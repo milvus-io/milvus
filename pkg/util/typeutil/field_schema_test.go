@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestValidateArrayElementType(t *testing.T) {
@@ -224,4 +225,114 @@ func TestIsNestedArrayTypeSchema(t *testing.T) {
 	require.False(t, IsNestedArrayTypeSchema(array(leaf(schemapb.DataType_Int64))))
 	require.True(t, IsNestedArrayTypeSchema(array(array(leaf(schemapb.DataType_Int64)))))
 	require.True(t, IsNestedArrayTypeSchema(array(array(array(leaf(schemapb.DataType_Int64))))))
+}
+
+func TestNativeListArrayFieldAndNestedLeaf(t *testing.T) {
+	nested := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int16}, Nullable: true,
+		}},
+	}}}
+	tests := []struct {
+		name  string
+		field *schemapb.FieldSchema
+		want  bool
+	}{
+		{"scalar", &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, false},
+		{"legacy scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, false},
+		{"nullable scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}, true},
+		{"nested scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nested}, true},
+		{"legacy vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}, false},
+		{"nullable vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsNativeListArrayField(tt.field))
+		})
+	}
+}
+
+func TestGetArrayLeaf(t *testing.T) {
+	leaf := func(dt schemapb.DataType, nullable bool) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: dt}, Nullable: nullable}
+	}
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element}}
+	}
+
+	t.Run("type chains", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			typeSchema   *schemapb.TypeSchema
+			wantLeaf     schemapb.DataType
+			wantNullable bool
+			wantDepth    int
+		}{
+			{"one level", array(leaf(schemapb.DataType_VarChar, true)), schemapb.DataType_VarChar, true, 1},
+			{"two levels", array(array(leaf(schemapb.DataType_Int16, true))), schemapb.DataType_Int16, true, 2},
+			{"two levels non-nullable leaf", array(array(leaf(schemapb.DataType_Int64, false))), schemapb.DataType_Int64, false, 2},
+			{"three levels", array(array(array(leaf(schemapb.DataType_Double, false)))), schemapb.DataType_Double, false, 3},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				gotLeaf, gotNullable, gotDepth, err := GetArrayLeaf(tt.typeSchema)
+				require.NoError(t, err)
+				require.Equal(t, tt.wantLeaf, gotLeaf)
+				require.Equal(t, tt.wantNullable, gotNullable)
+				require.Equal(t, tt.wantDepth, gotDepth)
+			})
+		}
+	})
+
+	t.Run("not an Array chain", func(t *testing.T) {
+		for name, typeSchema := range map[string]*schemapb.TypeSchema{
+			"nil":                nil,
+			"leaf at root":       leaf(schemapb.DataType_Int64, false),
+			"kind unset":         {},
+			"nil array element":  {Kind: &schemapb.TypeSchema_ArrayElement{}},
+			"element kind unset": array(&schemapb.TypeSchema{}),
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, _, _, err := GetArrayLeaf(typeSchema)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			})
+		}
+	})
+
+	t.Run("fields", func(t *testing.T) {
+		nested := array(array(leaf(schemapb.DataType_Int16, true)))
+		tests := []struct {
+			name         string
+			field        *schemapb.FieldSchema
+			wantLeaf     schemapb.DataType
+			wantNullable bool
+			wantDepth    int
+		}{
+			{"legacy scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, schemapb.DataType_Int64, false, 1},
+			{"element-nullable scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true}, schemapb.DataType_VarChar, true, 1},
+			{"nested scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nested}, schemapb.DataType_Int16, true, 2},
+			{"legacy vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}, schemapb.DataType_FloatVector, false, 1},
+			{"element-nullable vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, ElementNullable: true}, schemapb.DataType_Float16Vector, true, 1},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				gotLeaf, gotNullable, gotDepth, err := GetFieldArrayLeaf(tt.field)
+				require.NoError(t, err)
+				require.Equal(t, tt.wantLeaf, gotLeaf)
+				require.Equal(t, tt.wantNullable, gotNullable)
+				require.Equal(t, tt.wantDepth, gotDepth)
+			})
+		}
+
+		for name, field := range map[string]*schemapb.FieldSchema{
+			"scalar field":                 {Name: "f", DataType: schemapb.DataType_Int64},
+			"nested array without schema":  {Name: "f", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array},
+			"type_schema with a leaf root": {Name: "f", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: leaf(schemapb.DataType_Int64, false)},
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, _, _, err := GetFieldArrayLeaf(field)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			})
+		}
+	})
 }

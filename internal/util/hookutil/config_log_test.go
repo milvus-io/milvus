@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -119,6 +120,35 @@ func TestCipherStartupFailureLogsProtectConfig(t *testing.T) {
 	assert.Contains(t, sink.String(), "fail to init cipher plugin")
 	assert.NotContains(t, sink.String(), canary)
 	assert.NotContains(t, sink.String(), "cipher-path-canary")
+}
+
+func TestIgnoredCipherPathLogsProtectConfig(t *testing.T) {
+	const canary = "ignored-cipher-path-canary.so"
+	for _, tc := range []struct {
+		name    string
+		pathCpp string
+		initErr error
+	}{
+		{name: "initialized", pathCpp: "/tmp/some-cipher.so"},
+		{name: "init failed", pathCpp: "/tmp/some-cipher.so", initErr: errors.New("no kms key")},
+		{name: "idle", pathCpp: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installCipher(t, &recordingCipher{initErr: tc.initErr})
+			saveCipherKey(t, paramtable.GetCipherParams().SoPathGo.Key, canary)
+			saveCipherKey(t, paramtable.GetCipherParams().SoPathCpp.Key, tc.pathCpp)
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+
+			if tc.initErr != nil {
+				assert.Panics(t, InitOnceCipher)
+			} else {
+				assert.NotPanics(t, InitOnceCipher)
+			}
+
+			assert.Contains(t, sink.String(), "cipherPlugin.soPathGo is ignored")
+			assert.NotContains(t, sink.String(), canary)
+		})
+	}
 }
 
 func TestHookStartupFailureLogsProtectConfig(t *testing.T) {

@@ -1399,10 +1399,9 @@ func classifyVectorArrayCell(cell *schemapb.VectorField) (vectorArrayCellPlan, b
 	if isNilProto(cell) {
 		return vectorArrayCellPlan{}, true, nil
 	}
-	// ValidData (field 9) has no producer anywhere in this repo yet, but proto
-	// reflection recognizes it now, so GetUnknown() no longer catches it: a cell
-	// carrying it would silently lose that data through the arithmetic path.
-	// Fall back to the protobuf path until this one earns explicit handling.
+	// ValidData (field 9) carries element validity of an element-nullable
+	// ArrayOfVector row. The arithmetic path would drop it, so fall back to the
+	// protobuf path.
 	if len(cell.GetValidData()) != 0 {
 		return vectorArrayCellPlan{}, false, nil
 	}
@@ -1529,8 +1528,25 @@ func (s *insertFieldSizeState) computedSize(delta *insertFieldRowDelta, rowCount
 			return insertFieldComputedSize{}, err
 		}
 	}
+	if s.hasRowValidity(rowCount) {
+		legacyValidWireSize, err := insertBytesFieldSize(7, rowCount)
+		if err != nil {
+			return insertFieldComputedSize{}, err
+		}
+		fieldSize, err = checkedAddSize(fieldSize, legacyValidWireSize, "FieldData size")
+		if err != nil {
+			return insertFieldComputedSize{}, err
+		}
+	}
 	computed.fieldSize = fieldSize
 	return computed, nil
+}
+
+// hasRowValidity reports whether the selected rows carry a row-validity mask,
+// which is written both inside the nested ScalarField (17) / VectorField (9)
+// and to the legacy FieldData.valid_data (7).
+func (s *insertFieldSizeState) hasRowValidity(rowCount int) bool {
+	return (s.class == insertFieldPlanScalar || s.class == insertFieldPlanVector) && len(s.validData) > 0 && rowCount > 0
 }
 
 // directWireSize mirrors computedSize for the arithmetic-only field plans, but
@@ -1612,6 +1628,9 @@ func (s *insertFieldSizeState) directWireSize(delta *insertFieldRowDelta, rowCou
 		fieldSize += directBytesFieldSize(4, vectorSize)
 	default:
 		return 0, false, nil
+	}
+	if s.hasRowValidity(rowCount) {
+		fieldSize += directBytesFieldSize(7, uint64(rowCount))
 	}
 	fieldWireSize := directBytesFieldSize(13, fieldSize)
 	if fieldWireSize > uint64(math.MaxInt) {
@@ -1733,10 +1752,10 @@ func (s *insertFieldSizeState) appendPlan(plan []int, computed insertFieldComput
 			plan = append(plan, computed.payloadSize)
 		}
 	}
-	// Validity now lives inside the nested ScalarField/VectorField message
-	// (#52203), so the slot only exists when the writer enters that message.
-	if (s.class == insertFieldPlanScalar || s.class == insertFieldPlanVector) && len(s.validData) > 0 && rowCount > 0 {
-		plan = append(plan, rowCount)
+	// Row validity is written twice, in writer order: first inside the nested
+	// ScalarField/VectorField message, then as the legacy FieldData field.
+	if s.hasRowValidity(rowCount) {
+		plan = append(plan, rowCount, rowCount)
 	}
 	return plan
 }

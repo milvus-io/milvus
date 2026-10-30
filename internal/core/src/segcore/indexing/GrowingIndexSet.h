@@ -140,6 +140,9 @@ class GrowingIndexSet {
     Flush(Appender& appender, FieldId field_id);
 
     // One generation, one coverage boundary; no family-specific read getters.
+    // Invokes the owner's maintenance hook, which may trigger commit or
+    // publication for deferred publishers. Synchronous vector owners only
+    // check published failure state before pinning the available record.
     index::GrowingIndexSnapshotPin
     PinSnapshot(FieldId field_id) const {
         std::shared_lock lock(mutex_);

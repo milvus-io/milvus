@@ -43,7 +43,7 @@ delta = sum_b / n_b - sum_a / n_a
 m2    = m2_a + m2_b + delta^2 * n_a * n_b / (n_a + n_b)
 ```
 
-A side with count 0 is skipped or replaced, so empty partial states never divide by 0. That covers both NULL states from segcore and the zero states `EmptyAggResult` reports for a QueryNode without segments. The reducer rejects a plan where `m2` does not directly follow the `sum` and `count` of its field, a state with a negative count or a non-numeric slot, and an Int64 sum that would overflow.
+A side with count 0 is skipped or replaced, so empty partial states never divide by 0. That covers segcore's NULL state and the empty partial a QueryNode without segments encodes. The reducer rejects a plan where `m2` does not directly follow the `sum` and `count` of its field, a state with a negative count or a non-numeric slot, and an Int64 sum that would overflow.
 
 ### Finalization
 

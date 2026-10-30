@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 const (
@@ -40,6 +41,13 @@ const (
 	PinSnapshotDataTaskName         = "PinSnapshotDataTask"
 	UnpinSnapshotDataTaskName       = "UnpinSnapshotDataTask"
 )
+
+// snapshotCreateUTCTimestamp extracts Unix milliseconds from a snapshot's WAL
+// boundary timestamp. An unknown (zero) timestamp remains zero.
+func snapshotCreateUTCTimestamp(createTs int64) int64 {
+	physical, _ := tsoutil.ParseHybridTs(uint64(createTs))
+	return physical
+}
 
 // resolveCollectionNames resolves collection ID to (dbName, collectionName) via MetaCache.
 // Returns empty strings on failure (best-effort for display purposes).
@@ -112,6 +120,11 @@ func (cst *CreateSnapshotTask) PreExecute(ctx context.Context) error {
 	// Validate snapshot_name using standard naming rules
 	if err := ValidateSnapshotName(cst.req.GetName()); err != nil {
 		return err
+	}
+
+	maxDescriptionLength := paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength.GetAsInt()
+	if len(cst.req.GetDescription()) > maxDescriptionLength {
+		return merr.WrapErrParameterInvalidMsg("the length of a snapshot description must not exceed %d bytes", maxDescriptionLength)
 	}
 
 	// Validate compaction protection duration
@@ -476,9 +489,19 @@ func (lst *ListSnapshotsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	summaries := make([]*milvuspb.SnapshotSummary, 0, len(result.GetSnapshotSummaries()))
+	for _, info := range result.GetSnapshotSummaries() {
+		summaries = append(summaries, &milvuspb.SnapshotSummary{
+			Name:        info.GetName(),
+			CreateTs:    info.GetCreateTs(),
+			CreateUtcTs: snapshotCreateUTCTimestamp(info.GetCreateTs()),
+			Description: info.GetDescription(),
+		})
+	}
 	lst.result = &milvuspb.ListSnapshotsResponse{
-		Status:    result.GetStatus(),
-		Snapshots: result.GetSnapshots(),
+		Status:            result.GetStatus(),
+		Snapshots:         result.GetSnapshots(),
+		SnapshotSummaries: summaries,
 	}
 
 	return nil

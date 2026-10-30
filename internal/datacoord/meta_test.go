@@ -67,6 +67,87 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
+func TestGetCompactableSegmentGroupByCollection(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	m := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	cases := []struct {
+		id, collectionID int64
+		level            datapb.SegmentLevel
+		state            commonpb.SegmentState
+		importing        bool
+		compacting       bool
+	}{
+		{1, 100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, false},
+		{2, 100, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, false},
+		{3, 100, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, false, false},
+		{4, 200, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, false},
+		{5, 300, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, false, false},
+		{6, 400, datapb.SegmentLevel_L0, commonpb.SegmentState_Growing, false, false},
+		{7, 500, datapb.SegmentLevel_L0, commonpb.SegmentState_Dropped, false, false},
+		{8, 600, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, true, false},
+		{9, 700, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, true},
+		{10, 100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, false},
+		{11, 800, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, true},
+		{12, 900, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, true, false},
+		{13, 1000, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushing, false, false},
+	}
+	for _, tc := range cases {
+		m.segments.SetSegment(tc.id, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: tc.id, CollectionID: tc.collectionID, Level: tc.level,
+				State: tc.state, IsImporting: tc.importing,
+			},
+			isCompacting: tc.compacting,
+		})
+	}
+	m.snapshotMeta = createTestSnapshotMetaLoaded(t)
+	t.Cleanup(m.snapshotMeta.loaderCancel)
+	m.snapshotMeta.SetSnapshotPending(100)
+
+	groups := m.GetCompactableSegmentGroupByCollection()
+	require.Len(t, groups, 3)
+	assert.Contains(t, groups, int64(200))
+	assert.Empty(t, groups[200])
+	assert.Contains(t, groups, int64(300))
+	assert.Empty(t, groups[300])
+	require.Len(t, groups[100], 2)
+	assert.ElementsMatch(t, []int64{1, 10}, lo.Map(groups[100], func(segment *SegmentInfo, _ int) int64 {
+		assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
+		return segment.GetID()
+	}))
+
+	// Retained wrappers must not alias the iterator's reused value or DC state.
+	groups[100][0].isCompacting = true
+	assert.False(t, m.segments.GetSegment(groups[100][0].GetID()).isCompacting)
+}
+
+func TestGetCompactableSegmentGroupByCollectionNonL0Allocations(t *testing.T) {
+	allocations := func(nonL0Count int) float64 {
+		store := metacache.NewMetaStore(nil)
+		m := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+		for i := 0; i <= nonL0Count; i++ {
+			level := datapb.SegmentLevel_L1
+			if i == 0 {
+				level = datapb.SegmentLevel_L0
+			}
+			m.segments.SetSegment(int64(i+1), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: int64(i + 1), CollectionID: 100, Level: level, State: commonpb.SegmentState_Flushed,
+			}})
+		}
+		var groups map[int64][]*SegmentInfo
+		count := testing.AllocsPerRun(20, func() {
+			groups = m.GetCompactableSegmentGroupByCollection()
+		})
+		require.NotEmpty(t, groups[100])
+		return count
+	}
+
+	small := allocations(1)
+	large := allocations(1000)
+	t.Logf("allocations with 1/1000 non-L0 segments: %.0f / %.0f", small, large)
+	assert.LessOrEqual(t, large, small+8, "non-L0 metadata must be filtered before allocating retained wrappers")
+}
+
 // MetaReloadSuite tests meta reload & meta creation related logic
 type MetaReloadSuite struct {
 	testutils.PromMetricsSuite
@@ -2473,11 +2554,12 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}, nil).Once()
 		inspector := &indexInspector{handler: handler}
-		suite.True(inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
+		_, ok := inspector.canCreateIndexForSegment(context.Background(), updated, &model.Index{
 			CollectionID: updated.GetCollectionID(),
 			FieldID:      102,
 			IndexID:      1,
-		}), "materialized function-output field must be index-eligible")
+		})
+		suite.True(ok, "materialized function-output field must be index-eligible")
 	})
 
 	suite.Run("in-place result with stale base manifest is rejected", func() {
@@ -7059,4 +7141,29 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		assert.NotNil(t, am.GetTask(55))
 		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
 	})
+}
+
+func TestUpdateStatusOperator_DroppedIsTerminal(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:        1,
+		State:     commonpb.SegmentState_Dropped,
+		DroppedAt: 42,
+	})))
+
+	for _, target := range []commonpb.SegmentState{
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Flushing,
+		commonpb.SegmentState_Flushed,
+		commonpb.SegmentState_Importing,
+	} {
+		t.Run(target.String(), func(t *testing.T) {
+			require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), UpdateStatusOperator(1, target)))
+			segment := meta.GetSegment(context.TODO(), 1)
+			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+			require.EqualValues(t, 42, segment.GetDroppedAt())
+		})
+	}
 }

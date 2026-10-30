@@ -110,7 +110,7 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageDoneAndKeepalive(0)
+	session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 	// Test Commit.
 	err = session.RequestCommitAndWait(ctx, 0, 0)
@@ -244,6 +244,12 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(1)))
 
 	m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+	insertOnly, err := m.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	require.True(t, insertOnly.IsInsertOnly(), "replayed Insert bodies preserve commit classification")
+	empty, err := m.GetSessionOfTxn(2)
+	require.NoError(t, err)
+	require.False(t, empty.IsInsertOnly())
 	select {
 	case <-m.RecoverDone():
 		t.Errorf("txn manager should not be recovered")
@@ -293,6 +299,37 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 		session.Cleanup()
 	})
 	require.Equal(t, int32(1), cleanupCalled.Load())
+}
+
+func TestSuccessfulBodiesDetermineInsertOnlyCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bodies     []message.MessageType
+		insertOnly bool
+	}{
+		{"insert-only", []message.MessageType{message.MessageTypeInsert, message.MessageTypeInsert}, true},
+		{"insert-delete", []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete}, false},
+		{"delete-insert", []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, false},
+		{"delete-only", []message.MessageType{message.MessageTypeDelete}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics := metricsutil.NewTxnMetrics("commit-classification-test")
+			defer metrics.Close()
+			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+			defer session.Cleanup()
+			for _, typ := range tc.bodies {
+				require.NoError(t, session.AddNewMessage(t.Context(), 11))
+				session.AddNewMessageDoneAndKeepalive(11, typ)
+			}
+			// A failed append must not change the committed body classification.
+			require.NoError(t, session.AddNewMessage(t.Context(), 12))
+			session.AddNewMessageFail()
+			require.NoError(t, session.RequestCommitAndWait(t.Context(), 13, 0))
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly())
+			session.CommitDone()
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly(), "ACK projection retains classification after session cleanup")
+		})
+	}
 }
 
 func TestFailAllTransactions(t *testing.T) {
@@ -371,7 +408,7 @@ func TestFailAllTransactions(t *testing.T) {
 		}, 0)
 		err = session3.AddNewMessage(context.Background(), 0)
 		assert.NoError(t, err)
-		session3.AddNewMessageDoneAndKeepalive(0)
+		session3.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 		// Rollback all in-flight transactions
 		m.FailTxnAtVChannel("")

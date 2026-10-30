@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -13,23 +14,30 @@ const defaultLiveEventBufferSize = 1024
 
 // QueryRuntime is the vchannel singleton owned by VChannelRecoveryModule.
 type QueryRuntime struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	state   queryRuntimeState
-	modules []QueryRuntimeModule
+	views     map[*viewResources]struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
+	cond      *sync.Cond
+	state     queryRuntimeState
+	modules   []QueryRuntimeModule
 
 	pending      []walview.VChannelResourceEvent
 	pendingLimit int
 
-	dispatcher     *Dispatcher
-	drainScheduled bool
-	applyMu        sync.Mutex
+	dispatcher      *Dispatcher
+	drainScheduled  bool
+	applyMu         sync.Mutex
+	indexMu         sync.Mutex         // serializes load-info resolution and index publication
+	partitionScopes map[uint64][]int64 // immutable scopes retained for serving views
+	indexVersion    uint64             // load-info identity, not an ordered version
 
 	latestAdvance qviews.DataVersion
 	hasAdvance    bool
 
 	prepareView func(context.Context) error
 	closed      chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 type queryRuntimeState int
@@ -59,7 +67,9 @@ func (r *QueryRuntime) RangeModules(fn func(QueryRuntimeModule) bool) {
 }
 
 func newQueryRuntime(dispatcher *Dispatcher, modules ...QueryRuntimeModule) *QueryRuntime {
+	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &QueryRuntime{
+		ctx: ctx, cancel: cancel,
 		dispatcher:   dispatcher,
 		state:        queryRuntimePreparing,
 		closed:       make(chan struct{}),
@@ -74,6 +84,9 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	if r == nil {
 		return nil
 	}
+	view.RuntimeContext = r.ctx
+	r.indexVersion = view.LoadInfoVersion
+	r.partitionScopes = map[uint64][]int64{view.LoadInfoVersion: append([]int64{}, view.PartitionIDs...)}
 	view.ResourceEventBarrier = func(ctx context.Context) error {
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
 	}
@@ -173,8 +186,8 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
-// PrepareQueryView fences sealed handoffs and prepares the shared BM25 aggregate before readiness.
-func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.DataVersion) error {
+// PrepareQueryView fences sealed handoffs before View resources are prepared.
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
@@ -183,25 +196,83 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.
 		r.mu.Unlock()
 		return context.Canceled
 	}
-	modules := append([]QueryRuntimeModule(nil), r.modules...)
 	prepare := r.prepareView
 	r.mu.Unlock()
-	if err := prepare(ctx); err != nil {
+	return prepare(ctx)
+}
+
+// PrepareIndexMeta refreshes a reused runtime before the new view can serve.
+// Hold indexMu across the RPC: an older concurrent preparation must resolve its
+// version against Coord after a newer publication, rather than overwrite it with
+// a response captured earlier. Load-info versions are hashes and cannot be ordered.
+func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryViewMeta, provider LoadInfoProvider) error {
+	version := meta.GetLoadInfoVersion()
+	if version == 0 || provider == nil {
+		return nil
+	}
+	r.indexMu.Lock()
+	defer r.indexMu.Unlock()
+	r.mu.Lock()
+	_, scopePrepared := r.partitionScopes[version]
+	r.mu.Unlock()
+	if r.indexVersion == version && scopePrepared {
+		return nil
+	}
+	info, err := provider.QueryViewLoadInfo(ctx, meta.GetCollectionId(), version)
+	if err != nil {
 		return err
 	}
-	for _, module := range modules {
-		versioned, ok := module.(QueryRuntimePrepareModule)
-		if !ok {
-			continue
-		}
-		if err := versioned.PrepareDataVersion(ctx, dataVersion); err != nil {
-			return err
+	for _, module := range r.modules {
+		if partitioned, ok := module.(interface {
+			PreparePartitions(context.Context, *viewpb.QueryViewMeta, []int64) error
+		}); ok {
+			if err := partitioned.PreparePartitions(ctx, meta, info.PartitionIDs); err != nil {
+				return err
+			}
 		}
 	}
+	// Do not hold applyMu during the RPC. WAL application and Close must remain
+	// independent of coordinator availability.
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	r.mu.Lock()
+	ready := r.state == queryRuntimeReady
+	r.mu.Unlock()
+	if !ready {
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, module := range r.modules {
+		if indexed, ok := module.(QueryRuntimeIndexModule); ok {
+			if err := indexed.UpdateIndexMeta(ctx, info.IndexInfos); err != nil {
+				return err
+			}
+		}
+	}
+	r.mu.Lock()
+	if r.partitionScopes == nil {
+		r.partitionScopes = make(map[uint64][]int64)
+	}
+	r.partitionScopes[version] = append([]int64{}, info.PartitionIDs...)
+	r.mu.Unlock()
+	r.indexVersion = version
 	return nil
 }
 
 func (r *QueryRuntime) BeforeRelease(ctx context.Context, version qviews.DataVersion) error {
+	r.mu.Lock()
+	closed := r.state == queryRuntimeClosed
+	r.mu.Unlock()
+	if closed {
+		return r.tryClose()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(r.ctx, cancel)
+	defer stop()
+
 	var result error
 	r.RangeModules(func(module QueryRuntimeModule) bool {
 		if module, ok := module.(QueryRuntimeReleaseModule); ok {
@@ -255,29 +326,57 @@ func (r *QueryRuntime) advanceModules(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
+// stop wakes producers and cancels operations without waiting under owner locks.
+func (r *QueryRuntime) stop() []*viewResources {
+	r.mu.Lock()
+	if r.state != queryRuntimeClosed {
+		r.state = queryRuntimeClosed
+		close(r.closed)
+		r.cancel()
+		r.pending = nil
+		r.drainScheduled = false
+		r.cond.Broadcast()
+	}
+	views := make([]*viewResources, 0, len(r.views))
+	for v := range r.views {
+		views = append(views, v)
+	}
+	r.mu.Unlock()
+	for _, v := range views {
+		v.retire()
+	}
+	return views
+}
+
+func (r *QueryRuntime) tryClose() error {
+	for _, v := range r.stop() {
+		if err := v.release(); err != nil {
+			return err
+		}
+	}
+	r.Close()
+	return nil
+}
+
 func (r *QueryRuntime) Close() {
 	if r == nil {
 		return
 	}
-	r.mu.Lock()
-	if r.state == queryRuntimeClosed {
-		r.mu.Unlock()
-		return
-	}
-	r.state = queryRuntimeClosed
-	close(r.closed)
-	r.pending = nil
-	r.drainScheduled = false
-	r.cond.Broadcast()
-	modules := append([]QueryRuntimeModule(nil), r.modules...)
-	r.mu.Unlock()
-	r.applyMu.Lock()
-	defer r.applyMu.Unlock()
-	for i := len(modules) - 1; i >= 0; i-- {
-		if modules[i] != nil {
-			modules[i].Close()
+	views := r.stop()
+	r.closeOnce.Do(func() {
+		for _, v := range views {
+			<-v.drained
+			_ = v.release()
+			<-v.closed
 		}
-	}
+		r.applyMu.Lock()
+		defer r.applyMu.Unlock()
+		for i := len(r.modules) - 1; i >= 0; i-- {
+			if r.modules[i] != nil {
+				r.modules[i].Close()
+			}
+		}
+	})
 }
 
 func (r *QueryRuntime) takeInitialBatch() []walview.VChannelResourceEvent {
@@ -345,4 +444,19 @@ func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelR
 			}
 		}
 	}
+}
+
+// CheckWriteSchemaVersion checks WAL application after the event barrier.
+// Preparing an older read schema must not invalidate another view's resources.
+func (r *QueryRuntime) CheckWriteSchemaVersion(version int32) error {
+	var err error
+	r.RangeModules(func(module QueryRuntimeModule) bool {
+		if resource, ok := module.(QueryRuntimeWriteSchemaModule); ok {
+			if applied := resource.WriteSchemaVersion(); applied < version {
+				err = merr.WrapErrServiceNotReadyMsg("query runtime write schema %d has not reached %d", applied, version)
+			}
+		}
+		return err == nil
+	})
+	return err
 }

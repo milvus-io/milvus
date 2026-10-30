@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // legacyPageOracle deliberately keeps the pre-change two-operator composition.
@@ -118,7 +119,7 @@ func pageFixture(pks []int64, stringPK bool, vectorType schemapb.DataType, dim i
 			longField,
 			{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: texts}}}}},
 			{FieldId: 102, FieldName: "labels", Type: schemapb.DataType_Array, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_VarChar, Data: arrays}}}}},
-			{FieldId: 103, FieldName: "flag", Type: schemapb.DataType_Bool, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: append([]bool(nil), valid...), Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: bools}}}}},
+			{FieldId: 103, FieldName: "flag", Type: schemapb.DataType_Bool, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: bools}}}}},
 			{FieldId: 104, FieldName: "json", Type: schemapb.DataType_JSON, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: jsons}}}}},
 		},
 	}
@@ -129,10 +130,11 @@ func pageFixture(pks []int64, stringPK bool, vectorType schemapb.DataType, dim i
 		{FieldID: 103, Name: "flag", DataType: schemapb.DataType_Bool, Nullable: true},
 		{FieldID: 104, Name: "json", DataType: schemapb.DataType_JSON},
 	}}
+	typeutil.SetFieldDataValidData(r.FieldsData[3], append([]bool(nil), valid...))
 	if vectorType == schemapb.DataType_None {
 		return r, schema
 	}
-	vf := &schemapb.VectorField{Dim: int64(dim), ValidData: valid}
+	vf := &schemapb.VectorField{Dim: int64(dim)}
 	floats := make([]float32, 0)
 	bytes := make([]byte, 0)
 	contents := make([][]byte, 0)
@@ -180,6 +182,7 @@ func pageFixture(pks []int64, stringPK bool, vectorType schemapb.DataType, dim i
 		panic("unexpected page fixture vector type")
 	}
 	r.FieldsData = append(r.FieldsData, &schemapb.FieldData{FieldId: 105, FieldName: "vector", Type: vectorType, Field: &schemapb.FieldData_Vectors{Vectors: vf}})
+	typeutil.SetFieldDataValidData(r.FieldsData[5], append([]bool(nil), valid...))
 	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 105, Name: "vector", DataType: vectorType, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(dim)}}})
 	return r, schema
 }
@@ -269,6 +272,13 @@ func TestPageMaterializationIndependentPayloadOracle(t *testing.T) {
 					// The old merge carries the full source dimension even after slicing.
 					want.FieldsData[5].GetVectors().Dim = sparseDim
 					want.FieldsData[5].GetVectors().GetSparseFloatVector().Dim = sparseDim
+				}
+				// Merged output carries row validity in both FieldData.valid_data
+				// and the field-specific location.
+				for _, field := range want.GetFieldsData() {
+					if validData := typeutil.GetFieldDataValidData(field); len(validData) > 0 {
+						typeutil.SetFieldDataValidData(field, validData)
+					}
 				}
 				require.True(t, proto.Equal(want.GetIds(), got.GetIds()))
 				require.Len(t, got.GetFieldsData(), len(want.GetFieldsData()))
@@ -361,7 +371,7 @@ func TestPageMaterializationErrorsOutsidePage(t *testing.T) {
 				v := r2.FieldsData[5].GetVectors().GetFloatVector()
 				v.Data = v.Data[:len(v.Data)-1]
 			case "short_validity":
-				r2.FieldsData[5].GetVectors().ValidData = []bool{true}
+				typeutil.SetFieldDataValidData(r2.FieldsData[5], []bool{true})
 			case "element_metadata":
 				r2.ElementLevel = true
 			}

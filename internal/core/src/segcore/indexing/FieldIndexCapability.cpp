@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "index/Families.h"
 
 namespace milvus::segcore {
 namespace {
@@ -141,6 +142,21 @@ SameCaps(const index::ReaderCaps& a, const index::ReaderCaps& b) {
            a.nested == b.nested && a.value_lookup == b.value_lookup &&
            a.cheap_value_lookup == b.cheap_value_lookup &&
            a.json_paths == b.json_paths && a.exact == b.exact;
+}
+
+IndexRegistration
+RegistrationFromCapability(const IndexCapabilityEntry& entry) {
+    auto kind = IndexKind::Scalar;
+    if (entry.family == index::families::kVectorMem ||
+        entry.family == index::families::kVectorDisk) {
+        kind = IndexKind::Vector;
+    } else if (entry.family == index::families::kText) {
+        kind = IndexKind::Text;
+    } else if (entry.family == index::families::kNgram) {
+        kind = IndexKind::Ngram;
+    }
+    return IndexRegistration{
+        entry.key, kind, entry.json_path, entry.json_cast_type};
 }
 
 }  // namespace milvus::segcore

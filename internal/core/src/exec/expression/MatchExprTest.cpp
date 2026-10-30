@@ -34,6 +34,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -68,12 +69,12 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/segment_c.h"
 #include "storage/MmapManager.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
 
 using namespace milvus;
@@ -745,6 +746,7 @@ TEST(MatchExprZeroElementBatch,
     schema->set_primary_field_id(int64_fid);
     const auto nested_int_fid = FieldId(int64_fid.get() + 1);
     proto::schema::TypeSchema nested_int_type;
+    nested_int_type.set_nullable(true);
     nested_int_type.mutable_array_element()
         ->mutable_array_element()
         ->set_leaf_type(proto::schema::DataType::Int32);
@@ -1161,15 +1163,6 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     }
     auto storage_schema = Schema::ParseFrom(storage_schema_proto);
 
-    auto storage_growing =
-        CreateGrowingSegment(storage_schema, empty_index_meta, 2);
-    const auto storage_offset = storage_growing->PreInsert(row_count);
-    storage_growing->Insert(storage_offset,
-                            row_count,
-                            row_ids.data(),
-                            timestamps.data(),
-                            std::make_shared<InsertRecordProto>(*insert_data));
-
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
     const auto segment_path =
@@ -1180,30 +1173,88 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     auto directory_guard = folly::makeGuard(
         [&segment_path] { std::filesystem::remove_all(segment_path); });
 
-    auto schema_blob = storage_schema_proto.SerializeAsString();
-    const auto column_group_pattern =
-        "0|1|" + std::to_string(int64_fid.get()) + "," +
-        std::to_string(nested_int_fid.get()) + "," +
-        std::to_string(nested_string_fid.get());
-    CFlushConfig flush_config{};
-    flush_config.segment_path = segment_path.c_str();
-    flush_config.read_version = -1;
-    flush_config.retry_limit = 3;
-    flush_config.schema_blob = schema_blob.data();
-    flush_config.schema_length = static_cast<int64_t>(schema_blob.size());
-    flush_config.schema_based_pattern = column_group_pattern.c_str();
+    auto build_int64 = [](const auto& values) {
+        arrow::Int64Builder builder;
+        for (const auto value : values) {
+            AssertInfo(builder.Append(static_cast<int64_t>(value)).ok(),
+                       "failed to append nested expression test int64");
+        }
+        std::shared_ptr<arrow::Array> output;
+        AssertInfo(builder.Finish(&output).ok(),
+                   "failed to finish nested expression test int64");
+        return output;
+    };
+    auto int_values = std::make_shared<arrow::Int32Builder>();
+    auto int_inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        int_values,
+        arrow::list(arrow::field("item", arrow::int32(), false)));
+    arrow::ListBuilder int_outer(
+        arrow::default_memory_pool(),
+        int_inner,
+        GetArrowDataType((*storage_schema)[nested_int_fid]));
+    for (const auto& row : nested_int_rows->data()) {
+        ASSERT_TRUE(int_outer.Append().ok());
+        for (const auto& child : row.array_data().data()) {
+            ASSERT_TRUE(int_inner->Append().ok());
+            for (const auto value : child.int_data().data()) {
+                ASSERT_TRUE(int_values->Append(value).ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> nested_int_array;
+    ASSERT_TRUE(int_outer.Finish(&nested_int_array).ok());
 
-    CFlushResult flush_result{};
-    auto flush_guard =
-        folly::makeGuard([&flush_result] { FreeFlushResult(&flush_result); });
-    const auto flush_status = FlushGrowingSegmentData(
-        storage_growing.get(), 0, row_count, &flush_config, &flush_result);
-    ASSERT_EQ(flush_status.error_code, Success) << flush_status.error_msg;
-    ASSERT_EQ(flush_result.num_rows, row_count);
+    auto string_values = std::make_shared<arrow::StringBuilder>();
+    auto string_inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        string_values,
+        arrow::list(arrow::field("item", arrow::utf8(), false)));
+    arrow::ListBuilder string_outer(
+        arrow::default_memory_pool(),
+        string_inner,
+        GetArrowDataType((*storage_schema)[nested_string_fid]));
+    for (const auto& row : nested_string_rows->data()) {
+        ASSERT_TRUE(string_outer.Append().ok());
+        for (const auto& child : row.array_data().data()) {
+            ASSERT_TRUE(string_inner->Append().ok());
+            for (const auto& value : child.string_data().data()) {
+                ASSERT_TRUE(string_values->Append(value).ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> nested_string_array;
+    ASSERT_TRUE(string_outer.Finish(&nested_string_array).ok());
+
+    auto loon_schema = storage_schema->ConvertToLoonArrowSchema();
+    std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns = {
+        {RowFieldID, build_int64(row_ids)},
+        {TimestampFieldID, build_int64(timestamps)},
+        {int64_fid, build_int64(ids)},
+        {nested_int_fid, nested_int_array},
+        {nested_string_fid, nested_string_array},
+    };
+    arrow::ArrayVector ordered_columns;
+    for (const auto& id : storage_schema->get_field_ids()) {
+        ordered_columns.push_back(columns.at(id));
+    }
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int64_t offset = 0; offset < row_count; offset += 2) {
+        arrow::ArrayVector sliced;
+        for (const auto& column : ordered_columns) {
+            sliced.push_back(column->Slice(offset, 2));
+        }
+        batches.push_back(arrow::RecordBatch::Make(loon_schema, 2, sliced));
+    }
+    const auto committed_version = test::WriteRecordBatchesToV3(
+        storage_schema,
+        segment_path,
+        batches,
+        test::GenerateColumnGroupPattern(storage_schema));
 
     const auto manifest_path =
         "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(flush_result.committed_version) + "}";
+        "\",\"ver\":" + std::to_string(committed_version) + "}";
     proto::segcore::SegmentLoadInfo load_info;
     load_info.set_collectionid(1);
     load_info.set_partitionid(2);

@@ -24,6 +24,10 @@ extern int32_t milvusManifestSubmit(void*, LoonAsyncTask, void*);
 extern void milvusManifestOpenDone(uintptr_t, LoonFFIResult, LoonTransactionHandle);
 extern void milvusManifestCommitDone(uintptr_t, LoonFFIResult, int32_t, int64_t, int64_t);
 static inline void milvusRunManifestTask(LoonAsyncTask task, void* data) { task(data); }
+// Returning the callbacks with the FFI's callback types, instead of casting
+// them in Go, lets the C compiler reject a callback whose signature drifts.
+static inline LoonTransactionOpenCallback milvusManifestOpenCallback(void) { return milvusManifestOpenDone; }
+static inline LoonTransactionCommitCallback milvusManifestCommitCallback(void) { return milvusManifestCommitDone; }
 */
 import "C"
 
@@ -31,6 +35,7 @@ import (
 	"context"
 	"runtime/cgo"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -225,14 +230,17 @@ func (e *ManifestCommitError) Unwrap() error { return e.Err }
 type manifestCommitResult struct {
 	outcome ManifestCommitOutcome
 	version int64
-	err     error
+	// size is the byte size of the manifest object the commit wrote, -1 unless
+	// committed.
+	size int64
+	err  error
 }
 
 //export milvusManifestCommitDone
-func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t, _ C.int64_t) {
+func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t, size C.int64_t) {
 	h := cgo.Handle(token)
 	complete := h.Value().(func(manifestCommitResult))
-	value := manifestCommitResult{ManifestCommitOutcome(outcome), int64(version), handleManifestAsyncResult(result)}
+	value := manifestCommitResult{ManifestCommitOutcome(outcome), int64(version), int64(size), handleManifestAsyncResult(result)}
 	h.Delete()
 	complete(value)
 }
@@ -256,10 +264,16 @@ func manifestAsyncHandle(ctx context.Context) C.LoonAsyncHandle {
 	return C.LoonAsyncHandle{timeout_ms: C.uint64_t(max(1, timeout.Milliseconds()))}
 }
 
+// submitOpen opens the revision manifest names, passing the manifest size it
+// records like openTransaction does: loon then reads the manifest without first
+// asking storage for its size, and a size that does not match the manifest
+// object fails the open. loon treats a non-positive size as unknown and ignores
+// it for ManifestEarliest and ManifestLatest.
+//
 // submitOpen never waits for I/O or callback completion. The short mutex only
 // serializes access to the caller-owned handle: callback/cancellation may race
 // submission, but the executor's submit hook never runs a task inline or waits.
-func (io *ManifestIOContext) submitOpen(ctx context.Context, base string, version int64, config *indexpb.StorageConfig, resolver C.int32_t, complete func(manifestOpenResult)) error {
+func (io *ManifestIOContext) submitOpen(ctx context.Context, manifest ManifestJSON, config *indexpb.StorageConfig, resolver C.int32_t, complete func(manifestOpenResult)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -268,7 +282,7 @@ func (io *ManifestIOContext) submitOpen(ctx context.Context, base string, versio
 		return err
 	}
 	defer C.loon_properties_free(properties)
-	cBase := C.CString(base)
+	cBase := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBase))
 
 	var mu sync.Mutex
@@ -290,8 +304,8 @@ func (io *ManifestIOContext) submitOpen(ctx context.Context, base string, versio
 		complete(result)
 	})
 	mu.Lock()
-	res := C.loon_transaction_open_async(io.native, cBase, properties, C.int64_t(version), C.int64_t(-1), resolver,
-		getRetryLimit(), (C.LoonTransactionOpenCallback)(C.milvusManifestOpenDone), C.uintptr_t(token), &operation)
+	res := C.loon_transaction_open_async(io.native, cBase, properties, C.int64_t(manifest.ManifestVersion),
+		C.int64_t(manifest.Size), resolver, getRetryLimit(), C.milvusManifestOpenCallback(), C.uintptr_t(token), &operation)
 	if err := handleManifestAsyncResult(res); err != nil {
 		mu.Unlock()
 		token.Delete() // Rejected submissions never invoke a callback.
@@ -306,9 +320,9 @@ func (io *ManifestIOContext) submitOpen(ctx context.Context, base string, versio
 	return nil
 }
 
-func (io *ManifestIOContext) open(ctx context.Context, base string, version int64, config *indexpb.StorageConfig, resolver C.int32_t) (C.LoonTransactionHandle, error) {
+func (io *ManifestIOContext) open(ctx context.Context, manifest ManifestJSON, config *indexpb.StorageConfig, resolver C.int32_t) (C.LoonTransactionHandle, error) {
 	done := make(chan manifestOpenResult, 1)
-	if err := io.submitOpen(ctx, base, version, config, resolver, func(result manifestOpenResult) { done <- result }); err != nil {
+	if err := io.submitOpen(ctx, manifest, config, resolver, func(result manifestOpenResult) { done <- result }); err != nil {
 		return 0, err
 	}
 	result := <-done // Cancellation also drains the terminal callback.
@@ -321,14 +335,14 @@ func (io *ManifestIOContext) open(ctx context.Context, base string, version int6
 // rejected read returns an error without calling complete. The callback must not
 // block, submit more work, or close its own IO context. Close drains callbacks.
 func SubmitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, complete func([]ManifestIndexInfo, error)) error {
-	base, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return err
 	}
 	if err := io.acquire(ctx); err != nil {
 		return err
 	}
-	err = io.submitOpen(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_FAIL, func(result manifestOpenResult) {
+	err = io.submitOpen(ctx, manifest, config, C.LOON_TRANSACTION_RESOLVE_FAIL, func(result manifestOpenResult) {
 		defer io.release()
 		if result.err != nil {
 			complete(nil, result.err)
@@ -363,7 +377,7 @@ func (io *ManifestIOContext) submitCommit(ctx context.Context, txn C.LoonTransac
 	})
 	mu.Lock()
 	res := C.loon_transaction_commit_async(io.native, txn,
-		(C.LoonTransactionCommitCallback)(C.milvusManifestCommitDone), C.uintptr_t(token), &operation)
+		C.milvusManifestCommitCallback(), C.uintptr_t(token), &operation)
 	if err := handleManifestAsyncResult(res); err != nil {
 		mu.Unlock()
 		token.Delete()
@@ -378,18 +392,20 @@ func (io *ManifestIOContext) submitCommit(ctx context.Context, txn C.LoonTransac
 	return nil
 }
 
-func (result manifestCommitResult) finish(ctx context.Context) (int64, error) {
+// finish returns the committed version and the byte size of the manifest object
+// the commit wrote.
+func (result manifestCommitResult) finish(ctx context.Context) (int64, int64, error) {
 	if result.err != nil {
 		err := merr.WrapErrStorage(result.err, "async manifest commit")
 		if result.outcome == ManifestNotCommitted && ctx.Err() != nil {
 			err = ctx.Err()
 		}
-		return -1, &ManifestCommitError{result.outcome, err}
+		return -1, -1, &ManifestCommitError{result.outcome, err}
 	}
 	if result.outcome != ManifestCommitted || result.version < 0 {
-		return -1, &ManifestCommitError{result.outcome, merr.WrapErrServiceInternalMsg("invalid async manifest commit result")}
+		return -1, -1, &ManifestCommitError{result.outcome, merr.WrapErrServiceInternalMsg("invalid async manifest commit result")}
 	}
-	return result.version, nil
+	return result.version, result.size, nil
 }
 
 // GetManifestIndexInfosAsync waits in Go while OpenAsync loads the exact revision.
@@ -412,7 +428,7 @@ func GetManifestLobFilesAsync(ctx context.Context, io *ManifestIOContext, manife
 }
 
 func getManifestAsync(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig) (*C.LoonManifest, error) {
-	base, version, err := UnmarshalManifestPath(manifestPath)
+	revision, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +436,7 @@ func getManifestAsync(ctx context.Context, io *ManifestIOContext, manifestPath s
 		return nil, err
 	}
 	defer io.release()
-	txn, err := io.open(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_FAIL)
+	txn, err := io.open(ctx, revision, config, C.LOON_TRANSACTION_RESOLVE_FAIL)
 	if err != nil {
 		return nil, err
 	}
@@ -454,9 +470,11 @@ type ManifestUpdateResult struct {
 // accepted submission calls complete exactly once, possibly before returning;
 // rejection returns an error without a callback. With no effective changes the
 // result is baseManifestPath itself, like CommitManifestUpdates: a pointer that
-// did not move keeps its exact text. Updates must remain immutable until
-// completion. The callback must not block, submit more work, or close its own
-// IO context. Close drains accepted work.
+// did not move keeps its exact text. Like CommitManifestUpdates, the open passes
+// the manifest size baseManifestPath records, and a new revision's path records
+// the size of the manifest object the commit wrote. Updates must remain
+// immutable until completion. The callback must not block, submit more work, or
+// close its own IO context. Close drains accepted work.
 func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManifestPath string, config *indexpb.StorageConfig, updates *ManifestUpdates, complete func(ManifestUpdateResult, error)) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -465,14 +483,14 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 		complete(ManifestUpdateResult{ManifestPath: baseManifestPath}, nil)
 		return nil
 	}
-	base, version, parseErr := UnmarshalManifestPath(baseManifestPath)
+	baseManifest, parseErr := ParseManifestPath(baseManifestPath)
 	if parseErr != nil {
 		return merr.WrapErrDataIntegrity(parseErr, "parse base manifest path %q", baseManifestPath)
 	}
 	if err := io.acquire(ctx); err != nil {
 		return err
 	}
-	err := io.submitOpen(ctx, base, version, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, func(result manifestOpenResult) {
+	err := io.submitOpen(ctx, baseManifest, config, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, func(result manifestOpenResult) {
 		finish := func(updateResult ManifestUpdateResult, err error) {
 			defer io.release()
 			if result.transaction != 0 {
@@ -496,12 +514,13 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 		// Keep the original admission slot and transaction until commit completes.
 		// Submitting directly avoids re-entering admission from an executor worker.
 		err = io.submitCommit(ctx, result.transaction, func(result manifestCommitResult) {
-			committed, err := result.finish(ctx)
+			committed, size, err := result.finish(ctx)
 			if err != nil {
 				finish(ManifestUpdateResult{}, err)
 				return
 			}
-			finish(ManifestUpdateResult{MarshalManifestPath(base, committed), hasIndexes}, nil)
+			manifestPath := CommittedManifestPath(baseManifest.BasePath, committed, size, config.GetStorageType())
+			finish(ManifestUpdateResult{manifestPath, hasIndexes}, nil)
 		})
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)
@@ -535,7 +554,8 @@ func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string,
 	}
 	hasIndexes := manifestIndexesAfterUpdates(indexes, updates, drops, columns)
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 &&
+		len(updates.DropColumns) == 0 {
 		return false, hasIndexes, nil
 	}
 	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
@@ -552,7 +572,9 @@ func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestU
 		return nil
 	}
 	for _, index := range indexes {
-		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, index.ColumnName) {
+		// Internal data columns use decimal field IDs; ColumnName retains the
+		// schema name. Keep this projection aligned with storage invalidation.
+		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, strconv.FormatInt(index.FieldID, 10)) {
 			value = true
 			break
 		}

@@ -48,8 +48,8 @@ type (
 	cipherBox    struct{ cipher hook.Cipher }
 )
 
-// SetHook installs a compiled-in request hook. hookutil prefers it over
-// proxy.soPath and refuses a deployment that configures both. Call it before
+// SetHook installs a compiled-in request hook. hookutil uses it and ignores
+// proxy.soPath, with a warning, when both are configured. Call it before
 // milvus starts; a nil hook leaves the stock behavior in place.
 //
 // Init is called again whenever the hook's configuration is refreshed. A

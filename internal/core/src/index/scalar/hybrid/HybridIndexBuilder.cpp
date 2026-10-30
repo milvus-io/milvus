@@ -54,13 +54,19 @@ ParseInteger(const nlohmann::json& value, std::string_view key) {
     } else if (value.is_number_integer()) {
         return value.get<int64_t>();
     } else if (value.is_string()) {
-        const auto text = value.get<std::string>();
-        int64_t parsed = 0;
-        const auto [end, error] =
-            std::from_chars(text.data(), text.data() + text.size(), parsed);
-        if (!text.empty() && error == std::errc{} &&
-            end == text.data() + text.size()) {
-            return parsed;
+        std::string_view text = value.get_ref<const std::string&>();
+        const bool has_plus = text.starts_with('+');
+        if (has_plus) {
+            text.remove_prefix(1);
+        }
+        if (!text.empty() &&
+            (!has_plus || (text.front() >= '0' && text.front() <= '9'))) {
+            int64_t parsed = 0;
+            const auto [end, error] =
+                std::from_chars(text.data(), text.data() + text.size(), parsed);
+            if (error == std::errc{} && end == text.data() + text.size()) {
+                return parsed;
+            }
         }
     }
     ThrowInfo(DataTypeInvalid, "HYBRID parameter {} must be an integer", key);

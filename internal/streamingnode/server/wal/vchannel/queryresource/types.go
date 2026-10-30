@@ -20,10 +20,15 @@ type QueryRuntimeModule interface {
 	Close()
 }
 
-// QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
-// It does not retain a separate aggregate per version.
-type QueryRuntimePrepareModule interface {
-	PrepareDataVersion(context.Context, qviews.DataVersion) error
+// QueryRuntimeWriteSchemaModule reports progress on the ordered WAL write path.
+// Read resources instead prepare each view's exact schema and load identity.
+type QueryRuntimeWriteSchemaModule interface {
+	WriteSchemaVersion() int32
+}
+
+// QueryRuntimeIndexModule refreshes collection search metadata for a reused runtime.
+type QueryRuntimeIndexModule interface {
+	UpdateIndexMeta(context.Context, []*indexpb.IndexInfo) error
 }
 
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
@@ -36,9 +41,10 @@ type LoadInfoProvider interface {
 }
 
 type QueryViewLoadInfo struct {
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	PartitionIDs   []int64
+	LoadFields     []*messagespb.LoadFieldConfig
+	RequiredFields []*messagespb.LoadFieldConfig
+	IndexInfos     []*indexpb.IndexInfo
 }
 
 // QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.

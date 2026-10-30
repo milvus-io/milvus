@@ -37,6 +37,25 @@ ToUsageBytes(size_t bytes) {
     return static_cast<int64_t>(bytes);
 }
 
+SharedValidityBitmap::Snapshot
+SealedValidity(const std::shared_ptr<const std::vector<size_t>>& null_offsets,
+               int64_t count) {
+    AssertInfo(null_offsets != nullptr,
+               "text reader requires frozen null offsets");
+    AssertInfo(count >= 0, "text reader count must be non-negative");
+    AssertInfo(std::is_sorted(null_offsets->begin(), null_offsets->end()),
+               "text reader null offsets must be sorted");
+    AssertInfo(std::adjacent_find(null_offsets->begin(), null_offsets->end()) ==
+                   null_offsets->end(),
+               "text reader null offsets must be unique");
+    AssertInfo(null_offsets->empty() ||
+                   null_offsets->back() < static_cast<size_t>(count),
+               "text reader null offset exceeds row count {}",
+               count);
+    return SharedValidityBitmap::FromValidatedNullOffsets(
+        static_cast<size_t>(count), *null_offsets);
+}
+
 std::string
 OwnString(std::string_view value) {
     return value.empty() ? std::string{}
@@ -53,15 +72,31 @@ TextIndexReader::TextIndexReader(
     DataType value_type,
     bool file_backed,
     size_t payload_bytes)
+    : TextIndexReader(std::move(directory),
+                      std::move(engine),
+                      SealedValidity(null_offsets, count),
+                      count,
+                      value_type,
+                      file_backed,
+                      payload_bytes) {
+}
+
+TextIndexReader::TextIndexReader(
+    std::shared_ptr<storage::LocalDirectory> directory,
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+    SharedValidityBitmap::Snapshot validity,
+    int64_t count,
+    DataType value_type,
+    bool file_backed,
+    size_t payload_bytes)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
+      validity_(std::move(validity)),
       count_(count),
       value_type_(value_type),
       file_backed_(file_backed),
       payload_bytes_(payload_bytes) {
     AssertInfo(engine_ != nullptr, "text reader requires an engine");
-    AssertInfo(null_offsets != nullptr,
-               "text reader requires frozen null offsets");
     AssertInfo(count_ >= 0, "text reader count must be non-negative");
     AssertInfo(IsStringDataType(value_type_),
                "text reader requires a string value type, got {}",
@@ -73,26 +108,8 @@ TextIndexReader::TextIndexReader(
                "text reader count {} disagrees with Tantivy count {}",
                count_,
                engine_count);
-    AssertInfo(std::is_sorted(null_offsets->begin(), null_offsets->end()),
-               "text reader null offsets must be sorted");
-    AssertInfo(std::adjacent_find(null_offsets->begin(), null_offsets->end()) ==
-                   null_offsets->end(),
-               "text reader null offsets must be unique");
-    AssertInfo(null_offsets->empty() ||
-                   null_offsets->back() < static_cast<size_t>(count_),
-               "text reader null offset exceeds row count {}",
-               count_);
-
-    // See the valid_bitmap_ declaration: materialize validity once here so no
-    // query replays the offsets, and keep the all-valid case allocation-free.
-    if (null_offsets->empty()) {
-        all_valid_ = true;
-    } else {
-        valid_bitmap_ = TargetBitmap(static_cast<size_t>(count_), true);
-        for (const auto offset : *null_offsets) {
-            valid_bitmap_.reset(offset);
-        }
-    }
+    AssertInfo(validity_.Count() == static_cast<size_t>(count_),
+               "text reader validity count disagrees with its reader");
 }
 
 TextIndexReader::~TextIndexReader() = default;
@@ -126,11 +143,15 @@ TextIndexReader::MemoryUsage() const {
     constexpr size_t kKnownMetadataBytes =
         sizeof(TextIndexReader) + sizeof(milvus::tantivy::TantivyIndexWrapper);
     size_t total = kKnownMetadataBytes;
-    const auto validity_bytes = valid_bitmap_.size_in_bytes();
-    if (validity_bytes > std::numeric_limits<size_t>::max() - total) {
-        ThrowInfo(DataFormatBroken, "text reader memory size overflows");
-    }
-    total += validity_bytes;
+    const auto add_bytes = [&](size_t bytes) {
+        if (bytes > std::numeric_limits<size_t>::max() - total) {
+            ThrowInfo(DataFormatBroken, "text reader memory size overflows");
+        }
+        total += bytes;
+    };
+    // sizeof(TextIndexReader) already includes the snapshot itself. Shared
+    // buffers are counted once per reader, as the prior shared offsets were.
+    add_bytes(validity_.BufferBytes());
     if (directory_ != nullptr) {
         const auto directory_bytes = directory_->HeapBytes();
         if (directory_bytes > std::numeric_limits<size_t>::max() - total) {
@@ -180,22 +201,21 @@ TextIndexReader::FuzzyMatchQuery(std::string_view query,
     return bitset;
 }
 
+const SharedValidityBitmap::Snapshot&
+TextIndexReader::Validity() const {
+    return validity_;
+}
+
 TargetBitmap
 TextIndexReader::IsNull() const {
-    if (all_valid_) {
-        return TargetBitmap(static_cast<size_t>(count_));
-    }
-    auto result = valid_bitmap_.clone();
+    auto result = IsNotNull();
     result.flip();
     return result;
 }
 
 TargetBitmap
 TextIndexReader::IsNotNull() const {
-    if (all_valid_) {
-        return TargetBitmap(static_cast<size_t>(count_), true);
-    }
-    return valid_bitmap_.clone();
+    return validity_.ToBitmap();
 }
 
 }  // namespace milvus::index

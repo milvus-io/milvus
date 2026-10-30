@@ -453,8 +453,9 @@ func TestManagerCloseWaitsForRunningBuild(t *testing.T) {
 func TestManagerResolveLoadInfoAppliesLoadInfoAndIndexInfos(t *testing.T) {
 	provider := fakeLoadInfoProvider{
 		loadInfo: QueryViewLoadInfo{
-			PartitionIDs: []int64{10},
-			LoadFields:   loadFields(100, 101),
+			PartitionIDs:   []int64{10},
+			LoadFields:     loadFields(100),
+			RequiredFields: loadFields(100, 101),
 			IndexInfos: []*indexpb.IndexInfo{
 				{CollectionID: 1, FieldID: 101, IndexName: "sparse_inverted"},
 			},
@@ -468,7 +469,8 @@ func TestManagerResolveLoadInfoAppliesLoadInfoAndIndexInfos(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []int64{10}, view.PartitionIDs)
-	require.Equal(t, loadFields(100, 101), view.LoadFields)
+	require.Equal(t, loadFields(100), view.LoadFields)
+	require.Equal(t, loadFields(100, 101), view.RequiredFields)
 	require.Len(t, view.IndexInfos, 1)
 	require.Equal(t, int64(101), view.IndexInfos[0].GetFieldID())
 }
@@ -633,8 +635,22 @@ func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VCha
 
 func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
-func (m *versionedQueryRuntimeModule) PrepareDataVersion(ctx context.Context, version qviews.DataVersion) error {
-	return m.prepare(ctx, version)
+func (m *versionedQueryRuntimeModule) BindView(meta *viewpb.QueryViewMeta) QueryViewResource {
+	return &versionedQueryViewResource{module: m, meta: meta}
+}
+
+type versionedQueryViewResource struct {
+	module *versionedQueryRuntimeModule
+	meta   *viewpb.QueryViewMeta
+}
+
+func (v *versionedQueryViewResource) Prepare(ctx context.Context, _ LoadInfoProvider) error {
+	return v.module.PrepareSchemaDataVersion(ctx, v.meta)
+}
+func (*versionedQueryViewResource) Release() {}
+
+func (m *versionedQueryRuntimeModule) PrepareSchemaDataVersion(ctx context.Context, meta *viewpb.QueryViewMeta) error {
+	return m.prepare(ctx, qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()))
 }
 
 func (m *versionedQueryRuntimeModule) ReleaseDataVersion(version qviews.DataVersion) {
@@ -824,4 +840,17 @@ func TestManagerReleaseCancelsQueuedBuild(t *testing.T) {
 	require.Equal(t, int32(1), closes.Load(), "old cleanup must not close the new runtime")
 	manager.Close()
 	require.Equal(t, int32(2), closes.Load())
+}
+
+// Component fixtures register references directly; production binds them during
+// AcquireLocked or successful runtime initialization.
+func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
+	m.mu.Lock()
+	ref, runtime := m.refs[key], m.runtime
+	if runtime != nil && ref.resources == nil {
+		ref.resources = runtime.bindView(ref.meta)
+		m.refs[key] = ref
+	}
+	m.mu.Unlock()
+	return m.prepareViewRef(ctx, key, ref, runtime, onReady)
 }

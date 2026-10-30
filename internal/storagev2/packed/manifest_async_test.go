@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestAsyncManifestRoundTrip(t *testing.T) {
@@ -69,6 +70,65 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	_, err = GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+// On object storage an async commit records the size of the manifest object it
+// wrote, like CommitManifestUpdates, and every async open passes the size a
+// manifest path records. loon reads exactly the recorded number of bytes, so a
+// wrong size fails each entry point; those reads come first because loon caches
+// a revision once it has been read.
+func TestAsyncManifestRecordsAndPassesManifestSize(t *testing.T) {
+	paramtable.Init()
+	cfg := CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	io := NewManifestIOContext(2)
+	defer io.Close()
+	ctx := context.Background()
+	base := path.Join(cfg.GetRootPath(), fmt.Sprintf("async_manifest_size/%d", time.Now().UnixNano()))
+	requireRecordedSize := func(manifestPath string) ManifestJSON {
+		t.Helper()
+		manifest, err := ParseManifestPath(manifestPath)
+		require.NoError(t, err)
+		manifestFile, err := ManifestFilePath(manifestPath)
+		require.NoError(t, err)
+		data, err := ReadFile(cfg, manifestFile)
+		require.NoError(t, err)
+		require.EqualValues(t, len(data), manifest.Size, "path %s", manifestPath)
+		return manifest
+	}
+
+	index := ManifestIndexInfo{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}
+	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, MarshalManifestPath(base, ManifestEarliest), cfg,
+		&ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
+	require.NoError(t, err)
+	recorded := requireRecordedSize(first.ManifestPath)
+
+	wrongSize := recorded
+	wrongSize.Size += 7
+	wrong := marshalManifestPath(wrongSize)
+	_, err = GetManifestIndexInfosAsync(ctx, io, wrong, cfg)
+	require.Error(t, err, "GetManifestIndexInfosAsync")
+	_, err = GetManifestLobFilesAsync(ctx, io, wrong, cfg)
+	require.Error(t, err, "GetManifestLobFilesAsync")
+	done := make(chan error, 1)
+	require.NoError(t, SubmitManifestIndexInfos(ctx, io, wrong, cfg, func(_ []ManifestIndexInfo, err error) { done <- err }))
+	require.Error(t, <-done, "SubmitManifestIndexInfos")
+	_, err = CommitManifestUpdatesWithResultAsync(ctx, io, wrong, cfg,
+		&ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	require.Error(t, err, "CommitManifestUpdatesWithResultAsync")
+
+	entries, err := GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	second, err := CommitManifestUpdatesWithResultAsync(ctx, io, first.ManifestPath, cfg,
+		&ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	require.NoError(t, err)
+	require.Equal(t, recorded.ManifestVersion+1, requireRecordedSize(second.ManifestPath).ManifestVersion)
+	entries, err = GetManifestIndexInfosAsync(ctx, io, second.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.Empty(t, entries)
 }
 
 // Like CommitManifestUpdates, an empty update returns the base pointer verbatim
@@ -338,11 +398,12 @@ func TestAsyncManifestQueuedCommitDeadline(t *testing.T) {
 func TestAsyncManifestCommitOutcomeSurvivesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	version, err := (manifestCommitResult{outcome: ManifestCommitted, version: 42}).finish(ctx)
+	version, size, err := (manifestCommitResult{outcome: ManifestCommitted, version: 42, size: 1024}).finish(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(42), version)
+	require.Equal(t, int64(1024), size)
 	for _, outcome := range []ManifestCommitOutcome{ManifestNotCommitted, ManifestCommitUnknown} {
-		_, err := (manifestCommitResult{outcome: outcome, version: -1, err: ErrLoonTransient}).finish(ctx)
+		_, _, err := (manifestCommitResult{outcome: outcome, version: -1, size: -1, err: ErrLoonTransient}).finish(ctx)
 		var commitErr *ManifestCommitError
 		require.True(t, errors.As(merr.Wrap(err, "coordinator commit"), &commitErr))
 		require.Equal(t, outcome, commitErr.Outcome)
@@ -540,18 +601,71 @@ func TestAsyncManifestCommitSubmissionsSingleWorker(t *testing.T) {
 	require.False(t, called)
 }
 
+func TestManifestIndexesAfterUpdatesUsesFieldID(t *testing.T) {
+	indexes := []ManifestIndexInfo{
+		{FieldID: 100, IndexID: 1, ColumnName: "vector"},
+		{FieldID: 100, IndexID: 2, ColumnName: ""},
+		{FieldID: 101, IndexID: 3, ColumnName: "100"},
+	}
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		drops   []int64
+		add     bool
+		want    bool
+	}{
+		{
+			name: "unaffected field survives despite name collision", columns: []string{"100"}, want: true,
+		},
+		{
+			name: "all affected fields invalidated regardless of names", columns: []string{"100", "101"}, want: false,
+		},
+		{
+			name: "append invalidates both indexes on the same field", columns: []string{"100"}, drops: []int64{3}, want: false,
+		},
+		{
+			name: "explicit drop preserves another index on the field", columns: []string{"101"}, drops: []int64{1}, want: true,
+		},
+		{
+			name: "additions survive invalidation", columns: []string{"100", "101"}, add: true, want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updates := &ManifestUpdates{}
+			for _, id := range tc.drops {
+				updates.DropIndexes = append(updates.DropIndexes, DropIndexEntry{IndexID: id})
+			}
+			if tc.add {
+				updates.Indexes = indexes[:1]
+			}
+			got := manifestIndexesAfterUpdates(indexes, updates, tc.drops, tc.columns)
+			require.NotNil(t, got)
+			require.Equal(t, tc.want, *got)
+		})
+	}
+}
+
 // Compare the in-memory marker with the actual native resolver's persisted
 // output. This also guards the adapter against drift in index invalidation rules.
 func TestAsyncManifestIndexMarkerResult(t *testing.T) {
-	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
+	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg := manifestTestStorageConfig(t)
 			io := NewManifestIOContext(1)
 			defer io.Close()
 			base := path.Join(cfg.RootPath, scenario)
 			indexes := []ManifestIndexInfo{
-				{ColumnName: "100", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
-				{ColumnName: "101", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
+				{ColumnName: "vector", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
+				{ColumnName: "chunks[embedding]", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
+			}
+			switch scenario {
+			case "append_empty_name":
+				indexes[0].ColumnName, indexes[1].ColumnName = "", ""
+			case "append_name_collision":
+				indexes[0].ColumnName, indexes[1].ColumnName = "101", "100"
+			case "append_shared_field":
+				indexes[1].FieldID = indexes[0].FieldID
+				indexes[1].ColumnName = indexes[0].ColumnName
 			}
 			initial, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: indexes})
 			require.NoError(t, err)
@@ -581,9 +695,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				if scenario == "stale_drop_and_add" {
 					updates.DropIndexes[0].ExpectedBuildID = 99
 				}
-			case "append_columns", "append_segment", "append_and_add", "add_column_group":
+			case "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group":
 				columns := []string{"100"}
-				if scenario == "append_segment" || scenario == "append_and_add" {
+				if scenario == "append_segment" || scenario == "append_and_add" || scenario == "append_empty_name" {
 					columns = append(columns, "101")
 				}
 				groups, err := createColumnGroups(columns, "parquet", []Fragment{{FilePath: path.Join(base, "data.parquet"), EndRow: 1}})
@@ -603,6 +717,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				}
 				if scenario == "add_column_group" {
 					wantCount, wantMarker = 2, false
+				}
+				if scenario == "append_empty_name" || scenario == "append_shared_field" {
+					wantCount = 0
 				}
 			case "column_group_entry":
 				updates.ColumnGroups = []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet"}}
@@ -624,6 +741,10 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 			actual, err := GetManifestIndexInfos(result.ManifestPath, cfg)
 			require.NoError(t, err)
 			require.Len(t, actual, wantCount)
+			if scenario == "append_columns" || scenario == "append_name_collision" {
+				require.Equal(t, int64(2), actual[0].IndexID)
+				require.Equal(t, indexes[1].ColumnName, actual[0].ColumnName)
+			}
 			if wantMarker {
 				require.NotNil(t, result.HasIndexes)
 				require.Equal(t, len(actual) > 0, *result.HasIndexes)
@@ -635,4 +756,40 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAsyncManifestDropColumns verifies the production async commit path
+// (SubmitManifestUpdates -> applyAsyncManifestUpdates, the path
+// meta.CommitSegmentManifests actually drives) recognizes a DropColumns-only
+// update as real work. Without DropColumns in applyAsyncManifestUpdates'
+// "changed" check, a drop-only update would silently return the base path and
+// never produce a revision that strips the column.
+func TestAsyncManifestDropColumns(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	ctx := context.Background()
+	base := path.Join(cfg.RootPath, "async_drop_columns", "seg1")
+
+	seed, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files:   []ColumnGroupFileEntry{{Path: path.Join(base, "_data", "100_a.parquet"), StartIndex: 0, EndIndex: 5}},
+		}},
+	})
+	require.NoError(t, err)
+	fields, err := GetManifestFieldIDs(seed, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(100))
+
+	dropped, err := CommitManifestUpdatesWithResultAsync(ctx, io, seed, cfg, &ManifestUpdates{
+		DropColumns: []string{"100"},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, seed, dropped.ManifestPath,
+		"a DropColumns-only update must produce a new revision, not return the base path unchanged")
+	fields, err = GetManifestFieldIDs(dropped.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.NotContains(t, fields, int64(100))
 }

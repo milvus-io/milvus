@@ -33,11 +33,11 @@ func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanReque
 	if err != nil {
 		return nil, toRPCError(err)
 	}
-	plan, err := p.GetQueryPlan(ctx, req)
+	resp, err := p.GetQueryPlan(ctx, req)
 	if err != nil {
 		return nil, toRPCError(err)
 	}
-	return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+	return resp, nil
 }
 
 func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -93,5 +93,5 @@ func toRPCError(err error) error {
 	if errors.As(err, &viewErr) {
 		return viewerror.NewGRPCStatusFromViewError(viewErr).Err()
 	}
-	return viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
+	return viewerror.NewGRPCStatusFromError(err).Err()
 }

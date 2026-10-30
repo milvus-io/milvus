@@ -261,6 +261,53 @@ func (m *AnalyzerResourceManager) acquire(ctx context.Context, id int64, info *i
 // per-ID flights. Overlapping callers may read the same metadata, but share
 // downloads. A metadata RPC belongs only to its caller and cannot cancel others.
 func (m *AnalyzerResourceManager) Acquire(ctx context.Context, ids []int64, params ...string) (*Resources, error) {
+	names := analyzerResourceNames(params)
+	if len(names) == 0 {
+		ids = nil
+	}
+	result, err := m.acquireResources(ctx, ids, names)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		result.extra = `{ "resource_map": {} }`
+		result.validationExtra = `{ "resource_map": {}, "resource_file_names": {}, "validate_resource_names": true }`
+		return result, nil
+	}
+
+	resourceMap := make(map[string]int64)
+	fileNames := make(map[string]string)
+	for _, entry := range result.entries {
+		// info is immutable after publication for this ID.
+		m.mu.Lock()
+		info := entry.info
+		m.mu.Unlock()
+		resourceMap[info.GetName()] = info.GetId()
+		fileNames[info.GetName()] = path.Base(info.GetPath())
+	}
+	extra := map[string]any{"storage_name": demandStorageName, "resource_map": resourceMap}
+	data, err := json.Marshal(extra)
+	if err != nil {
+		result.Close()
+		return nil, merr.Wrap(err, "marshal analyzer resource bindings")
+	}
+	result.extra = string(data)
+	extra["resource_file_names"] = fileNames
+	extra["validate_resource_names"] = true
+	data, err = json.Marshal(extra)
+	if err != nil {
+		result.Close()
+		return nil, merr.Wrap(err, "marshal analyzer validation bindings")
+	}
+	result.validationExtra = string(data)
+	if err := ctx.Err(); err != nil {
+		result.Close()
+		return nil, err
+	}
+	return result, nil
+}
+
+func (m *AnalyzerResourceManager) acquireResources(ctx context.Context, ids []int64, names map[string]struct{}) (*Resources, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -271,10 +318,7 @@ func (m *AnalyzerResourceManager) Acquire(ctx context.Context, ids []int64, para
 		return nil, merr.WrapErrServiceNotReadyMsg("analyzer resource manager is closed")
 	}
 	result := &Resources{manager: m}
-	names := analyzerResourceNames(params)
-	if len(names) == 0 {
-		result.extra = `{ "resource_map": {} }`
-		result.validationExtra = `{ "resource_map": {}, "resource_file_names": {}, "validate_resource_names": true }`
+	if len(ids) == 0 && len(names) == 0 {
 		return result, nil
 	}
 	var missingIDs []int64
@@ -353,31 +397,6 @@ func (m *AnalyzerResourceManager) Acquire(ctx context.Context, ids []int64, para
 		}
 	}
 
-	resourceMap := make(map[string]int64)
-	fileNames := make(map[string]string)
-	for _, entry := range result.entries {
-		// info is immutable after publication for this ID.
-		m.mu.Lock()
-		info := entry.info
-		m.mu.Unlock()
-		resourceMap[info.GetName()] = info.GetId()
-		fileNames[info.GetName()] = path.Base(info.GetPath())
-	}
-	extra := map[string]any{"storage_name": demandStorageName, "resource_map": resourceMap}
-	data, err := json.Marshal(extra)
-	if err != nil {
-		result.Close()
-		return nil, merr.Wrap(err, "marshal analyzer resource bindings")
-	}
-	result.extra = string(data)
-	extra["resource_file_names"] = fileNames
-	extra["validate_resource_names"] = true
-	data, err = json.Marshal(extra)
-	if err != nil {
-		result.Close()
-		return nil, merr.Wrap(err, "marshal analyzer validation bindings")
-	}
-	result.validationExtra = string(data)
 	if err := ctx.Err(); err != nil {
 		result.Close()
 		return nil, err
@@ -405,4 +424,15 @@ func checkFetchedResources(infos []*internalpb.FileResourceInfo, ids []int64, na
 		seen[info.GetId()] = struct{}{}
 	}
 	return nil
+}
+
+// Resolved returns copies of the exact downloaded resources. Their files remain
+// valid until this handle is closed.
+func (r *Resources) Resolved() []*ResolvedFileResource {
+	resources := make([]*ResolvedFileResource, 0, len(r.entries))
+	for _, entry := range r.entries {
+		info := entry.info
+		resources = append(resources, &ResolvedFileResource{ID: info.GetId(), Name: info.GetName(), Path: info.GetPath(), LocalPath: path.Join(r.manager.resourcePath(info.GetId()), path.Base(info.GetPath()))})
+	}
+	return resources
 }

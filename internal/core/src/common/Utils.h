@@ -47,22 +47,29 @@ namespace milvus {
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
 
+// Row validity has two wire locations: the legacy FieldData.valid_data and the
+// field-specific ScalarField/VectorField.valid_data. Components built before
+// the field-specific location existed read and update only the legacy one and
+// forward the field-specific one untouched, so the legacy location is
+// authoritative whenever it is set. The Go side follows the same rules in
+// pkg/util/typeutil/field_data.go.
 inline const google::protobuf::RepeatedField<bool>&
 GetFieldDataRowValidData(const DataArray& field_data) {
-    // New payloads normally store validity in the field-specific ScalarField
-    // or VectorField. FieldData.valid_data is kept as a fallback for legacy
-    // payloads that do not contain field-specific validity.
-    if (field_data.has_scalars() &&
-        field_data.scalars().valid_data_size() > 0) {
+    if (field_data.valid_data_size() > 0) {
+        return field_data.valid_data();
+    }
+    if (field_data.has_scalars()) {
         return field_data.scalars().valid_data();
     }
-    if (field_data.has_vectors() &&
-        field_data.vectors().valid_data_size() > 0) {
+    if (field_data.has_vectors()) {
         return field_data.vectors().valid_data();
     }
     return field_data.valid_data();
 }
 
+// Returns the field-specific row validity for the caller to fill, clearing the
+// legacy location. SyncFieldDataRowValidData must run before the DataArray
+// leaves segcore so that the legacy location carries the same mask.
 inline google::protobuf::RepeatedField<bool>*
 MutableFieldDataRowValidData(DataArray* field_data) {
     field_data->clear_valid_data();
@@ -79,6 +86,33 @@ MutableFieldDataRowValidData(DataArray* field_data) {
         return field_data->mutable_vectors()->mutable_valid_data();
     }
     return field_data->mutable_scalars()->mutable_valid_data();
+}
+
+// Writes the authoritative row validity (see GetFieldDataRowValidData) to both
+// the legacy and the field-specific location. Call it on every DataArray that
+// segcore hands to Go.
+inline void
+SyncFieldDataRowValidData(DataArray* field_data) {
+    if (field_data->has_struct_arrays()) {
+        for (auto& sub_field :
+             *field_data->mutable_struct_arrays()->mutable_fields()) {
+            SyncFieldDataRowValidData(&sub_field);
+        }
+        return;
+    }
+    google::protobuf::RepeatedField<bool>* field_specific = nullptr;
+    if (field_data->has_scalars()) {
+        field_specific = field_data->mutable_scalars()->mutable_valid_data();
+    } else if (field_data->has_vectors()) {
+        field_specific = field_data->mutable_vectors()->mutable_valid_data();
+    } else {
+        return;
+    }
+    if (field_data->valid_data_size() > 0) {
+        *field_specific = field_data->valid_data();
+    } else {
+        *field_data->mutable_valid_data() = *field_specific;
+    }
 }
 
 using CheckDataValid = std::function<bool(size_t)>;

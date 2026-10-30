@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -18,6 +19,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
 	if req.GetIgnoreGrowing() {
 		return NewSNSearchSegmentTasks(nil), nil
@@ -27,6 +29,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
 		return nil, err
@@ -45,7 +50,11 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}
@@ -72,12 +81,16 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
 	lease, err := h.acquireUpView(ctx, shardID, version, false)
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
+	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
+	}
 
 	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
 		return nil, err
@@ -96,7 +109,11 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
+	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
+	if err != nil {
+		return nil, err
+	}
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, partitions)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -49,6 +50,7 @@ func (r *Runtime) getOrCreateSegment(segmentID int64, partitionID int64) *growin
 		return nil
 	}
 	segment := newGrowingSegment(r.collection, segmentID, partitionID)
+	segment.encodingSchema = r.writeSchema
 	r.segments[segmentID] = segment
 	r.segmentIDs = append(r.segmentIDs, segmentID)
 	return segment
@@ -72,6 +74,26 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		return nil
 	}
 	switch msg.MessageType() {
+	case message.MessageTypeAlterCollection:
+		if !applyGrowing {
+			return nil
+		}
+		altered := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		if !messageutil.IsSchemaChange(altered.Header()) {
+			return nil
+		}
+		// WAL dispatch serializes this transition with insert conversion and write.
+		// The native collection lazily reopens existing segments on the next access.
+		schema := altered.MustBody().GetUpdates().GetSchema()
+		if err := r.collection.UpdateSchema(schema, msg.TimeTick()); err != nil {
+			return err
+		}
+		// UpdateSchema may be a no-op when the serving dispatcher is ahead of
+		// this replay. Its own cursor must still advance at this WAL position.
+		r.mu.Lock()
+		r.writeSchema = schema
+		r.mu.Unlock()
+		return nil
 	case message.MessageTypeCreateSegment:
 		if !applyGrowing {
 			return nil

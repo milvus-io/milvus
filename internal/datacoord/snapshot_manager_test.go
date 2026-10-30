@@ -744,9 +744,9 @@ func TestSnapshotManager_DescribeSnapshot_NotFound(t *testing.T) {
 func TestSnapshotManager_ListSnapshots_Success(t *testing.T) {
 	ctx := context.Background()
 
-	expectedSnapshots := []string{"snapshot1", "snapshot2", "snapshot3"}
+	expectedSnapshots := []*datapb.SnapshotSummary{{Name: "snapshot1"}, {Name: "snapshot2"}, {Name: "snapshot3"}}
 
-	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).To(func(sm *snapshotMeta, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).To(func(sm *snapshotMeta, ctx context.Context, collectionID, partitionID int64) ([]*datapb.SnapshotSummary, error) {
 		assert.Equal(t, int64(100), collectionID)
 		assert.Equal(t, int64(0), partitionID)
 		return expectedSnapshots, nil
@@ -776,7 +776,7 @@ func TestSnapshotManager_ListSnapshots_Error(t *testing.T) {
 	ctx := context.Background()
 
 	expectedErr := errors.New("list error")
-	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).To(func(sm *snapshotMeta, ctx context.Context, collectionID, partitionID int64) ([]string, error) {
+	mockListSnapshots := mockey.Mock((*snapshotMeta).ListSnapshots).To(func(sm *snapshotMeta, ctx context.Context, collectionID, partitionID int64) ([]*datapb.SnapshotSummary, error) {
 		return nil, expectedErr
 	}).Build()
 	defer mockListSnapshots.UnPatch()
@@ -6402,5 +6402,40 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 				assert.Equal(t, 1, closed)
 			}
 		})
+	}
+}
+
+func TestSnapshotManager_ListSnapshots_SummaryOrder(t *testing.T) {
+	meta := createTestSnapshotMetaLoaded(t)
+	for i, info := range []*datapb.SnapshotInfo{
+		{Name: "old", CreateTs: 0},
+		{Name: "b", CreateTs: 200},
+		{Name: "a", CreateTs: 200},
+		{Name: "middle", CreateTs: 100},
+	} {
+		info.Id = int64(i + 1)
+		info.CollectionId = 100
+		insertTestSnapshot(meta, info, nil, nil)
+	}
+	manager := NewSnapshotManager(nil, meta, nil, nil, nil, nil, nil, nil)
+	infos, err := manager.ListSnapshots(context.Background(), 100, 0, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "middle", "old"}, snapshotSummaryNames(infos))
+	infos, err = manager.ListSnapshots(context.Background(), 999, 0, 0)
+	require.NoError(t, err)
+	assert.Empty(t, infos)
+}
+
+func TestSnapshotManager_ListSnapshots_DeterministicComparisons(t *testing.T) {
+	for _, input := range [][]*datapb.SnapshotSummary{
+		{{Name: "old"}, {Name: "b", CreateTs: 200}, {Name: "a", CreateTs: 200}},
+		{{Name: "a", CreateTs: 200}, {Name: "b", CreateTs: 200}, {Name: "old"}},
+	} {
+		patch := mockey.Mock((*snapshotMeta).ListSnapshots).Return(input, nil).Build()
+		manager := NewSnapshotManager(nil, &snapshotMeta{}, nil, nil, nil, nil, nil, nil)
+		infos, err := manager.ListSnapshots(context.Background(), 100, 0, 0)
+		patch.UnPatch()
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "b", "old"}, snapshotSummaryNames(infos))
 	}
 }

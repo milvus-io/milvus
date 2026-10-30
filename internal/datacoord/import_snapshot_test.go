@@ -2790,19 +2790,24 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						require.NoError(t, proto.Unmarshal(encoded, file))
 						reader, err := importutilv2.NewReader(ctx, cm, schema, file, options, 1024, cfg, 1024)
 						require.NoError(t, err)
-						batch, err := reader.Read()
-						require.NoError(t, err)
+						var got []int64
+						for {
+							batch, err := reader.Read()
+							if err == io.EOF {
+								break
+							}
+							require.NoError(t, err)
+							got = append(got, batch.Data[100].(*milvusstorage.Int64FieldData).Data...)
+						}
 						if tc.commit == 0 {
 							// Accepted historical loss: all deletes are newer than raw
 							// rowTs=100. The omitted commitTs=300 cannot be recovered,
 							// so rows 1/2 are filtered too, unlike a complete snapshot.
-							require.Zero(t, batch.GetRowNum())
+							require.Empty(t, got)
 						} else {
-							require.Equal(t, []int64{1, 2}, batch.Data[100].(*milvusstorage.Int64FieldData).Data,
+							require.Equal(t, []int64{1, 2}, got,
 								"keep pre-commit and equal-commit deletes; apply post-commit deletes in both phases")
 						}
-						_, err = reader.Read()
-						require.ErrorIs(t, err, io.EOF)
 						reader.Close()
 					}
 				})

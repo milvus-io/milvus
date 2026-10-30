@@ -151,10 +151,15 @@ class VirtualPKScanCursor final : public ScanCursor {
     int64_t scan_pos_;
 };
 
+template <bool HasCandidateMask>
 class VirtualPKTakeResult final : public TakeResult {
  public:
-    VirtualPKTakeResult(std::shared_ptr<VirtualPKValues> owner, int64_t size)
-        : owner_(std::move(owner)), size_(size) {
+    VirtualPKTakeResult(std::shared_ptr<VirtualPKValues> owner,
+                        int64_t size,
+                        const TargetBitmap* candidate_mask)
+        : owner_(std::move(owner)),
+          size_(size),
+          candidate_mask_(candidate_mask) {
         AssertInfo(owner_ != nullptr, "virtual PK take owner is null");
         AssertInfo(
             size_ >= 0, "virtual PK take size {} must be non-negative", size_);
@@ -185,6 +190,11 @@ class VirtualPKTakeResult final : public TakeResult {
  protected:
     TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
+        if constexpr (HasCandidateMask) {
+            AssertInfo((*candidate_mask_)[index],
+                       "Take position {} was excluded by the candidate mask",
+                       index);
+        }
         return {true,
                 read_data && !owner_->data_skipped.empty() &&
                     owner_->data_skipped[index]};
@@ -208,24 +218,27 @@ class VirtualPKTakeResult final : public TakeResult {
 
  protected:
     const void*
-    FixedValueAt(int64_t index) const override {
+    FixedValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return nullptr;
+        }
         return owner_->values.data() + index;
     }
 
     std::string_view
-    StringViewAt(int64_t) const override {
+    StringViewAt(int64_t, TakeItemState&) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "virtual PK Take does not contain string values");
     }
 
-    Json
-    JsonAt(int64_t) const override {
+    std::string_view
+    JsonViewAt(int64_t, TakeItemState&) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "virtual PK Take does not contain JSON values");
     }
 
     ArrayView
-    ArrayAt(int64_t) const override {
+    ArrayAt(int64_t, TakeItemState&) const override {
         ThrowInfo(ErrorCode::Unsupported,
                   "virtual PK Take does not contain array values");
     }
@@ -233,6 +246,7 @@ class VirtualPKTakeResult final : public TakeResult {
  private:
     std::shared_ptr<VirtualPKValues> owner_;
     int64_t size_;
+    const TargetBitmap* candidate_mask_;
 };
 
 }  // namespace
@@ -267,27 +281,49 @@ VirtualPKChunkedColumn::Take(milvus::OpContext*, TakeOptions options) const {
     AssertInfo(offsets.size == 0 || offsets.data != nullptr,
                "virtual PK Take offsets are null with count {}",
                offsets.size);
+    AssertInfo(options.candidate_mask == nullptr ||
+                   options.candidate_mask->size() == offsets.size,
+               "Take candidate mask size does not match offset count {}",
+               offsets.size);
+    if (options.candidate_mask != nullptr && options.candidate_mask->all()) {
+        options.candidate_mask = nullptr;
+    }
 
     auto owner = std::make_shared<VirtualPKValues>();
     const auto data_skipped =
-        offsets.size > 0 && ShouldSkipData(options.filter);
+        offsets.size > 0 &&
+        (options.candidate_mask == nullptr || options.candidate_mask->any()) &&
+        ShouldSkipData(options.filter);
     if (data_skipped) {
         owner->data_skipped.resize(offsets.size, true);
     } else {
         owner->values.reserve(offsets.size);
     }
-    for (int64_t i = 0; i < offsets.size; ++i) {
-        const auto offset = offsets[i];
-        AssertInfo(offset >= 0 && offset < num_rows_,
-                   "virtual PK Take offset {} is out of rows {}",
-                   offset,
-                   num_rows_);
-        if (!data_skipped) {
-            owner->values.emplace_back(ComputeVirtualPK(offset));
+    const auto make_result = [&]<bool HasCandidateMask>() -> TakeResultPtr {
+        for (int64_t i = 0; i < offsets.size; ++i) {
+            if constexpr (HasCandidateMask) {
+                if (!(*options.candidate_mask)[i]) {
+                    if (!data_skipped) {
+                        owner->values.emplace_back(0);
+                    }
+                    continue;
+                }
+            }
+            const auto offset = offsets[i];
+            AssertInfo(offset >= 0 && offset < num_rows_,
+                       "virtual PK Take offset {} is out of rows {}",
+                       offset,
+                       num_rows_);
+            if (!data_skipped) {
+                owner->values.emplace_back(ComputeVirtualPK(offset));
+            }
         }
-    }
-    return std::make_unique<VirtualPKTakeResult>(std::move(owner),
-                                                 offsets.size);
+        return std::make_unique<VirtualPKTakeResult<HasCandidateMask>>(
+            std::move(owner), offsets.size, options.candidate_mask);
+    };
+    return options.candidate_mask == nullptr
+               ? make_result.template operator()<false>()
+               : make_result.template operator()<true>();
 }
 
 bool

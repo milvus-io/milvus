@@ -560,21 +560,10 @@ func WriteLobFilesToManifest(
 	lobFiles []packed.LobFileInfo,
 	storageConfig *indexpb.StorageConfig,
 ) (string, error) {
-	if len(lobFiles) == 0 || manifestPath == "" {
+	if manifestPath == "" {
 		return manifestPath, nil
 	}
-
-	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
-	if err != nil {
-		return "", err
-	}
-
-	newVersion, err := packed.AddLobFilesToTransaction(basePath, version, storageConfig, lobFiles)
-	if err != nil {
-		return "", err
-	}
-
-	return packed.MarshalManifestPath(basePath, newVersion), nil
+	return packed.AddLobFilesToTransaction(manifestPath, storageConfig, lobFiles)
 }
 
 // ApplyLobCompactionToManifests updates output segment manifests with merged LOB files.

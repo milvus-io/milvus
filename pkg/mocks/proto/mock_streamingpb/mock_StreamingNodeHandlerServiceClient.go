@@ -465,6 +465,79 @@ func (_c *MockStreamingNodeHandlerServiceClient_RunAnalyzer_Call) RunAndReturn(r
 	return _c
 }
 
+// SubscribeReplicas provides a mock function with given fields: ctx, opts
+func (_m *MockStreamingNodeHandlerServiceClient) SubscribeReplicas(ctx context.Context, opts ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SubscribeReplicas")
+	}
+
+	var r0 streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient, error)); ok {
+		return rf(ctx, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...grpc.CallOption) streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient); ok {
+		r0 = rf(ctx, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubscribeReplicas'
+type MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call struct {
+	*mock.Call
+}
+
+// SubscribeReplicas is a helper method to define mock.On call
+//   - ctx context.Context
+//   - opts ...grpc.CallOption
+func (_e *MockStreamingNodeHandlerServiceClient_Expecter) SubscribeReplicas(ctx interface{}, opts ...interface{}) *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call {
+	return &MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call{Call: _e.mock.On("SubscribeReplicas",
+		append([]interface{}{ctx}, opts...)...)}
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call) Run(run func(ctx context.Context, opts ...grpc.CallOption)) *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call) Return(_a0 streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient, _a1 error) *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call) RunAndReturn(run func(context.Context, ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_SubscribeReplicasClient, error)) *MockStreamingNodeHandlerServiceClient_SubscribeReplicas_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SubscribeTransform provides a mock function with given fields: ctx, opts
 func (_m *MockStreamingNodeHandlerServiceClient) SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (streamingpb.StreamingNodeHandlerService_SubscribeTransformClient, error) {
 	_va := make([]interface{}, len(opts))
