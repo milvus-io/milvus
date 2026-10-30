@@ -37,6 +37,17 @@ milvus-dev-cli go-integration local . -b master --allow-dirty \
   -t tests/integration/idempotency
 ```
 
+Select one leaf case during development with Go's slash-separated run pattern:
+
+```sh
+milvus-dev-cli go-integration local . -b master --allow-dirty \
+  -t tests/integration/idempotency \
+  -k '^TestIdempotencyFailpoints$/^TestBackendAcknowledgementLost$/^single$'
+```
+
+Case selection limits execution; the server and selected test package still need
+to be compiled.
+
 When no `MILVUS_FAILPOINT_WORK_DIR` is supplied, the shared `TestMain` helper builds
 one temporary fixture before running this package and removes it after teardown.
 A CI runner that prebuilds can set that variable to reuse the fixture instead.

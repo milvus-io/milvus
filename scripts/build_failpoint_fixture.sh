@@ -21,7 +21,8 @@ ln -s "$repo_root/cmake_build" "$source_root/cmake_build"
 ln -sfn "$repo_root/configs" "$output/configs"
 # Resolve the tool from go.mod so rewriting and the runtime always match.
 cd "$source_root"
-go build -o "$output/bin/failpoint-ctl" github.com/pingcap/failpoint/failpoint-ctl
+failpoint_version=$(go list -m -f '{{.Version}}' github.com/pingcap/failpoint)
+GOBIN="$output/bin" go install "github.com/pingcap/failpoint/failpoint-ctl@$failpoint_version"
 "$output/bin/failpoint-ctl" enable \
     internal/streamingnode/server/wal/adaptor \
     internal/streamingnode/server/wal/interceptors/idempotency
