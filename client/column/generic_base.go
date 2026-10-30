@@ -66,7 +66,7 @@ func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
 		return
 	}
 
-	fd.ValidData = validData
+	fd.ValidData = validData //nolint:gocritic // SDK row-validity helper writes both wire locations without depending on server typeutil.
 }
 
 var _ Column = (*genericColumnBase[any])(nil)
