@@ -2324,6 +2324,11 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.inspector = NewMockCompactionInspector(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.versionManager = NewMockVersionManager(s.T())
+	// Subtests rebuild the fixture, so stop the trigger being replaced: a
+	// deferred retry it armed would otherwise fire on mocks whose test is over.
+	if s.tr != nil {
+		s.tr.stop()
+	}
 	s.tr = newCompactionTrigger(
 		s.meta,
 		s.inspector,
@@ -2332,6 +2337,10 @@ func (s *CompactionTriggerSuite) SetupTest() {
 		s.versionManager,
 	)
 	s.tr.testingOnly = true
+}
+
+func (s *CompactionTriggerSuite) TearDownTest() {
+	s.tr.stop()
 }
 
 func (s *CompactionTriggerSuite) TestHandleSignal() {
