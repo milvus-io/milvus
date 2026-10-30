@@ -499,3 +499,36 @@ func TestOverlappingResourceBatchesCancelIndependently(t *testing.T) {
 		})
 	})
 }
+
+func TestAcquireNamedPinsExactIdentity(t *testing.T) {
+	mockey.PatchConvey("name reuse selects a new ID while existing consumers retain the old file", t, func() {
+		var id int64 = 7
+		manager := setupResourceLoader(t, nil, func(_ context.Context, name string) (*internalpb.FileResourceInfo, error) {
+			return &internalpb.FileResourceInfo{Id: id, Name: name, Path: "models/rank.ubj"}, nil
+		})
+		download := mockResourceDownload()
+		first, err := AcquireNamed(t.Context(), "rank")
+		require.NoError(t, err)
+		second, err := AcquireNamed(t.Context(), "rank")
+		require.NoError(t, err)
+		require.Equal(t, 1, download.Times())
+		old := first.Resolved()[0]
+		require.EqualValues(t, 7, old.ID)
+		require.FileExists(t, old.LocalPath)
+		old.LocalPath = "mutated"
+		require.NotEqual(t, old.LocalPath, first.Resolved()[0].LocalPath)
+		id = 8
+		third, err := AcquireNamed(t.Context(), "rank")
+		require.NoError(t, err)
+		require.EqualValues(t, 8, third.Resolved()[0].ID)
+		first.Close()
+		require.FileExists(t, second.Resolved()[0].LocalPath)
+		second.Close()
+		require.NoDirExists(t, manager.resourcePath(7))
+		require.FileExists(t, third.Resolved()[0].LocalPath)
+		manager.Close()
+		require.FileExists(t, third.Resolved()[0].LocalPath)
+		third.Close()
+		require.NoDirExists(t, manager.resourcePath(8))
+	})
+}

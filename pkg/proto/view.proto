@@ -91,6 +91,12 @@ message QueryViewMeta {
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
 // The node is identified implicitly by the shard's vchannel binding.
 message QueryViewOfStreamingNode {
+    repeated ClusteredPartitionStats partition_stats = 1;
+}
+
+message ClusteredPartitionStats {
+    int64 partition_id = 1;
+    int64 version = 2;
 }
 
 // QueryViewOfQueryNode contains the segment assignments for one QueryNode.
@@ -111,6 +117,8 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
+    // Minimum physical base version required before this view reports Ready.
+    // Parallel to segment_ids; zero preserves legacy metadata resolution.
     repeated int64 segment_manifest_versions = 4 [packed = true];
 }
 
@@ -191,6 +199,23 @@ message QueryPlanWorkNode {
         QueryWorkNode query_node = 1;
         StreamingWorkNode streaming_node = 2;
     }
+    SegmentSelection segment_selection = 3;
+    // Positional, parallel to hybrid subrequests. Each entry is explicit.
+    repeated SegmentSelection sub_selections = 4;
+}
+
+// Selection is relative to the existing View/request scope. All and None carry
+// no IDs; Include and Exclude carry the smaller nonempty side of a partial set.
+// An absent selection defaults to All. Hybrid entries remain positional.
+message SegmentSelection {
+    enum Mode {
+        All = 0;
+        Include = 1;
+        Exclude = 2;
+        None = 3;
+    }
+    repeated int64 segment_ids = 1 [packed = true];
+    Mode mode = 2;
 }
 
 //
@@ -233,7 +258,8 @@ message GetQueryPlanRequest {
     oneof mvcc {
         common.ConsistencyLevel consistency_level = 3;
         QueryPlanMVCC query_plan_mvcc = 7;
-        // Establish scoped WAL coverage, then read both frontiers at this timestamp.
+        // Establish WAL coverage for this fixed logical snapshot. Execution frontiers
+        // may be lower when the complete prefix proves equivalent visibility.
         uint64 barrier_mvcc = 8;
     }
     repeated int64 partition_ids = 4;
@@ -243,6 +269,8 @@ message GetQueryPlanRequest {
     oneof request {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
+        // SN counts growing data during this call; the returned plan targets QNs only.
+        StatisticsRequest statistics_request = 9;
     }
 }
 
@@ -256,6 +284,36 @@ message GetMVCCTimestampResponse {
 
 message GetQueryPlanResponse {
     QueryPlan plan = 1;
+    GrowingInlineResponse growing_inline_response = 2;
+    ExecutionSummary execution_summary = 3;
+    // Consumed by QueryViewClient; not part of the reusable worker plan.
+    QueryPlanClientOptimizeInfo client_optimize_info = 4;
+}
+
+message ExecutionSummary {
+    GlobalOptimizerExecutionSummary global_optimizer = 1;
+}
+
+message GlobalOptimizerExecutionSummary {
+    // Offsets in flags, NOT masks: test/set a bit with uint32(1) << offset.
+    // Zero denotes a real bit offset, not an unspecified optimization.
+    enum BitOffset {
+        PrunedByPartitionFiltering = 0;
+        PrunedByScalarFiltering = 1;
+        PrunedByVectorFiltering = 2;
+    }
+    // Records actual candidate exclusions, not enabled optimizer settings.
+    // Extend beyond 32 bits by adding another uint32 field and its own offsets;
+    // do not renumber existing offsets or allocate unused words in advance.
+    uint32 flags = 1;
+}
+
+// Growing results computed during Phase 1, separate from the reusable query plan.
+// Additional result types can extend this oneof when SN inlines other queries.
+message GrowingInlineResponse {
+    oneof response {
+        StatisticsOnViewResponse statistics_response = 1;
+    }
 }
 
 // QueryPlan contains everything needed to dispatch Phase 2 requests.
@@ -274,6 +332,7 @@ message QueryPlan {
     oneof request {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
+        StatisticsRequest statistics_request = 8;
     }
 }
 
@@ -289,9 +348,24 @@ service ViewQueryService {
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
-    // RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
-    // Uses the same view version as the preceding search/query to ensure consistency.
-    rpc RequeryOnView(RequeryOnViewRequest) returns (RequeryOnViewResponse) {}
+    rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
+}
+
+// Runtime physical row statistics: no expression, TTL or historical snapshot.
+// Consumption progress is supplied by the outer GetQueryPlanRequest MVCC.
+message StatisticsRequest {
+    repeated int64 partition_ids = 1;
+}
+
+message StatisticsOnViewRequest {
+    ShardID shard_id = 1;
+    QueryViewVersion version = 2;
+    QueryPlanMVCC mvcc = 3;
+    repeated int64 partition_ids = 4;
+}
+
+message StatisticsOnViewResponse {
+    int64 row_count = 1;
 }
 
 message SearchOnViewRequest {
@@ -300,6 +374,9 @@ message SearchOnViewRequest {
     ShardID shard_id = 2;
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
+    SegmentSelection segment_selection = 5;
+    repeated SegmentSelection sub_selections = 6;
+    SearchExecutionOptions execution_options = 7;
 }
 
 message SearchOnViewResponse {
@@ -313,6 +390,7 @@ message QueryOnViewRequest {
     ShardID shard_id = 2;
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
+    SegmentSelection segment_selection = 5;
 }
 
 message QueryOnViewResponse {
@@ -320,15 +398,41 @@ message QueryOnViewResponse {
     internal.RetrieveResults legacy_results = 1;
 }
 
-message RequeryOnViewRequest {
-    // TODO: replace with native view request types once legacy internal protos are removed.
-    internal.RetrieveRequest legacy_req = 1;
-    ShardID shard_id = 2;
-    QueryViewVersion version = 3;
-    QueryPlanMVCC mvcc = 4;
+message QueryPayloadReuse {
+    bool placeholder_group = 1;
+    bool serialized_expr_plan = 2;
+    // Positional, parallel to SearchRequest.sub_reqs.
+    repeated QueryPayloadReuse sub_requests = 3;
 }
 
-message RequeryOnViewResponse {
-    // TODO: replace with native view result types once legacy internal protos are removed.
-    internal.RetrieveResults legacy_results = 1;
+
+message VChannelReplicas {
+    string vchannel = 1;
+    // Complete replacement, including an empty set. Does not certify QN health
+    // or the availability of a particular schema version.
+    repeated Replica replicas = 2;
+
+    // VChannel plus replica_id identifies the shard. No full View is replicated.
+    message Replica {
+        int64 replica_id = 1;
+        QueryViewVersion max_up_view_version = 2;
+    }
+}
+
+message QueryPlanClientOptimizeInfo {
+    // Restore only explicitly marked payloads, preserving intentional clearing.
+    QueryPayloadReuse reused_payloads = 1;
+    // Present only for eligible filter-first ANN searches.
+    SearchOptimizationInfo search_optimization = 2;
+}
+
+message SearchOptimizationInfo {
+    uint32 sealed_segment_count = 1;
+    int64 vector_dim = 2;
+    string index_type = 3;
+}
+
+message SearchExecutionOptions {
+    bool filter_only = 1;
+    bool enable_expr_cache = 2;
 }

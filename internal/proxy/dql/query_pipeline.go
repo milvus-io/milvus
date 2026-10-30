@@ -268,7 +268,15 @@ func newReduceByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		merged, err := reducer.Merge(ctx, partials)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Finalize(merged)
 		if err != nil {
 			return nil, err
 		}
@@ -315,7 +323,15 @@ func newRawReduceByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		merged, err := reducer.Merge(ctx, partials)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Finalize(merged)
 		if err != nil {
 			return nil, err
 		}

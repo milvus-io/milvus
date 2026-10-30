@@ -296,3 +296,7 @@ func (n *noopWALAccesser) TransformLogStreamManager() wal.TransformLogStreamMana
 func (n *noopWALAccesser) SchemaClient() SchemaClient {
 	return nil
 }
+
+func (n *noopWALAccesser) QueryViewClient() QueryViewClient {
+	panic("QueryViewClient is unavailable in noop WAL accessor")
+}

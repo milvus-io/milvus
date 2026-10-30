@@ -41,13 +41,14 @@ func (m *fakeWALManager) GetAvailableRawWALByPChannel(pchannel string) (wal.WAL,
 
 type fakeProviderWAL struct {
 	wal.WAL
-	plan *viewpb.QueryPlan
-	err  error
-	mvcc *viewpb.QueryPlanMVCC
+	inlineResponse *viewpb.GrowingInlineResponse
+	plan           *viewpb.QueryPlan
+	err            error
+	mvcc           *viewpb.QueryPlanMVCC
 }
 
-func (w *fakeProviderWAL) GetQueryPlan(context.Context, *viewpb.GetQueryPlanRequest) (*viewpb.QueryPlan, error) {
-	return w.plan, w.err
+func (w *fakeProviderWAL) GetQueryPlan(context.Context, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	return &viewpb.GetQueryPlanResponse{Plan: w.plan, GrowingInlineResponse: w.inlineResponse}, w.err
 }
 
 func (w *fakeProviderWAL) GetMVCCTimestamp(context.Context, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -81,7 +82,12 @@ func TestServerGetQueryPlanDelegatesToLocalWALProvider(t *testing.T) {
 }
 
 func TestServerGetQueryPlanDelegatesToWrappedLocalWALProvider(t *testing.T) {
-	raw := &fakeProviderWAL{plan: &viewpb.QueryPlan{Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 99}}}
+	raw := &fakeProviderWAL{
+		plan: &viewpb.QueryPlan{Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 99}},
+		inlineResponse: &viewpb.GrowingInlineResponse{Response: &viewpb.GrowingInlineResponse_StatisticsResponse{
+			StatisticsResponse: &viewpb.StatisticsOnViewResponse{},
+		}},
+	}
 	manager := &fakeWALManager{wal: wrappedProviderWAL{WAL: raw, raw: raw}}
 	server := NewServer(manager)
 
@@ -90,6 +96,8 @@ func TestServerGetQueryPlanDelegatesToWrappedLocalWALProvider(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	require.Same(t, raw.inlineResponse, resp.GetGrowingInlineResponse())
+	require.NotNil(t, resp.GetGrowingInlineResponse().GetStatisticsResponse())
 	assert.Equal(t, uint64(100), resp.GetPlan().GetMvcc().GetGrowingTimetick())
 	assert.Equal(t, uint64(99), resp.GetPlan().GetMvcc().GetTransformingTimetick())
 	assert.Equal(t, types.PChannelInfo{Name: "by-dev-rootcoord-dml_0", Term: 7, AccessMode: types.AccessModeRW}, manager.channel)

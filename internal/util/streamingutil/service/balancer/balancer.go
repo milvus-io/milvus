@@ -167,9 +167,9 @@ func (b *baseBalancer) mergeErrors() error {
 //   - errPicker if the balancer is in TransientFailure,
 //   - built by the pickerBuilder with all READY SubConns otherwise.
 func (b *baseBalancer) regeneratePicker() {
+	var pickerErr error
 	if b.state == connectivity.TransientFailure {
-		b.picker = base.NewErrPicker(b.mergeErrors())
-		return
+		pickerErr = b.mergeErrors()
 	}
 	readySCs := make(map[balancer.SubConn]base.SubConnInfo)
 	unReadySCs := make(map[balancer.SubConn]base.SubConnInfo)
@@ -187,6 +187,7 @@ func (b *baseBalancer) regeneratePicker() {
 		}
 	}
 	b.picker = b.pickerBuilder.Build(PickerBuildInfo{
+		Err:        pickerErr,
 		ReadySCs:   readySCs,
 		UnReadySCs: unReadySCs,
 	})

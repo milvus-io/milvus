@@ -29,9 +29,6 @@ type serverIDPickerBuilder struct{}
 
 // Build returns a picker that will be used by gRPC to pick a SubConn.
 func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.Picker {
-	if len(info.ReadySCs) == 0 {
-		return base.NewErrPicker(balancer.ErrNoSubConnAvailable)
-	}
 	readyMap := make(map[int64]subConnInfo, len(info.ReadySCs))
 	readyList := make([]subConnInfo, 0, len(info.ReadySCs))
 	for sc, scInfo := range info.ReadySCs {
@@ -64,11 +61,14 @@ func (b *serverIDPickerBuilder) Build(info bbalancer.PickerBuildInfo) balancer.P
 		unReadyMap[*serverID] = info
 	}
 
-	if len(readyList) == 0 {
-		mlog.Warn(context.TODO(), "no subConn available after serverID filtering")
-		return base.NewErrPicker(balancer.ErrNoSubConnAvailable)
+	var fallback balancer.Picker
+	if info.Err != nil {
+		fallback = base.NewErrPicker(info.Err)
+	} else if len(readyList) == 0 {
+		fallback = base.NewErrPicker(balancer.ErrNoSubConnAvailable)
 	}
 	p := &serverIDPicker{
+		fallback:           fallback,
 		next:               atomic.NewInt64(0),
 		readySubConnsMap:   readyMap,
 		readySubConsList:   readyList,

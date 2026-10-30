@@ -60,6 +60,21 @@ func TestWALFieldAnalyzerCurrentSchema(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(phraseResp.GetStatus()))
 		require.Equal(t, []int64{-1}, phraseResp.GetPhraseMatch().GetSlops())
+		// Rendering an old search must keep its analyzer after WAL writes switch.
+		mockey.Mock((*walAdaptorImpl).GetCollectionSchema).To(func(_ *walAdaptorImpl, _ context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error) {
+			require.Equal(t, schema.GetVersion(), req.GetSchemaVersion())
+			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: schema}, nil
+		}).Build()
+		req.GetFieldAnalyzer().ReadSchemaVersion = &schema.Version
+		resp, err = w.RunAnalyzer(t.Context(), req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetTokenize().GetResults()[0].Tokens, 2)
+		phrase.GetFieldAnalyzer().ReadSchemaVersion = &schema.Version
+		phraseResp, err = w.RunAnalyzer(t.Context(), phrase)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(phraseResp.GetStatus()))
+		require.Equal(t, []int64{0}, phraseResp.GetPhraseMatch().GetSlops())
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())

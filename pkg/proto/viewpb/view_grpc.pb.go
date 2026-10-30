@@ -272,9 +272,9 @@ var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ViewQueryService_SearchOnView_FullMethodName  = "/milvus.proto.view.ViewQueryService/SearchOnView"
-	ViewQueryService_QueryOnView_FullMethodName   = "/milvus.proto.view.ViewQueryService/QueryOnView"
-	ViewQueryService_RequeryOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/RequeryOnView"
+	ViewQueryService_SearchOnView_FullMethodName     = "/milvus.proto.view.ViewQueryService/SearchOnView"
+	ViewQueryService_QueryOnView_FullMethodName      = "/milvus.proto.view.ViewQueryService/QueryOnView"
+	ViewQueryService_StatisticsOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/StatisticsOnView"
 )
 
 // ViewQueryServiceClient is the client API for ViewQueryService service.
@@ -285,9 +285,7 @@ type ViewQueryServiceClient interface {
 	SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
 	QueryOnView(ctx context.Context, in *QueryOnViewRequest, opts ...grpc.CallOption) (*QueryOnViewResponse, error)
-	// RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
-	// Uses the same view version as the preceding search/query to ensure consistency.
-	RequeryOnView(ctx context.Context, in *RequeryOnViewRequest, opts ...grpc.CallOption) (*RequeryOnViewResponse, error)
+	StatisticsOnView(ctx context.Context, in *StatisticsOnViewRequest, opts ...grpc.CallOption) (*StatisticsOnViewResponse, error)
 }
 
 type viewQueryServiceClient struct {
@@ -316,9 +314,9 @@ func (c *viewQueryServiceClient) QueryOnView(ctx context.Context, in *QueryOnVie
 	return out, nil
 }
 
-func (c *viewQueryServiceClient) RequeryOnView(ctx context.Context, in *RequeryOnViewRequest, opts ...grpc.CallOption) (*RequeryOnViewResponse, error) {
-	out := new(RequeryOnViewResponse)
-	err := c.cc.Invoke(ctx, ViewQueryService_RequeryOnView_FullMethodName, in, out, opts...)
+func (c *viewQueryServiceClient) StatisticsOnView(ctx context.Context, in *StatisticsOnViewRequest, opts ...grpc.CallOption) (*StatisticsOnViewResponse, error) {
+	out := new(StatisticsOnViewResponse)
+	err := c.cc.Invoke(ctx, ViewQueryService_StatisticsOnView_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,9 +331,7 @@ type ViewQueryServiceServer interface {
 	SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
 	QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error)
-	// RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
-	// Uses the same view version as the preceding search/query to ensure consistency.
-	RequeryOnView(context.Context, *RequeryOnViewRequest) (*RequeryOnViewResponse, error)
+	StatisticsOnView(context.Context, *StatisticsOnViewRequest) (*StatisticsOnViewResponse, error)
 }
 
 // UnimplementedViewQueryServiceServer should be embedded to have forward compatible implementations.
@@ -348,8 +344,8 @@ func (UnimplementedViewQueryServiceServer) SearchOnView(context.Context, *Search
 func (UnimplementedViewQueryServiceServer) QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method QueryOnView not implemented")
 }
-func (UnimplementedViewQueryServiceServer) RequeryOnView(context.Context, *RequeryOnViewRequest) (*RequeryOnViewResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RequeryOnView not implemented")
+func (UnimplementedViewQueryServiceServer) StatisticsOnView(context.Context, *StatisticsOnViewRequest) (*StatisticsOnViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StatisticsOnView not implemented")
 }
 
 // UnsafeViewQueryServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -399,20 +395,20 @@ func _ViewQueryService_QueryOnView_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ViewQueryService_RequeryOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RequeryOnViewRequest)
+func _ViewQueryService_StatisticsOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatisticsOnViewRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ViewQueryServiceServer).RequeryOnView(ctx, in)
+		return srv.(ViewQueryServiceServer).StatisticsOnView(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ViewQueryService_RequeryOnView_FullMethodName,
+		FullMethod: ViewQueryService_StatisticsOnView_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ViewQueryServiceServer).RequeryOnView(ctx, req.(*RequeryOnViewRequest))
+		return srv.(ViewQueryServiceServer).StatisticsOnView(ctx, req.(*StatisticsOnViewRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -433,8 +429,8 @@ var ViewQueryService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ViewQueryService_QueryOnView_Handler,
 		},
 		{
-			MethodName: "RequeryOnView",
-			Handler:    _ViewQueryService_RequeryOnView_Handler,
+			MethodName: "StatisticsOnView",
+			Handler:    _ViewQueryService_StatisticsOnView_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

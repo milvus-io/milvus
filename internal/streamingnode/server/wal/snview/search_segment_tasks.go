@@ -14,6 +14,7 @@ var (
 )
 
 type SNSearchSegmentTask struct {
+	Options  *viewpb.SearchExecutionOptions
 	Handle   GrowingSegmentHandle
 	Request  *internalpb.SearchRequest
 	MVCC     *viewpb.QueryPlanMVCC

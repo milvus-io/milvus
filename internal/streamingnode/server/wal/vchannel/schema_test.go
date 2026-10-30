@@ -88,4 +88,5 @@ func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 	read, err := view.GetSchemaVersion(1, 0)
 	require.NoError(t, err)
 	require.Equal(t, second.Schema.Description, read.Schema.Description)
+	require.True(t, proto.Equal(second.Schema, read.Schema), "exact lookup must return the canonical schema payload")
 }
