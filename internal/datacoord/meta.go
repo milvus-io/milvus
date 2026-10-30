@@ -2281,11 +2281,13 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 	return clonedSegment
 }
 
-// batchSaveDropSegments saves drop segments info together with the channel
-// removal flag as a single composite catalog.Update call, so the dropped
-// segments and the channel tombstone commit atomically (or, when the op
-// count exceeds the txn size limit, via the caller-ordered chunked
-// fallback - see kv/txn.Commit for the exact atomicity contract).
+// batchSaveDropSegments saves the dropped segments of a channel and deletes the
+// channel's removal flag as a single composite catalog.Update call (or, when
+// the op count exceeds the txn size limit, via the caller-ordered chunked
+// fallback - see kv/txn.Commit for the exact atomicity contract). Nothing reads
+// the flag once the channel is dropped (GC asks RootCoord whether the
+// collection still exists), so it is deleted instead of being rewritten to
+// "removed" and leaking forever.
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
@@ -2302,9 +2304,9 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 		}
 		actions = append(actions, metastore.UpdateSegment(seg.SegmentInfo))
 	}
-	// The channel tombstone is the visibility marker; it commits last (see
-	// MarkChannelDropped -> CommitSave), after the dropped segments.
-	actions = append(actions, metastore.MarkChannelDropped(channel))
+	// The flag delete commits last (see DropChannelFlag -> CommitRemove),
+	// after the dropped segments.
+	actions = append(actions, metastore.DropChannelFlag(channel))
 	if err := m.catalog.Update(ctx, actions...); err != nil {
 		return err
 	}
