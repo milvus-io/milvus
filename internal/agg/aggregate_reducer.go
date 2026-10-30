@@ -80,25 +80,37 @@ func (reducer *GroupAggReducer) EmptyAggResult() (*AggregationResult, error) {
 			return nil, err
 		}
 	}
+	isGlobal := len(reducer.groupByFieldIds) == 0
 	for _, agg := range reducer.aggregates {
-		if agg.GetOp() == planpb.AggregateOp_count {
-			countField := genEmptyLongFieldData(schemapb.DataType_Int64, []int64{0})
-			ret.fieldDatas = append(ret.fieldDatas, countField)
-		} else {
+		resultType := schemapb.DataType_Int64
+		if agg.GetOp() != planpb.AggregateOp_count {
 			field, err := helper.GetFieldFromID(agg.GetFieldId())
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
 			}
-			resultType, err := getAggregateResultType(agg.GetOp(), field.GetDataType())
+			resultType, err = getAggregateResultType(agg.GetOp(), field.GetDataType())
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to get result type for aggregate fieldID %d", agg.GetFieldId())
 			}
-			emptyFieldData, err := genEmptyFieldDataByType(resultType)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to generate empty field data for result type %s", resultType.String())
-			}
-			ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
 		}
+		emptyFieldData, err := genEmptyFieldDataByType(resultType)
+		if err != nil {
+			return nil, merr.Wrapf(err, "failed to generate empty field data for result type %s", resultType.String())
+		}
+		// A global aggregate always has exactly one row. With no contributors it
+		// is the merge identity: count=0, and NULL for every other aggregate so
+		// that min/max/sum ignore it when merged with real partials. GROUP BY
+		// with no contributors has zero groups, so every column stays zero-row.
+		if isGlobal {
+			value := NewNullFieldValue()
+			if agg.GetOp() == planpb.AggregateOp_count {
+				value = NewFieldValue(int64(0))
+			}
+			if err := AssembleSingleValue(value, emptyFieldData); err != nil {
+				return nil, err
+			}
+		}
+		ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
 	}
 	return ret, nil
 }
@@ -114,17 +126,17 @@ func genEmptyLongFieldData(dataType schemapb.DataType, data []int64) *schemapb.F
 	}
 }
 
-// genEmptyFieldDataByType generates empty field data based on the data type
+// genEmptyFieldDataByType generates a zero-row field data column of the given type
 func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, error) {
 	switch dataType {
 	case schemapb.DataType_Int64:
-		return genEmptyLongFieldData(dataType, []int64{0}), nil
+		return genEmptyLongFieldData(dataType, nil), nil
 	case schemapb.DataType_Double:
 		return &schemapb.FieldData{
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{0}}},
+					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -133,7 +145,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{0}}},
+					Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -142,7 +154,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{0}}},
+					Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -156,7 +168,14 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			},
 		}, nil
 	case schemapb.DataType_Timestamptz:
-		return genEmptyLongFieldData(dataType, []int64{0}), nil
+		return &schemapb.FieldData{
+			Type: dataType,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: nil}},
+				},
+			},
+		}, nil
 	default:
 		// For other types, try to use the original field's GenEmptyFieldData
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type for aggregate result: %s", dataType.String())
