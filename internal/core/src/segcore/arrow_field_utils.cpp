@@ -35,7 +35,7 @@ BuildFixedWidthArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const auto& valid_data = field_data.valid_data();
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
         AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
@@ -71,7 +71,7 @@ BuildVarLenArray(const DataContainer& data,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
-    const auto& valid_data = field_data.valid_data();
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
         AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
@@ -102,7 +102,7 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildCompactVarLenArray(const DataContainer& data,
                         const milvus::DataArray& field_data,
                         size_t total_valid) {
-    const auto& valid_data = field_data.valid_data();
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
         AssertInfo(static_cast<size_t>(valid_data.size()) == total_valid,
@@ -241,7 +241,7 @@ BuildDenseVectorArray(RawPtr raw,
     auto type = arrow::fixed_size_binary(byte_width);
     arrow::FixedSizeBinaryBuilder builder(type);
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
-    const auto& valid_data = field_data.valid_data();
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
     size_t physical = 0;
     for (size_t i = 0; i < total_valid; ++i) {
@@ -364,7 +364,8 @@ FieldDataToArrow(const std::string& field_name,
                 std::make_shared<arrow::FixedSizeBinaryBuilder>(value_type);
             arrow::ListBuilder list_builder(arrow::default_memory_pool(),
                                             inner_builder);
-            const auto& valid_data = field_data.valid_data();
+            const auto& valid_data =
+                milvus::GetFieldDataRowValidData(field_data);
             const bool has_valid_data = !valid_data.empty();
             for (size_t i = 0; i < total_valid; ++i) {
                 if (has_valid_data && !valid_data[i]) {
@@ -512,7 +513,7 @@ FieldDataToArrow(const std::string& field_name,
 
     if (scalars.has_array_data()) {
         const auto& ad = scalars.array_data();
-        const auto& valid_data = field_data.valid_data();
+        const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
         const bool has_valid_data = !valid_data.empty();
         arrow::BinaryBuilder builder;
         ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));

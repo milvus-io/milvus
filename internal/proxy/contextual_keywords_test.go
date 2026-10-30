@@ -174,10 +174,7 @@ func TestFieldNameKeywordPolicy(t *testing.T) {
 
 	for _, keyword := range []string{"like", "and", "or", "not", "in", "null"} {
 		for _, name := range fieldKeywordCaseVariantsForTest(keyword) {
-			// The 3.0 branch matches most keywords by exact casing (only null
-			// is case-insensitive); assert the enforcement paths agree with
-			// IsFieldNameKeyword rather than assuming full case-insensitivity.
-			t.Run(name, func(t *testing.T) { check(t, name, common.IsFieldNameKeyword(name)) })
+			t.Run(name, func(t *testing.T) { check(t, name, true) })
 		}
 	}
 	for _, keyword := range contextualFieldKeywordsForTest {
@@ -208,7 +205,7 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 
 	for _, keyword := range []string{"like", "and", "or", "not", "in", "null"} {
 		for _, name := range fieldKeywordCaseVariantsForTest(keyword) {
-			t.Run(name, func(t *testing.T) { check(t, name, common.IsFieldNameKeyword(name)) })
+			t.Run(name, func(t *testing.T) { check(t, name, true) })
 		}
 	}
 	for _, keyword := range contextualFieldKeywordsForTest {
@@ -222,7 +219,7 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 	}
 	t.Run("parent_name_is_checked_before_children", func(t *testing.T) {
 		// The add-struct production path lives in the ddl package.
-		err := ddl.ValidateStructArrayField(&schemapb.StructArrayFieldSchema{Name: "and"}, keywordValidationSchemaForTest())
+		err := ddl.ValidateStructArrayField(&schemapb.StructArrayFieldSchema{Name: "AND"}, keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, err, true)
 	})
 }
@@ -230,9 +227,9 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 func TestFieldNameErrorClassification(t *testing.T) {
 	// Every invalid field name originates from user-supplied schema input.
 	// Factory and validation paths must agree on the wire and metric cause.
-	factoryErr := merr.WrapErrFieldNameInvalid("like", "Invalid field name: like. like is keyword in milvus.")
+	factoryErr := merr.WrapErrFieldNameInvalid("Like", "Invalid field name: Like. Like is keyword in milvus.")
 	requireKeywordValidationForTest(t, factoryErr, true)
-	validationErr := validateFieldNameForTest("like")
+	validationErr := validateFieldNameForTest("Like")
 	requireKeywordValidationForTest(t, validationErr, true)
 	require.Equal(t, factoryErr.Error(), validationErr.Error())
 	require.Equal(t, merr.Status(factoryErr).GetErrorCode(), merr.Status(validationErr).GetErrorCode())

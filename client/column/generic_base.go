@@ -31,6 +31,44 @@ type GColumn[T any] interface {
 	AppendValue(v T)
 }
 
+// Row validity has two wire locations: the legacy FieldData.valid_data and the
+// field-specific ScalarField/VectorField.valid_data. Servers released before the
+// field-specific location existed read and update only the legacy one, so the
+// client writes both and treats the legacy location as authoritative when it is
+// set.
+
+// getFieldDataValidData returns row validity, preferring the legacy location.
+func getFieldDataValidData(fd *schemapb.FieldData) []bool {
+	if legacy := fd.GetValidData(); len(legacy) > 0 {
+		return legacy
+	}
+	var current []bool
+	if scalars := fd.GetScalars(); scalars != nil {
+		current = scalars.GetValidData()
+	} else {
+		current = fd.GetVectors().GetValidData()
+	}
+	return current
+}
+
+// setFieldDataValidData writes row validity to both the legacy and the
+// field-specific location.
+func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
+	if fd == nil {
+		return
+	}
+
+	if scalars := fd.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fd.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
+	}
+
+	fd.ValidData = validData
+}
+
 var _ Column = (*genericColumnBase[any])(nil)
 
 // genericColumnBase implements `Column` interface
@@ -153,7 +191,7 @@ func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
 	fd.FieldName = c.name
 	fd.Type = schemapb.DataType(c.fieldType)
 	if c.nullable {
-		fd.ValidData = c.validData
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }

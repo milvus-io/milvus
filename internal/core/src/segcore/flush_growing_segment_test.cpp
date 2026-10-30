@@ -1190,7 +1190,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
         auto actual = static_cast<const milvus::VectorArray*>(
             field_datas[0]->RawValue(i));
         ASSERT_NE(actual, nullptr);
-        EXPECT_EQ(actual->length(), array_len);
+        EXPECT_EQ(actual->physical_length(), array_len);
         EXPECT_EQ(actual->output_data().SerializeAsString(),
                   expected[i].SerializeAsString());
     }
@@ -1356,7 +1356,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
             auto actual = static_cast<const milvus::VectorArray*>(
                 field_datas[0]->RawValue(i));
             ASSERT_NE(actual, nullptr);
-            EXPECT_EQ(actual->length(), array_len);
+            EXPECT_EQ(actual->physical_length(), array_len);
             EXPECT_EQ(actual->get_element_type(), test_case.element_type);
             EXPECT_EQ(actual->output_data().SerializeAsString(),
                       expected[i].SerializeAsString());
@@ -2987,10 +2987,11 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
         *rows->Add() = expected_empty;
         *rows->Add() = expected_empty;
         *rows->Add() = expected_target;
-        field_data->mutable_valid_data()->Clear();
-        field_data->add_valid_data(false);
-        field_data->add_valid_data(true);
-        field_data->add_valid_data(true);
+        auto* valid_data = field_data->mutable_vectors()->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);
+        valid_data->Add(true);
+        valid_data->Add(true);
         break;
     }
 

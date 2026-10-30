@@ -552,6 +552,9 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 CRetrieveResult*
 CreateLeakedCRetrieveResultFromProto(
     std::unique_ptr<milvus::proto::segcore::RetrieveResults> retrieve_result) {
+    for (auto& field_data : *retrieve_result->mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
     auto size = retrieve_result->ByteSizeLong();
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
     retrieve_result->SerializePartialToArray(buffer.get(), size);
@@ -873,6 +876,7 @@ struct FieldInfo {
     std::string field_name;
     milvus::DataType data_type;
     milvus::DataType element_type;
+    bool is_nested_array;
     bool nullable;
     int64_t dim;  // for vector types
     const milvus::segcore::VectorBase* vec_base;
@@ -1176,12 +1180,11 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
             return arrow::Status::Invalid("not a fixed-width vector field");
     }
 
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (data_size != valid_count * byte_width) {
         return arrow::Status::Invalid(fmt::format(
             "bulk_subscript vector payload size mismatch, field={}, bytes={}, "
@@ -1198,7 +1201,7 @@ BuildFixedWidthVectorArrayFromBulkSubscript(
         auto bytes = static_cast<const uint8_t*>(data);
         int64_t physical = 0;
         for (int64_t i = 0; i < num_rows; i++) {
-            bool is_valid = !has_valid_data || data_array.valid_data(i);
+            bool is_valid = !has_valid_data || valid_data[i];
             if (!is_valid) {
                 ARROW_RETURN_NOT_OK(builder.AppendNull());
                 continue;
@@ -1225,12 +1228,11 @@ arrow::Result<std::shared_ptr<arrow::Array>>
 BuildSparseVectorArrayFromBulkSubscript(
     const milvus::proto::schema::FieldData& data_array, int64_t num_rows) {
     const auto& sparse = data_array.vectors().sparse_float_vector();
-    bool has_valid_data = data_array.valid_data_size() > 0;
-    int64_t valid_count = has_valid_data
-                              ? std::count(data_array.valid_data().begin(),
-                                           data_array.valid_data().end(),
-                                           true)
-                              : num_rows;
+    const auto& valid_data = milvus::GetFieldDataRowValidData(data_array);
+    bool has_valid_data = !valid_data.empty();
+    int64_t valid_count =
+        has_valid_data ? std::count(valid_data.begin(), valid_data.end(), true)
+                       : num_rows;
     if (sparse.contents_size() != valid_count) {
         return arrow::Status::Invalid(
             fmt::format("bulk_subscript sparse payload size mismatch, rows={}, "
@@ -1244,7 +1246,7 @@ BuildSparseVectorArrayFromBulkSubscript(
     ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
     int64_t physical = 0;
     for (int64_t i = 0; i < num_rows; i++) {
-        bool is_valid = !has_valid_data || data_array.valid_data(i);
+        bool is_valid = !has_valid_data || valid_data[i];
         if (!is_valid) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
             continue;
@@ -1438,7 +1440,7 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         ARROW_RETURN_NOT_OK(builder.Append());
         ARROW_RETURN_NOT_OK(value_builder->AppendValues(
             reinterpret_cast<const uint8_t*>(vector_array.data()),
-            vector_array.length()));
+            vector_array.physical_length()));
     }
 
     return builder.Finish();
@@ -1596,6 +1598,31 @@ BuildArrayForChunk(const FieldInfo& field_info,
         }
 
         case milvus::DataType::ARRAY: {
+            if (field_info.is_nested_array) {
+                auto array_vec =
+                    dynamic_cast<const milvus::segcore::ConcurrentVector<
+                        milvus::ArrayValue>*>(field_info.vec_base);
+                if (!array_vec) {
+                    return arrow::Status::Invalid(
+                        "Expected ConcurrentVector<ArrayValue>");
+                }
+                arrow::BinaryBuilder builder;
+                ARROW_RETURN_NOT_OK(builder.Reserve(num_rows));
+                for (int64_t i = 0; i < num_rows; i++) {
+                    const int64_t offset = global_offset + i;
+                    if (field_info.valid_data &&
+                        !field_info.valid_data->is_valid(offset)) {
+                        ARROW_RETURN_NOT_OK(builder.AppendNull());
+                    } else {
+                        auto serialized = array_vec->view_element(offset)
+                                              .output_data()
+                                              .SerializeAsString();
+                        ARROW_RETURN_NOT_OK(builder.Append(serialized.data(),
+                                                           serialized.size()));
+                    }
+                }
+                return builder.Finish();
+            }
             auto array_vec = dynamic_cast<
                 const milvus::segcore::ConcurrentVector<milvus::Array>*>(
                 field_info.vec_base);
@@ -2114,6 +2141,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             info.field_name = field_meta.get_name().get();
             info.data_type = data_type;
             info.element_type = field_meta.get_element_type();
+            info.is_nested_array = field_meta.is_nested_array();
             info.nullable = field_meta.is_nullable();
             info.dim = dim;
             info.vec_base = vec_base;

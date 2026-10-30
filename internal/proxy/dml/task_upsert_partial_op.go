@@ -73,6 +73,8 @@ func (p *fieldPartialUpdatePlan) isPathReplace() bool {
 	return p != nil && p.op == schemapb.FieldPartialUpdateOp_PATH_REPLACE
 }
 
+// TODO: Recursive Array fields do not support ARRAY_APPEND, ARRAY_REMOVE, or
+// PATH_REPLACE.
 func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.CollectionSchema) (map[string]*fieldPartialUpdatePlan, bool, error) {
 	fieldOps := req.GetFieldOps()
 	if len(fieldOps) == 0 {
@@ -186,7 +188,7 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 			if err != nil {
 				return nil, false, err
 			}
-			if fieldSchema.GetDataType() != schemapb.DataType_Array {
+			if fieldSchema.GetDataType() != schemapb.DataType_Array || typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
 				return nil, false, merr.WrapErrParameterInvalidMsg(
 					"PATH_REPLACE requires a non-recursive Array or ArrayOfStruct field, but field %q is %s", name, fieldSchema.GetDataType().String())
 			}
@@ -213,10 +215,18 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 
 		switch op {
 		case schemapb.FieldPartialUpdateOp_ARRAY_APPEND, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+			if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
+			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array {
 				return nil, false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s requires Array field, but field %q is %s",
 						op.String(), name, fieldSchema.GetDataType().String()))
+			}
+			if fieldSchema.GetElementNullable() {
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					fmt.Sprintf("op %s does not support element nullable Array field %q", op.String(), name))
 			}
 		default:
 			return nil, false, merr.WrapErrParameterInvalidMsg(
@@ -430,7 +440,7 @@ func validatePathReplaceStructChildRows(fd *schemapb.FieldData, schema *schemapb
 }
 
 func validateNonNullOperandRows(fd *schemapb.FieldData, rowCount int) error {
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) != 0 && len(validData) != rowCount {
 		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q valid_data has length %d, expected %d", fd.GetFieldName(), len(validData), rowCount)
 	}
@@ -496,6 +506,9 @@ func scalarArrayRowElementCount(row *schemapb.ScalarField, elementType schemapb.
 	if row == nil {
 		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a non-nil Array row")
 	}
+	if len(typeutil.GetArrayElementValidData(row)) != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
+	}
 	var payloadMatches bool
 	switch elementType {
 	case schemapb.DataType_Bool:
@@ -525,6 +538,10 @@ func vectorArrayRowElementCount(row *schemapb.VectorField, elementType schemapb.
 	if row == nil || dim <= 0 {
 		return 0, merr.WrapErrParameterInvalidMsg(
 			"PATH_REPLACE requires a non-nil vector row and a positive dimension")
+	}
+	if len(typeutil.GetVectorArrayElementValidData(row)) != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE does not support ArrayOfVector element valid_data")
 	}
 	width, err := vectorArrayElementWidth(elementType, dim)
 	if err != nil {
@@ -593,7 +610,7 @@ func validateExistingArrayPathRows(field *schemapb.FieldData, dataIndices, rowIn
 	if arrayData.GetElementType() != plan.arrayParent.GetElementType() {
 		return merr.WrapErrServiceInternalMsg("retrieved field %q has element type %s, expected %s", field.GetFieldName(), arrayData.GetElementType().String(), plan.arrayParent.GetElementType().String())
 	}
-	parentValidData := field.GetValidData()
+	parentValidData := typeutil.GetFieldDataValidData(field)
 	for i, dataIndex := range dataIndices {
 		rowIndex := rowIndices[i]
 		if len(parentValidData) > 0 {
@@ -660,7 +677,7 @@ func validateExistingStructPathRows(field *schemapb.FieldData, plan *fieldPartia
 		parentValid := true
 		for childIndex, childData := range children {
 			childSchema := plan.structParent.GetFields()[childIndex]
-			validData := childData.GetValidData()
+			validData := typeutil.GetFieldDataValidData(childData)
 			currentParentValid := true
 			if len(validData) > 0 {
 				if rowIndex < 0 || int(rowIndex) >= len(validData) {
@@ -710,6 +727,12 @@ func structChildRowLen(field *schemapb.FieldData, schema *schemapb.FieldSchema, 
 			return 0, merr.WrapErrServiceInternalMsg("missing Array row %d", rowIndex)
 		}
 		row := arrayData.GetData()[rowIndex]
+		if typeutil.IsNestedArrayTypeSchema(schema.GetTypeSchema()) {
+			if row.GetData() == nil || row.GetArrayData() == nil {
+				return 0, merr.WrapErrServiceInternalMsg("malformed nested Array row %d", rowIndex)
+			}
+			return len(row.GetArrayData().GetData()), nil
+		}
 		rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
 		if err != nil {
 			return 0, merr.WrapErrServiceInternalErr(err, "malformed Array row %d", rowIndex)

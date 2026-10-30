@@ -26,10 +26,11 @@
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -607,7 +608,7 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-TEST(ElementFilter, GrowingSegmentArrayOffsets) {
+TEST(ElementFilter, GrowingSegmentStructElementOffsets) {
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -660,15 +661,15 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    // Both fields should share the same ArrayOffsets
-    auto offsets_vec = growing_impl->GetArrayOffsets(vec_fid);
-    auto offsets_int = growing_impl->GetArrayOffsets(int_array_fid);
+    // Both fields should share the same StructElementOffsets
+    auto offsets_vec = growing_impl->GetStructElementOffsets(vec_fid);
+    auto offsets_int = growing_impl->GetStructElementOffsets(int_array_fid);
     ASSERT_NE(offsets_vec, nullptr);
     ASSERT_NE(offsets_int, nullptr);
 
     // Should point to the same object (shared)
     ASSERT_EQ(offsets_vec, offsets_int)
-        << "Fields in same struct should share ArrayOffsets";
+        << "Fields in same struct should share StructElementOffsets";
 
     // Verify counts
     ASSERT_EQ(offsets_vec->GetRowCount(), N)
@@ -691,7 +692,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
 }
 
 TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
-    // Test out-of-order Insert handling in GrowingArrayOffsets
+    // Test out-of-order Insert handling in StructElementOffsetsGrowing
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -761,11 +762,11 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     segment->Insert(
         25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
 
     // After inserting docs [0-19] (batch3 cached due to gap), committed count
@@ -1158,10 +1159,10 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
 
-    // Verify ArrayOffsets was built
+    // Verify StructElementOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -2240,6 +2241,142 @@ TEST(ElementFilter, QueryIteratorCursorRequiresElementFilter) {
     ASSERT_ANY_THROW(parser.CreateRetrievePlan(plan_node));
 }
 
+TEST(ElementFilter, RecursiveArrayJsonContainsPlanValidation) {
+    auto make_schema = [](proto::schema::TypeSchema logical_child) {
+        auto schema = std::make_shared<Schema>();
+        auto field_id = FieldId(100);
+        proto::schema::TypeSchema physical_type;
+        *physical_type.mutable_array_element() = std::move(logical_child);
+        schema->AddField(
+            FieldMeta(FieldName("structA[nested]"),
+                      field_id,
+                      DataType::ARRAY,
+                      DataType::ARRAY,
+                      false,
+                      false,
+                      std::nullopt,
+                      std::string{},
+                      std::make_optional(std::move(physical_type))));
+        return std::pair{std::move(schema), field_id};
+    };
+
+    auto make_contains_expr = [](FieldId field_id, DataType element_type) {
+        proto::plan::Expr expr;
+        auto* contains = expr.mutable_json_contains_expr();
+        auto* column = contains->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(ToProtoDataType(element_type));
+        column->set_is_element_level(true);
+        contains->set_op(proto::plan::JSONContainsExpr_JSONOp_ContainsAny);
+        contains->set_elements_same_type(true);
+        contains->add_elements()->set_string_val("abc");
+        return expr;
+    };
+
+    proto::schema::TypeSchema array_of_varchar;
+    array_of_varchar.mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::VarChar);
+    auto [schema, field_id] = make_schema(std::move(array_of_varchar));
+
+    auto contains = make_contains_expr(field_id, DataType::VARCHAR);
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(contains));
+
+    auto wrong_leaf = make_contains_expr(field_id, DataType::INT64);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_leaf));
+
+    auto wrong_logical_type = make_contains_expr(field_id, DataType::VARCHAR);
+    wrong_logical_type.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_data_type(proto::schema::DataType::VarChar);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_logical_type));
+
+    auto row_level = make_contains_expr(field_id, DataType::VARCHAR);
+    row_level.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_is_element_level(false);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(row_level));
+
+    auto flat_schema = std::make_shared<Schema>();
+    auto flat_field_id = flat_schema->AddDebugArrayField(
+        "structA[scalar]", DataType::VARCHAR, false);
+    auto flat_contains = make_contains_expr(flat_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(flat_schema).ParseExprs(flat_contains));
+
+    proto::schema::TypeSchema array_of_array_of_varchar;
+    array_of_array_of_varchar.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::VarChar);
+    auto [deeper_schema, deeper_field_id] =
+        make_schema(std::move(array_of_array_of_varchar));
+    auto deeper_contains =
+        make_contains_expr(deeper_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(deeper_schema).ParseExprs(deeper_contains));
+
+    proto::plan::Expr range_expr;
+    auto* range = range_expr.mutable_unary_range_expr();
+    auto* range_column = range->mutable_column_info();
+    range_column->set_field_id(field_id.get());
+    range_column->set_data_type(proto::schema::DataType::Array);
+    range_column->set_element_type(proto::schema::DataType::VarChar);
+    range_column->set_is_element_level(true);
+    range->set_op(proto::plan::OpType::Equal);
+    range->mutable_value()->set_string_val("abc");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(range_expr));
+}
+
+TEST(ElementFilter, RecursiveArrayLengthPlanValidation) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = FieldId(100);
+    proto::schema::TypeSchema physical_type;
+    physical_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("structA[nested]"),
+                               field_id,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               std::make_optional(std::move(physical_type))));
+
+    auto make_length_expr = [field_id]() {
+        proto::plan::Expr expr;
+        auto* length = expr.mutable_binary_arith_op_eval_range_expr();
+        auto* column = length->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(proto::schema::DataType::Array);
+        column->set_is_element_level(true);
+        length->set_arith_op(proto::plan::ArithOpType::ArrayLength);
+        length->set_op(proto::plan::OpType::Equal);
+        length->mutable_value()->set_int64_val(1);
+        return expr;
+    };
+
+    auto length = make_length_expr();
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(length));
+
+    auto wrong_element_type = make_length_expr();
+    wrong_element_type.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->set_element_type(proto::schema::DataType::Int32);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_element_type));
+
+    auto nested_path = make_length_expr();
+    nested_path.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->add_nested_path("0");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(nested_path));
+
+    auto wrong_arith = make_length_expr();
+    wrong_arith.mutable_binary_arith_op_eval_range_expr()->set_arith_op(
+        proto::plan::ArithOpType::Add);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_arith));
+}
+
 // Regression test for https://github.com/milvus-io/milvus/issues/49260
 // ElementFilterBitsNode: when element_filter is AND-composed with a predicate
 // that matches 0 docs on a segment, doc_hit_ratio = 0 triggers offset_mode
@@ -2522,14 +2659,15 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         dynamic_cast<SegmentInternalInterface*>(segment.get());
     ASSERT_NE(internal_segment, nullptr);
 
-    auto array_offsets = segment->GetArrayOffsets(int_array_fid);
-    ASSERT_NE(array_offsets, nullptr);
-    ASSERT_EQ(array_offsets->GetTotalElementCount(), 2);
+    auto struct_element_offsets =
+        segment->GetStructElementOffsets(int_array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(), 2);
     for (size_t row = 0; row < kTargetRow; ++row) {
-        EXPECT_EQ(array_offsets->ElementIDRangeOfRow(row),
+        EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(row),
                   std::make_pair(0, 0));
     }
-    EXPECT_EQ(array_offsets->ElementIDRangeOfRow(kTargetRow),
+    EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(kTargetRow),
               std::make_pair(0, 2));
 
     enum class PredicateMode {
@@ -2876,10 +3014,11 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto array_data = insert_record_proto->add_fields_data();
     array_data->set_field_id(int_array_fid.get());
     array_data->set_type(proto::schema::DataType::Array);
-    array_data->add_valid_data(true);
-    array_data->add_valid_data(false);
-    array_data->add_valid_data(true);
-    auto arrays = array_data->mutable_scalars()->mutable_array_data();
+    auto* array_scalars = array_data->mutable_scalars();
+    array_scalars->add_valid_data(true);
+    array_scalars->add_valid_data(false);
+    array_scalars->add_valid_data(true);
+    auto arrays = array_scalars->mutable_array_data();
     arrays->set_element_type(proto::schema::DataType::Int32);
     auto row0 = arrays->mutable_data()->Add();
     row0->mutable_int_data()->mutable_data()->Add(10);
@@ -3985,10 +4124,10 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
                     raw_data.timestamps_.data(),
                     raw_data.raw_);
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -4179,7 +4318,7 @@ MakeNullableElementSearchFixture() {
             }
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(true);
@@ -4207,9 +4346,10 @@ BuildFieldValidBitmap(const GeneratedData& data, FieldId field_id) {
         if (fd.field_id() != field_id.get()) {
             continue;
         }
+        const auto& row_valid_data = GetFieldDataRowValidData(fd);
         for (int row = 0; row < row_count; ++row) {
             const bool valid =
-                fd.valid_data_size() == 0 ? true : fd.valid_data(row);
+                row_valid_data.empty() ? true : row_valid_data[row];
             if (valid) {
                 valid_bitmap[row >> 3] |= (1 << (row & 0x07));
             }
@@ -4258,7 +4398,7 @@ MakeNullableElementSearchWithNullAndEmptyRowsFixture() {
             target_values{7.0F, 7.0F, 7.0F, 7.0F, 1.0F, 0.0F, 0.0F, 0.0F};
         target_row->Add(target_values.begin(), target_values.end());
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         valid_data->Add(false);  // row 0: null
         valid_data->Add(true);   // row 1: empty
@@ -4301,7 +4441,7 @@ MakeNullableElementSearchWithOnlyNullRowsFixture() {
                 ->Clear();
         }
 
-        auto* valid_data = fd->mutable_valid_data();
+        auto* valid_data = fd->mutable_vectors()->mutable_valid_data();
         valid_data->Clear();
         for (int row = 0; row < kNullableElemN; ++row) {
             valid_data->Add(false);
@@ -4352,7 +4492,7 @@ CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
     vector_arrays.reserve(vec_array_values.size());
     for (int64_t row = 0; row < f.raw_data.raw_->num_rows(); ++row) {
         if (IsBitmapRowValid(valid_bitmap, row)) {
-            vector_arrays.emplace_back(vec_array_values[row]);
+            vector_arrays.emplace_back(vec_array_values[row], false);
         }
     }
 
@@ -5058,10 +5198,11 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
         for (int d = 0; d < dim; ++d) {
             target->mutable_float_vector()->add_data(1.0f + d);
         }
-        field_data->mutable_valid_data()->Clear();
-        field_data->add_valid_data(false);
-        field_data->add_valid_data(true);
-        field_data->add_valid_data(true);
+        auto* valid_data = field_data->mutable_vectors()->mutable_valid_data();
+        valid_data->Clear();
+        valid_data->Add(false);
+        valid_data->Add(true);
+        valid_data->Add(true);
         break;
     }
 
@@ -5077,7 +5218,7 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), 1);
@@ -5125,10 +5266,11 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
     auto data_array =
         segment->bulk_subscript(/*op_ctx=*/nullptr, vec_fid, seg_offsets, N);
     ASSERT_NE(data_array, nullptr);
-    ASSERT_EQ(data_array->valid_data_size(), N);
-    EXPECT_FALSE(data_array->valid_data(0));
-    EXPECT_TRUE(data_array->valid_data(1));
-    EXPECT_TRUE(data_array->valid_data(2));
+    const auto& valid_data = GetFieldDataRowValidData(*data_array);
+    ASSERT_EQ(valid_data.size(), N);
+    EXPECT_FALSE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+    EXPECT_TRUE(valid_data[2]);
     const auto& out_rows = data_array->vectors().vector_array().data();
     ASSERT_EQ(out_rows.size(), N);
     EXPECT_EQ(out_rows[1].float_vector().data_size(), 0);

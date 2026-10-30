@@ -441,11 +441,11 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		data := mock_segcore.GenSearchResultData(nq, 2, ids, scores, topks)
 		data.GroupByFieldValues = []*schemapb.FieldData{
 			{
-				FieldId:   101,
-				Type:      schemapb.DataType_Int64,
-				ValidData: []bool{false, false},
+				FieldId: 101,
+				Type:    schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
+					ValidData: []bool{false, false},
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
 				}},
 			},
 		}

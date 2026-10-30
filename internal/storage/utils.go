@@ -90,15 +90,32 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if field.GetElementNullable() &&
+			(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+			return merr.WrapErrStorageMsg("element nullable %s is not supported in V1 storage format, fieldName=%s",
+				field.GetDataType().String(), field.GetName())
+		}
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			return merr.WrapErrStorageMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
-			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
+			return merr.WrapErrStorageMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
 	}
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
+			if field.GetElementNullable() &&
+				(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+				return merr.WrapErrStorageMsg("element nullable %s is not supported in V1 storage format, structName=%s, fieldName=%s",
+					field.GetDataType().String(), structField.GetName(), field.GetName())
+			}
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrStorageMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
+			}
 			if isNullableArrayOfVectorField(field) {
-				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
+				return merr.WrapErrStorageMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
 			}
 		}
@@ -576,7 +593,7 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 		}
 		dim = int64(fieldDim)
 	}
-	requireValidData := logicalRows > 0 || len(srcField.GetValidData()) > 0
+	requireValidData := logicalRows > 0 || len(typeutil.GetFieldDataValidData(srcField)) > 0
 	if err := funcutil.ValidateNullableVectorFieldDataCompactWithDim(srcField, uint64(logicalRows), requireValidData, dim); err != nil {
 		return merr.WrapErrParameterInvalidMsg(err.Error())
 	}
@@ -586,6 +603,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(fieldData)
 		srcFields[fieldData.GetFieldId()] = fieldData
 	}
 
@@ -608,6 +628,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(field)
 		srcFields[field.FieldId] = field
 	}
 
@@ -633,7 +656,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetFloatVector().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
 				return nil, err
 			}
@@ -656,7 +679,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetBinaryVector()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
 				return nil, err
 			}
@@ -679,7 +702,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetFloat16Vector()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
 				return nil, err
 			}
@@ -702,7 +725,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetBfloat16Vector()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
 				return nil, err
 			}
@@ -719,7 +742,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_SparseFloatVector:
 			sparseArray := srcFields[field.FieldID].GetVectors().GetSparseFloatVector()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			var contents [][]byte
 			var dim int64
 			if sparseArray != nil {
@@ -750,7 +773,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 			srcData := srcField.GetVectors().GetInt8Vector()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			if err := validateColumnBasedNullableVectorFieldData(field, srcField, int(msg.GetNumRows())); err != nil {
 				return nil, err
 			}
@@ -767,7 +790,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Bool:
 			srcData := srcField.GetScalars().GetBoolData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &BoolFieldData{
 				Data:      srcData,
@@ -777,7 +800,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Int8:
 			srcData := srcField.GetScalars().GetIntData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &Int8FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int8 { return int8(v) }),
@@ -787,7 +810,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Int16:
 			srcData := srcField.GetScalars().GetIntData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &Int16FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int16 { return int16(v) }),
@@ -797,7 +820,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Int32:
 			srcData := srcField.GetScalars().GetIntData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &Int32FieldData{
 				Data:      srcData,
@@ -817,7 +840,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				}
 			default:
 				srcData := srcField.GetScalars().GetLongData().GetData()
-				validData := srcField.GetValidData()
+				validData := typeutil.GetFieldDataValidData(srcField)
 				fieldData = &Int64FieldData{
 					Data:      srcData,
 					ValidData: validData,
@@ -827,7 +850,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Float:
 			srcData := srcField.GetScalars().GetFloatData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &FloatFieldData{
 				Data:      srcData,
@@ -837,7 +860,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Double:
 			srcData := srcField.GetScalars().GetDoubleData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &DoubleFieldData{
 				Data:      srcData,
@@ -847,7 +870,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Timestamptz:
 			srcData := srcField.GetScalars().GetTimestamptzData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &TimestamptzFieldData{
 				Data:      srcData,
@@ -857,7 +880,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &StringFieldData{
 				Data:      srcData,
@@ -867,18 +890,19 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Array:
 			srcData := srcField.GetScalars().GetArrayData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &ArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        srcData,
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            srcData,
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 
 		case schemapb.DataType_JSON:
 			srcData := srcField.GetScalars().GetJsonData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &JSONFieldData{
 				Data:      srcData,
@@ -888,18 +912,19 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_ArrayOfVector:
 			vectorArray := srcField.GetVectors().GetVectorArray()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &VectorArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        vectorArray.GetData(),
-				Dim:         vectorArray.GetDim(),
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            vectorArray.GetData(),
+				Dim:             vectorArray.GetDim(),
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 		case schemapb.DataType_Geometry:
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
-			validData := srcField.GetValidData()
+			validData := typeutil.GetFieldDataValidData(srcField)
 			fieldData = &GeometryFieldData{
 				Data:      srcData,
 				ValidData: validData,
@@ -1094,18 +1119,51 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
-func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) {
+func validateElementNullableMerge(fid FieldID, existing, incoming FieldData) error {
+	switch incoming := incoming.(type) {
+	case *ArrayFieldData:
+		existing, ok := existing.(*ArrayFieldData)
+		if ok && existing.ElementNullable != incoming.ElementNullable {
+			return merr.WrapErrServiceInternalMsg(
+				"cannot merge Array field %d with inconsistent element_nullable: existing=%t, incoming=%t",
+				fid,
+				existing.ElementNullable,
+				incoming.ElementNullable,
+			)
+		}
+	case *VectorArrayFieldData:
+		existing, ok := existing.(*VectorArrayFieldData)
+		if ok && existing.ElementNullable != incoming.ElementNullable {
+			return merr.WrapErrServiceInternalMsg(
+				"cannot merge ArrayOfVector field %d with inconsistent element_nullable: existing=%t, incoming=%t",
+				fid,
+				existing.ElementNullable,
+				incoming.ElementNullable,
+			)
+		}
+	}
+	return nil
+}
+
+func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) error {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &ArrayFieldData{
-			ElementType: field.ElementType,
-			Data:        nil,
-			ValidData:   nil,
+			ElementType:     field.ElementType,
+			Data:            nil,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*ArrayFieldData)
+	if err := validateElementNullableMerge(fid, fieldData, field); err != nil {
+		return err
+	}
+	fieldData.Nullable = fieldData.Nullable || field.Nullable
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+	return nil
 }
 
 func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
@@ -1203,20 +1261,25 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 	fieldData.AppendAllRows(field)
 }
 
-func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) {
+func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) error {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &VectorArrayFieldData{
-			Data:        nil,
-			Dim:         field.Dim,
-			ElementType: field.ElementType,
-			ValidData:   nil,
-			Nullable:    field.Nullable,
+			Data:            nil,
+			Dim:             field.Dim,
+			ElementType:     field.ElementType,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*VectorArrayFieldData)
+	if err := validateElementNullableMerge(fid, fieldData, field); err != nil {
+		return err
+	}
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+	return nil
 }
 
 func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldData) {
@@ -1237,10 +1300,10 @@ func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldD
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
-// MergeFieldData merge field into data.
-func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
+// MergeFieldData merges field into data.
+func MergeFieldData(data *InsertData, fid FieldID, field FieldData) error {
 	if field == nil {
-		return
+		return nil
 	}
 	switch field := field.(type) {
 	case *BoolFieldData:
@@ -1262,7 +1325,7 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:
-		mergeArrayField(data, fid, field)
+		return mergeArrayField(data, fid, field)
 	case *JSONFieldData:
 		mergeJSONField(data, fid, field)
 	case *BinaryVectorFieldData:
@@ -1278,27 +1341,53 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	case *Int8VectorFieldData:
 		mergeInt8VectorField(data, fid, field)
 	case *VectorArrayFieldData:
-		mergeVectorArrayField(data, fid, field)
+		return mergeVectorArrayField(data, fid, field)
 	}
+	return nil
 }
 
 // MergeInsertData append the insert datas to the original buffer.
-func MergeInsertData(buffer *InsertData, datas ...*InsertData) {
+func MergeInsertData(buffer *InsertData, datas ...*InsertData) error {
 	if buffer == nil {
 		mlog.Warn(context.TODO(), "Attempt to merge data into a nil buffer, skip the data merge.")
-		return
+		return nil
+	}
+
+	fields := make(map[FieldID]FieldData, len(buffer.Data))
+	for fid, field := range buffer.Data {
+		fields[fid] = field
+	}
+	for _, data := range datas {
+		if data == nil {
+			continue
+		}
+		for fid, field := range data.Data {
+			if field == nil {
+				continue
+			}
+			if existing, ok := fields[fid]; ok {
+				if err := validateElementNullableMerge(fid, existing, field); err != nil {
+					return err
+				}
+			} else {
+				fields[fid] = field
+			}
+		}
 	}
 
 	for _, data := range datas {
 		if data != nil {
 			for fid, field := range data.Data {
-				MergeFieldData(buffer, fid, field)
+				if err := MergeFieldData(buffer, fid, field); err != nil {
+					return err
+				}
 			}
 
 			// TODO: handle storage.InsertData.Infos
 			buffer.Infos = append(buffer.Infos, data.Infos...)
 		}
 	}
+	return nil
 }
 
 // TODO: string type.
@@ -1366,11 +1455,6 @@ func stringFieldDataToPbBytes(field *StringFieldData) ([]byte, error) {
 	return proto.Marshal(arr)
 }
 
-func arrayFieldDataToPbBytes(field *ArrayFieldData) ([]byte, error) {
-	arr := &schemapb.ArrayArray{Data: field.Data}
-	return proto.Marshal(arr)
-}
-
 func jsonFieldDataToPbBytes(field *JSONFieldData) ([]byte, error) {
 	arr := &schemapb.JSONArray{Data: field.Data}
 	return proto.Marshal(arr)
@@ -1403,7 +1487,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int8FieldData:
 			int32Data := make([]int32, len(rawData.Data))
@@ -1422,7 +1505,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int16FieldData:
 			int32Data := make([]int32, len(rawData.Data))
@@ -1441,7 +1523,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int32FieldData:
 			fieldData = &schemapb.FieldData{
@@ -1456,7 +1537,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int64FieldData:
 			fieldData = &schemapb.FieldData{
@@ -1471,7 +1551,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *FloatFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1486,7 +1565,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *DoubleFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1501,7 +1579,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *TimestamptzFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1516,7 +1593,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *StringFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1531,22 +1607,22 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *ArrayFieldData:
+			arrayData := &schemapb.ArrayArray{
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_Array,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_ArrayData{
-							ArrayData: &schemapb.ArrayArray{
-								Data: rawData.Data,
-							},
+							ArrayData: arrayData,
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *JSONFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1561,7 +1637,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *GeometryFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1576,7 +1651,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *FloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1592,7 +1666,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *BinaryVectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1606,7 +1679,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Float16VectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1620,7 +1692,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *BFloat16VectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1634,7 +1705,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *SparseFloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
@@ -1647,7 +1717,6 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						},
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *Int8VectorFieldData:
 			dataBytes := arrow.Int8Traits.CastToBytes(rawData.Data)
@@ -1662,30 +1731,30 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 						Dim: int64(rawData.Dim),
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		case *VectorArrayFieldData:
+			vectorArray := &schemapb.VectorArray{
+				Dim:         rawData.Dim,
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Data:        rawData.Data,
-								ElementType: rawData.ElementType,
-								Dim:         rawData.Dim,
-							},
+							VectorArray: vectorArray,
 						},
 						Dim: rawData.Dim,
 					},
 				},
-				ValidData: rawData.ValidData,
 			}
 		default:
 			return insertRecord, merr.WrapErrServiceInternalMsg("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
 		}
 
+		typeutil.SetFieldDataValidData(fieldData, rawData.GetValidData())
 		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
 		insertRecord.NumRows = int64(rawData.RowNum())
 	}

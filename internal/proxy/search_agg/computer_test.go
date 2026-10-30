@@ -428,11 +428,11 @@ func TestSearchAggregationComputerNullGrouping(t *testing.T) {
 		FieldsData: nil,
 		GroupByFieldValues: []*schemapb.FieldData{
 			{
-				FieldId:   101,
-				Type:      schemapb.DataType_Int64,
-				ValidData: []bool{false, false},
+				FieldId: 101,
+				Type:    schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
+					ValidData: []bool{false, false},
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
 				}},
 			},
 		},
@@ -1371,10 +1371,10 @@ func TestSearchAggregationComputerInterleavedNullGroupBy(t *testing.T) {
 			// Row sequence:  A | null | B | null | A
 			// ValidData:     t |  f   | t |  f   | t
 			{
-				FieldId:   101,
-				Type:      schemapb.DataType_VarChar,
-				ValidData: []bool{true, false, true, false, true},
+				FieldId: 101,
+				Type:    schemapb.DataType_VarChar,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true, false, true},
 					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{
 						Data: []string{"A", "", "B", "", "A"},
 					}},
@@ -1422,7 +1422,7 @@ func testLongFieldData(fieldID int64, values []int64) *schemapb.FieldData {
 
 func testNullableLongFieldData(fieldID int64, values []int64, validData []bool) *schemapb.FieldData {
 	fd := testLongFieldData(fieldID, values)
-	fd.ValidData = validData
+	fd.GetScalars().ValidData = validData
 	return fd
 }
 

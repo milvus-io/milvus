@@ -28,6 +28,7 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "index/ScalarIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
@@ -287,7 +288,8 @@ struct GeneratedData {
                 auto& field_meta = schema_->operator[](field_id);
                 Assert(field_meta.is_nullable());
                 FixedVector<bool> ret(raw_->num_rows());
-                auto src_data = target_field_data.valid_data().data();
+                auto src_data =
+                    GetFieldDataRowValidData(target_field_data).data();
                 std::copy_n(src_data, raw_->num_rows(), ret.data());
                 return ret;
             }
@@ -1420,6 +1422,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     FieldDataPtr field_data = nullptr;
 
     auto element_type = field_meta.get_element_type();
+    const auto& row_valid_data = GetFieldDataRowValidData(*data);
     auto createFieldData =
         [&field_data, &raw_count, &element_type](
             const void* raw_data, DataType data_type, int64_t dim) {
@@ -1456,7 +1459,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 dim = field_meta.get_dim();
                 if (field_meta.is_nullable()) {
                     createNullableFieldData(raw_data,
-                                            data->valid_data().data(),
+                                            row_valid_data.data(),
                                             DataType::VECTOR_FLOAT,
                                             dim);
                 } else {
@@ -1470,7 +1473,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 AssertInfo(dim % 8 == 0, "wrong dim value for binary vector");
                 if (field_meta.is_nullable()) {
                     createNullableFieldData(raw_data,
-                                            data->valid_data().data(),
+                                            row_valid_data.data(),
                                             DataType::VECTOR_BINARY,
                                             dim);
                 } else {
@@ -1483,7 +1486,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 dim = field_meta.get_dim();
                 if (field_meta.is_nullable()) {
                     createNullableFieldData(raw_data,
-                                            data->valid_data().data(),
+                                            row_valid_data.data(),
                                             DataType::VECTOR_FLOAT16,
                                             dim);
                 } else {
@@ -1496,7 +1499,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 dim = field_meta.get_dim();
                 if (field_meta.is_nullable()) {
                     createNullableFieldData(raw_data,
-                                            data->valid_data().data(),
+                                            row_valid_data.data(),
                                             DataType::VECTOR_BFLOAT16,
                                             dim);
                 } else {
@@ -1515,7 +1518,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 dim = field_meta.get_dim();
                 if (field_meta.is_nullable()) {
                     createNullableFieldData(raw_data,
-                                            data->valid_data().data(),
+                                            row_valid_data.data(),
                                             DataType::VECTOR_INT8,
                                             dim);
                 } else {
@@ -1528,7 +1531,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto dim = field_meta.get_dim();
                 std::vector<VectorArray> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {
-                    data_raw[i] = VectorArray(src_data.at(i));
+                    data_raw[i] = VectorArray(src_data.at(i),
+                                              field_meta.is_element_nullable());
                 }
                 createFieldData(data_raw.data(), DataType::VECTOR_ARRAY, dim);
                 break;
@@ -1542,7 +1546,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::BOOL: {
                 auto raw_data = data->scalars().bool_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::BOOL, dim);
                 } else {
@@ -1555,7 +1559,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 std::vector<int8_t> data_raw(src_data.size());
                 std::copy_n(src_data.data(), src_data.size(), data_raw.data());
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         data_raw.data(), raw_valid_data, DataType::INT8, dim);
                 } else {
@@ -1568,7 +1572,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 std::vector<int16_t> data_raw(src_data.size());
                 std::copy_n(src_data.data(), src_data.size(), data_raw.data());
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         data_raw.data(), raw_valid_data, DataType::INT16, dim);
                 } else {
@@ -1579,7 +1583,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::INT32: {
                 auto raw_data = data->scalars().int_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::INT32, dim);
                 } else {
@@ -1590,7 +1594,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::INT64: {
                 auto raw_data = data->scalars().long_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::INT64, dim);
                 } else {
@@ -1601,7 +1605,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::FLOAT: {
                 auto raw_data = data->scalars().float_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::FLOAT, dim);
                 } else {
@@ -1612,7 +1616,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
             case DataType::DOUBLE: {
                 auto raw_data = data->scalars().double_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::DOUBLE, dim);
                 } else {
@@ -1624,7 +1628,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto raw_data =
                     data->scalars().timestamptz_data().data().data();
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         raw_data, raw_valid_data, DataType::TIMESTAMPTZ, dim);
                 } else {
@@ -1637,7 +1641,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto end = data->scalars().string_data().data().end();
                 std::vector<std::string> data_raw(begin, end);
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(data_raw.data(),
                                             raw_valid_data,
                                             DataType::VARCHAR,
@@ -1655,7 +1659,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     data_raw[i] = Json(simdjson::padded_string(str));
                 }
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         data_raw.data(), raw_valid_data, DataType::JSON, dim);
                 } else {
@@ -1671,7 +1675,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     data_raw[i] = std::string(str);
                 }
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(data_raw.data(),
                                             raw_valid_data,
                                             DataType::GEOMETRY,
@@ -1688,7 +1692,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                     data_raw[i] = Array(src_data.at(i));
                 }
                 if (field_meta.is_nullable()) {
-                    auto raw_valid_data = data->valid_data().data();
+                    auto raw_valid_data = row_valid_data.data();
                     createNullableFieldData(
                         data_raw.data(), raw_valid_data, DataType::ARRAY, dim);
                 } else {

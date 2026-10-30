@@ -150,6 +150,77 @@ func TestBinlogStreamWriter(t *testing.T) {
 	})
 }
 
+func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
+	array := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		}
+	}
+	leaf := func(dataType schemapb.DataType) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: dataType},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		field         *schemapb.FieldSchema
+		expectedRatio int
+	}{
+		{
+			name: "legacy int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "nested int32 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
+			},
+			expectedRatio: 4,
+		},
+		{
+			name: "deeply nested int64 array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema: array(array(array(
+					leaf(schemapb.DataType_Int64),
+				))),
+			},
+			expectedRatio: 8,
+		},
+		{
+			name: "nested float array",
+			field: &schemapb.FieldSchema{
+				FieldID:     1,
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Array,
+				TypeSchema:  array(array(leaf(schemapb.DataType_Float))),
+			},
+			expectedRatio: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			writer, err := newSingleFieldRecordWriter(test.field, &buffer)
+			require.NoError(t, err)
+			require.Equal(t, test.expectedRatio, writer.memoryExpansionRatio)
+			require.NoError(t, writer.Close())
+		})
+	}
+}
+
 func TestRecordToInsertData(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -267,9 +338,9 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 			},
 		}
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			serdeMap[schemapb.DataType_FloatVector].arrowType(2, schemapb.DataType_None))
+			serdeMap[schemapb.DataType_FloatVector].arrowType(2, schemapb.DataType_None, false))
 		require.NoError(t, serdeMap[schemapb.DataType_FloatVector].serialize(
-			builder, []float32{1, 2}, schemapb.DataType_None))
+			builder, []float32{1, 2}, schemapb.DataType_None, 0, false))
 		arr := builder.NewArray()
 		builder.Release()
 		record := &compositeRecord{
@@ -303,13 +374,13 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 		}
 		entry := serdeMap[schemapb.DataType_ArrayOfVector]
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			entry.arrowType(2, schemapb.DataType_FloatVector))
+			entry.arrowType(2, schemapb.DataType_FloatVector, false))
 		require.NoError(t, entry.serialize(builder, &schemapb.VectorField{
 			Dim: 2,
 			Data: &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}},
 			},
-		}, schemapb.DataType_FloatVector))
+		}, schemapb.DataType_FloatVector, 2, false))
 		arr := builder.NewArray()
 		builder.Release()
 		record := &compositeRecord{
@@ -1005,6 +1076,44 @@ func TestValueSerializer_NullArrayOfVectorRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	defer rewrittenRecord.Release()
 	assert.True(t, rewrittenRecord.Column(vectorArrayFieldID).IsNull(1))
+}
+
+func TestValueSerializerRejectsArrayOfVectorElementValidityConflict(t *testing.T) {
+	const (
+		pkFieldID          FieldID = common.StartOfUserFieldID
+		vectorArrayFieldID FieldID = common.StartOfUserFieldID + 1
+	)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: pkFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:     vectorArrayFieldID,
+				Name:        "vec_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "2"},
+				},
+			},
+		},
+	}
+	row := makeFloatVec(2, 1, 2)
+	row.ValidData = []bool{true}
+	values := []*Value{{
+		Value: map[FieldID]any{
+			common.RowIDField:     int64(11),
+			common.TimeStampField: int64(101),
+			pkFieldID:             int64(1),
+			vectorArrayFieldID:    row,
+		},
+	}}
+
+	record, err := ValueSerializer(values, schema)
+	require.Nil(t, record)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "non-element-nullable ArrayOfVector row cannot carry element valid_data")
 }
 
 func TestValueDeserializerNullableDenseVectorBinaryRecord(t *testing.T) {

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "ArrayOffsets.h"
+#include "StructElementOffsets.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -27,6 +27,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/OpContext.h"
@@ -100,12 +101,12 @@ class ChunkedReader {
 
     T
     operator[](int64_t idx) const {
-        const int64_t chunk_id = idx >> ArrayOffsetsGrowing::kChunkBits;
+        const int64_t chunk_id = idx >> StructElementOffsetsGrowing::kChunkBits;
         if (chunk_id != cached_chunk_id_) {
             cached_chunk_id_ = chunk_id;
             cached_chunk_ = dir_[static_cast<size_t>(chunk_id)].get();
         }
-        return cached_chunk_[idx & ArrayOffsetsGrowing::kChunkMask];
+        return cached_chunk_[idx & StructElementOffsetsGrowing::kChunkMask];
     }
 
  private:
@@ -190,18 +191,18 @@ ElementBitsetAnyReduce(const Starts& starts,
 }  // namespace
 
 std::pair<int32_t, int32_t>
-ArrayOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
+StructElementOffsetsSealed::ElementIDToRowID(int32_t elem_id) const {
     const auto info = LocateElement(row_to_element_start_, elem_id);
     return {info.row_id, info.element_index};
 }
 
 ElementRowInfo
-ArrayOffsetsSealed::ElementIDToRowInfo(int32_t elem_id) const {
+StructElementOffsetsSealed::ElementIDToRowInfo(int32_t elem_id) const {
     return LocateElement(row_to_element_start_, elem_id);
 }
 
 std::pair<int32_t, int32_t>
-ArrayOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
+StructElementOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
     int32_t row_count = GetRowCount();
     assert(row_id >= 0 && row_id <= row_count);
 
@@ -213,7 +214,7 @@ ArrayOffsetsSealed::ElementIDRangeOfRow(int32_t row_id) const {
 }
 
 void
-ArrayOffsetsSealed::CopyRowElementRanges(
+StructElementOffsetsSealed::CopyRowElementRanges(
     const int32_t* row_ids,
     int64_t count,
     std::pair<int32_t, int32_t>* out) const {
@@ -230,9 +231,9 @@ ArrayOffsetsSealed::CopyRowElementRanges(
 }
 
 void
-ArrayOffsetsSealed::CopyRowElementStarts(int64_t row_start,
-                                         int64_t row_count,
-                                         int32_t* out) const {
+StructElementOffsetsSealed::CopyRowElementStarts(int64_t row_start,
+                                                 int64_t row_count,
+                                                 int32_t* out) const {
     AssertInfo(row_start >= 0 && row_count >= 0 &&
                    row_start + row_count <= GetRowCount(),
                "row range out of bounds: row_start={}, row_count={}, "
@@ -246,7 +247,7 @@ ArrayOffsetsSealed::CopyRowElementStarts(int64_t row_start,
 }
 
 std::pair<TargetBitmap, TargetBitmap>
-ArrayOffsetsSealed::RowBitsetToElementBitset(
+StructElementOffsetsSealed::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
     const TargetBitmapView& valid_row_bitset,
     int64_t row_start) const {
@@ -279,7 +280,7 @@ ArrayOffsetsSealed::RowBitsetToElementBitset(
 }
 
 FixedVector<int32_t>
-ArrayOffsetsSealed::RowBitsetToElementOffsets(
+StructElementOffsetsSealed::RowBitsetToElementOffsets(
     const TargetBitmapView& row_bitset, int64_t row_start) const {
     int64_t row_count = row_bitset.size();
     int64_t total_rows = GetRowCount();
@@ -315,7 +316,7 @@ ArrayOffsetsSealed::RowBitsetToElementOffsets(
 }
 
 FixedVector<int32_t>
-ArrayOffsetsSealed::RowOffsetsToElementOffsets(
+StructElementOffsetsSealed::RowOffsetsToElementOffsets(
     const FixedVector<int32_t>& row_offsets) const {
     FixedVector<int32_t> element_offsets;
     if (row_offsets.empty()) {
@@ -339,7 +340,7 @@ ArrayOffsetsSealed::RowOffsetsToElementOffsets(
 }
 
 TargetBitmap
-ArrayOffsetsSealed::ForEachRowElementRange(
+StructElementOffsetsSealed::ForEachRowElementRange(
     const ElementRangePredicate& predicate,
     int64_t row_start,
     int64_t row_count) const {
@@ -363,7 +364,7 @@ ArrayOffsetsSealed::ForEachRowElementRange(
 }
 
 void
-ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
+StructElementOffsetsSealed::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
@@ -384,20 +385,21 @@ ArrayOffsetsSealed::ElementBitsetToRowBitsetAny(
                            row_result);
 }
 
-std::shared_ptr<ArrayOffsetsSealed>
-ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
-                                    const FieldMeta& field_meta,
-                                    int64_t row_count,
-                                    OpContext* op_ctx) {
+std::shared_ptr<StructElementOffsetsSealed>
+StructElementOffsetsSealed::BuildFromColumn(
+    const ChunkedColumnInterface& column,
+    const FieldMeta& field_meta,
+    int64_t row_count,
+    OpContext* op_ctx) {
     CheckOffsetsCancellation(op_ctx);
     if (row_count == 0) {
         LOG_INFO(
-            "ArrayOffsetsSealed::BuildFromColumn: empty segment for "
+            "StructElementOffsetsSealed::BuildFromColumn: empty segment for "
             "struct "
             "'{}'",
             field_meta.get_name().get());
-        return std::make_shared<ArrayOffsetsSealed>(std::vector<int32_t>{0},
-                                                    TargetBitmap(0));
+        return std::make_shared<StructElementOffsetsSealed>(
+            std::vector<int32_t>{0}, TargetBitmap(0));
     }
 
     auto data_type = field_meta.get_data_type();
@@ -441,10 +443,26 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
                 if (!valid_flags || valid_flags[i]) {
-                    array_len = vector_array_views[i].length();
+                    array_len = vector_array_views[i].physical_length();
                 }
 
                 append_array_length(array_len, !valid_flags || valid_flags[i]);
+            }
+        }
+    } else if (field_meta.is_nested_array()) {
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            CheckOffsetsCancellation(op_ctx);
+            auto pinned_chunk = column.GetChunk(op_ctx, chunk_id);
+            auto* array_chunk =
+                dynamic_cast<ColumnarArrayChunk*>(pinned_chunk.get());
+            AssertInfo(array_chunk != nullptr,
+                       "nested ARRAY field {} must use ColumnarArrayChunk",
+                       field_meta.get_id().get());
+
+            const auto& offsets = array_chunk->offsets();
+            for (size_t i = 0; i < array_chunk->row_count(); ++i) {
+                const auto array_len = offsets[i + 1] - offsets[i];
+                append_array_length(array_len, array_chunk->is_valid(i));
             }
         }
     } else {
@@ -473,14 +491,14 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                current_row_id);
 
     LOG_INFO(
-        "ArrayOffsetsSealed::BuildFromColumn: struct_name='{}', "
+        "StructElementOffsetsSealed::BuildFromColumn: struct_name='{}', "
         "field_id={}, row_count={}, total_elements={}",
         field_meta.get_name().get(),
         field_meta.get_id().get(),
         row_count,
         total_elements);
 
-    auto result = std::make_shared<ArrayOffsetsSealed>(
+    auto result = std::make_shared<StructElementOffsetsSealed>(
         std::move(row_to_element_start), std::move(row_validity));
     result->resource_size_ = sizeof(int32_t) * (row_count + 1) +
                              sizeof(uint64_t) * ((row_count + 63) / 64);
@@ -490,7 +508,7 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
 }
 
 std::pair<int32_t, int32_t>
-ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
+StructElementOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
     const auto info =
@@ -499,14 +517,14 @@ ArrayOffsetsGrowing::ElementIDToRowID(int32_t elem_id) const {
 }
 
 ElementRowInfo
-ArrayOffsetsGrowing::ElementIDToRowInfo(int32_t elem_id) const {
+StructElementOffsetsGrowing::ElementIDToRowInfo(int32_t elem_id) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
     return LocateElement(ChunkedReader(starts_chunks_), committed, elem_id);
 }
 
 std::pair<int32_t, int32_t>
-ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
+StructElementOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
     assert(row_id >= 0 && row_id <= committed);
@@ -520,7 +538,7 @@ ArrayOffsetsGrowing::ElementIDRangeOfRow(int32_t row_id) const {
 }
 
 void
-ArrayOffsetsGrowing::CopyRowElementRanges(
+StructElementOffsetsGrowing::CopyRowElementRanges(
     const int32_t* row_ids,
     int64_t count,
     std::pair<int32_t, int32_t>* out) const {
@@ -546,9 +564,9 @@ ArrayOffsetsGrowing::CopyRowElementRanges(
 }
 
 void
-ArrayOffsetsGrowing::CopyStartsSlice(int64_t first_idx,
-                                     int64_t entry_count,
-                                     int32_t* out) const {
+StructElementOffsetsGrowing::CopyStartsSlice(int64_t first_idx,
+                                             int64_t entry_count,
+                                             int32_t* out) const {
     int64_t idx = first_idx;
     int64_t copied = 0;
     while (copied < entry_count) {
@@ -565,9 +583,9 @@ ArrayOffsetsGrowing::CopyStartsSlice(int64_t first_idx,
 }
 
 void
-ArrayOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
-                                          int64_t row_count,
-                                          int32_t* out) const {
+StructElementOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
+                                                  int64_t row_count,
+                                                  int32_t* out) const {
     AssertInfo(row_start >= 0 && row_count >= 0,
                "invalid row range: row_start={}, row_count={}",
                row_start,
@@ -591,7 +609,7 @@ ArrayOffsetsGrowing::CopyRowElementStarts(int64_t row_start,
 }
 
 std::pair<TargetBitmap, TargetBitmap>
-ArrayOffsetsGrowing::RowBitsetToElementBitset(
+StructElementOffsetsGrowing::RowBitsetToElementBitset(
     const TargetBitmapView& row_bitset,
     const TargetBitmapView& valid_row_bitset,
     int64_t row_start) const {
@@ -629,7 +647,7 @@ ArrayOffsetsGrowing::RowBitsetToElementBitset(
 }
 
 FixedVector<int32_t>
-ArrayOffsetsGrowing::RowBitsetToElementOffsets(
+StructElementOffsetsGrowing::RowBitsetToElementOffsets(
     const TargetBitmapView& row_bitset, int64_t row_start) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
@@ -668,7 +686,7 @@ ArrayOffsetsGrowing::RowBitsetToElementOffsets(
 }
 
 FixedVector<int32_t>
-ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
+StructElementOffsetsGrowing::RowOffsetsToElementOffsets(
     const FixedVector<int32_t>& row_offsets) const {
     const int64_t committed =
         committed_row_count_.load(std::memory_order_acquire);
@@ -696,7 +714,7 @@ ArrayOffsetsGrowing::RowOffsetsToElementOffsets(
 }
 
 TargetBitmap
-ArrayOffsetsGrowing::ForEachRowElementRange(
+StructElementOffsetsGrowing::ForEachRowElementRange(
     const ElementRangePredicate& predicate,
     int64_t row_start,
     int64_t row_count) const {
@@ -724,7 +742,7 @@ ArrayOffsetsGrowing::ForEachRowElementRange(
 }
 
 void
-ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
+StructElementOffsetsGrowing::ElementBitsetToRowBitsetAny(
     const TargetBitmapView& elem_bitset,
     int64_t elem_offset,
     int64_t row_start,
@@ -745,9 +763,9 @@ ArrayOffsetsGrowing::ElementBitsetToRowBitsetAny(
 }
 
 void
-ArrayOffsetsGrowing::Insert(int64_t row_id_start,
-                            const int32_t* array_lengths,
-                            int64_t count) {
+StructElementOffsetsGrowing::Insert(int64_t row_id_start,
+                                    const int32_t* array_lengths,
+                                    int64_t count) {
     std::lock_guard lock(write_mutex_);
     for (int64_t i = 0; i < count; ++i) {
         int64_t row_id = row_id_start + i;
@@ -765,7 +783,7 @@ ArrayOffsetsGrowing::Insert(int64_t row_id_start,
 }
 
 void
-ArrayOffsetsGrowing::WriteStart(int64_t idx, int32_t value) {
+StructElementOffsetsGrowing::WriteStart(int64_t idx, int32_t value) {
     const auto chunk_id = static_cast<size_t>(idx >> kChunkBits);
     while (starts_chunks_.size() <= chunk_id) {
         starts_chunks_.push_back(std::make_unique<int32_t[]>(kEntriesPerChunk));
@@ -774,7 +792,7 @@ ArrayOffsetsGrowing::WriteStart(int64_t idx, int32_t value) {
 }
 
 void
-ArrayOffsetsGrowing::CommitRow(int32_t array_len) {
+StructElementOffsetsGrowing::CommitRow(int32_t array_len) {
     const int32_t row = committed_rows_writer_;
     const int32_t current_total = LoadStart(row);
     WriteStart(row + 1, current_total + array_len);
@@ -782,7 +800,7 @@ ArrayOffsetsGrowing::CommitRow(int32_t array_len) {
 }
 
 void
-ArrayOffsetsGrowing::DrainPendingRows() {
+StructElementOffsetsGrowing::DrainPendingRows() {
     while (true) {
         auto it = pending_rows_.find(committed_rows_writer_);
         if (it == pending_rows_.end()) {
@@ -796,7 +814,7 @@ ArrayOffsetsGrowing::DrainPendingRows() {
 }
 
 void
-ArrayOffsetsGrowing::PublishCommitted() {
+StructElementOffsetsGrowing::PublishCommitted() {
     committed_row_count_.store(committed_rows_writer_,
                                std::memory_order_release);
 }

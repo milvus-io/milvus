@@ -35,7 +35,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -144,8 +144,8 @@ class SegmentReadSnapshot {
 
     // Returns nullptr when this field has no struct mapping in the captured
     // state. Consumers that require element-to-row conversion must check it.
-    virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const = 0;
 
     // Must return a non-null schema from the same captured state as the columns.
     virtual SchemaPtr
@@ -425,8 +425,8 @@ class SegmentInterface {
     // Returns nullptr if the field has no struct-element mapping.
     // Sealed segments build it during loading, before publishing the column
     // generation. This getter only reads immutable metadata and performs no IO.
-    virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -527,6 +527,9 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_view_impl(
+                op_ctx, field_id, chunk_id, offset_len);
         } else if constexpr (std::is_same_v<ViewType, VectorArrayView>) {
             return chunk_vector_array_view_impl(
                 op_ctx, field_id, chunk_id, offset_len);
@@ -563,14 +566,10 @@ class SegmentInternalInterface : public SegmentInterface {
 
     template <typename ViewType>
     PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
-    get_views_by_offsets(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         int64_t chunk_id,
-                         const FixedVector<int32_t>& offsets) const {
-        if (this->type() == SegmentType::Growing) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "get chunk views not supported for growing segment");
-        }
+    chunk_views_by_offsets(milvus::OpContext* op_ctx,
+                           FieldId field_id,
+                           int64_t chunk_id,
+                           const FixedVector<int32_t>& offsets) const {
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
             return chunk_string_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
@@ -591,7 +590,24 @@ class SegmentInternalInterface : public SegmentInterface {
         } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
             return chunk_array_views_by_offsets(
                 op_ctx, field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, ArrayValueView>) {
+            return chunk_array_value_views_by_offsets(
+                op_ctx, field_id, chunk_id, offsets);
         }
+    }
+
+    template <typename ViewType>
+    PinWrapper<std::pair<std::vector<ViewType>, FixedVector<bool>>>
+    get_views_by_offsets(milvus::OpContext* op_ctx,
+                         FieldId field_id,
+                         int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const {
+        if (this->type() == SegmentType::Growing) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "get chunk views not supported for growing segment");
+        }
+        return chunk_views_by_offsets<ViewType>(
+            op_ctx, field_id, chunk_id, offsets);
     }
 
     // union(segment_id, field_id) as unique id
@@ -841,7 +857,7 @@ class SegmentInternalInterface : public SegmentInterface {
      *
      * @param limit Maximum number of elements to return
      * @param element_bitset Element-level bitset (size = total_element_count)
-     * @param array_offsets Mapping between element IDs and (doc_id, element_index)
+     * @param struct_element_offsets Mapping between element IDs and (doc_id, element_index)
      * @return tuple of:
      *   - vector of unique doc_offsets (no duplicates)
      *   - vector of element_indices per doc (element_indices[i] for doc_offsets[i])
@@ -852,7 +868,7 @@ class SegmentInternalInterface : public SegmentInterface {
         find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
+            const IStructElementOffsets* struct_element_offsets,
             const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     void
@@ -911,6 +927,13 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    chunk_array_value_view_impl(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     chunk_vector_array_view_impl(
         milvus::OpContext* op_ctx,
@@ -931,6 +954,14 @@ class SegmentInternalInterface : public SegmentInterface {
                                  FieldId field_id,
                                  int64_t chunk_id,
                                  const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    chunk_array_value_views_by_offsets(
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

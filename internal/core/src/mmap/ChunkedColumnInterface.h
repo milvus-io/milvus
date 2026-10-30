@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayValue.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
@@ -115,6 +116,14 @@ class ChunkedColumnInterface {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    // ArrayValueView is non-owning. The returned PinWrapper keeps the backing
+    // ColumnarArrayChunk alive for the lifetime of the views.
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
@@ -134,6 +143,12 @@ class ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(milvus::OpContext* op_ctx,
+                             int64_t chunk_id,
+                             const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>
@@ -335,6 +350,16 @@ class ChunkedColumnInterface {
                 int64_t count) const {
         ThrowInfo(ErrorCode::Unsupported,
                   "BulkArrayAt only supported for ChunkedArrayColumn");
+    }
+
+    virtual void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "BulkArrayValueAt only supported for recursive ARRAY columns");
     }
 
     virtual void

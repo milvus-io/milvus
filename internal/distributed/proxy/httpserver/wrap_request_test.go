@@ -61,7 +61,7 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, schemapb.DataType_Text, result.GetType())
 		assert.Equal(t, []string{"a", "b", "c"}, result.GetScalars().GetStringData().GetData())
-		assert.Empty(t, result.GetValidData())
+		assert.Empty(t, typeutil.GetFieldDataValidData(result))
 	})
 	t.Run("text_error", func(t *testing.T) {
 		fieldData := FieldData{
@@ -87,7 +87,7 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemapb.DataType_Text, result.GetType())
 		assert.Equal(t, []string{"a", ""}, result.GetScalars().GetStringData().GetData())
-		assert.Equal(t, []bool{true, false, true}, result.GetValidData())
+		assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(result))
 	})
 	t.Run("text_all_null", func(t *testing.T) {
 		fieldData := FieldData{

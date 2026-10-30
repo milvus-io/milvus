@@ -6,7 +6,7 @@ require (
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/milvus-io/milvus v0.0.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.4-0.20261020180144-0dbac7706ae9
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.5
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73

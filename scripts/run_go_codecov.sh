@@ -40,7 +40,7 @@ export MILVUS_UT_WITHOUT_KAFKA=1 # kafka is not available in the CI environment,
 beginTime=$(date +%s)
 echo -e "=== Running go unittest (parallel=$PARALLEL) ===\n\n"
 
-for d in cmd/tools internal pkg client; do
+for d in cmd/tools cmd/milvus internal pkg client; do
     pushd "$d"
     PROFILE="profile_${d//\//_}.out"
     echo -e "-----------------------------------\nRunning test cases under $d with -p $PARALLEL ..."

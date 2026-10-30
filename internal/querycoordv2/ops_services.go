@@ -476,7 +476,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			if streamingutil.IsStreamingServiceEnabled() {
+			if streamingutil.UseStreamingQueryNodeAsDelegator() {
 				dstNodeSet.Insert(replica.GetRWSQNodes()...)
 			} else {
 				dstNodeSet.Insert(replica.GetRWNodes()...)

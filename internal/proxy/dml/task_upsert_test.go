@@ -3780,7 +3780,7 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 	defer streaming.SetWALForTest(oldWAL)
 
 	m = mockey.Mock((*UpsertTask).queryPreExecute).To(func(task *UpsertTask, ctx context.Context) ([]int, error) {
-		task.req.FieldsData[1].ValidData = []bool{true, false, true}
+		typeutil.SetFieldDataValidData(task.req.FieldsData[1], []bool{true, false, true})
 		return nil, nil
 	}).Build()
 	defer m.UnPatch()
@@ -3934,8 +3934,7 @@ func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
 			},
 			{
 				FieldName: "extra", FieldId: 102, Type: schemapb.DataType_VarChar,
-				Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
-				ValidData: []bool{true, true},
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: []bool{true, true}, Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"old1", "old2"}}}}},
 			},
 		},
 	}
@@ -5074,7 +5073,7 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		}
 		field := profileField()
 		subField := field.GetStructArrays().GetFields()[0]
-		subField.ValidData = validData
+		typeutil.SetFieldDataValidData(subField, validData)
 		subField.GetScalars().GetArrayData().Data = rows
 		return field
 	}
@@ -5165,7 +5164,7 @@ func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
 		profile := findProfile(task)
 		if assert.NotNil(t, profile) {
 			subField := profile.GetStructArrays().GetFields()[0]
-			assert.Equal(t, []bool{true, false}, subField.GetValidData())
+			assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(subField))
 			rows := subField.GetScalars().GetArrayData().GetData()
 			require.Len(t, rows, 1)
 			assert.Equal(t, []int32{111}, rows[0].GetIntData().GetData())
@@ -5848,6 +5847,7 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 			FieldName: "timestamp_field",
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true, false},
 					Data: &schemapb.ScalarField_TimestamptzData{
 						TimestamptzData: &schemapb.TimestamptzArray{
 							Data: []int64{1000, 0, 3000, 0},
@@ -5855,13 +5855,12 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true, false},
 		}
 
 		err := ToCompressedFormatNullable(field)
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{1000, 3000}, field.GetScalars().GetTimestamptzData().GetData())
-		assert.Equal(t, []bool{true, false, true, false}, field.ValidData)
+		assert.Equal(t, []bool{true, false, true, false}, typeutil.GetFieldDataValidData(field))
 	})
 
 	t.Run("geometry WKT with null values", func(t *testing.T) {
@@ -5870,6 +5869,7 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 			FieldName: "geometry_field",
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true},
 					Data: &schemapb.ScalarField_GeometryWktData{
 						GeometryWktData: &schemapb.GeometryWktArray{
 							Data: []string{"POINT (1 2)", "", "POINT (5 6)"},
@@ -5877,7 +5877,6 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		err := ToCompressedFormatNullable(field)
@@ -5891,6 +5890,7 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 			FieldName: "geometry_field",
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true},
 					Data: &schemapb.ScalarField_GeometryData{
 						GeometryData: &schemapb.GeometryArray{
 							Data: [][]byte{{0x01, 0x02}, nil, {0x05, 0x06}},
@@ -5898,7 +5898,6 @@ func TestToCompressedFormatNullable_GeometryAndTimestamptz(t *testing.T) {
 					},
 				},
 			},
-			ValidData: []bool{true, false, true},
 		}
 
 		err := ToCompressedFormatNullable(field)
@@ -5924,7 +5923,7 @@ func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.NotNil(t, fieldData)
 		assert.Equal(t, int64(100), fieldData.FieldId)
 		assert.Equal(t, "timestamp_field", fieldData.FieldName)
-		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, typeutil.GetFieldDataValidData(fieldData), upsertIDSize)
 		assert.Equal(t, schemapb.DataType_Timestamptz, fieldData.GetType())
 		assert.Equal(t, make([]string, upsertIDSize), fieldData.GetScalars().GetStringData().GetData())
 	})
@@ -5944,7 +5943,7 @@ func TestGenNullableFieldData_GeometryAndTimestamptz(t *testing.T) {
 		assert.NotNil(t, fieldData)
 		assert.Equal(t, int64(101), fieldData.FieldId)
 		assert.Equal(t, "geometry_field", fieldData.FieldName)
-		assert.Len(t, fieldData.ValidData, upsertIDSize)
+		assert.Len(t, typeutil.GetFieldDataValidData(fieldData), upsertIDSize)
 		assert.Len(t, fieldData.GetScalars().GetGeometryWktData().GetData(), upsertIDSize)
 	})
 }
@@ -6639,8 +6638,8 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vecData}}}},
 			},
 			{
-				FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector, ValidData: validData,
-				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
+				FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: validData, Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
 			},
 		}
 	}
@@ -6689,8 +6688,8 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vecData}}}},
 				},
 				{
-					FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector, ValidData: validData,
-					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
+					FieldName: "nullable_vec", FieldId: 102, Type: schemapb.DataType_FloatVector,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: validData, Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: nullableData}}}},
 				},
 			},
 		}
@@ -6724,7 +6723,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 	assert.Empty(t, task1a.deletePKs.GetIntId().GetData())
 	assert.Equal(t, []int64{1}, task1a.insertFieldData[0].GetScalars().GetLongData().GetData())
 	assert.Equal(t, []float32{1, 1, 1, 1}, task1a.insertFieldData[1].GetVectors().GetFloatVector().GetData())
-	assert.Equal(t, []bool{false}, task1a.insertFieldData[2].ValidData)
+	assert.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(task1a.insertFieldData[2]))
 	assert.Empty(t, task1a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
 
 	// Step 1b: Empty data, upsert pk2(all) -> insert, nullable_vec=[102,...]
@@ -6752,7 +6751,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 	task3a := runUpsert(createPartialCols([]int64{3}), queryResult(nil))
 	assert.Empty(t, task3a.deletePKs.GetIntId().GetData())
 	assert.Equal(t, []int64{3}, task3a.insertFieldData[0].GetScalars().GetLongData().GetData())
-	assert.Equal(t, []bool{false}, task3a.insertFieldData[2].ValidData)
+	assert.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(task3a.insertFieldData[2]))
 	assert.Empty(t, task3a.insertFieldData[2].GetVectors().GetFloatVector().GetData())
 
 	// Step 3b: Empty data, upsert pk4(all) -> insert, nullable_vec=[104,...]
@@ -6775,7 +6774,7 @@ func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
 	// Update rows pk3,pk4: nullable_vec from existing data (ValidData=true)
 	// Insert rows pk5,pk6: nullable_vec generated by GenNullableFieldData (null, ValidData=false)
 	// ValidData has 4 elements, FloatVector only contains data for ValidData=true rows
-	assert.Equal(t, []bool{true, true, false, false}, task4b.insertFieldData[2].ValidData)
+	assert.Equal(t, []bool{true, true, false, false}, typeutil.GetFieldDataValidData(task4b.insertFieldData[2]))
 	assert.Equal(t, []float32{303, 303, 303, 303, 304, 304, 304, 304}, task4b.insertFieldData[2].GetVectors().GetFloatVector().GetData())
 }
 
@@ -6813,9 +6812,9 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 				assert.Equal(t, field.FieldID, result.FieldId)
 				assert.Equal(t, field.Name, result.FieldName)
 				assert.Equal(t, tc.dataType, result.Type)
-				assert.Equal(t, upsertIDSize, len(result.ValidData))
+				assert.Equal(t, upsertIDSize, len(typeutil.GetFieldDataValidData(result)))
 				// All ValidData should be false (null)
-				for _, v := range result.ValidData {
+				for _, v := range typeutil.GetFieldDataValidData(result) {
 					assert.False(t, v)
 				}
 			})
@@ -6849,9 +6848,9 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 				assert.Equal(t, field.FieldID, result.FieldId)
 				assert.Equal(t, field.Name, result.FieldName)
 				assert.Equal(t, tc.dataType, result.Type)
-				assert.Equal(t, upsertIDSize, len(result.ValidData))
+				assert.Equal(t, upsertIDSize, len(typeutil.GetFieldDataValidData(result)))
 				// All ValidData should be false (null)
-				for _, v := range result.ValidData {
+				for _, v := range typeutil.GetFieldDataValidData(result) {
 					assert.False(t, v)
 				}
 				assert.NotNil(t, result.GetVectors())
@@ -6869,7 +6868,7 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 		result, err := GenNullableFieldData(field, upsertIDSize)
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, upsertIDSize, len(result.ValidData))
+		assert.Equal(t, upsertIDSize, len(typeutil.GetFieldDataValidData(result)))
 		assert.NotNil(t, result.GetVectors().GetSparseFloatVector())
 	})
 
@@ -6914,8 +6913,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 		},
 		{
 			FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
-			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b"}}}}},
-			ValidData: []bool{true, true, false},
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: []bool{true, true, false}, Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "b"}}}}},
 		},
 	}
 
@@ -7011,8 +7009,7 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 		{
 			// ValidData length (2) doesn't match numRows (3) → FillWithDefaultValue returns error
 			FieldName: "default_col", FieldId: 102, Type: schemapb.DataType_VarChar,
-			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}}},
-			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{ValidData: []bool{true, false}, Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}}}},
 		},
 	}
 
@@ -7170,7 +7167,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		metaData := metaField.GetScalars().GetJsonData().GetData()
 		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
 		// ValidData should also have 3 entries (2 from update + 1 from insert)
-		assert.Equal(t, 3, len(metaField.GetValidData()), "ValidData length should match row count")
+		assert.Equal(t, 3, len(typeutil.GetFieldDataValidData(metaField)), "ValidData length should match row count")
 	})
 
 	t.Run("dynamic field without ValidData is auto-filled by queryPreExecute", func(t *testing.T) {
@@ -7258,7 +7255,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		assert.NotNil(t, metaField)
 		metaData := metaField.GetScalars().GetJsonData().GetData()
 		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
-		validData := metaField.GetValidData()
+		validData := typeutil.GetFieldDataValidData(metaField)
 		assert.Equal(t, 3, len(validData),
 			"queryPreExecute auto-fills ValidData, merge produces correct length 3")
 	})
@@ -7365,7 +7362,7 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 		metaData := metaField.GetScalars().GetJsonData().GetData()
 		assert.Equal(t, 3, len(metaData), "merged $meta should have 3 rows")
 		// For non-nullable $meta, ValidData should remain empty (not auto-filled)
-		assert.Empty(t, metaField.GetValidData(),
+		assert.Empty(t, typeutil.GetFieldDataValidData(metaField),
 			"non-nullable $meta should NOT have ValidData auto-filled")
 	})
 }
@@ -7541,4 +7538,76 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			require.Zero(t, fakeWAL.appendCalls)
 		})
 	}
+}
+
+func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
+	typeSchema := &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+					},
+				},
+			},
+		},
+	}
+	collectionSchema := &schemapb.CollectionSchema{
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				FieldID: 200,
+				Name:    "profile",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:     201,
+						Name:        "profile[values]",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+						TypeSchema:  typeSchema,
+					},
+				},
+			},
+		},
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collectionSchema)
+	require.NoError(t, err)
+	nestedRow := &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32},
+		},
+	}
+	subFieldData := &schemapb.FieldData{
+		FieldName: "values",
+		FieldId:   201,
+		Type:      schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Array,
+						Data:        []*schemapb.ScalarField{nestedRow},
+					},
+				},
+			},
+		},
+	}
+	fieldData := &schemapb.FieldData{
+		FieldName: "profile",
+		FieldId:   200,
+		Type:      schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{subFieldData},
+			},
+		},
+	}
+
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(
+		schemaHelper,
+		collectionSchema.GetStructArrayFields()[0],
+		fieldData,
+		1,
+	))
 }

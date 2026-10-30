@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func NewFieldAccessor(fieldType schemapb.DataType) (FieldAccessor, error) {
@@ -68,7 +69,7 @@ func (i32Field *Int32FieldAccessor) Hash(idx int) uint64 {
 
 func (i32Field *Int32FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	i32Field.vals = fieldData.GetScalars().GetIntData().GetData()
-	i32Field.validData = fieldData.GetValidData()
+	i32Field.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (i32Field *Int32FieldAccessor) RowCount() int {
@@ -113,7 +114,7 @@ func (i64Field *Int64FieldAccessor) Hash(idx int) uint64 {
 
 func (i64Field *Int64FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	i64Field.vals = fieldData.GetScalars().GetLongData().GetData()
-	i64Field.validData = fieldData.GetValidData()
+	i64Field.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (i64Field *Int64FieldAccessor) RowCount() int {
@@ -158,7 +159,7 @@ func (tzField *TimestamptzFieldAccessor) Hash(idx int) uint64 {
 
 func (tzField *TimestamptzFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	tzField.vals = fieldData.GetScalars().GetTimestamptzData().GetData()
-	tzField.validData = fieldData.GetValidData()
+	tzField.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (tzField *TimestamptzFieldAccessor) RowCount() int {
@@ -208,7 +209,7 @@ func (boolField *BoolFieldAccessor) Hash(idx int) uint64 {
 
 func (boolField *BoolFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	boolField.vals = fieldData.GetScalars().GetBoolData().GetData()
-	boolField.validData = fieldData.GetValidData()
+	boolField.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (boolField *BoolFieldAccessor) RowCount() int {
@@ -254,7 +255,7 @@ func (f32FieldAccessor *Float32FieldAccessor) Hash(idx int) uint64 {
 
 func (f32FieldAccessor *Float32FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	f32FieldAccessor.vals = fieldData.GetScalars().GetFloatData().GetData()
-	f32FieldAccessor.validData = fieldData.GetValidData()
+	f32FieldAccessor.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (f32FieldAccessor *Float32FieldAccessor) RowCount() int {
@@ -300,7 +301,7 @@ func (f64Field *Float64FieldAccessor) Hash(idx int) uint64 {
 
 func (f64Field *Float64FieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	f64Field.vals = fieldData.GetScalars().GetDoubleData().GetData()
-	f64Field.validData = fieldData.GetValidData()
+	f64Field.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (f64Field *Float64FieldAccessor) RowCount() int {
@@ -345,7 +346,7 @@ func (stringField *StringFieldAccessor) Hash(idx int) uint64 {
 
 func (stringField *StringFieldAccessor) SetVals(fieldData *schemapb.FieldData) {
 	stringField.vals = fieldData.GetScalars().GetStringData().GetData()
-	stringField.validData = fieldData.GetValidData()
+	stringField.validData = typeutil.GetFieldDataValidData(fieldData)
 }
 
 func (stringField *StringFieldAccessor) RowCount() int {
@@ -391,7 +392,7 @@ func AssembleSingleRow(colCount int, row *Row, fieldDatas []*schemapb.FieldData)
 func AssembleSingleValue(fv *FieldValue, fieldData *schemapb.FieldData) error {
 	isNull := fv.IsNull()
 	// Append validity data (true = valid, false = null)
-	fieldData.ValidData = append(fieldData.ValidData, !isNull)
+	typeutil.SetFieldDataValidData(fieldData, append(typeutil.GetFieldDataValidData(fieldData), !isNull))
 
 	// For null values, append zero/default values to maintain array alignment
 	if isNull {

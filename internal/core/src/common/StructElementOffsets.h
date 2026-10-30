@@ -54,9 +54,16 @@ struct ElementRowInfo {
 // Offsets for inner nested arrays stay in each column's own chunk. When nested
 // Array of Struct layers are supported, each layer needs its own mapping from
 // that layer's elements to its parent layer.
-class IArrayOffsets {
+// Row-to-struct-element mapping, built only for struct sub-fields. One mapping
+// belongs to each struct and is shared by all of its sibling sub-fields;
+// element IDs are contiguous across the entire segment.
+//
+// Offsets for inner nested arrays stay in each column's own chunk. When nested
+// Array of Struct layers are supported, each layer needs its own mapping from
+// that layer's elements to its parent layer.
+class IStructElementOffsets {
  public:
-    virtual ~IArrayOffsets() = default;
+    virtual ~IStructElementOffsets() = default;
 
     virtual int64_t
     GetRowCount() const = 0;
@@ -167,14 +174,14 @@ class IArrayOffsets {
                                 TargetBitmapView row_result) const = 0;
 };
 
-class ArrayOffsetsSealed : public IArrayOffsets {
-    friend class ArrayOffsetsTest;
+class StructElementOffsetsSealed : public IStructElementOffsets {
+    friend class StructElementOffsetsTest;
 
  public:
-    ArrayOffsetsSealed() : row_to_element_start_({0}) {
+    StructElementOffsetsSealed() : row_to_element_start_({0}) {
     }
 
-    explicit ArrayOffsetsSealed(
+    explicit StructElementOffsetsSealed(
         std::vector<int32_t> row_to_element_start,
         std::optional<TargetBitmap> row_validity = std::nullopt)
         : row_to_element_start_(std::move(row_to_element_start)),
@@ -190,9 +197,9 @@ class ArrayOffsetsSealed : public IArrayOffsets {
     // is balanced. Used when a scalar or struct ARRAY field is materialized for
     // old sealed rows (schema evolution) without going through the normal
     // offsets-build path.
-    static std::shared_ptr<ArrayOffsetsSealed>
+    static std::shared_ptr<StructElementOffsetsSealed>
     BuildAllZeros(int64_t row_count, bool rows_valid = true) {
-        auto result = std::make_shared<ArrayOffsetsSealed>(
+        auto result = std::make_shared<StructElementOffsetsSealed>(
             std::vector<int32_t>(row_count + 1, 0),
             TargetBitmap(row_count, rows_valid));
         result->resource_size_ = sizeof(int32_t) * (row_count + 1) +
@@ -202,7 +209,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
         return result;
     }
 
-    ~ArrayOffsetsSealed() {
+    ~StructElementOffsetsSealed() {
         cachinglayer::Manager::GetInstance().RefundLoadedResource(
             {resource_size_, 0});
     }
@@ -274,7 +281,7 @@ class ArrayOffsetsSealed : public IArrayOffsets {
                                 int64_t row_start,
                                 TargetBitmapView row_result) const override;
 
-    static std::shared_ptr<ArrayOffsetsSealed>
+    static std::shared_ptr<StructElementOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,
                     const FieldMeta& field_meta,
                     int64_t row_count,
@@ -302,14 +309,14 @@ class ArrayOffsetsSealed : public IArrayOffsets {
 // Growing offsets are not charged to the caching layer. Chunked storage
 // eagerly allocates the first starts chunk (32 KiB) and then grows in 32 KiB
 // steps.
-class ArrayOffsetsGrowing : public IArrayOffsets {
+class StructElementOffsetsGrowing : public IStructElementOffsets {
  public:
     // Public so tests can target chunk boundaries.
     static constexpr int64_t kChunkBits = 13;
     static constexpr int64_t kEntriesPerChunk = int64_t{1} << kChunkBits;
     static constexpr int64_t kChunkMask = kEntriesPerChunk - 1;
 
-    ArrayOffsetsGrowing() {
+    StructElementOffsetsGrowing() {
         // starts[0] is the sentinel for an empty table. The constructor
         // happens-before concurrent use, so this initialization needs no
         // synchronization.

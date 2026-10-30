@@ -45,6 +45,13 @@ func CreateConsumer(
 	opts *ConsumerOptions,
 	handlerClient streamingpb.StreamingNodeHandlerServiceClient,
 ) (Consumer, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	created := false
+	defer func() {
+		if !created {
+			cancel()
+		}
+	}()
 	ctx = contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
 		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
 	})
@@ -69,6 +76,7 @@ func CreateConsumer(
 	}
 	cli := &consumerImpl{
 		ctx:              ctx,
+		cancel:           cancel,
 		walName:          createResp.GetWalName(),
 		opts:             opts,
 		grpcStreamClient: streamClient,
@@ -77,16 +85,26 @@ func CreateConsumer(
 			mlog.String("walName", createResp.GetWalName()),
 			mlog.String("pchannel", opts.Assignment.Channel.Name),
 			mlog.Int64("term", opts.Assignment.Channel.Term),
-			mlog.Int64("streamingNodeID", opts.Assignment.Node.ServerID)),
+			mlog.Int64("streamingNodeID", opts.Assignment.Node.ServerID),
+		),
 		msgHandler: opts.MessageHandler,
 		finishErr:  syncutil.NewFuture[error](),
 	}
+	if err := cli.createVChannelConsumer(); err != nil {
+		// No receiver owns finishErr yet. Cancel only this attempt and leave
+		// the upper message handler available for a retry.
+		cancel()
+		_ = streamClient.CloseSend()
+		return nil, err
+	}
+	created = true
 	go cli.execute()
 	return cli, nil
 }
 
 type consumerImpl struct {
-	ctx              context.Context // TODO: the cancel method of consumer should be managed by consumerImpl, fix it in future.
+	ctx              context.Context
+	cancel           context.CancelFunc
 	walName          string
 	opts             *ConsumerOptions
 	grpcStreamClient streamingpb.StreamingNodeHandlerService_ConsumeClient
@@ -147,12 +165,10 @@ func (c *consumerImpl) recvLoop() (err error) {
 		} else {
 			c.logger.Info(c.ctx, "recv arm of stream closed")
 		}
+		c.cancel()
 		c.finishErr.Set(err)
 		c.msgHandler.Close()
 	}()
-	if err := c.createVChannelConsumer(); err != nil {
-		return err
-	}
 	for {
 		resp, err := c.grpcStreamClient.Recv()
 		if errors.Is(err, io.EOF) {
@@ -219,7 +235,15 @@ func (c *consumerImpl) createVChannelConsumer() error {
 	if createVChannelResp == nil {
 		return status.NewInvalidRequestSeq("expect create vchannel response")
 	}
-	return nil
+	switch response := createVChannelResp.GetResponse().(type) {
+	case *streamingpb.CreateVChannelConsumerResponse_ConsumerId:
+		return nil
+	case *streamingpb.CreateVChannelConsumerResponse_Error:
+		if response.Error != nil {
+			return (*status.StreamingError)(response.Error)
+		}
+	}
+	return status.NewInvalidRequestSeq("expect successful create vchannel response")
 }
 
 func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {

@@ -36,6 +36,7 @@
 
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
+#include "common/Utils.h"
 #include "common/IndexMeta.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
@@ -212,10 +213,11 @@ FindFieldData(const segcore::GeneratedData& dataset, FieldId field_id) {
 
 int64_t
 CountValidRows(const DataArray& data, int64_t total_count) {
-    if (data.valid_data_size() == 0) {
+    const auto& valid_data = GetFieldDataRowValidData(data);
+    if (valid_data.empty()) {
         return total_count;
     }
-    return std::count(data.valid_data().begin(), data.valid_data().end(), true);
+    return std::count(valid_data.begin(), valid_data.end(), true);
 }
 
 std::shared_ptr<ChunkedColumn>
@@ -1006,7 +1008,7 @@ TEST(SearchOnGrowingBitsetLifetime,
     auto valid_count = CountValidRows(vector_data, total_count);
     ASSERT_GT(valid_count, 0);
     ASSERT_LT(valid_count, total_count);
-    const auto& row_validity = vector_data.valid_data();
+    const auto& row_validity = GetFieldDataRowValidData(vector_data);
     ASSERT_EQ(row_validity.size(), total_count);
 
     auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
@@ -1788,6 +1790,65 @@ TEST(SearchOnSealedColumnBitsetLifetime,
         logical_bitset_bytes,
         additional_filter,
         [&](int64_t offset) { return valid_data[offset]; });
+}
+
+TEST(ElementNullableVectorArraySearch, RejectsUnsupportedRepresentation) {
+    auto schema = std::make_shared<Schema>();
+    auto primary_key = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(primary_key);
+    auto vector_array =
+        schema->AddDebugVectorArrayField("vectors",
+                                         DataType::VECTOR_FLOAT,
+                                         kDim,
+                                         knowhere::metric::L2,
+                                         /*nullable=*/false,
+                                         /*element_nullable=*/true);
+
+    SearchInfo search_info;
+    search_info.field_id_ = vector_array;
+    search_info.topk_ = 1;
+    search_info.round_decimal_ = -1;
+    search_info.metric_type_ = knowhere::metric::L2;
+    std::vector<float> query(kDim, 0.0F);
+
+    segcore::SealedIndexingEntry entry;
+    SearchResult sealed_index_result;
+    EXPECT_ANY_THROW(SearchOnSealedIndex(*schema,
+                                         entry,
+                                         search_info,
+                                         query.data(),
+                                         nullptr,
+                                         1,
+                                         BitsetView{},
+                                         nullptr,
+                                         sealed_index_result));
+
+    SearchResult sealed_column_result;
+    EXPECT_ANY_THROW(SearchOnSealedColumn(*schema,
+                                          nullptr,
+                                          search_info,
+                                          {},
+                                          query.data(),
+                                          nullptr,
+                                          1,
+                                          0,
+                                          BitsetView{},
+                                          nullptr,
+                                          sealed_column_result));
+
+    auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    SearchResult growing_result;
+    EXPECT_ANY_THROW(SearchOnGrowing(*growing,
+                                     search_info,
+                                     query.data(),
+                                     nullptr,
+                                     1,
+                                     MAX_TIMESTAMP,
+                                     BitsetView{},
+                                     nullptr,
+                                     growing_result));
 }
 
 }  // namespace milvus::query
