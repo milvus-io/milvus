@@ -187,11 +187,23 @@ func (s *Suite) TestQueryNodeGroups() {
 	filtered := integration.ConstructSearchRequest("", name, "pk >= 0", "vec",
 		schemapb.DataType_FloatVector, nil, metric.L2, map[string]any{"nprobe": 4}, 1, dim, 5, -1)
 	filtered.UseDefaultConsistency = true
-	_, err = s.Cluster.MilvusClient.Search(ctx, filtered)
+	result, err := s.Cluster.MilvusClient.Search(ctx, filtered)
 	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(result.GetStatus()))
+	s.Require().NotEmpty(result.GetResults().GetIds().GetIntId().GetData())
 	after := execFeatures(s.report(ctx))
 	s.Greater(after["two_stage_search"], before["two_stage_search"],
-		"a filtered pure-ANN search takes the two-stage branch; the delegator reports it as an execution feature")
+		"a filtered pure-ANN search takes the two-stage branch; QueryViewClient reports it as an execution feature")
+
+	// Zero filter cardinalities still complete both stages and must produce an
+	// empty ANN result rather than being mistaken for missing statistics.
+	emptyFilter := proto.Clone(filtered).(*milvuspb.SearchRequest)
+	emptyFilter.Dsl = "pk < 0"
+	empty, err := s.Cluster.MilvusClient.Search(ctx, emptyFilter)
+	s.Require().NoError(err)
+	s.Require().NoError(merr.Error(empty.GetStatus()))
+	s.Empty(empty.GetResults().GetIds().GetIntId().GetData())
+	s.Greater(execFeatures(s.report(ctx))["two_stage_search"], after["two_stage_search"])
 
 	// RunAnalyzer is the one user feature only a QueryNode serves; it is
 	// counted at the Proxy, once per client request.

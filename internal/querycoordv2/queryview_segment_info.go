@@ -62,7 +62,7 @@ func (s *Server) queryViewCollectionSegmentInfo(ctx context.Context, collectionI
 		stats := snapshot()
 		placements := queryViewUpSegments(cfg, stats, requested)
 		ids := slices.Sorted(maps.Keys(placements))
-		var metadata []*querypb.SegmentLoadInfo
+		var metadata []*querypb.QueryViewSegmentLoadInfoResult
 		var err error
 		if len(ids) > 0 {
 			// MixCoord dispatches this directly to its local DataCoord metadata.
@@ -78,7 +78,11 @@ func (s *Server) queryViewCollectionSegmentInfo(ctx context.Context, collectionI
 			return nil, err
 		}
 		infos := make([]*querypb.SegmentInfo, 0, len(metadata))
-		for _, meta := range metadata {
+		for _, result := range metadata {
+			if err := merr.Error(result.GetStatus()); err != nil {
+				return nil, err
+			}
+			meta := result.GetLoadInfo()
 			info := placements[meta.GetSegmentID()]
 			info.NumRows = meta.GetNumOfRows()
 			info.Level = meta.GetLevel()

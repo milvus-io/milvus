@@ -45,7 +45,7 @@ func newHandoffServer(t *testing.T) (*Server, func(string, int64)) {
 	require.NoError(t, err)
 	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 11}}}))
 	registry := &coordview.ShardViewRegistry{}
-	runtime := &qviewsRuntime{loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry), loadManager: loadmgr.NewCollectionLoadManager(store, nil)}
+	runtime := &qviewsRuntime{loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry), loadManager: loadmgr.NewCollectionLoadManager(store, nil, nil)}
 	runtime.resources = &qvresource.Resources{LoadConfigs: store, LoadManager: runtime.loadManager, ShardViews: registry, Readiness: runtime.readyChanges, RefreshVersions: &runtime.refreshVersions, VChannels: func(context.Context, int64) ([]string, error) { return []string{"v0", "v1"}, nil }}
 	resourcePatch := mockey.Mock(qvresource.Resource).Return(runtime.resources).Build()
 	t.Cleanup(func() { resourcePatch.UnPatch() })
@@ -147,7 +147,7 @@ func TestCreatePartitionWaitsForQueryViewConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	applied := make(chan struct{}, 1)
-	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, func(int64) { applied <- struct{}{} })
+	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, func(int64) { applied <- struct{}{} }, nil)
 	s.qviewsRuntime.resources.LoadManager = s.qviewsRuntime.loadManager
 	done := make(chan error, 1)
 	go func() {

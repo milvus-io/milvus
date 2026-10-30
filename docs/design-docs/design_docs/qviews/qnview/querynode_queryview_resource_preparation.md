@@ -339,6 +339,21 @@ resource estimates; it releases the initial preparing Collection before becoming
 available to Views. The Go View owns its Collection until all operations finish.
 
 
+Segment metrics inspect SegmentResourceManager's actual physical bases, not
+View requirements or the legacy SegmentManager registry. Sampling increments
+the existing resource/base operation references under the manager lock, then
+reads physical metadata outside it and releases the references. A closing
+resource cannot acquire a new sample; reconciliation cannot retire a sampled
+base. No schema reference or additional collection pin is needed. Resources
+retained by old Views or queries remain observable until retirement.
+
+A base shared by several Views is sampled once. Distinct physical bases of one
+SegmentID are aggregated into one response entry: memory sums the existing
+per-base MemSize measurements, rows use the maximum loaded insert count rather
+than multiplying logical rows, and indexed fields are merged by field/build ID.
+The existing MemSize and index/raw-data measurements remain physical inspection
+values, not an atomic snapshot of all concurrent reopen/index operations.
+
 Physical ReadStates retain immutable resource generations: columns, indexes,
 readers and row-domain metadata. PublishedSegmentState owns a shared immutable
 SealedFieldLayout. The layout owns a shared Schema reference, an IndexMeta
@@ -537,7 +552,13 @@ runs outside registration locks and only schedules reconciliation. The temporary
 resource catch-up goroutine exits after installing it; no per-Segment failure
 waiter remains while the resource serves queries.
 
-Catchup uses bounded pages on a shared worker pool. A registration awaiting
+Catchup uses bounded pages on a shared worker pool. Its QueryNode-wide worker
+count is `max(1, floor(hardware.GetCPUNum() * ratio))`, configured by
+`queryNode.queryView.transformLogDrainConcurrencyRatio` (default `0.25`).
+Configuration changes resize the existing node-wide pool. Shrinking completes
+in-flight pages and preserves queued registrations; growing starts more workers.
+Node context cancellation unregisters the watcher and stops the worker pool.
+This pool runs Segment catch-up; there is no separate Segment catch-up pool. A registration awaiting
 transport coverage parks its state and releases the worker. Arrivals schedule
 pending registrations under the same VChannel lock used for the final empty
 check and attachment to the live dispatch set. A queued/running bit coalesces
@@ -549,14 +570,6 @@ and live application, including when its base is newer than current coverage.
 Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application
 for their selected physical resources, not only remote receipt.
-
-The QueryNode-wide catch-up worker count is
-`max(1, floor(hardware.GetCPUNum() * ratio))`, configured by
-`queryNode.queryView.transformLogDrainConcurrencyRatio` (default `0.25`).
-Configuration changes resize the existing pool. Shrinking completes in-flight
-pages and preserves queued registrations; growing starts more workers. The node
-context cancellation unregisters the watcher and stops the pool. There is no
-separate Segment catch-up worker pool.
 
 Catch-up applies bounded pages on a shared worker pool, yielding after each
 page. A registration awaiting transport coverage parks its state and releases

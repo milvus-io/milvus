@@ -363,11 +363,11 @@ TEST_F(JsonFlatContainsExpressionTest,
     EXPECT_EQ(cache.GetEntryCount(), 4);
 }
 
-TEST_F(JsonFlatExpressionTest, RootComparisonPreservesScalarShape) {
+TEST_F(JsonFlatExpressionTest, RootComparisonUsesIndex) {
     proto::plan::GenericValue value;
     value.set_int64_val(1);
     auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(json_fid_, DataType::JSON, {}),
+        expr::ColumnInfo(json_fid_, DataType::JSON, {""}),
         proto::plan::OpType::GreaterEqual,
         value,
         std::vector<proto::plan::GenericValue>());
@@ -375,10 +375,10 @@ TEST_F(JsonFlatExpressionTest, RootComparisonPreservesScalarShape) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     auto final = query::ExecuteQueryExpr(
         plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
-    EXPECT_EQ(final.count(), 2);
+    EXPECT_EQ(final.count(), 3);
     EXPECT_TRUE(final[8]);
     EXPECT_TRUE(final[10]);
-    EXPECT_FALSE(final[12]);  // A numeric array is not a scalar number.
+    EXPECT_TRUE(final[12]);
 }
 
 TEST_F(JsonFlatExpressionTest, ComparisonsAndNotPreserveUnknowns) {
@@ -495,7 +495,7 @@ TEST_F(JsonFlatExpressionTest,
     EXPECT_TRUE(final[6]);
 }
 
-TEST_F(JsonFlatExpressionTest, ScalarFallbackCachesResultsWithoutFlatValidity) {
+TEST_F(JsonFlatExpressionTest, ReusesValidityAcrossLiteralsAndOperators) {
     auto& cache = exec::ExprResCacheManager::Instance();
     exec::CacheConfig config;
     config.mode = exec::CacheMode::Memory;
@@ -527,11 +527,7 @@ TEST_F(JsonFlatExpressionTest, ScalarFallbackCachesResultsWithoutFlatValidity) {
 
     EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, int_value(1)).count(),
               2);
-    EXPECT_EQ(cache.GetEntryCount(), 1);
-
-    EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, int_value(1)).count(),
-              2);
-    EXPECT_EQ(cache.GetEntryCount(), 1);  // Reuse the scalar result entry.
+    EXPECT_EQ(cache.GetEntryCount(), 2);
 
     exec::ExprResCacheManager::Key artifact_key{
         segment_->get_segment_id(),
@@ -541,30 +537,32 @@ TEST_F(JsonFlatExpressionTest, ScalarFallbackCachesResultsWithoutFlatValidity) {
                     static_cast<unsigned int>(DataType::DOUBLE))};
     exec::ExprResCacheManager::Value artifact;
     artifact.active_count = json_data_.size();
-    // Scalar evaluation uses the original JSON shape, not the flat index's
-    // type-validity bitmap (which also includes array elements).
+    ASSERT_TRUE(cache.Get(artifact_key, artifact));
+    EXPECT_EQ(artifact.result->count(), 6);
+    EXPECT_EQ(artifact.valid_result->count(), json_data_.size());
+    artifact.active_count = json_data_.size() + 1;
     EXPECT_FALSE(cache.Get(artifact_key, artifact));
 
     EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, int_value(3)).count(),
               1);
-    EXPECT_EQ(cache.GetEntryCount(), 2);
+    EXPECT_EQ(cache.GetEntryCount(), 3);
 
     EXPECT_EQ(
         evaluate({"a"}, proto::plan::OpType::GreaterThan, int_value(1)).count(),
         4);
-    EXPECT_EQ(cache.GetEntryCount(), 3);
+    EXPECT_EQ(cache.GetEntryCount(), 4);
 
     proto::plan::GenericValue string_value;
     string_value.set_string_val("abc");
     EXPECT_EQ(evaluate({"a"}, proto::plan::OpType::Equal, string_value).count(),
               1);
-    EXPECT_EQ(cache.GetEntryCount(), 4);
+    EXPECT_EQ(cache.GetEntryCount(), 6);
 
     EXPECT_EQ(evaluate({"b"}, proto::plan::OpType::Equal, int_value(2)).count(),
               1);
-    EXPECT_EQ(cache.GetEntryCount(), 5);
+    EXPECT_EQ(cache.GetEntryCount(), 8);
 
-    EXPECT_EQ(cache.EraseSegment(segment_->get_segment_id()), 5);
+    EXPECT_EQ(cache.EraseSegment(segment_->get_segment_id()), 8);
     EXPECT_EQ(cache.GetEntryCount(), 0);
 }
 

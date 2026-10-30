@@ -23,7 +23,7 @@ func TestWALLifetime(t *testing.T) {
 	channel := "test"
 	mixcoord := mocks.NewMockMixCoordClient(t)
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
-	fMixcoord.Set(testMixCoordClient{MockMixCoordClient: mixcoord})
+	fMixcoord.Set(mixcoord)
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixcoord),

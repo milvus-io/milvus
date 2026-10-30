@@ -60,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -73,9 +72,6 @@ import (
 var Params = params.Params
 
 type Server struct {
-	loadInfos interface {
-		GetLoadInfo(context.Context, int64, uint64) (*querypb.GetQueryViewLoadInfoResponse, error)
-	}
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
@@ -398,13 +394,15 @@ func (s *Server) initQueryCoord() error {
 
 func (s *Server) initQViewsRuntime() error {
 	mlog.Info(s.ctx, "init query view runtime")
-	runtime, err := newQViewsRuntime(s.ctx, newDefaultQViewsRuntimeDependencies(
+	deps := newDefaultQViewsRuntimeDependencies(
 		s.kv,
 		s.etcdCli,
 		s.store,
 		s.meta.ResourceManager,
 		s.mixCoord,
-	))
+	)
+	deps.replicaResources = s.meta
+	runtime, err := newQViewsRuntime(s.ctx, deps)
 	if err != nil {
 		return err
 	}
@@ -546,6 +544,7 @@ func (s *Server) startServerLoop() {
 	mlog.Info(s.ctx, "start query view runtime...")
 	if s.qviewsRuntime != nil {
 		s.qviewsRuntime.start(s.ctx)
+		s.watchLoadConfigChanges()
 	}
 	if s.collectionUsage != nil {
 		s.collectionUsage.start(s.ctx)
@@ -921,16 +920,17 @@ func (s *Server) updateBalanceConfig() bool {
 func (s *Server) watchLoadConfigChanges() {
 	w := NewLoadConfigWatcher(s)
 	s.loadConfigWatcher = w
+	w.handlers = make(map[string]config.EventHandler)
+	for _, key := range []string{
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key,
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key,
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key,
+	} {
+		handler := config.NewHandler("queryviewLoadConfigChanges", func(e *config.Event) { w.Trigger() })
+		w.handlers[key] = handler
+		paramtable.Get().Watch(key, handler)
+	}
 	w.Trigger()
-
-	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) { w.Trigger() })
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, replicaNumHandler)
-
-	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) { w.Trigger() })
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
-
-	forceOverrideHandler := config.NewHandler("watchForceOverrideUserReplicaModeChanges", func(e *config.Event) { w.Trigger() })
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, forceOverrideHandler)
 }
 
 // GetInternalReplicasByCollection returns replicas for a collection from internal meta.

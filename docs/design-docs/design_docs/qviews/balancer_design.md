@@ -499,6 +499,26 @@ broadcast completion callback to update `CollectionLoadManager`. StreamingNode d
 persist a vchannel-local load config; QueryView metadata identifies the versioned load
 info used when the local state machine acquires resources.
 
+`AlterCollection` and `AlterDatabase` already carry replica-count/resource-group
+intent in their durable messages. Their ACK callbacks pass this intent directly to
+`CollectionLoadManager.UpdateReplicaConfig`. The manager constructs the complete
+configuration and reuses the application path of `ApplyLoadConfig`. They reuse surviving ReplicaIDs
+and preserve partition, field and user-placement intent. An unloaded collection
+stays unloaded. The enclosing exclusive collection/database guard supplies
+serialization; recursively calling the `UpdateLoadConfig` RPC would reacquire
+a conflicting guard and deadlock. Replaying an already applied placement is a
+no-op. A missing resource group does not prevent metadata-cache invalidation.
+
+The cluster load-configuration watcher uses the same configuration construction
+and `ApplyLoadConfig` path without broadcasting an `AlterLoadConfig` message.
+It acquires the collection resource guard, rereads current desired state and
+cluster settings, and persists under that guard. This serializes it with release,
+explicit load and collection/database ALTER; a stale watcher snapshot cannot
+resurrect a released collection or override newly committed user placement.
+The periodically retried cluster configuration is its reconciliation source.
+External `UpdateLoadConfig` requests also acquire the collection guard and apply
+through the manager directly; they do not create another WAL operation.
+
 **Release semantics (Option A)**: `ReleaseCollection` removes LoadConfig; its
 source hook clears the cache desired field and enqueues the collection. Orphan
 views are detected by Phase 1 and released via `RequestRelease`. No separate
@@ -1217,6 +1237,29 @@ version changed, it reports zero progress for the current configuration (or no
 configuration after release). Store versions increase across release/reload, so
 old Up views cannot satisfy the new load. A successful check describes a point
 in time during the call; subsequent configuration changes require a new poll.
+
+**Loaded feature statistics** use the same current-config readiness check over
+metadata's complete vchannel set. Counts, replica-number buckets and resource
+groups come from the returned immutable LoadConfig, not legacy collection or
+replica managers. A RootCoord collection snapshot excludes dropped collections.
+Nonempty preload hints are a partial load when they omit required field IDs;
+RequiredFields includes dynamic and flattened StructArray fields. Empty hints
+mean full preload. These statistics do not imply that fields outside explicit
+preload hints are inaccessible to lazy queries.
+
+**Cluster default placement changes** reconcile LoadConfigStore on startup,
+configuration notifications, periodic checks and retries. The watcher coalesces
+notifications; it unregisters handlers and cancels outstanding work on shutdown.
+Each collection update takes the normal exclusive collection broadcast lock,
+re-reads the current LoadConfig and cluster defaults, and skips released
+collections or user-specified placement unless force override is enabled.
+Replica counts are compared per resource group, including repeated group names.
+The explicit UpdateLoadConfig RPC uses the same AlterLoadConfig broadcast and
+ordered callback. Updates preserve partitions, field requirements and user
+intent, retain/reuse replica IDs where possible, and return after durable config
+application. They do not wait for QueryView Up while holding up updates to other
+collections; shared load readiness reports asynchronous convergence. No legacy
+replica promotion or Target/Distribution observer participates.
 
 **Query segment inspection**: `GetQuerySegmentInfo` / `GetLoadSegmentInfo`
 report the latest serving sealed-segment membership per vchannel from the

@@ -3253,16 +3253,10 @@ func (_c *MockQueryCoordClient_ValidateAnalyzer_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// WatchQueryViewSegmentLoadInfo provides a mock function with given fields: ctx, opts
-
-// MockQueryCoordClient_WatchQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchQueryViewSegmentLoadInfo'
-type MockQueryCoordClient_WatchQueryViewSegmentLoadInfo_Call struct {
-	*mock.Call
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MockQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }
-
-// WatchQueryViewSegmentLoadInfo is a helper method to define mock.On call
-//   - ctx context.Context
-//   - opts ...grpc.CallOption
 
 // NewMockQueryCoordClient creates a new instance of MockQueryCoordClient. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
@@ -3276,9 +3270,4 @@ func NewMockQueryCoordClient(t interface {
 	t.Cleanup(func() { mock.AssertExpectations(t) })
 
 	return mock
-}
-
-// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
-func (_m *MockQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }

@@ -238,8 +238,8 @@ counts and completeness against the planned sealed count. Missing statistics
 fall back to ordinary ANN. Invalid statistics fail the attempt. Complete counts
 feed CalculateEffectiveSegmentNum and OptimizeSearchParams with second-stage
 semantics. The hosting process supplies an initialized QueryHook through
-ViewQueryClientConfig.QueryHook. Proxy hook initialization and watcher ownership,
-and QN execution-option propagation, remain separate integration work. Without a hook, existing non-hook parameter handling remains.
+ViewQueryClientConfig.QueryHook. Proxy initializes the hook and owns its configuration watchers; QN propagates
+execution options to its native search adapter. Without a hook, existing non-hook parameter handling remains.
 
 Only then does ANN fan out to every planned QN and SN. Filter results never enter
 the search reducer. Their execution feature bits are preserved, while the
