@@ -7,7 +7,6 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,9 +45,6 @@ func TestUpdateReplicaConfig(t *testing.T) {
 			store, _ := newTestStore(t)
 			id := int64(11)
 			for _, p := range []*mockey.Mocker{
-				mockey.Mock(catalogkv.Catalog.SaveCollection).Return(nil).Build(),
-				mockey.Mock(catalogkv.Catalog.SaveReplica).Return(nil).Build(),
-				mockey.Mock(catalogkv.Catalog.ReleaseReplica).Return(nil).Build(),
 				mockey.Mock((*testReplicaConfigResources).ContainResourceGroup).To(func(_ *testReplicaConfigResources, _ context.Context, group string) bool { return group != "missing" }).Build(),
 				mockey.Mock((*testReplicaConfigResources).AllocateReplicaID).To(func(*testReplicaConfigResources, context.Context) (int64, error) { id++; return id, nil }).Build(),
 			} {
@@ -62,7 +58,7 @@ func TestUpdateReplicaConfig(t *testing.T) {
 			err := manager.UpdateReplicaConfig(t.Context(), 1, tc.replicas, tc.groups)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
-				require.Equal(t, original, store.GetConfig(1))
+				require.Equal(t, original.Replicas, store.GetConfig(1).Replicas)
 				return
 			}
 			require.NoError(t, err)

@@ -46,7 +46,8 @@ type CoordQueryViewStateMachine struct {
 	// acquires it from the DataViewRefProvider, and released exactly once at
 	// durable removal (finalizeRemoval). Nil when the version no longer
 	// exists (already GC'd) or the caller passes no ref.
-	ref qviews.DataViewRef
+	ref             qviews.DataViewRef
+	releaseLoadInfo func()
 }
 
 // queryViewFlush is the latest unflushed external effect of a state machine.
@@ -151,6 +152,9 @@ func (sm *CoordQueryViewStateMachine) Version() qviews.QueryViewVersion {
 // Idempotent: each acquirer must release exactly once, so a second call is a
 // no-op.
 func (sm *CoordQueryViewStateMachine) ReleaseRef() {
+	if release := sm.takeLoadInfoRef(); release != nil {
+		release()
+	}
 	if ref := sm.takeRef(); ref != nil {
 		ref.Deref()
 	}
@@ -162,6 +166,12 @@ func (sm *CoordQueryViewStateMachine) takeRef() qviews.DataViewRef {
 	ref := sm.ref
 	sm.ref = nil
 	return ref
+}
+
+func (sm *CoordQueryViewStateMachine) takeLoadInfoRef() func() {
+	release := sm.releaseLoadInfo
+	sm.releaseLoadInfo = nil
+	return release
 }
 
 // Ref returns the attached DataView reference, or nil when the DataView

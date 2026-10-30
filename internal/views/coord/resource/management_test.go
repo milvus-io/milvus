@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -31,7 +32,7 @@ func managementResources(t *testing.T) *Resources {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	r := &Resources{
 		LoadConfigs: store, ShardViews: &coordview.ShardViewRegistry{}, Readiness: readiness.NewNotifications(),
@@ -74,6 +75,7 @@ func TestQueryViewReplicas(t *testing.T) {
 	require.Empty(t, replicas[0].ShardReplicas[0].NodeIds)
 	// Identical content has the same config version but a new lifecycle identity.
 	r.VChannels = func(ctx context.Context, _ int64) ([]string, error) {
+		r.LoadConfigs.StopPlanning(1)
 		require.NoError(t, r.LoadConfigs.Remove(ctx, 1))
 		require.NoError(t, r.LoadConfigs.Put(ctx, cfg))
 		return []string{"v0", "v1"}, nil

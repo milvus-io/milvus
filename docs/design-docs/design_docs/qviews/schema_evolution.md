@@ -49,8 +49,8 @@ were encoded by the latest schema.
 
 SchemaVersion identifies an immutable query-relevant schema payload within a
 CollectionID. It is not a DataVersion, Manifest version, index build version or
-LoadInfoVersion. LoadInfoVersion is a content identity and supports equality,
-not ordering. CollectionID distinguishes drop/recreate under the same name.
+LoadInfoVersion. LoadInfoVersion is allocated durably and monotonically; compatibility still
+requires exact requirements, not merely version ordering. CollectionID distinguishes drop/recreate under the same name.
 
 All query-affecting schema mutations, including TTL settings, must advance the
 schema identity. Repeating an identical operation does not create a new version.
@@ -216,13 +216,18 @@ Readiness establishes complete query capabilities and lazy-loading entry points;
 it does not require every allowed column to be resident. Warmup settings still
 control physical preloading. Both sets are retained in the exact LoadInfo snapshot.
 
-Each view pins the immutable LoadInfo field/partition scope it was created with.
-Its IndexID is always zero, meaning the latest available index; index descriptors
-are resolved from current metadata and are not historical View requirements. GetQueryViewLoadInfo must resolve a retained
-exact identity, not require that it equal the latest configuration. Persist
-versioned load snapshots with view-owned references; the latest desired config
-remains the LoadConfigStore's responsibility. Schema is fetched separately and
-is not added to the GetQueryViewLoadInfo response.
+Each View pins immutable field/partition requirements and exact index selections.
+LoadFieldConfig carries repeated index_ids, supporting multiple JSON path indexes
+per field. CollectionLoadConfig stores these references, not IndexMeta copies.
+GetQueryViewLoadInfo returns the retained exact requirements and resolves their
+selected IndexIDs in the same response. It does not append current indexes or
+substitute another ID. AlterIndex is not a hot update; no parameter history is
+needed. Schema is fetched separately and is not part of that response.
+
+One LoadConfigStore owns current and retained versions. View references retain
+historical versions until final durable View removal. Release withdraws planning,
+drains Views, and then deletes all versions; reload gets a fresh allocated ID.
+See [CollectionLoadInfo](collection_load_info.md) for recovery and local GC.
 
 The preparation identity includes SchemaVersion, LoadInfoVersion, load lifecycle,
 DataView membership, and required Segment content/Manifest revisions. Config
@@ -402,7 +407,8 @@ For QN:
   resources, including schema-less physical inspection, eviction and reload.
   SegmentLoadInfo stores field selection and load metadata without retaining
   another layout owner. Neither structure supplies a query's logical schema.
-- IndexID remains zero/latest-compatible, with execution-time resource pins.
+- IndexIDs are selected by LoadInfo; compatible physical artifacts are pinned
+  through execution, independently of the lifetime of the metadata RPC response.
   Durable object GC remains deferred to section 8.2. The complete QN ownership
   and execution contract is [QN resource preparation](qnview/querynode_queryview_resource_preparation.md).
 
@@ -470,9 +476,10 @@ fabricating readiness.
 
 ### 8.2 TODO: unified GC design (deferred)
 
-All GC questions are deferred and are not implementation prerequisites of this
-refactor. Do not introduce new schema/LoadInfo/Manifest/FileResource deletion or
-retention algorithms in this work. Runtime reference counting and delayed
+Storage, schema and FileResource GC questions remain deferred. CollectionLoadInfo
+version retention and final Release cleanup are defined separately in
+[CollectionLoadInfo](collection_load_info.md); this does not establish a distributed
+index-file or schema GC protocol. Runtime reference counting and delayed
 release of resources used by executing queries remain in scope: they are needed
 for handoff even without persistent-storage GC.
 
@@ -483,7 +490,7 @@ The future unified design must cover:
   Segment-only schema GC does not describe all these consumers.
 - The interval between WAL schema observation and Coordinator view registration,
   and between exact lookup and resource acquisition.
-- Historical LoadInfo snapshots, index descriptors, old Manifest/data bases,
+- Index descriptors and their relationship to retained LoadInfo references, old Manifest/data bases,
   Function/analyzer FileResources and their dependent objects.
 - Consistent protection across Coord/SN/QN recovery, pchannel ownership changes,
   outstanding readers, delayed notifications and stale-owner deletion.

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -76,7 +77,7 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	}
 	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: "v0"}
 	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
-		queryCoordCatalog: catalog,
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
 		queryViewCatalog: &fakeQueryViewCatalog{
 			views: []*viewpb.QueryViewOfShard{testPersistedQueryView(100, shardID)},
 		},
@@ -113,20 +114,18 @@ func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
 
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
-		queryCoordCatalog:    catalog,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     newRuntimeDataViewProvider(t),
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		queryViewCatalog:       &fakeQueryViewCatalog{},
+		viewSyncClient:         &fakeRuntimeViewSyncClient{},
+		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager:   &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:       newRuntimeDataViewProvider(t),
 		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},
 	})
 	require.NoError(t, err)
 
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	require.NoError(t, runtime.loadManager.UpdateLoadConfig(ctx, testAlterLoadConfigResult()))
 
 	assert.Empty(t, runtime.shardViewRegistry.ShardIDs())

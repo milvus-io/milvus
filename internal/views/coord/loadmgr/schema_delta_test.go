@@ -8,8 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
@@ -32,10 +31,10 @@ func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &LoadConfig{CollectionID: 1, RequiredFields: RequiredFieldsForSchema(old)}
 			for _, id := range tc.hints {
-				cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: id})
+				cfg.LoadFields = append(cfg.LoadFields, &viewpb.LoadFieldConfig{FieldId: id})
 			}
 			original := cfg.Clone()
-			next := reconcileSchemaFields(cfg, old, target, []*messagespb.LoadFieldConfig{{FieldId: 105, IndexId: 900}})
+			next := reconcileSchemaFields(cfg, old, target, []*viewpb.LoadFieldConfig{{FieldId: 105, IndexIds: []int64{900}}})
 			var hints []int64
 			for _, f := range next.LoadFields {
 				hints = append(hints, f.FieldId)
@@ -48,11 +47,11 @@ func TestSchemaDeltaPreservesLoadingIntent(t *testing.T) {
 			require.Equal(t, []int64{100, 101, 103, 104, 105, 107, 108}, required)
 			require.Equal(t, original, cfg, "old views retain immutable requirements")
 			require.True(t, equalSchemaLoadIntent(next, reconcileSchemaFields(next, old, target, nil)), "replay is idempotent")
-			wire, err := proto.Marshal(next.toCollectionLoadInfoProto())
+			wire, err := proto.Marshal(next.toCollectionLoadConfigProto())
 			require.NoError(t, err)
-			var persisted querypb.CollectionLoadInfo
+			var persisted viewpb.CollectionLoadConfig
 			require.NoError(t, proto.Unmarshal(wire, &persisted))
-			recovered := buildFromPersisted(&persisted, nil, nil)
+			recovered := buildFromPersisted(&persisted)
 			requireFieldConfigsEqual(t, next.RequiredFields, recovered.RequiredFields)
 			requireFieldConfigsEqual(t, next.LoadFields, recovered.LoadFields)
 		})
@@ -63,12 +62,12 @@ func TestSchemaDeltaNormalizesLegacyRequiredFields(t *testing.T) {
 	old := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101, IsDynamic: true}}}
 	target := proto.Clone(old).(*schemapb.CollectionSchema)
 	target.Fields = append(target.Fields, &schemapb.FieldSchema{FieldID: 102})
-	next := reconcileSchemaFields(&LoadConfig{LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}}, old, target, nil)
-	require.Equal(t, RequiredFieldsForSchema(target), next.RequiredFields)
-	require.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}}, next.LoadFields)
+	next := reconcileSchemaFields(&LoadConfig{LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}}}, old, target, nil)
+	requireFieldConfigsEqual(t, RequiredFieldsForSchema(target), next.RequiredFields)
+	requireFieldConfigsEqual(t, []*viewpb.LoadFieldConfig{{FieldId: 100}}, next.LoadFields)
 }
 
-func requireFieldConfigsEqual(t *testing.T, expected, actual []*messagespb.LoadFieldConfig) {
+func requireFieldConfigsEqual(t *testing.T, expected, actual []*viewpb.LoadFieldConfig) {
 	t.Helper()
-	require.True(t, slices.EqualFunc(expected, actual, func(a, b *messagespb.LoadFieldConfig) bool { return proto.Equal(a, b) }), "expected %v, actual %v", expected, actual)
+	require.True(t, slices.EqualFunc(expected, actual, func(a, b *viewpb.LoadFieldConfig) bool { return proto.Equal(a, b) }), "expected %v, actual %v", expected, actual)
 }

@@ -17,6 +17,12 @@ import (
 // layer injects the Manager as-is.
 type DataViewRefProvider = qviews.DataViewRefProvider
 
+// LoadInfoRefProvider protects immutable requirements until final durable View
+// removal. Acquisition may perform synchronization and runs outside manager locks.
+type LoadInfoRefProvider interface {
+	AcquireLoadInfo(context.Context, int64, uint64) (func(), error)
+}
+
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
 // within a single replica on the Coord side.
 //
@@ -64,6 +70,7 @@ type ShardViewManager struct {
 	// leaves this nil and does not participate in DataView GC/reference ownership.
 	// A non-nil provider returning a nil ref means the version was collected.
 	dataViewRefs DataViewRefProvider
+	loadInfoRefs LoadInfoRefProvider
 }
 
 // syncEntry pairs a state machine with its per-node views for deferred event submission.
@@ -86,6 +93,7 @@ func newShardViewManager(
 	eventSubmitter dirtyViewEventSubmitter,
 	recoveredViews []*viewpb.QueryViewOfShard,
 	dataViewRefs DataViewRefProvider,
+	loadInfoRefs ...LoadInfoRefProvider,
 ) *ShardViewManager {
 	m := &ShardViewManager{
 		ctx:            ctx,
@@ -99,6 +107,9 @@ func newShardViewManager(
 	// RecoverShardViewManager, this simple path does not re-acquire DataView
 	// refs (used by Ensure with no recovered views, and by tests).
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
+	if len(loadInfoRefs) > 0 {
+		m.loadInfoRefs = loadInfoRefs[0]
+	}
 	for _, view := range recoveredViews {
 		sm := RecoverCoordQueryViewStateMachineWithRef(view, nil)
 		recovered = append(recovered, sm)
@@ -129,6 +140,7 @@ func RecoverShardViewManager(
 	eventSubmitter dirtyViewEventSubmitter,
 	dataViewRefs DataViewRefProvider,
 	recoveredViews []*viewpb.QueryViewOfShard,
+	loadInfoRefs ...LoadInfoRefProvider,
 ) (*ShardViewManager, error) {
 	m := &ShardViewManager{
 		ctx:            ctx,
@@ -138,6 +150,9 @@ func RecoverShardViewManager(
 		dataViewRefs:   dataViewRefs,
 	}
 
+	if len(loadInfoRefs) > 0 {
+		m.loadInfoRefs = loadInfoRefs[0]
+	}
 	allMissing := len(recoveredViews) > 0
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
 	for _, view := range recoveredViews {
@@ -154,6 +169,14 @@ func RecoverShardViewManager(
 		}
 
 		sm := RecoverCoordQueryViewStateMachineWithRef(view, ref)
+		if m.loadInfoRefs != nil {
+			sm.releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
+			if err != nil {
+				sm.ReleaseRef()
+				m.abortRecovery()
+				return nil, err
+			}
+		}
 		if ref != nil {
 			allMissing = false
 		}
@@ -445,6 +468,14 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 			err = merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
 		}
 	}
+	var releaseLoadInfo func()
+	if err == nil && m.loadInfoRefs != nil {
+		releaseLoadInfo, err = m.loadInfoRefs.AcquireLoadInfo(ctx, view.GetMeta().GetCollectionId(), view.GetMeta().GetLoadInfoVersion())
+		if err != nil && ref != nil {
+			ref.Deref()
+			ref = nil
+		}
+	}
 	m.mu.Lock()
 	if err != nil {
 		m.releaseEmptyAfterFailedPrepareLocked()
@@ -461,6 +492,9 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		if ref != nil {
 			ref.Deref()
 		}
+		if releaseLoadInfo != nil {
+			releaseLoadInfo()
+		}
 		return err
 	}
 	qv := m.nextQueryVersion(newDV)
@@ -471,6 +505,7 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	}
 	view.Meta.TransformStartAfterTimetick = m.publishedRetentionStartLocked(view.Meta)
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
+	sm.releaseLoadInfo = releaseLoadInfo
 	sm.preparation = preparation
 	if preparation != nil {
 		preparation.Version = sm.Version()
@@ -889,11 +924,15 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 	}
 	m.removeView(target)
 	ref := target.takeRef()
+	releaseLoadInfo := target.takeLoadInfoRef()
 	m.publishStatsLocked()
 	empty := m.releaseRequested && len(m.views) == 0
 	onEmpty := m.onReleasedEmpty
 	m.mu.Unlock()
 
+	if releaseLoadInfo != nil {
+		releaseLoadInfo()
+	}
 	if empty && onEmpty != nil {
 		onEmpty(m.shardID, m)
 	}
@@ -998,13 +1037,20 @@ func (m *ShardViewManager) abortRecovery() {
 	m.mu.Lock()
 	m.closed = true
 	refs := make([]qviews.DataViewRef, 0, len(m.views))
+	loadRefs := make([]func(), 0, len(m.views))
 	for _, sm := range m.views {
+		if release := sm.takeLoadInfoRef(); release != nil {
+			loadRefs = append(loadRefs, release)
+		}
 		sm.failPreparation("shard manager closed")
 		if ref := sm.takeRef(); ref != nil {
 			refs = append(refs, ref)
 		}
 	}
 	m.mu.Unlock()
+	for _, release := range loadRefs {
+		release()
+	}
 	for _, ref := range refs {
 		ref.Deref()
 	}

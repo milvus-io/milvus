@@ -29,6 +29,7 @@ type ShardViewRegistry struct {
 	ctx            context.Context
 	flushScheduler *DirtyViewFlushScheduler
 	dataViewRefs   DataViewRefProvider
+	loadInfoRefs   LoadInfoRefProvider
 
 	version  uint64
 	shards   map[qviews.ShardID]*ShardViewManager
@@ -56,14 +57,14 @@ func RecoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 
 // RecoverShardViewRegistryWithDataViews rebuilds exact-version references before
 // publishing recovered views. A provider is required even for an empty registry.
-func RecoverShardViewRegistryWithDataViews(ctx context.Context, catalog queryview.QueryViewCatalog, s syncer.ReliableSyncer, dataViewRefs DataViewRefProvider) (*ShardViewRegistry, error) {
+func RecoverShardViewRegistryWithDataViews(ctx context.Context, catalog queryview.QueryViewCatalog, s syncer.ReliableSyncer, dataViewRefs DataViewRefProvider, loadInfoRefs ...LoadInfoRefProvider) (*ShardViewRegistry, error) {
 	if dataViewRefs == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView-backed registry requires a reference provider")
 	}
-	return recoverShardViewRegistry(ctx, catalog, s, dataViewRefs)
+	return recoverShardViewRegistry(ctx, catalog, s, dataViewRefs, loadInfoRefs...)
 }
 
-func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCatalog, s syncer.ReliableSyncer, dataViewRefs DataViewRefProvider) (*ShardViewRegistry, error) {
+func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCatalog, s syncer.ReliableSyncer, dataViewRefs DataViewRefProvider, loadInfoRefs ...LoadInfoRefProvider) (*ShardViewRegistry, error) {
 	views, err := catalog.ListQueryViews(ctx)
 	if err != nil {
 		return nil, err
@@ -89,9 +90,9 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 	for sid, recovered := range byShardID {
 		var manager *ShardViewManager
 		if dataViewRefs == nil {
-			manager = newShardViewManager(ctx, sid, flushScheduler, recovered, nil)
+			manager = newShardViewManager(ctx, sid, flushScheduler, recovered, nil, loadInfoRefs...)
 		} else {
-			manager, err = RecoverShardViewManager(ctx, sid, flushScheduler, dataViewRefs, recovered)
+			manager, err = RecoverShardViewManager(ctx, sid, flushScheduler, dataViewRefs, recovered, loadInfoRefs...)
 		}
 		if err != nil {
 			flushScheduler.Close()
@@ -112,6 +113,9 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 		stats:            make(map[qviews.ShardID]*ShardStats, len(shards)),
 		collectionShards: make(map[int64]map[qviews.ShardID]struct{}),
 		nodeShards:       make(map[int64]map[qviews.ShardID]struct{}),
+	}
+	if len(loadInfoRefs) > 0 {
+		registry.loadInfoRefs = loadInfoRefs[0]
 	}
 	for sid, mgr := range shards {
 		stats := mgr.Stats()
@@ -146,7 +150,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	}
 	r.mu.RUnlock()
 
-	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil, r.dataViewRefs)
+	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil, r.dataViewRefs, r.loadInfoRefs)
 	mgr.SetStatsObserver(r.onShardStatsChanged)
 	mgr.setOnReleasedEmpty(r.removeReleasedManager)
 	stats := emptyShardStats()

@@ -215,13 +215,11 @@ func TestCollectionUsageHotTTLAppliesToScan(t *testing.T) {
 
 func TestCollectionUsageUsesDifferentCollectionTTLs(t *testing.T) {
 	enableAutoReleaseForTest(t)
-	s, manager, catalog, _ := newUsageTestManager(t)
+	s, manager, _, _ := newUsageTestManager(t)
 	for _, id := range []int64{200, 300, 400} {
 		cfg := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
 		cfg.CollectionID = id
 		cfg.Replicas[0].ReplicaID = id * 10
-		catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-		catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 		require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), cfg))
 	}
 	broker := meta.NewMockBroker(t)
@@ -432,12 +430,11 @@ func TestCollectionUsageInitializesFromRecoveredLoadConfig(t *testing.T) {
 
 func TestCollectionUsageCleansReleasedCollectionAndRestartsTTL(t *testing.T) {
 	enableAutoReleaseForTest(t)
-	s, manager, catalog, releaseCount := newUsageTestManager(t)
+	s, manager, _, releaseCount := newUsageTestManager(t)
 	manager.scan(context.Background())
 	config := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
 	setActivityTime(manager, 100, time.Now().Add(-20*time.Second))
-	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
-	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
+	s.qviewsRuntime.loadConfigStore.StopPlanning(100)
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(context.Background(), 100))
 	_, exists := activityTime(manager, 100)
 	require.False(t, exists)
@@ -447,8 +444,6 @@ func TestCollectionUsageCleansReleasedCollectionAndRestartsTTL(t *testing.T) {
 	_, exists = activityTime(manager, 100)
 	require.False(t, exists)
 
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), config))
 	before := time.Now()
 	manager.scan(context.Background())

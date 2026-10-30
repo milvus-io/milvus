@@ -72,7 +72,11 @@ func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message
 	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
 	// Broadcast owns the collection lock until this callback completes. Waiting
 	// here also serializes a subsequent load with the old replica's cleanup.
-	return s.waitQueryViewsReleased(ctx, result.Message.Header().GetCollectionId())
+	collectionID := result.Message.Header().GetCollectionId()
+	if err := s.waitQueryViewsReleased(ctx, collectionID); err != nil {
+		return err
+	}
+	return s.qviewsRuntime.loadConfigStore.Remove(ctx, collectionID)
 }
 
 func (s *Server) waitQueryViewsReleased(ctx context.Context, collectionID int64) error {

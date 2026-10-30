@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -186,12 +187,12 @@ func TestAlterLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
-		queryCoordCatalog:    catalog,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     newRuntimeDataViewProvider(t),
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		queryViewCatalog:       &fakeQueryViewCatalog{},
+		viewSyncClient:         &fakeRuntimeViewSyncClient{},
+		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager:   &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:       newRuntimeDataViewProvider(t),
 		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},
@@ -200,8 +201,6 @@ func TestAlterLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	s := &Server{qviewsRuntime: runtime}
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 
 	require.NoError(t, s.alterLoadConfigV2AckCallback(ctx, buildAlterLoadConfigBroadcastResult(100)))
 

@@ -36,8 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -345,7 +345,7 @@ func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfo(t *testing.T) {
 		return &querypb.GetQueryViewLoadInfoResponse{
 			Status: merr.Success(), CollectionID: 100, Version: 7,
 			PartitionIDs:  []int64{10, 20},
-			LoadFields:    []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+			LoadFields:    []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
 			IndexInfoList: indexes,
 		}, nil
 	}).Build()
@@ -358,7 +358,7 @@ func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfo(t *testing.T) {
 	assert.Equal(t, int64(100), info.CollectionID)
 	assert.Equal(t, qnview.QueryViewLoadInfoVersion(7), info.Version)
 	assert.Equal(t, []int64{10, 20}, info.PartitionIDs)
-	assert.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}, info.LoadFields)
+	assert.Equal(t, []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}, info.LoadFields)
 	assert.Equal(t, indexes, info.IndexInfos)
 	require.Len(t, requests, 1)
 	assert.Equal(t, int64(100), requests[0].GetCollectionID())

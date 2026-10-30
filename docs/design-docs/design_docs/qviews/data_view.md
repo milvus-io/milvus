@@ -163,7 +163,7 @@ compact_version)`.
 | Create | first snapshot `(1,0)` |
 | Bootstrap | first snapshot `(1,0)` for a Collection that predates DataView management (upgrade migration) |
 | Flush (PrepareFlush commit) | `(S,C) -> (S+1,C)` |
-| Compaction, import, copy, external refresh, drop partition, truncate, L0 manifest advance (Recompute) | `(S,C) -> (S,C+1)` when the rebuilt snapshot differs |
+| Compaction, index Manifest publication, import, copy, external refresh, drop partition, truncate, L0 manifest advance (Recompute) | `(S,C) -> (S,C+1)` when the rebuilt snapshot differs |
 | No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
 

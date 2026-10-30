@@ -10,9 +10,10 @@ import (
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestProgress(t *testing.T) {
@@ -31,7 +32,7 @@ func TestProgress(t *testing.T) {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
 	ctx := context.Background()
-	store, err := loadmgr.RecoverLoadConfigStore(ctx, catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	cfg := &loadmgr.LoadConfig{CollectionID: 1, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}
 	channels := []string{"v0", "v1"}
@@ -94,7 +95,7 @@ func TestProgress(t *testing.T) {
 	check(75)
 	up(11, "v1", version)
 	check(100)
-	cfg.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
+	cfg.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
 	require.NoError(t, store.Put(ctx, cfg))
 	check(0) // Previous load fields must not confirm the new configuration.
 	version = store.GetConfigVersion(1)
@@ -115,10 +116,11 @@ func TestProgress(t *testing.T) {
 			}
 			duringSnapshot = func() {
 				if action == "release" || action == "release_reload" {
+					store.StopPlanning(1)
 					require.NoError(t, store.Remove(ctx, 1))
 				}
 				if action == "update" {
-					cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: 200})
+					cfg.LoadFields = append(cfg.LoadFields, &viewpb.LoadFieldConfig{FieldId: 200})
 				}
 				if action == "release_reload" {
 					for _, r := range cfg.Replicas {

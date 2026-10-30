@@ -1977,17 +1977,16 @@ func TestWriteSegmentIndexToManifest(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 
-	// Off by default: manifest publication is opt-in, and the legacy
-	// etcd-only path must be what a cluster gets without configuration.
+	// QueryView physical preparation follows the published Manifest version.
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "false")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
 	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
-	// A value that does not parse as a boolean reads as false, i.e. the
-	// legacy behavior. Under the old etcd-write polarity this silently
-	// entered the one-way off state; with publication opt-in the failure is
-	// merely "the operator thinks it is on", with no durability consequence.
+	// Explicit invalid boolean values retain the parameter parser's behavior.
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 }

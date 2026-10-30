@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -41,7 +42,7 @@ func newHandoffServer(t *testing.T) (*Server, func(string, int64)) {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 11}}}))
 	registry := &coordview.ShardViewRegistry{}
@@ -132,6 +133,7 @@ func TestQueryViewDataHandoffCancellationAndRelease(t *testing.T) {
 				cancel()
 				require.ErrorIs(t, <-done, context.Canceled)
 			} else {
+				s.qviewsRuntime.loadConfigStore.StopPlanning(1)
 				require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(ctx, 1))
 				require.NoError(t, <-done)
 			}
@@ -169,6 +171,7 @@ func TestCreatePartitionWaitsForQueryViewConfig(t *testing.T) {
 	status, err := s.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{CollectionID: 1, PartitionID: 20})
 	require.NoError(t, merr.CheckRPCCall(status, err))
 	require.Len(t, s.qviewsRuntime.loadConfigStore.GetConfig(1).PartitionIDs, 2)
+	s.qviewsRuntime.loadConfigStore.StopPlanning(1)
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(ctx, 1))
 	status, err = s.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{CollectionID: 1, PartitionID: 30})
 	require.NoError(t, merr.CheckRPCCall(status, err))
@@ -198,6 +201,7 @@ func TestRefreshCollectionUsesQueryViews(t *testing.T) {
 	up("v0", 2)
 	up("v1", 2)
 	require.NoError(t, <-done)
+	s.qviewsRuntime.loadConfigStore.StopPlanning(1)
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(ctx, 1))
 	require.ErrorIs(t, s.refreshCollection(ctx, 1), merr.ErrCollectionNotLoaded)
 }

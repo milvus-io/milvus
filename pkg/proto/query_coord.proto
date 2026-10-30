@@ -349,9 +349,9 @@ message GetQueryViewLoadInfoResponse {
     int64 collectionID = 2;
     uint64 version = 3;
     repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated view.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
-    repeated messages.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+    repeated view.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
 }
 
 // Current complete loading snapshots for segments in one collection. Consumers
