@@ -983,8 +983,10 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 //   - a sparse vector column takes its Dim from the source of its first row;
 //   - struct arrays and payload kinds PrepareResultFieldData does not know.
 //
-// The columns follow the first source that has any. With rows <= 0, or when
-// the sources do not share one layout, every column stays nil.
+// The columns follow the first source that has any. When the sources do not
+// share one layout, every column stays nil. With rows <= 0 no row is appended,
+// so the columns are returned typed but empty, preserving FieldId/FieldName
+// for downstream consumers of an empty result.
 func PresizeAppendFieldData(rows int64, sources ...[]*schemapb.FieldData) []*schemapb.FieldData {
 	var sample []*schemapb.FieldData
 	for _, source := range sources {
@@ -993,10 +995,16 @@ func PresizeAppendFieldData(rows int64, sources ...[]*schemapb.FieldData) []*sch
 			break
 		}
 	}
-	dst := make([]*schemapb.FieldData, len(sample))
 	if rows <= 0 {
+		dst := make([]*schemapb.FieldData, len(sample))
+		for i, fieldData := range sample {
+			if fieldData != nil {
+				dst[i] = PrepareResultFieldData(sample[i:i+1], 0)[0]
+			}
+		}
 		return dst
 	}
+	dst := make([]*schemapb.FieldData, len(sample))
 
 	// Any source may be the one that carries validity for a vector column.
 	nullableVectors := make([]bool, len(sample))
