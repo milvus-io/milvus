@@ -39,6 +39,7 @@
 #include "segcore/Types.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "storage/artifact/DiskEngineFileHandle.h"
 #include "index/Meta.h"
@@ -1689,6 +1690,59 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
         EXPECT_EQ(vectors->Dim(), 4);
     }
     ExpectNativeReads();
+    EXPECT_TRUE(std::filesystem::is_empty(staging_));
+}
+
+// Entries persisted by a 3.0 memory build of a nullable embedding-list column
+// whose valid rows are all empty lists: offsets {0} instead of one empty list
+// per valid row (#54857).
+class LegacyEmptyEmbListArtifact final : public storage::Artifact {
+ public:
+    void
+    Serialize(storage::FileSink& sink) const override {
+        const std::vector<size_t> offsets{0};
+        std::vector<uint8_t> payload(
+            detail::GetEmptyEmbeddingListPayloadSize(offsets.size()));
+        detail::EncodeEmptyEmbeddingListPayload(
+            payload.data(), 4, ToValidDataCount(offsets.size()), offsets);
+        sink.WriteEntry(
+            EMPTY_EMB_LIST_OFFSETS_KEY, payload.data(), payload.size());
+        const uint64_t row_count = 3;
+        sink.WriteEntry(VALID_DATA_COUNT_KEY, &row_count, sizeof(row_count));
+        const uint8_t bitmap = 0b101;
+        sink.WriteEntry(VALID_DATA_KEY, &bitmap, sizeof(bitmap));
+    }
+};
+
+TEST_F(LegacyIndexLoadTest, LegacyEmptyEmbeddingListOffsetsKeepValidRows) {
+    auto adapted = AdaptIndexType({
+        .index_type = "FLAT",
+        .field_type = DataType::VECTOR_ARRAY,
+        .element_type = DataType::VECTOR_FLOAT,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"}, {DIM_KEY, 4}},
+    });
+    adapted.params["nullable"] = true;
+    adapted.params[INDEX_NUM_ROWS_KEY] = 3;
+    Persist(LegacyEmptyEmbListArtifact{});
+    for (bool mmap : {false, true}) {
+        auto reader =
+            LoaderRegistry::Instance()
+                .Lookup(adapted.family)
+                .Load({IndexFiles{context_,
+                                  paths_,
+                                  LegacyIndexStorageConfig{
+                                      storage::V1SourceLayout::MemoryEntries}},
+                       Options(adapted.params, mmap)});
+        const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
+        ASSERT_NE(vectors, nullptr);
+        EXPECT_EQ(vectors->ValidCount(), 2);
+        EXPECT_TRUE(vectors->IsRowValid(0));
+        EXPECT_FALSE(vectors->IsRowValid(1));
+        EXPECT_TRUE(vectors->IsRowValid(2));
+        EXPECT_EQ(vectors->Dim(), 4);
+    }
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
 }
 
