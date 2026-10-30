@@ -214,6 +214,6 @@ func (m *GrpcQueryCoordClient) GetQueryViewLoadInfo(context.Context, *querypb.Ge
 	return &querypb.GetQueryViewLoadInfoResponse{}, m.Err
 }
 
-func (c *GrpcQueryCoordClient) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
-	panic("patch WatchQueryViewSegmentLoadInfo with mockey")
+func (c *GrpcQueryCoordClient) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }

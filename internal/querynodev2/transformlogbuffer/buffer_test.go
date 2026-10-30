@@ -4,6 +4,7 @@ package transformlogbuffer
 
 import (
 	"context"
+	"io"
 	"slices"
 	"sort"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -106,6 +108,14 @@ func (s *fakeStream) Subscribe(_ context.Context, opt wal.TransformLogSubscripti
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		if s.err != nil {
+			return nil, s.err
+		}
+		return nil, io.EOF
+	default:
+	}
 	s.subscriptions = append(s.subscriptions, opt)
 	return fakeSubscription{id: int64(len(s.subscriptions)), vchannel: opt.VChannel}, nil
 }
@@ -121,9 +131,7 @@ func (s *fakeStream) Error() error {
 }
 
 func (s *fakeStream) Close() error {
-	s.closeOnce.Do(func() {
-		close(s.done)
-	})
+	s.failStream(nil)
 	return s.Error()
 }
 
@@ -131,8 +139,12 @@ func (s *fakeStream) failStream(err error) {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.err = err
-		s.mu.Unlock()
+		subscriptions := append([]wal.TransformLogSubscriptionOption(nil), s.subscriptions...)
 		close(s.done)
+		s.mu.Unlock()
+		for _, sub := range subscriptions {
+			sub.Handler.Close()
+		}
 	})
 }
 
@@ -408,6 +420,57 @@ func TestBufferAcquireDoesNotPoisonBufferOnRecoverableSubscriptionError(t *testi
 	requireSubscriptionVChannels(t, stream, []string{"v1"})
 }
 
+func TestBufferPrepareRetriesCanceledSubscriptionClose(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 1)
+	retained, err := buffer.Bind(newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer retained.Release()
+
+	var original func(*fakeStream, context.Context, wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error)
+	first := true
+	patch := mockey.Mock((*fakeStream).Subscribe).Origin(&original).To(func(s *fakeStream, ctx context.Context, opt wal.TransformLogSubscriptionOption) (wal.TransformLogSubscription, error) {
+		if first {
+			first = false
+			// Canceling one creation closes its handler while the logical stream
+			// stays alive for the retained View's next preparation attempt.
+			opt.Handler.Close()
+			return nil, context.Canceled
+		}
+		return original(s, ctx, opt)
+	}).Build()
+	defer patch.UnPatch()
+
+	retryable, err := retained.Prepare(t.Context())
+	require.True(t, retryable)
+	require.ErrorIs(t, err, context.Canceled)
+	_, err = retained.Prepare(t.Context())
+	require.NoError(t, err)
+	stream := streams.stream("v1")
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "v1", SyncUp: &wal.TransformLogSyncUp{TimeTick: 60}})
+	require.NoError(t, retained.WaitTransformVisible(t.Context(), 60))
+}
+
+func TestBufferLastGuardReleaseClosesStreamWithoutFailure(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 1)
+	guard, err := buffer.Acquire(t.Context(), newTestQueryView("v1", 50))
+	require.NoError(t, err)
+	defer guard.Release()
+	retired := buffer.channels["v1"]
+	stream := streams.stream("v1")
+	guard.Release()
+	select {
+	case <-stream.Done():
+	default:
+		t.Fatal("last guard release did not close the stream")
+	}
+	require.NoError(t, stream.Error())
+	retired.mu.Lock()
+	defer retired.mu.Unlock()
+	require.NoError(t, retired.err, "normal owner cleanup must not synthesize a buffer failure")
+}
+
 func TestBufferAcquireReturnsStreamErrorBeforeSubscriptionReady(t *testing.T) {
 	streams := newFakeStreamManager()
 	stream := newFakeStream()
@@ -423,6 +486,58 @@ func TestBufferAcquireReturnsStreamErrorBeforeSubscriptionReady(t *testing.T) {
 	guard, err := buffer.Acquire(context.Background(), newTestQueryView("v1", 50))
 	require.Nil(t, guard)
 	require.ErrorContains(t, err, "catchup failed")
+}
+
+func TestBufferTerminalStreamErrorFailsSharedRegistrations(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 2)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	liveGuard, err := buffer.Acquire(ctx, newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer liveGuard.Release()
+	pendingGuard, err := buffer.Acquire(ctx, newTestQueryView("p_2v0", 50))
+	require.NoError(t, err)
+	defer pendingGuard.Release()
+	stream := streams.stream("p")
+	stream.emit(wal.TransformLogStreamEvent{VChannel: "p_1v0", SyncUp: &wal.TransformLogSyncUp{TimeTick: 50}})
+	live, err := buffer.RegisterSegment(ctx, &fakeSegment{id: 1, vchannel: "p_1v0", startAfter: 50})
+	require.NoError(t, err)
+	defer live.Unregister()
+	require.NoError(t, live.WaitCatchup(ctx))
+	pending, err := buffer.RegisterSegment(ctx, &fakeSegment{id: 2, vchannel: "p_2v0", startAfter: 50})
+	require.NoError(t, err)
+	defer pending.Unregister()
+
+	streamErr := handler.ErrClientClosed
+	stream.failStream(streamErr)
+	require.ErrorIs(t, live.WaitTransformVisible(ctx, 60), streamErr)
+	require.ErrorIs(t, pending.WaitCatchup(ctx), streamErr)
+	require.ErrorIs(t, liveGuard.WaitTransformVisible(ctx, 60), streamErr)
+	require.ErrorIs(t, pendingGuard.WaitTransformVisible(ctx, 60), streamErr)
+	retryable, err := liveGuard.Prepare(ctx)
+	require.False(t, retryable)
+	require.ErrorIs(t, err, streamErr)
+}
+
+func TestBufferPrepareAfterStreamTerminated(t *testing.T) {
+	streams := newFakeStreamManager()
+	buffer := New(streams, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	first, err := buffer.Acquire(ctx, newTestQueryView("p_1v0", 50))
+	require.NoError(t, err)
+	defer first.Release()
+	streamErr := handler.ErrClientClosed
+	streams.stream("p").failStream(streamErr)
+	// The new buffer has no subscription to receive the terminal Close callback.
+	require.ErrorIs(t, first.WaitTransformVisible(ctx, 60), streamErr)
+	next, err := buffer.Bind(newTestQueryView("p_2v0", 50))
+	require.NoError(t, err)
+	defer next.Release()
+	retryable, err := next.Prepare(ctx)
+	require.False(t, retryable)
+	require.ErrorIs(t, err, streamErr)
 }
 
 func TestBufferAcquireReusesVChannelSubscriptionAndRegistersFromLocalBuffer(t *testing.T) {
@@ -533,16 +648,17 @@ func TestBufferRegisterSegmentReturnsBeforeCatchupDrainCompletes(t *testing.T) {
 		require.NoError(t, result.err)
 		require.NotNil(t, result.reg)
 		defer func() {
+			// Unregister joins application; unblock the test's fake first.
 			unblock.Do(func() { close(applyBlock) })
 			result.reg.Unregister()
 		}()
+		select {
+		case <-applyStarted:
+		case <-time.After(time.Second):
+			t.Fatal("catchup did not start after registration")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("RegisterSegment did not return")
-	}
-	select {
-	case <-applyStarted:
-	case <-time.After(time.Second):
-		t.Fatal("catch-up did not start")
 	}
 }
 

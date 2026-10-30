@@ -60,11 +60,10 @@ Distinguish these identities:
 | Resource and physical-instance identity | The concrete owner and physical incarnation held by operations and handles |
 | SchemaVersion / LoadInfoVersion | Exact query schema and load requirements |
 | Manifest/base revision | Required stored data and materialization capability |
-| Metadata revision | Equality token for a complete watched snapshot |
 | Operation identity | A particular load, reopen, subscription or drain attempt |
 
-A logical key is not an incarnation fence. LoadInfoVersion and metadata revision
-are content identities, not ordered clocks. A larger SchemaVersion alone does
+A logical key is not an incarnation fence. LoadInfoVersion is a content identity,
+not an ordered clock. A larger SchemaVersion alone does
 not prove compatibility with another View's field, Function or query semantics.
 
 ## 3. Ownership model
@@ -76,7 +75,7 @@ QueryView
        -> VChannel TransformBuffer range reference
        -> SegmentBinding[]
             -> SegmentResource
-                 -> metadata subscription and accepted snapshot
+                 -> on-demand metadata acquisition and retained snapshot
                  -> physical Segment and load/reopen operations
                  -> prepared ReadStates
                  -> transform registration and application progress
@@ -87,10 +86,10 @@ QueryView
 | --- | --- |
 | QueryView handler/state machine | Receives desired Views, binds/unbinds their resources, aggregates reports and implements View lifecycle |
 | ViewResources | Owns one View's immutable requirements, resource references and per-binding readiness results |
-| SegmentResource | Sole owner of a Segment's physical preparation and lifetime; reconciles all bindings and owns subscriptions, operations and transform registration |
+| SegmentResource | Sole owner of a Segment's physical preparation and lifetime; reconciles all bindings and owns metadata acquisition, operations and transform registration |
 | CollectionRuntime | Reference-counted CollectionID + SchemaVersion planning resource with a separate immutable View load scope |
 | TransformLogBuffer | Shares VChannel history and transport; applies transforms through instance-bound registrations |
-| Metadata stream | Delivers complete snapshots and resumes live subscriptions after transport failure |
+| Metadata provider | Returns complete loading snapshots through GetQueryViewSegmentLoadInfo |
 | Physical loader | Executes load/reopen/index/delta work using pinned inputs; returns results to the resource owner |
 | NodeScheduler | Executes queued work and delayed retries; resource owners decide what work is necessary |
 
@@ -166,30 +165,37 @@ Every relevant change updates stored state and marks the resource dirty:
 | --- | --- |
 | Bind or unbind | Required capabilities, reuse, remaining work and closure |
 | Collection runtime becomes available | Requirements waiting for schema/load metadata |
-| Metadata snapshot arrives | Initial load, materialization, Manifest and index work |
+| Get completes | Initial load, materialization, Manifest and index work for unmet bindings |
 | Operation succeeds, fails or is canceled | Actual capability, retries and other executable bindings |
 | Transform progress or registration changes | Catch-up completion and valid live attachment |
-| Subscription recovery or dependency failure | Retained work and retry/failure decisions |
+| Metadata request or dependency fails | Retained work and retry/failure decisions |
 | Final query/operation reference releases | Deferred destruction or waiting reconstruction |
 
 Notifications are coalesced wakeups, not the work itself. State and dirty work
 remain stored until reconciled. An event arriving during a pass is consumed by that pass or schedules an
 immediate successor; completing a pass cannot erase a concurrently published change.
-Use local scheduling state independently of content-based metadata revisions.
+Use local scheduling state independently of metadata acquisition.
 
 A resource may be idle only if all required capabilities are satisfied, or if
 its unsatisfied bindings have a registered dependency wakeup or scheduled retry.
 Dependency observation and wakeup registration must have no missed-update gap.
 
 The resource's `scheduled` flag covers running or immediately queued work only.
-Subscription installation and successful preparation immediately recheck local
-state. Snapshot and catch-up waits rely on their registered callbacks rather
-than the NodeScheduler's `ErrDelay` backoff. Each pass performs at most one
+Metadata acquisition and successful preparation immediately recheck local
+state. Catch-up waits rely on their registered callbacks; metadata retries use
+a resource-owned timer rather than the NodeScheduler's `ErrDelay` backoff. Each pass performs at most one
 physical preparation, then yields further work to the queue tail. Failed
-bindings retain their 200 ms retry deadline; a resource-owned timer wakes the
-earliest pending retry without preventing other bindings or events from running.
+bindings retain independent exponential retry state, starting at 200 ms. Each
+consecutive failed attempt doubles the base interval, with ±20% jitter and a
+hard 5 s limit on the actual delay. A resource-owned timer wakes the earliest
+pending retry without preventing other bindings or events from running.
+Successful physical preparation or reuse of a ready compatible read clears that
+binding's retry state. New bindings start fresh; unrelated wakeups do not bypass
+or reset an existing failed binding's delay. Compatible reads are published
+before checking retry deadlines, so newly satisfied requirements become Ready
+immediately.
 Release cancels the timer, and stale callbacks cannot wake a replacement owner.
-Neither another metadata revision nor a repeated Coordinator push is required
+Neither a metadata notification nor a repeated Coordinator push is required
 to discover work already implied by local state.
 
 ### 5.2 Work selection
@@ -230,7 +236,13 @@ or shard locks.
 ### 5.4 Retry and failure
 
 Locally recoverable I/O, metadata and temporary admission failures retain the
-requirements and retry with backoff. Every retry selects work from current
+requirements and retry with backoff. Collection/TransformBuffer dependency
+preparation uses a separate exponential sequence per View, starting at 100 ms
+and sharing the same doubling, jitter and hard 5 s limit. It spans the complete
+dependency attempt: a successful collection acquisition followed by a failed
+buffer preparation must not reset the delay. A new View starts a new sequence.
+Neither retry path has an elapsed-time cutoff while its requirement is live;
+Release and context cancellation interrupt waits promptly. Every retry selects work from current
 requirements and accepted metadata; it does not indefinitely execute an
 obsolete captured target.
 
@@ -373,8 +385,8 @@ is not a universal compatibility proof. Default projections retain their value
 and type semantics; StructArray generation identity must survive name reuse.
 
 ReadState preparation stages missing resources without mutating a published
-state. Old queries retain their selected resources across Manifest or latest-index
-refresh. Compatible latest indexes are pinned during execution, independently of
+state. Old queries retain their selected resources while a new View prepares Manifest
+or index changes. Compatible latest indexes are pinned during execution, independently of
 QueryView version. Physical mutation remains serialized by the resource owner.
 Private column preparation preserves the physical row domain and never resizes
 the continuously updated shared delete bitmap.
@@ -411,44 +423,56 @@ independent metadata. All existing physical dependencies must be detached before
 removing that initial pin. Runtime destruction releases dependent objects before
 their schema/physical owner handles, including exception and cancellation paths.
 
-## 7. Metadata subscription ownership
+## 7. On-demand loading metadata
 
-Metadata responses carry collection index definitions once per collection per
-batch. Each batch is self-contained; Segment snapshots refer to that table by
-collection ID. Combined metadata revision includes the current collection index
-revision, which is canonicalized once per collection. Subscription requests and
-snapshot responses use a 4 MiB aggregate target; an oversized single snapshot is
-sent alone under the configured RPC limit. Only successfully sent snapshots
-advance server-side resume revisions, and unsubscribe precedes resubscribe.
-The client receives concurrently with the initial subscription batches as well as
-later deltas, so bidirectional flow control cannot block subscription completion.
+This path assumes StorageV3 with index artifacts published into the Segment
+Manifest. `GetQueryViewSegmentLoadInfo` is a unary batch request for Segment IDs
+in one Collection. It returns one result per distinct requested ID, including a
+per-Segment status and, on success, a complete current SegmentLoadInfo. Collection
+index definitions are included once for the batch. The response-level status is
+reserved for request-wide failures; a missing Segment or an uncertified replay
+cursor must not discard successful siblings. An empty ID list succeeds with no
+results. It does not promise historical SegmentInfo lookup. Manifest,
+resource statistics and the certified Transform replay cursor must describe the
+same base; callers cannot combine a Manifest with a separately fetched cursor.
 
-A live SegmentResource owns its metadata subscription, independent of how many
-Views bind it. The shared QueryNode stream delivers complete snapshots and
-retains the last accepted revision for reconnection. Accepted metadata and
-physically applied metadata are separate states.
+A live SegmentResource shares the accepted snapshot across compatible View
+bindings. Reconciliation first reuses a compatible prepared ReadState. If an
+unmet binding needs a Manifest newer than the cached snapshot, or no snapshot
+exists, it performs Get outside resource/shard locks. NodeScheduler bounds
+concurrent resource tasks, and the RPC has a timeout. The QN metadata adapter
+coalesces pending requests for the same Collection for up to 1 ms or 128 callers,
+deduplicates Segment IDs, then distributes individual results back to their
+resource owners. Different Collections never share a batch. A failed request retries
+only while a live unmet requirement needs it; physical load retries retain their
+accepted metadata rather than repeatedly calling the coordinator.
 
-SegmentLoadInfo snapshots also preserve SegmentInfo.Stats. For internal
-StorageV3 segments with a Manifest and no expanded binlogs, resource reservation
-uses its LoadResource column-group sizes and delta size before physical loading.
-Manifest stats entries for Bloom filters or BM25 are not a substitute for this
-resource-estimation summary.
+Successful preparation freezes the binding's ReadState. There is no metadata
+polling or same-View index-refresh subscription. Manifest publication requests
+DataView reconciliation; a new QueryView drives any subsequent resource update.
+Old Views and in-flight queries retain their original reads while the new View
+prepares. Schema and LoadInfoVersion remain exact; indexes are selected from
+compatible available metadata at preparation and are not a new View identity.
 
-Acknowledging a snapshot means it is retained by the resource and reconciliation
-has been made responsible for it. It does not mean physical work has finished.
-A snapshot arriving before schema/load dependencies is retained and becomes
-usable when those dependencies resolve, without another delivery.
+Ordinary sealed bases retain their minimum-Manifest rule. External bases require
+the exact requested Manifest because their row domain can change. A current
+snapshot newer than an unavailable historical external requirement fails that
+unprepared binding, rather than substituting the current base or polling forever.
+Existing historical reads remain valid. Reconstructing historical external
+SegmentInfo is outside this interface's current capability.
 
-Subscribe installation, replacement and closure are serialized by the resource
-owner. An old installation cannot replace a newer owner's subscription merely
-because they have the same SegmentID. Handlers target the owning object, and
-cleanup removes only the subscription it owns. Network work and Close execute
-outside resource/shard locks.
+Get belongs to the resource owner, not its first View. Releasing one View cannot
+cancel another binding's shared acquisition. Final demand removal cancels the
+resource waiter; the RPC is canceled when its last waiter leaves (or the node
+shuts down). Canceling one resource must not cancel siblings in the same batch.
+The closing owner drains its waiter and ignores any late response before a
+replacement owner can be installed. One Segment's request failure does not close
+a shared transport session or invalidate unrelated ready resources.
 
-On transport failure, live subscriptions resume from their accepted revisions.
-On process restart, new resources subscribe for full snapshots. Coordinator
-metadata publication must commit durable/in-memory state before notification;
-replay and reconnection must observe committed state.
+Coordinator publication commits catalog and in-memory state before requesting
+DataView reconciliation. Removing SegmentMeta Watch must preserve this trigger.
+The existing recompute queue is best-effort; queue saturation/recovery behavior
+belongs to the DataView producer and is not repaired by periodic QN polling.
 
 ## 8. Transform coverage and readiness
 
@@ -524,6 +548,14 @@ Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application
 for their selected physical resources, not only remote receipt.
 
+The QueryNode-wide catch-up worker count is
+`max(1, floor(hardware.GetCPUNum() * ratio))`, configured by
+`queryNode.queryView.transformLogDrainConcurrencyRatio` (default `0.25`).
+Configuration changes resize the existing pool. Shrinking completes in-flight
+pages and preserves queued registrations; growing starts more workers. The node
+context cancellation unregisters the watcher and stops the pool. There is no
+separate Segment catch-up worker pool.
+
 Catch-up applies bounded pages on a shared worker pool, yielding after each
 page. A registration awaiting transport coverage parks its state and releases
 the worker. Arrivals schedule pending registrations under the same VChannel
@@ -577,14 +609,14 @@ and survive that release when replacement bindings already protect them.
 When no View or query needs a resource, the owner enters Closing, prevents new
 operations on that physical incarnation, cancels obsolete work, and drains all
 operations/callbacks that can access it. It unregisters transform application,
-closes its metadata subscription and releases native resources and dependency
+drains metadata acquisition and releases native resources and dependency
 pins in an order that preserves every outstanding reference.
 
 Closing is not reversible for that physical incarnation. The registry retains
 ownership of the closing resource until its operations and cleanup have finished.
 New bindings arriving during closure are recorded for reconciliation after that
 closure; destruction and reconstruction for the same logical Segment are
-serialized. Detached old work cannot install a subscription or remove the newly
+serialized. Detached old work cannot install a metadata snapshot or remove the newly
 created instance.
 
 `OnDropped` is invoked exactly once after the View's release obligations are
@@ -659,6 +691,6 @@ No new persistence or distributed GC protocol is introduced here.
 | `internal/querynodev2/transformlogbuffer/` | Shared history, registration identity and ordered application |
 | `internal/querynodev2/segments/` | Native Segment integration and pinned ReadStates |
 | `internal/core/src/segcore/` | Shared column/index resources and staged native publication |
-| `internal/distributed/mixcoord/client/` | Versioned load metadata and Segment metadata stream |
+| `internal/distributed/mixcoord/client/` | Versioned collection metadata and unary Segment loading snapshots |
 | `pkg/util/nodescheduler/` | Execution and retry scheduling |
 | `internal/views/worknode/handler/` | Shared ViewSync transport and state reports |

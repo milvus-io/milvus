@@ -16,8 +16,11 @@ resource instance's MVCC wait. Physical subscription failures resume inside the
 transport. Buffer observes the logical stream's Done/Error to propagate terminal
 failure to its retained VChannels; Handler receives only Entry/SyncUp.
 
-The accompanying metadata supply adds SegmentLoadInfo Watch and exact retained
-LoadInfo lookup. `coord/qv-load-info/<collection>/<version>` holds immutable scope
+The accompanying metadata supply adds unary GetQueryViewSegmentLoadInfo and
+exact retained collection LoadInfo lookup. Segment loading assumes StorageV3
+with index artifacts published into manifests. New View requirements trigger
+metadata acquisition; ready Views do not poll or subscribe to metadata changes.
+Manifest publication retains its DataView recompute notification. `coord/qv-load-info/<collection>/<version>` holds immutable scope
 snapshots. Nonzero versions use the shared `LoadInfoStore`: snapshots without
 `required_fields` fail with DataIntegrity, and each read resolves current indexes
 only for the retained required fields, including fields outside preload hints.

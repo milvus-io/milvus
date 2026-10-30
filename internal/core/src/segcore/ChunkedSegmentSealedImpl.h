@@ -2778,12 +2778,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t num_rows,
         const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
         milvus::OpContext* op_ctx = nullptr) {
-        return generate_interim_index(
-            (*CaptureFieldLayout())[field_id],
-            num_rows,
-            loaded_column,
-            op_ctx,
-            nullptr);
+        return generate_interim_index((*CaptureFieldLayout())[field_id],
+                                      num_rows,
+                                      loaded_column,
+                                      op_ctx,
+                                      nullptr);
     }
 
     bool

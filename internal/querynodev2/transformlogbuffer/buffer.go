@@ -2,6 +2,7 @@ package transformlogbuffer
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -11,10 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type Buffer struct {
@@ -25,9 +28,13 @@ type Buffer struct {
 	streamsByPChannel map[string]*streamState
 	channels          map[string]*vchannelBuffer
 
-	drainMu    sync.Mutex
-	drainReady *sync.Cond
-	drainTasks []*registration
+	drainMu          sync.Mutex
+	drainReady       *sync.Cond
+	drainTasks       []*registration
+	drainWorkers     int
+	drainConcurrency int
+	drainClosed      bool
+	drainWG          sync.WaitGroup
 }
 
 func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
@@ -40,10 +47,51 @@ func New(streams wal.TransformLogStreamManager, drainConcurrency int) *Buffer {
 		channels:          make(map[string]*vchannelBuffer),
 	}
 	b.drainReady = sync.NewCond(&b.drainMu)
-	for i := 0; i < drainConcurrency; i++ {
+	b.drainMu.Lock()
+	b.resizeDrainLocked(drainConcurrency)
+	b.drainMu.Unlock()
+	return b
+}
+
+// NewConfigured creates the node-wide catchup pool, watching config until the
+// owning QueryNode context ends. Cancellation retires workers after their page.
+func NewConfigured(ctx context.Context, streams wal.TransformLogStreamManager) *Buffer {
+	params := paramtable.Get()
+	b := New(streams, params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt())
+	refresh := func(*config.Event) {
+		b.drainMu.Lock()
+		defer b.drainMu.Unlock()
+		if !b.drainClosed {
+			b.resizeDrainLocked(params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.GetAsInt())
+		}
+	}
+	watcher := config.NewHandler(fmt.Sprintf("query-transform-drain-%p", b), refresh)
+	params.Watch(params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.Key, watcher)
+	refresh(nil)
+	context.AfterFunc(ctx, func() {
+		params.Unwatch(params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.Key, watcher)
+		b.closeDrain()
+	})
+	return b
+}
+
+func (b *Buffer) resizeDrainLocked(concurrency int) {
+	b.drainConcurrency = concurrency
+	for b.drainWorkers < concurrency {
+		b.drainWorkers++
+		b.drainWG.Add(1)
 		go b.drainWorker()
 	}
-	return b
+	b.drainReady.Broadcast()
+}
+
+func (b *Buffer) closeDrain() {
+	b.drainMu.Lock()
+	b.drainClosed = true
+	b.drainTasks = nil
+	b.drainReady.Broadcast()
+	b.drainMu.Unlock()
+	b.drainWG.Wait()
 }
 
 // Bind records a range reference without opening a stream or doing I/O.
@@ -104,16 +152,27 @@ func (b *vchannelBuffer) scheduleDrainLocked(reg *registration) {
 	reg.scheduled = true
 	owner := b.owner
 	owner.drainMu.Lock()
+	if owner.drainClosed {
+		reg.scheduled = false
+		owner.drainMu.Unlock()
+		return
+	}
 	owner.drainTasks = append(owner.drainTasks, reg)
 	owner.drainReady.Signal()
 	owner.drainMu.Unlock()
 }
 
 func (b *Buffer) drainWorker() {
+	defer b.drainWG.Done()
 	for {
 		b.drainMu.Lock()
-		for len(b.drainTasks) == 0 {
+		for len(b.drainTasks) == 0 && !b.drainClosed && b.drainWorkers <= b.drainConcurrency {
 			b.drainReady.Wait()
+		}
+		if b.drainClosed || b.drainWorkers > b.drainConcurrency {
+			b.drainWorkers--
+			b.drainMu.Unlock()
+			return
 		}
 		reg := b.drainTasks[0]
 		b.drainTasks[0] = nil
@@ -173,36 +232,7 @@ func (b *Buffer) getOrCreateStreamLocked(ctx context.Context, pchannel string) (
 		refs:     make(map[string]*vchannelBuffer),
 	}
 	b.streamsByPChannel[pchannel] = state
-	go b.watchStream(state)
 	return state, nil
-}
-
-// Physical failures are resumed by the transport. Only the logical stream's
-// terminal completion invalidates the buffers that still reference it.
-func (b *Buffer) watchStream(state *streamState) {
-	<-state.stream.Done()
-	err := transformStreamFailure(state.stream)
-	b.mu.Lock()
-	refs := make([]*vchannelBuffer, 0, len(state.refs))
-	for _, buf := range state.refs {
-		refs = append(refs, buf)
-	}
-	b.mu.Unlock()
-	for _, buf := range refs {
-		buf.fail(err)
-	}
-}
-
-func transformStreamFailure(stream wal.TransformLogStream) error {
-	select {
-	case <-stream.Done():
-		if err := stream.Error(); err != nil {
-			return err
-		}
-		return merr.WrapErrServiceUnavailableMsg("transform log stream is closed")
-	default:
-		return nil
-	}
 }
 
 func (b *Buffer) removeLocked(vchannel string, buf *vchannelBuffer) wal.TransformLogStream {
@@ -227,6 +257,7 @@ type streamState struct {
 
 type bufEventHandler struct {
 	buffer *vchannelBuffer
+	stream wal.TransformLogStream
 }
 
 func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) {
@@ -250,7 +281,14 @@ func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) {
 	}
 }
 
-func (h bufEventHandler) Close() {}
+func (h bufEventHandler) Close() {
+	// Logical termination publishes its error before closing handlers. Physical
+	// reconnects preserve this handler; canceling one subscription does not set
+	// a stream error.
+	if err := h.stream.Error(); err != nil {
+		h.buffer.fail(err)
+	}
+}
 
 type guard struct {
 	once      sync.Once
@@ -271,13 +309,21 @@ func (g *guard) Prepare(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	// A new reference can arrive after the terminal watcher has taken its snapshot.
-	if err := transformStreamFailure(stream.stream); err != nil {
+	// A later reference must observe terminal failure even without a subscription.
+	if err := stream.stream.Error(); err != nil {
 		g.buffer.fail(err)
 		return false, err
 	}
 	err = g.buffer.ensureSubscribed(ctx, stream.stream)
+	// An already terminated stream can reject Subscribe without creating a
+	// subscription or invoking its handler Close callback.
+	if terminalErr := stream.stream.Error(); terminalErr != nil {
+		g.buffer.fail(terminalErr)
+	}
 	g.buffer.mu.Lock()
+	if g.buffer.err != nil {
+		err = g.buffer.err
+	}
 	retryable := g.buffer.err == nil
 	g.buffer.mu.Unlock()
 	return retryable, err
@@ -374,9 +420,9 @@ func (b *vchannelBuffer) subscribe(ctx context.Context, stream wal.TransformLogS
 	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{
 		VChannel:           b.vchannel,
 		StartAfterTimeTick: startAfter,
-		Handler:            bufEventHandler{buffer: b},
+		Handler:            bufEventHandler{buffer: b, stream: stream},
 	})
-	if streamErr := transformStreamFailure(stream); streamErr != nil {
+	if streamErr := stream.Error(); streamErr != nil {
 		b.fail(streamErr)
 		if err != nil {
 			err = streamErr

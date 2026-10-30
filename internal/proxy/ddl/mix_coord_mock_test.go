@@ -1964,6 +1964,6 @@ func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileR
 	panic("mock FetchFileResources with mockey")
 }
 
-func (*MixCoordMock) WatchQueryViewSegmentLoadInfo(context.Context, ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
-	panic("mock WatchQueryViewSegmentLoadInfo with mockey")
+func (*MixCoordMock) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }

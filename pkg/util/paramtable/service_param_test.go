@@ -170,7 +170,7 @@ func TestLocalStorageConfig_PathDoesNotChangeAtRuntime(t *testing.T) {
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
-	bt := NewBaseTable(SkipRemote(true))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true))
 	SParams.init(bt)
 
 	t.Run("test MQConfig", func(t *testing.T) {

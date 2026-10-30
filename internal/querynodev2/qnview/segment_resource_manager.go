@@ -6,10 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
+	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -28,7 +31,7 @@ type SegmentResourceManager struct {
 	scheduler   nodescheduler.Scheduler
 	loader      PhysicalSegmentLoader
 	estimator   SegmentResourceEstimator
-	stream      SegmentLoadInfoStream
+	metadata    SegmentLoadInfoProvider
 	buffer      TransformLogBuffer
 	collections QueryViewCollectionRuntimeManager
 	mu          sync.Mutex
@@ -51,20 +54,20 @@ type viewResources struct {
 }
 
 type segmentBinding struct {
-	view        *viewResources
-	resource    *segmentResource
-	partitionID int64
-	manifest    int64
-	prepared    *preparedSegmentRead
-	reported    bool
-	retryAfter  time.Time
+	view         *viewResources
+	resource     *segmentResource
+	partitionID  int64
+	manifest     int64
+	prepared     *preparedSegmentRead
+	reported     bool
+	retryAfter   time.Time
+	retryBackoff *backoff.ExponentialBackOff
 }
 
 type preparedSegmentRead struct {
 	schema   int32
 	load     uint64
 	manifest int64
-	revision SegmentLoadInfoRevision
 	base     *segmentBase
 	read     segments.ReadState
 }
@@ -85,18 +88,16 @@ type segmentBase struct {
 // A resource remains in the registry through Closing. Bindings arriving during
 // closure wait for its done channel before installing a replacement owner.
 type segmentResource struct {
-	manager        *SegmentResourceManager
-	id             int64
-	collectionID   int64
-	ctx            context.Context
-	cancel         context.CancelFunc
-	bindings       []*segmentBinding
-	snapshot       *SegmentLoadInfoSnapshot
-	subscription   SegmentLoadInfoSubscription
-	metadataClosed bool
-	bases          []*segmentBase
-	reads          []*preparedSegmentRead
-	queryRefs      int
+	manager      *SegmentResourceManager
+	id           int64
+	collectionID int64
+	ctx          context.Context
+	cancel       context.CancelFunc
+	bindings     []*segmentBinding
+	snapshot     *SegmentLoadInfoSnapshot
+	bases        []*segmentBase
+	reads        []*preparedSegmentRead
+	queryRefs    int
 	// scheduled covers only running or immediately queued work, never backoff.
 	scheduled  bool
 	retryTimer *time.Timer
@@ -107,8 +108,8 @@ type segmentResource struct {
 	operations sync.WaitGroup
 }
 
-func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, stream SegmentLoadInfoStream, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
-	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, stream: stream, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), resources: make(map[int64]*segmentResource)}
+func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
+	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), resources: make(map[int64]*segmentResource)}
 }
 
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
@@ -166,6 +167,7 @@ func (m *SegmentResourceManager) newResourceLocked(id, collection int64) *segmen
 func (m *SegmentResourceManager) prepareView(v *viewResources) {
 	defer close(v.dependenciesDone)
 	view := qviews.NewQueryViewAtQueryNode(v.req.Meta, v.req.View).(*qviews.QueryViewAtQueryNode)
+	retryBackoff := newResourceRetryBackoff(100 * time.Millisecond)
 	for v.ctx.Err() == nil {
 		collection, retryable, err := m.collections.Acquire(v.ctx, view)
 		if err != nil {
@@ -173,7 +175,7 @@ func (m *SegmentResourceManager) prepareView(v *viewResources) {
 				m.failView(v, err)
 				return
 			}
-			if !waitResourceRetry(v.ctx) {
+			if !waitResourceRetry(v.ctx, nextResourceRetryDelay(retryBackoff)) {
 				return
 			}
 			continue
@@ -188,7 +190,7 @@ func (m *SegmentResourceManager) prepareView(v *viewResources) {
 				m.failView(v, err)
 				return
 			}
-			if !waitResourceRetry(v.ctx) {
+			if !waitResourceRetry(v.ctx, nextResourceRetryDelay(retryBackoff)) {
 				return
 			}
 			continue
@@ -212,8 +214,8 @@ func (m *SegmentResourceManager) prepareView(v *viewResources) {
 	}
 }
 
-func waitResourceRetry(ctx context.Context) bool {
-	timer := time.NewTimer(100 * time.Millisecond)
+func waitResourceRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -299,29 +301,6 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			go r.close()
 			return nil
 		}
-		if r.metadataClosed {
-			subscription := r.subscription
-			affected := append([]*segmentBinding(nil), r.bindings...)
-			m.mu.Unlock()
-			// Error uses the transport's callback mutex: never read it under mu.
-			err := subscription.Error()
-			if err == nil {
-				err = merr.WrapErrServiceNotReadyMsg("segment %d metadata subscription closed", r.id)
-			}
-			for _, binding := range affected {
-				m.failView(binding.view, err)
-			}
-			m.mu.Lock()
-			return nil
-		}
-		if r.subscription == nil {
-			m.mu.Unlock()
-			sub := m.stream.Subscribe(SegmentLoadInfoSubscriptionOption{CollectionID: r.collectionID, SegmentID: r.id, Handler: resourceMetadataHandler{r}})
-			m.mu.Lock()
-			r.subscription = sub
-			// Subscribe may deliver its first snapshot synchronously.
-			continue
-		}
 		cursor := r.cursor
 		b, retryAt := r.nextBindingLocked()
 		if b != nil && prepared {
@@ -330,6 +309,37 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.cursor = cursor
 			r.dirty = true
 			b = nil
+		}
+		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest) {
+			m.mu.Unlock()
+			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
+			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
+			cancel()
+			if err == nil {
+				err = r.validateSnapshot(snapshot)
+			}
+			m.mu.Lock()
+			if r.closing {
+				continue
+			}
+			if err == nil {
+				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
+				r.snapshot = &snapshot
+				if snapshotManifestVersion(snapshot) < b.manifest {
+					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
+				}
+			}
+			if err != nil {
+				b.backoffLocked()
+				m.mu.Unlock()
+				if merr.GetErrorType(err) == merr.InputError || errors.Is(err, merr.ErrSegmentNotFound) || errors.Is(err, merr.ErrServiceInternal) || errors.Is(err, merr.ErrDataIntegrity) {
+					m.failView(b.view, err)
+				}
+				mlog.RatedWarn(r.ctx, rate.Limit(0.2), "query view segment metadata acquisition failed", mlog.FieldSegmentID(r.id), mlog.Err(err))
+				m.mu.Lock()
+			}
+			// Re-evaluate all bindings, including ones released or added during Get.
+			continue
 		}
 		obsolete := r.pruneReadsLocked()
 		anchors := append([]*preparedSegmentRead(nil), r.reads...)
@@ -366,8 +376,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		m.mu.Lock()
 		b.view.operationRefs--
 		if err != nil {
-			b.retryAfter = time.Now().Add(200 * time.Millisecond)
+			b.backoffLocked()
 		} else {
+			b.resetRetryLocked()
 			r.reads = append(r.reads, result)
 		}
 		prepared = true
@@ -392,10 +403,12 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			go m.failView(b.view, b.prepared.base.catchupErr)
 			continue
 		}
-		for _, read := range r.reads {
-			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest) && read.base.caughtUp {
-				if b.prepared == nil || read.revision == r.snapshot.Revision {
+		if b.prepared == nil {
+			for _, read := range r.reads {
+				if readMatchesBinding(read, b) && read.base.caughtUp && read.base.catchupErr == nil {
 					b.prepared = read
+					b.resetRetryLocked()
+					break
 				}
 			}
 		}
@@ -407,31 +420,15 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			}
 		}
 	}
-	if r.snapshot == nil {
-		return nil, retryAt
-	}
 	for n := 0; n < len(r.bindings); n++ {
 		i := (r.cursor + n) % len(r.bindings)
 		b := r.bindings[i]
-		if b.view.collection == nil || b.view.buffer == nil || b.view.failed {
+		if b.view.collection == nil || b.view.buffer == nil || b.view.failed || b.prepared != nil {
 			continue
 		}
-		// External bases can change their row domain under the same ID. An
-		// already bound historical read remains valid but must not adopt a new
-		// external snapshot merely because its manifest number is greater.
-		if typeutil.IsExternalCollection(b.view.collection.Schema()) && b.manifest != 0 && snapshotManifestVersion(*r.snapshot) != b.manifest {
-			if b.prepared == nil {
-				go m.failView(b.view, merr.WrapErrServiceNotReadyMsg("required external segment %d manifest %d is unavailable in current metadata", r.id, b.manifest))
-			}
-			continue
-		}
-		if b.prepared != nil && b.prepared.revision == r.snapshot.Revision {
-			continue
-		}
-		// Do not build a duplicate while its transform attachment is catching up.
 		waiting := false
 		for _, read := range r.reads {
-			if read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() && read.revision == r.snapshot.Revision && read.manifest >= b.manifest {
+			if readMatchesBinding(read, b) {
 				waiting = true
 				if read.base.catchupErr != nil {
 					go m.failView(b.view, read.base.catchupErr)
@@ -441,19 +438,42 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 		if waiting {
 			continue
 		}
-		if snapshotManifestVersion(*r.snapshot) < b.manifest {
-			continue
-		}
 		if time.Now().Before(b.retryAfter) {
 			if retryAt.IsZero() || b.retryAfter.Before(retryAt) {
 				retryAt = b.retryAfter
 			}
 			continue
 		}
+		// External manifests may change the row domain. Never replace a required
+		// historical external base with the current one or retry that mismatch forever.
+		if r.snapshot != nil && b.manifest != 0 && typeutil.IsExternalCollection(b.view.collection.Schema()) && snapshotManifestVersion(*r.snapshot) > b.manifest {
+			go m.failView(b.view, merr.WrapErrServiceNotReadyMsg("required external segment %d manifest %d is unavailable in current metadata", r.id, b.manifest))
+			continue
+		}
 		r.cursor = (i + 1) % len(r.bindings)
 		return b, retryAt
 	}
 	return nil, retryAt
+}
+
+func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	return read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() &&
+		read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest)
+}
+
+func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) error {
+	info := snapshot.LoadInfo
+	if info == nil || snapshot.CollectionID != r.collectionID || snapshot.SegmentID != r.id || info.GetCollectionID() != r.collectionID || info.GetSegmentID() != r.id {
+		return merr.WrapErrServiceInternalMsg("segment %d received mismatched loading metadata", r.id)
+	}
+	_, version, err := packed.UnmarshalManifestPath(info.GetManifestPath())
+	if err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3 {
+		return merr.WrapErrServiceInternalMsg("segment %d requires a committed StorageV3 manifest", r.id)
+	}
+	if info.GetTransformStartAfterTimetick() == 0 {
+		return merr.WrapErrServiceNotReadyMsg("segment %d has no certified transform replay cursor", r.id)
+	}
+	return nil
 }
 
 func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
@@ -510,7 +530,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	if err != nil {
 		return nil, err
 	}
-	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), revision: snapshot.Revision, base: base, read: read}, nil
+	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
 }
 
 func (r *segmentResource) catchup(base *segmentBase) {
@@ -540,9 +560,6 @@ func (r *segmentResource) catchup(base *segmentBase) {
 func (r *segmentResource) close() {
 	m := r.manager
 	r.operations.Wait()
-	if r.subscription != nil {
-		r.subscription.Close()
-	}
 	for _, base := range r.bases {
 		if base.registration != nil {
 			base.registration.Unregister()
@@ -626,31 +643,6 @@ func (m *SegmentResourceManager) cleanupView(v *viewResources) {
 			}
 		})
 	}
-}
-
-type resourceMetadataHandler struct{ resource *segmentResource }
-
-func (h resourceMetadataHandler) Handle(snapshot SegmentLoadInfoSnapshot) error {
-	r := h.resource
-	r.manager.mu.Lock()
-	if !r.closing {
-		owned := snapshot
-		owned.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
-		r.snapshot = &owned
-		r.wakeLocked()
-	}
-	r.manager.mu.Unlock()
-	return nil
-}
-
-func (h resourceMetadataHandler) Close() {
-	r := h.resource
-	r.manager.mu.Lock()
-	if !r.closing {
-		r.metadataClosed = true
-		r.wakeLocked()
-	}
-	r.manager.mu.Unlock()
 }
 
 // WaitTransformVisible waits for the View buffer frontier.

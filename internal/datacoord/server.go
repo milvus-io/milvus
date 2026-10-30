@@ -96,13 +96,12 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
-	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
-	ctx                       context.Context
-	serverLoopCtx             context.Context
-	serverLoopCancel          context.CancelFunc
-	serverLoopWg              sync.WaitGroup
-	quitCh                    chan struct{}
-	stateCode                 atomic.Value
+	ctx              context.Context
+	serverLoopCtx    context.Context
+	serverLoopCancel context.CancelFunc
+	serverLoopWg     sync.WaitGroup
+	quitCh           chan struct{}
+	stateCode        atomic.Value
 
 	etcdCli                             *clientv3.Client
 	tikvCli                             *txnkv.Client
@@ -756,7 +755,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
-	recoveredMeta.queryViewLoadInfoNotifier = s.queryViewLoadInfoNotifier
 	recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
 	s.dataViewManager = manager

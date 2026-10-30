@@ -733,11 +733,11 @@ TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
     auto dataset = segcore::DataGen(new_schema, 5);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
-    auto segment =
-        std::make_unique<ReadinessSegment>(new_schema,
-                                           empty_index_meta,
-                                           segcore::SegcoreConfig::default_config(),
-                                           kSegmentID);
+    auto segment = std::make_unique<ReadinessSegment>(
+        new_schema,
+        empty_index_meta,
+        segcore::SegcoreConfig::default_config(),
+        kSegmentID);
     segment->LoadFieldData(PrepareInsertBinlog(
         kCollectionID, kPartitionID, kSegmentID, dataset, cm));
 

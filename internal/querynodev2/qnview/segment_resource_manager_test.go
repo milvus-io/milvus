@@ -11,6 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -37,17 +39,11 @@ type resourceTestRead struct{ segments.Segment }
 func (*resourceTestRead) RetainReadState() func() { panic("unpatched") }
 func (*resourceTestRead) ReleaseReadState()       { panic("unpatched") }
 
-type resourceTestStream struct{ SegmentLoadInfoStream }
+type resourceTestMetadata struct{}
 
-func (*resourceTestStream) Subscribe(SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
+func (*resourceTestMetadata) GetQueryViewSegmentLoadInfo(context.Context, int64, int64) (SegmentLoadInfoSnapshot, error) {
 	panic("unpatched")
 }
-
-type resourceTestSubscription struct{ SegmentLoadInfoSubscription }
-
-func (*resourceTestSubscription) Error() error { return nil }
-
-func (*resourceTestSubscription) Close() { panic("unpatched") }
 
 type resourceTestFixture struct {
 	dependencyMock *mockey.Mocker
@@ -55,7 +51,9 @@ type resourceTestFixture struct {
 	registerMock   *mockey.Mocker
 	manager        *SegmentResourceManager
 	ready          chan int32
-	handler        chan SegmentLoadInfoEventHandler
+	getMock        *mockey.Mocker
+	gets           atomic.Int32
+	manifest       atomic.Int64
 	loads          atomic.Int32
 	prepares       atomic.Int32
 	releases       atomic.Int32
@@ -63,7 +61,8 @@ type resourceTestFixture struct {
 
 func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *resourceTestFixture {
 	mockey.Mock((*resourceTestLoader).AdoptReadState).Return(nil).Build()
-	f := &resourceTestFixture{ready: make(chan int32, 20), handler: make(chan SegmentLoadInfoEventHandler, 20)}
+	f := &resourceTestFixture{ready: make(chan int32, 20)}
+	f.manifest.Store(1)
 	f.loadMock = mockey.Mock((*resourceTestLoader).Load).To(func(_ *resourceTestLoader, _ context.Context, info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
 		f.loads.Add(1)
 		return &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID}, nil
@@ -80,11 +79,9 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 	mockey.Mock((*resourceTestRead).RetainReadState).Return(func() {}).Build()
 	mockey.Mock((*resourceTestRead).ReleaseReadState).Return().Build()
 	mockey.Mock((*fakeTransformSegment).Release).To(func(*fakeTransformSegment, context.Context) error { f.releases.Add(1); return nil }).Build()
-	mockey.Mock((*resourceTestSubscription).Close).Return().Build()
-	mockey.Mock((*resourceTestStream).Subscribe).To(func(_ *resourceTestStream, option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription {
-		f.handler <- option.Handler
-		require.NoError(t, option.Handler.Handle(SegmentLoadInfoSnapshot{SegmentID: option.SegmentID, CollectionID: option.CollectionID, Revision: SegmentLoadInfoRevision{Revision: 1}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: option.SegmentID, CollectionID: option.CollectionID, PartitionID: 10, NumOfRows: 10, TransformStartAfterTimetick: 50}}))
-		return &resourceTestSubscription{}
+	f.getMock = mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
+		f.gets.Add(1)
+		return resourceSnapshot(collectionID, segmentID, f.manifest.Load()), nil
 	}).Build()
 	f.dependencyMock = mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
 		version := view.IntoProto().Meta.SchemaVersion
@@ -93,14 +90,14 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 	f.registerMock = mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(instantTransformRegistration{}, nil).Build()
 	scheduler := nodescheduler.New(2)
 	t.Cleanup(scheduler.Close)
-	f.manager = NewSegmentResourceManager(t.Context(), scheduler, &resourceTestLoader{}, nil, &resourceTestStream{}, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{})
+	f.manager = NewSegmentResourceManager(t.Context(), scheduler, &resourceTestLoader{}, nil, &resourceTestMetadata{}, &fakeTransformLogBuffer{}, &fakeQueryViewCollectionRuntimeManager{})
 	return f
 }
 
 func (f *resourceTestFixture) request(version int64, schema int32, load uint64) AcquireSegments {
 	meta := buildHandlerTestMeta(version)
 	meta.SchemaVersion, meta.LoadInfoVersion = schema, load
-	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}}}}
+	view := &viewpb.QueryViewOfQueryNode{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{1000}, SegmentManifestVersions: []int64{1}}}}
 	req := AcquireSegments{Meta: meta, View: view, Key: qviews.NewQueryViewAtQueryNode(meta, view).QueryViewKey(), OnReady: func(map[int64][]int64) { f.ready <- schema }}
 	return req
 }
@@ -177,8 +174,8 @@ func TestSegmentResourceBlockedRequirementDoesNotStarveOthers(t *testing.T) {
 	})
 }
 
-func TestSegmentResourceMetadataBeforeDependencies(t *testing.T) {
-	mockey.PatchConvey("first metadata is retained until collection preparation resolves", t, func() {
+func TestSegmentResourceFetchesAfterDependencies(t *testing.T) {
+	mockey.PatchConvey("metadata is fetched only after dependencies resolve", t, func() {
 		f := setupResourceTest(t, nil)
 		gate := make(chan struct{})
 		f.dependencyMock.UnPatch()
@@ -191,7 +188,7 @@ func TestSegmentResourceMetadataBeforeDependencies(t *testing.T) {
 			}
 		}).Build()
 		req := f.acquire(1, 1, 1)
-		<-f.handler // synchronous first snapshot accepted before dependency
+		require.Never(t, func() bool { return f.gets.Load() != 0 }, 50*time.Millisecond, time.Millisecond)
 		require.Zero(t, f.loads.Load())
 		close(gate)
 		f.await(t, 1)
@@ -205,7 +202,7 @@ func TestSegmentResourceReleaseSerializesReconstruction(t *testing.T) {
 		entered, resume := make(chan struct{}), make(chan struct{})
 		var attempts atomic.Int32
 		// Delay read preparation after the base exists. Release must cancel and
-		// drain this owner before the replacement subscribes or loads.
+		// drain this owner before the replacement fetches metadata or loads.
 		f.manager.loader = &blockedResourceTestLoader{base: f.manager.loader}
 		mockey.Mock((*blockedResourceTestLoader).PrepareReadState).To(func(l *blockedResourceTestLoader, ctx context.Context, segment TransformSegment, reuse segments.ReadState, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
 			if attempts.Add(1) == 1 {
@@ -247,26 +244,38 @@ func (*blockedResourceTestLoader) PrepareReadState(context.Context, TransformSeg
 	panic("unpatched")
 }
 
-func TestSegmentResourceSameSchemaDifferentScopeAndMetadataRefresh(t *testing.T) {
-	mockey.PatchConvey("scope identity and refreshed indexes prepare separate results on shared rows", t, func() {
+func TestSegmentResourceSameSchemaDifferentScopeAndManifest(t *testing.T) {
+	mockey.PatchConvey("new View prepares new manifest while retained Views keep their reads", t, func() {
 		f := setupResourceTest(t, nil)
 		a := f.acquire(1, 1, 99)
 		f.await(t, 1)
 		b := f.acquire(2, 1, 2)
 		f.await(t, 1)
 		require.EqualValues(t, 1, f.loads.Load())
-		handler := <-f.handler
-		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, NumOfRows: 10, TransformStartAfterTimetick: 50}}))
-		require.Eventually(t, func() bool {
-			f.manager.mu.Lock()
-			defer f.manager.mu.Unlock()
-			return f.manager.views[a.Key].bindings[1000].prepared.revision.Revision == 2 && f.manager.views[b.Key].bindings[1000].prepared.revision.Revision == 2
-		}, 5*time.Second, time.Millisecond)
-		require.Empty(t, f.ready, "resource refresh does not re-report Ready")
-		require.EqualValues(t, 1, f.loads.Load())
+		require.EqualValues(t, 1, f.gets.Load())
+		f.manifest.Store(2)
+		next := f.request(3, 1, 2)
+		next.View.Partitions[0].SegmentManifestVersions = []int64{2}
+		f.manager.Acquire(next)
+		f.await(t, 1)
+		f.manager.mu.Lock()
+		require.EqualValues(t, 1, f.manager.views[a.Key].bindings[1000].prepared.manifest)
+		require.EqualValues(t, 1, f.manager.views[b.Key].bindings[1000].prepared.manifest)
+		require.EqualValues(t, 2, f.manager.views[next.Key].bindings[1000].prepared.manifest)
+		f.manager.mu.Unlock()
+		require.EqualValues(t, 2, f.gets.Load())
+		require.EqualValues(t, 1, f.loads.Load(), "compatible rows share their physical base")
 		f.drop(t, a)
 		f.drop(t, b)
+		f.drop(t, next)
 	})
+}
+
+func resourceSnapshot(collectionID, segmentID, manifest int64) SegmentLoadInfoSnapshot {
+	return SegmentLoadInfoSnapshot{CollectionID: collectionID, SegmentID: segmentID, LoadInfo: &querypb.SegmentLoadInfo{
+		CollectionID: collectionID, SegmentID: segmentID, PartitionID: 10, NumOfRows: 10,
+		ManifestPath: packed.MarshalManifestPath("test", manifest), StorageVersion: storage.StorageV3, TransformStartAfterTimetick: 50,
+	}}
 }
 
 func TestSegmentResourceReleaseWhileDependenciesPending(t *testing.T) {

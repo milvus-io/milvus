@@ -73,21 +73,20 @@ import (
 var Params = params.Params
 
 type Server struct {
-	segmentLoadInfoWatcher *queryViewSegmentLoadInfoWatcher
-	loadInfos              *loadmgr.LoadInfoStore
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	wg                     sync.WaitGroup
-	status                 atomic.Int32
-	etcdCli                *clientv3.Client
-	tikvCli                *txnkv.Client
-	address                string
-	session                sessionutil.SessionInterface
-	sessionWatcher         sessionutil.SessionWatcher
-	sessionWatcherMu       sync.Mutex
-	kv                     kv.MetaKv
-	idAllocator            func() (int64, error)
-	metricsCacheManager    *metricsinfo.MetricsCacheManager
+	loadInfos           *loadmgr.LoadInfoStore
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	status              atomic.Int32
+	etcdCli             *clientv3.Client
+	tikvCli             *txnkv.Client
+	address             string
+	session             sessionutil.SessionInterface
+	sessionWatcher      sessionutil.SessionWatcher
+	sessionWatcherMu    sync.Mutex
+	kv                  kv.MetaKv
+	idAllocator         func() (int64, error)
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
 	mixCoord types.MixCoord
@@ -153,10 +152,9 @@ type FileResourceObserver interface {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		segmentLoadInfoWatcher: newQueryViewSegmentLoadInfoWatcher(),
-		ctx:                    ctx,
-		cancel:                 cancel,
-		metricsRequest:         metricsinfo.NewMetricsRequest(),
+		ctx:            ctx,
+		cancel:         cancel,
+		metricsRequest: metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator

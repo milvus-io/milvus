@@ -190,7 +190,8 @@ NewSegmentWithLoadInfo(CCollection collection,
 
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
-        auto segment = CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
+        auto segment =
+            CreateSegment(col, seg_type, segment_id, is_sorted_by_pk);
         segment->SetLoadInfo(std::move(load_info));
         *newSegment = segment.release();
         return milvus::SuccessCStatus();
