@@ -1984,31 +1984,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		mlog.Error(ctx, "fail to load all grant privilege entities", mlog.String("key", granteeKey), mlog.Err(err))
 		return []*milvuspb.GrantEntity{}, err
 	}
-	granteeOwnerKeys := make(map[string][]string)
-	for i, key := range keys {
-		if i >= len(values) {
-			mlog.Warn(ctx, "grantee key has no matching id value while indexing grantee id owners",
-				mlog.String("key", key), mlog.String("prefix", granteeKey))
-			continue
-		}
-		granteeOwnerKeys[values[i]] = append(granteeOwnerKeys[values[i]], key)
-	}
-
-	granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
-	allIDKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDPrefix)
-	if err != nil {
-		mlog.Error(ctx, "fail to load all grantee ids", mlog.String("key", granteeIDPrefix), mlog.Err(err))
-		return []*milvuspb.GrantEntity{}, err
-	}
-	granteeIDKeys := make(map[string][]string)
-	for _, key := range allIDKeys {
-		granteeIDInfos := typeutil.AfterN(key, granteeIDPrefix, "/")
-		if len(granteeIDInfos) < 2 || funcutil.IsEmptyString(granteeIDInfos[0]) {
-			mlog.Warn(ctx, "invalid grantee id", mlog.String("string", key), mlog.String("sub_string", granteeIDPrefix))
-			continue
-		}
-		granteeIDKeys[granteeIDInfos[0]] = append(granteeIDKeys[granteeIDInfos[0]], key)
-	}
+	var granteeOwnerKeys, granteeIDKeys map[string][]string
 
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
@@ -2018,6 +1994,17 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 			funcutil.IsEmptyString(grantInfos[2]) {
 			mlog.Warn(ctx, "invalid grantee key", mlog.String("string", key), mlog.String("sub_string", granteeKey))
 			continue
+		}
+		// Validate only when a valid grantee is encountered, as in the per-ID
+		// loader. Empty or entirely malformed grantee lists need no privilege read.
+		if granteeOwnerKeys == nil {
+			if err := validateLoadedGrantees(keys, values); err != nil {
+				return []*milvuspb.GrantEntity{}, err
+			}
+			granteeOwnerKeys = make(map[string][]string)
+			for j, ownerKey := range keys {
+				granteeOwnerKeys[values[j]] = append(granteeOwnerKeys[values[j]], ownerKey)
+			}
 		}
 		logicalGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
 		idStr := values[i]
@@ -2032,6 +2019,30 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 				err := newSharedGranteeIDError(idStr, logicalGranteeKey, otherGranteeKey)
 				mlog.Error(ctx, "fail to load the grantee ids", mlog.String("key", legacyIDPrefix), mlog.Err(err))
 				return []*milvuspb.GrantEntity{}, err
+			}
+		}
+
+		// Load lazily after this grantee's ownership check. Moving the read
+		// before that check would change which error is returned first.
+		if granteeIDKeys == nil {
+			granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
+			allIDKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDPrefix)
+			if err != nil {
+				if !errors.Is(err, merr.ErrIoKeyNotFound) {
+					mlog.Error(ctx, "fail to load all grantee ids", mlog.String("key", granteeIDPrefix), mlog.Err(err))
+					return []*milvuspb.GrantEntity{}, err
+				}
+				// The per-ID loader treats a missing prefix as an empty candidate.
+				allIDKeys = nil
+			}
+			granteeIDKeys = make(map[string][]string)
+			for _, idKey := range allIDKeys {
+				granteeIDInfos := typeutil.AfterN(idKey, granteeIDPrefix, "/")
+				if len(granteeIDInfos) < 2 || funcutil.IsEmptyString(granteeIDInfos[0]) {
+					mlog.Warn(ctx, "invalid grantee id", mlog.String("string", idKey), mlog.String("sub_string", granteeIDPrefix))
+					continue
+				}
+				granteeIDKeys[granteeIDInfos[0]] = append(granteeIDKeys[granteeIDInfos[0]], idKey)
 			}
 		}
 
