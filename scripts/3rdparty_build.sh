@@ -308,20 +308,13 @@ mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include
 
 pushd ${ROOT_DIR}/cmake_build/thirdparty
-if command -v cargo >/dev/null 2>&1; then
-    echo "cargo exists"
-    unameOut="$(uname -s)"
-    case "${unameOut}" in
-        Darwin*)
-          echo "running on mac os, reinstall rust 1.94"
-          # github will install rust 1.74 by default.
-          # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
-          rustup install 1.94
-          rustup default 1.94;;
-        *)
-          echo "not running on mac os, no need to reinstall rust";;
-    esac
+if command -v rustup >/dev/null 2>&1; then
+    # Corrosion selects this exact toolchain; an existing cargo from an older
+    # builder image does not satisfy the storage bridge's Rust requirement.
+    if ! rustup run 1.94.1 rustc --version >/dev/null 2>&1; then
+        rustup toolchain install 1.94.1 --profile minimal || { echo 'rust 1.94.1 install failed'; exit 1; }
+    fi
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.94 -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.94.1 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
