@@ -12,7 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -21,12 +21,12 @@ import (
 func TestQueryViewUpdateLoadConfig(t *testing.T) {
 	s, _ := newHandoffServer(t)
 	s.meta = &meta.Meta{ReplicaManager: &meta.ReplicaManager{}, ResourceManager: &meta.ResourceManager{}}
-	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, nil, s.meta)
+	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, nil, qviewsReplicaResources{ResourceManager: s.meta.ResourceManager, allocateID: func() (int64, error) { return s.idAllocator() }})
 	store := s.qviewsRuntime.loadConfigStore
 	cfg := store.GetConfig(1).Clone()
 	cfg.Replicas = []*loadmgr.ReplicaAssignment{{ReplicaID: 11, ResourceGroup: "a"}, {ReplicaID: 12, ResourceGroup: "a"}, {ReplicaID: 13, ResourceGroup: "b"}}
-	cfg.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 100}}
-	cfg.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
+	cfg.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 100}}
+	cfg.RequiredFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
 	cfg.UserSpecifiedReplicaMode = true
 	require.NoError(t, store.Put(t.Context(), cfg))
 	for _, p := range []*mockey.Mocker{
@@ -69,6 +69,7 @@ func TestQueryViewUpdateLoadConfig(t *testing.T) {
 	version := store.GetConfigVersion(1)
 	require.NoError(t, watcher.applyLoadConfigChanges())
 	require.Equal(t, version, store.GetConfigVersion(1), "unchanged config is not republished")
+	store.StopPlanning(1)
 	require.NoError(t, store.Remove(t.Context(), 1))
 	require.NoError(t, s.updateLoadConfig(t.Context(), []int64{1}, 3, []string{"a"}))
 }
@@ -110,28 +111,27 @@ func TestQueryViewLoadConfigWatcherLifecycle(t *testing.T) {
 func TestQueryViewReplicaConfigDirectApply(t *testing.T) {
 	s, _ := newHandoffServer(t)
 	s.meta = &meta.Meta{ReplicaManager: &meta.ReplicaManager{}, ResourceManager: &meta.ResourceManager{}}
-	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, nil, s.meta)
+	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, nil, qviewsReplicaResources{ResourceManager: s.meta.ResourceManager, allocateID: func() (int64, error) { return s.idAllocator() }})
 	store := s.qviewsRuntime.loadConfigStore
 	cfg := store.GetConfig(1).Clone()
 	cfg.Replicas = []*loadmgr.ReplicaAssignment{{ReplicaID: 11, ResourceGroup: "a"}}
-	cfg.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 100}}
-	cfg.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
+	cfg.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 100}}
+	cfg.RequiredFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}
 	cfg.UserSpecifiedReplicaMode = true
 	require.NoError(t, store.Put(t.Context(), cfg))
+	cfg = store.GetConfig(1).Clone()
 	allocated := int64(11)
 	var allocationErr error
-	for _, p := range []*mockey.Mocker{
-		mockey.Mock((*meta.ResourceManager).ContainResourceGroup).Return(true).Build(),
-		mockey.Mock((*meta.ReplicaManager).AllocateReplicaID).To(func(*meta.ReplicaManager, context.Context) (int64, error) {
-			if allocationErr != nil {
-				return 0, allocationErr
-			}
-			allocated++
-			return allocated, nil
-		}).Build(),
-	} {
-		t.Cleanup(func() { p.UnPatch() })
+	s.idAllocator = func() (int64, error) {
+		if allocationErr != nil {
+			return 0, allocationErr
+		}
+		allocated++
+		return allocated, nil
 	}
+	patch := mockey.Mock((*meta.ResourceManager).ContainResourceGroup).Return(true).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+
 	allocationErr = context.DeadlineExceeded
 	err := s.qviewsRuntime.loadManager.UpdateReplicaConfig(t.Context(), 1, 3, []string{"a", "b", "b"})
 	require.ErrorIs(t, err, allocationErr)
@@ -169,6 +169,7 @@ func TestQueryViewLoadConfigWatcherRechecksAfterLock(t *testing.T) {
 				// Simulate a release or explicit load winning the lock before the
 				// watcher. Its earlier snapshot must not overwrite either one.
 				if release {
+					store.StopPlanning(1)
 					require.NoError(t, store.Remove(ctx, 1))
 				} else {
 					cfg := store.GetConfig(1).Clone()

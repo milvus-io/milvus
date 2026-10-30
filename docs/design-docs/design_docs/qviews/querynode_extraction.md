@@ -1,12 +1,22 @@
 # QueryNode QueryView extraction
 
 The [resource preparation contract](qnview/querynode_queryview_resource_preparation.md)
-is implemented by `querynodev2/{qnview,qvresource,transformlogbuffer,viewquery}`.
+is implemented by `querynodev2/{qnview,qvresource,transformlogbuffer,viewquery}`,
+except for the explicitly pending shared-layout ownership revision in sections
+6.1–6.2 and the [versioned CollectionLoadConfig revision](collection_load_info.md).
 `distributed/querynode` registers ViewSyncService and ViewQueryService against the
 same handler. Query handles retain their concrete physical generation and wait
 for its applied Transform MVCC before execution.
 
 ## Metadata supply and production boundary
+
+The following describes current code. The agreed
+[CollectionLoadInfo revision](collection_load_info.md) replaces the separate
+scope-only history with persisted versions containing partition membership and
+exact index references, updated by CreateIndex and DropIndex. AlterIndex has no
+hot-update semantics.
+It also defines View-reference GC and complete deletion after Release drains
+all Views. These changes are pending implementation in Coord and its consumers.
 
 Remote TransformLog transport is supplied by the base branch through
 `streaming.WAL().TransformLogStreamManager()`. The QueryNode adapter returns
@@ -69,10 +79,17 @@ operation references retain CCollection until synchronous CSegment operations
 and their native children and result conversion complete. There is no additional
 Collection Pin layer. Shared expression and scoring code use the plan schema.
 
-Building the node requires the matching native implementation of the new create,
-reopen, pin and adopt C APIs. Old installed headers/libraries cannot validate this
-path. Native build artifacts must be supplied through the workspace's approved
-trunk artifact binding.
+SealedFieldLayout owns its immutable scope and shared Schema/index metadata.
+Views, PublishedStates and retained reads can share the layout. Releasing the
+CCollection handle drops its ownership; it does not destroy metadata still used
+by a layout. Native borrowing is protected by the exact state/layout owner,
+including asynchronous reopen and base adoption. Schema objects are not copied
+per Segment. Physical index artifacts are filtered by the View selection before
+preparation; Segment metadata cannot overwrite the logical binding.
+
+Building the node requires matching native create/reopen/pin/adopt APIs and the
+shared-Schema binding constructor. Old installed headers/libraries cannot
+validate this path. See resource preparation sections 6.1–6.2 for lifecycle rules.
 
 ## Query execution protocol alignment
 

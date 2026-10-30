@@ -313,7 +313,7 @@ loadmgr.CollectionLoadManager
 ├── LoadConfigStore          ← desired state
 │   ├── LoadConfig per collection (persisted)
 │   ├── Replica RG constraints (persisted, embedded in LoadConfig)
-│   └── Full-config writes with orphan cleanup
+│   └── One immutable complete record per version
 │
 └── source publication hook  ← synchronous cache update, then dirty notification
 ```
@@ -341,17 +341,12 @@ the Balancer dependency on a global LoadConfigSnapshot.
 type LoadConfigStore struct { /* ... */ }
 
 // Sole constructor: loads persisted state from ETCD at construction.
-func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCatalog) (*LoadConfigStore, error)
+func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencies) (*LoadConfigStore, error)
 
-// Put persists the full LoadConfig. Always writes all current keys
-// (CollectionLoadInfo + all PartitionLoadInfo + all Replica), and deletes
-// orphan partitions / replicas present in the previous state but absent
-// from the new config.
+// Put persists the complete config in one QueryView catalog key per version.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error
 
-// Remove deletes all persisted state for a collection
-// (CollectionLoadInfo + PartitionLoadInfo keys + all Replicas).
-// No-op if the collection is not present.
+// Remove deletes all retained versions after View cleanup releases references.
 func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error
 
 func (s *LoadConfigStore) Snapshot() *LoadConfigSnapshot
@@ -361,8 +356,8 @@ type LoadConfig struct {
     DbID                     int64
     CollectionID             int64
     PartitionIDs             []int64
-    LoadFields               []*messagespb.LoadFieldConfig  // preload hints; empty follows target schema
-    RequiredFields           []*messagespb.LoadFieldConfig  // explicit nonempty internal query scope
+    LoadFields               []*viewpb.LoadFieldConfig  // preload hints; empty follows target schema
+    RequiredFields           []*viewpb.LoadFieldConfig  // explicit nonempty internal query scope
     UserSpecifiedReplicaMode bool
     Replicas                 []*ReplicaAssignment
 }
@@ -383,13 +378,13 @@ func (r *ReplicaAssignment) Clone() *ReplicaAssignment
 func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *LoadConfig
 ```
 
-**Persistence**: Split storage, reusing legacy key formats for upgrade compatibility:
-
-- `querycoord-collection-loadinfo/{collectionID}` — CollectionLoadInfo proto
-- `querycoord-partition-loadinfo/{collectionID}/{partitionID}` — PartitionLoadInfo proto
-- `querycoord-replica/{collectionID}/{replicaID}` — Replica proto
-
-Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `resource_group`, `ID`, `collectionID` on Replica; physical node membership fields are ignored, and `collectionID`, `dbID`, `required_fields`, `load_fields`, `load_all_fields`, `skip_load_dynamic_field`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
+**Persistence**: `coord/load_info/<collectionID>/<version>` contains the full
+`viewpb.CollectionLoadConfig`, including partition membership, field/index
+selection, replica IDs, resource groups and priorities. The QueryView catalog
+owns this single-key publication; there are no per-partition/per-replica writes
+and no writes to legacy load metadata. Message protos remain independent and
+are converted explicitly. See [CollectionLoadInfo](collection_load_info.md).
+Legacy migration and fault-recovery integration remain TODO.
 
 **Copy-On-Write semantics**: Put clones caller-owned configuration and never
 mutates a published value. The target publication hook shares this immutable
@@ -397,21 +392,14 @@ value and its source revision with the cache before Put returns. Remove
 publishes desired absence before returning. Existing Snapshot APIs can remain
 compatibility views but are not the Balancer read path.
 
-**LoadInfoVersion**: The identity stored in QueryView metadata is derived from
-canonical persisted configuration content using SHA-256 truncated to the uint64
-wire field (with the high bit reserved for this identity domain). It is an opaque
-identity compared for equality, not an ordered counter. Canonicalization sorts
-partition IDs, fields/indexes and replica IDs; it includes collection/database
-identity, replica mode and resource groups. Scheduling priority is excluded
-because it is not persisted and does not identify loaded resources. Config
-recovery and repeated equivalent Put calls reproduce the same identity; a real
-configuration change gets a different fingerprint, subject to the negligible
-collision risk inherent in the 64-bit field. The process-local store revision
-continues to invalidate snapshots but is never used as LoadInfoVersion.
-No catalog or RPC schema change is needed. Earlier draft counter-based views
-are replaced once when their identity differs.
+**LoadInfoVersion**: A durable ID allocator supplies an increasing identity for
+each new immutable publication. Equivalent committed requirements are a no-op;
+Release/reload receives a fresh identity. Priority participates in the persisted
+configuration. Exact reads retain the selected historical version until its last
+View is durably removed. The old content-hash identity is removed.
 
-**Write amplification**: Put always writes the full config (no diff). Orphan partitions / replicas (present in previous state but absent from new config) are deleted. This is intentionally simple — dedup / diff optimization can be added later if write volume becomes a concern.
+**Write amplification**: One Save writes the complete collection configuration,
+including its replica list. Membership changes do not create orphan child keys.
 
 #### ShardViewRegistry
 

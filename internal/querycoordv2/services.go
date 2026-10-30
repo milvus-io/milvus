@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -272,17 +271,6 @@ func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
 		fields = append(fields, field.GetFieldId())
 	}
 	return fields
-}
-
-func cloneLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
-	cloned := make([]*messagespb.LoadFieldConfig, 0, len(fields))
-	for _, field := range fields {
-		cloned = append(cloned, &messagespb.LoadFieldConfig{
-			FieldId: field.GetFieldId(),
-			IndexId: field.GetIndexId(),
-		})
-	}
-	return cloned
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
@@ -868,32 +856,36 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		return resp, nil
 	}
 
-	loadedReplicas := make(map[int64]int32)
-	outgoingNodes := make(map[int64]int32)
-	replicasInRG := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
-	for _, replica := range replicasInRG {
-		loadedReplicas[replica.GetCollectionID()]++
-		for _, node := range replica.GetRONodes() {
-			if !s.meta.ContainsNode(ctx, replica.GetResourceGroup(), node) {
-				outgoingNodes[replica.GetCollectionID()]++
-			}
-		}
-	}
-	incomingNodes := make(map[int64]int32)
-	collections := s.meta.GetAll(ctx)
-	for _, collection := range collections {
-		replicas := s.meta.GetByCollection(ctx, collection)
-
-		for _, replica := range replicas {
-			if replica.GetResourceGroup() == req.GetResourceGroup() {
-				continue
-			}
+	loadedReplicas, outgoingNodes, incomingNodes := make(map[int64]int32), make(map[int64]int32), make(map[int64]int32)
+	if s.qviewsRuntime != nil {
+		loadedReplicas, outgoingNodes, incomingNodes = s.qviewsResourceGroupStats(req.GetResourceGroup())
+	} else {
+		replicasInRG := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
+		for _, replica := range replicasInRG {
+			loadedReplicas[replica.GetCollectionID()]++
 			for _, node := range replica.GetRONodes() {
-				if s.meta.ContainsNode(ctx, req.GetResourceGroup(), node) {
-					incomingNodes[collection]++
+				if !s.meta.ContainsNode(ctx, replica.GetResourceGroup(), node) {
+					outgoingNodes[replica.GetCollectionID()]++
 				}
 			}
 		}
+
+		collections := s.meta.GetAll(ctx)
+		for _, collection := range collections {
+			replicas := s.meta.GetByCollection(ctx, collection)
+
+			for _, replica := range replicas {
+				if replica.GetResourceGroup() == req.GetResourceGroup() {
+					continue
+				}
+				for _, node := range replica.GetRONodes() {
+					if s.meta.ContainsNode(ctx, req.GetResourceGroup(), node) {
+						incomingNodes[collection]++
+					}
+				}
+			}
+		}
+
 	}
 
 	nodes := make([]*commonpb.NodeInfo, 0, len(rg.GetNodes()))

@@ -19,11 +19,11 @@ package querycoordv2
 import (
 	"context"
 	"sync"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
@@ -39,7 +39,9 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -52,7 +54,8 @@ type qviewsBalancer interface {
 
 type qviewsRuntime struct {
 	stopOnce          sync.Once
-	loadInfos         *loadmgr.LoadInfoStore
+	gcCancel          context.CancelFunc
+	gcDone            chan struct{}
 	resources         *qvresource.Resources
 	loadConfigStore   *loadmgr.LoadConfigStore
 	loadManager       *loadmgr.CollectionLoadManager
@@ -70,12 +73,11 @@ type qviewsRuntime struct {
 }
 
 type qviewsRuntimeDependencies struct {
-	replicaResources   loadmgr.ReplicaConfigResources
-	loadInfos          *loadmgr.LoadInfoStore
-	dataViewReconciler qvresource.DataViewReconciler
-	vchannels          func(context.Context, int64) ([]string, error)
-	queryCoordCatalog  metastore.QueryCoordCatalog
-	queryViewCatalog   queryview.QueryViewCatalog
+	replicaResources       loadmgr.ReplicaConfigResources
+	loadConfigDependencies loadmgr.LoadConfigStoreDependencies
+	dataViewReconciler     qvresource.DataViewReconciler
+	vchannels              func(context.Context, int64) ([]string, error)
+	queryViewCatalog       queryview.QueryViewCatalog
 
 	viewSyncClient       syncer.ViewSyncClient
 	queryNodeClient      nodeview.QueryNodeStatePublisher
@@ -93,9 +95,6 @@ type qviewsRuntimeDependencies struct {
 }
 
 func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
-	if deps.queryCoordCatalog == nil {
-		return nil, merr.WrapErrServiceInternalMsg("querycoord catalog is nil")
-	}
 	if deps.queryViewCatalog == nil {
 		return nil, merr.WrapErrServiceInternalMsg("query view catalog is nil")
 	}
@@ -129,7 +128,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		)
 	}
 
-	loadConfigStore, err := loadmgr.RecoverLoadConfigStore(ctx, deps.queryCoordCatalog, deps.loadInfos)
+	loadConfigStore, err := loadmgr.RecoverLoadConfigStore(ctx, deps.loadConfigDependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -138,13 +137,14 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, err
 	}
 	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
-	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider)
+	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {
 		nodePublisher.Close()
 		_ = reliableSyncer.Close()
 		return nil, err
 	}
 
+	loadConfigStore.EnableGC()
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
 	schemaVersion := deps.schemaVersion
 	if deps.publishedSchemaVersion != nil {
@@ -172,7 +172,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	)
 
 	runtime := &qviewsRuntime{
-		loadInfos:            deps.loadInfos,
 		loadConfigStore:      loadConfigStore,
 		loadManager:          loadManager,
 		shardViewRegistry:    shardViewRegistry,
@@ -195,11 +194,33 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 }
 
 func (r *qviewsRuntime) start(ctx context.Context) {
+	gcCtx, cancel := context.WithCancel(ctx)
+	r.gcCancel, r.gcDone = cancel, make(chan struct{})
+	go func() {
+		defer close(r.gcDone)
+		defer cancel()
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-gcCtx.Done():
+				return
+			case <-ticker.C:
+				if err := r.loadConfigStore.CollectLoadInfo(gcCtx); err != nil && gcCtx.Err() == nil {
+					mlog.Warn(gcCtx, "failed to collect obsolete load requirements", mlog.Err(err))
+				}
+			}
+		}
+	}()
 	r.balancer.Start(ctx)
 }
 
 func (r *qviewsRuntime) stop() {
 	r.stopOnce.Do(func() {
+		if r.gcCancel != nil {
+			r.gcCancel()
+			<-r.gcDone
+		}
 		if r.readyChanges != nil {
 			r.readyChanges.Close()
 		}
@@ -229,7 +250,6 @@ func (r *qviewsRuntime) stop() {
 func newDefaultQViewsRuntimeDependencies(
 	metaKV kv.MetaKv,
 	etcdCli *clientv3.Client,
-	queryCoordCatalog metastore.QueryCoordCatalog,
 	resourceGroupManager nodeview.ResourceGroupStatePublisher,
 	mixCoord types.MixCoord,
 ) qviewsRuntimeDependencies {
@@ -248,22 +268,32 @@ func newDefaultQViewsRuntimeDependencies(
 		reconciler = source.QueryViewDataReconciler()
 	}
 	deps := qviewsRuntimeDependencies{
-		loadInfos: loadmgr.NewLoadInfoStore(queryview.NewLoadInfoCatalog(metaKV), func(id int64) []*indexpb.IndexInfo {
-			if source, ok := mixCoord.(interface {
-				QueryViewCollectionIndexInfos(int64) []*indexpb.IndexInfo
-			}); ok {
-				return source.QueryViewCollectionIndexInfos(id)
-			}
-			return nil
-		}, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
-			return qvresource.PreparationSchema(ctx, id, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
-				coll, err := broker.DescribeCollection(ctx, id)
-				if err != nil {
-					return nil, err
+		loadConfigDependencies: loadmgr.LoadConfigStoreDependencies{
+			Catalog: queryview.NewCollectionLoadInfoCatalog(metaKV),
+			AllocateVersion: func(ctx context.Context) (uint64, error) {
+				response, err := mixCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{Count: 1})
+				if err = merr.CheckRPCCall(response, err); err != nil {
+					return 0, err
 				}
-				return coll.GetSchema(), nil
-			})
-		}),
+				return uint64(response.GetID()), nil
+			},
+			Indexes: func(id int64, indexIDs ...int64) []*indexpb.IndexInfo {
+				if source, ok := mixCoord.(interface {
+					QueryViewCollectionIndexInfos(int64, ...int64) []*indexpb.IndexInfo
+				}); ok {
+					return source.QueryViewCollectionIndexInfos(id, indexIDs...)
+				}
+				return nil
+			}, Schema: func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
+				return qvresource.PreparationSchema(ctx, id, func(ctx context.Context, id int64) (*schemapb.CollectionSchema, error) {
+					coll, err := broker.DescribeCollection(ctx, id)
+					if err != nil {
+						return nil, err
+					}
+					return coll.GetSchema(), nil
+				})
+			},
+		},
 		dataViewReconciler: reconciler,
 		vchannels: func(ctx context.Context, id int64) ([]string, error) {
 			coll, err := broker.DescribeCollection(ctx, id)
@@ -292,7 +322,6 @@ func newDefaultQViewsRuntimeDependencies(
 			}
 			return schema.GetVersion(), nil
 		},
-		queryCoordCatalog:           queryCoordCatalog,
 		queryViewCatalog:            queryview.NewQueryViewCatalog(metaKV, "coord"),
 		queryNodeClient:             queryNodeManager,
 		resourceGroupManager:        resourceGroupManager,
@@ -307,4 +336,15 @@ func newDefaultQViewsRuntimeDependencies(
 
 type dataViewProviderSource interface {
 	DataViewProvider() balancer.DataViewProvider
+}
+
+// qviewsReplicaResources supplies primitives, not a second replica-state owner.
+// Desired replicas live exclusively in CollectionLoadConfig.
+type qviewsReplicaResources struct {
+	*meta.ResourceManager
+	allocateID func() (int64, error)
+}
+
+func (r qviewsReplicaResources) AllocateReplicaID(ctx context.Context) (int64, error) {
+	return r.allocateID()
 }

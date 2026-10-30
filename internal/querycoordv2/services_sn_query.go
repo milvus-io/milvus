@@ -21,20 +21,11 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("collection id is zero"))
 		return resp, nil
 	}
-	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil || s.qviewsRuntime.loadInfos == nil {
+	if s.qviewsRuntime == nil || s.qviewsRuntime.loadConfigStore == nil {
 		resp.Status = merr.Status(merr.WrapErrServiceInternalMsg("query view load metadata is not initialized"))
 		return resp, nil
 	}
-	version := req.GetVersion()
-	if version == 0 {
-		cfg, current := s.qviewsRuntime.loadConfigStore.GetConfigWithVersion(req.GetCollectionID())
-		if cfg == nil {
-			resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
-			return resp, nil
-		}
-		version = current
-	}
-	info, err := s.qviewsRuntime.loadInfos.Get(ctx, req.GetCollectionID(), version)
+	info, err := s.qviewsRuntime.loadConfigStore.GetLoadInfo(ctx, req.GetCollectionID(), req.GetVersion())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil

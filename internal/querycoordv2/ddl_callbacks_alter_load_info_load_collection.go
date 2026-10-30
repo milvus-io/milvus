@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -245,7 +246,7 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		CollectionId:             coll.GetCollectionID(),
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
 		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
-		RequiredFields:           loadmgr.RequiredFieldsForSchema(coll.GetSchema()),
+		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
 	}
@@ -293,7 +294,7 @@ func (s *Server) generateQViewsReplicaConfigs(
 				replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replicaID, rgName, expected.Priority))
 				continue
 			}
-			replicaID, err := s.meta.AllocateReplicaID(ctx)
+			replicaID, err := s.idAllocator()
 			if err != nil {
 				return nil, err
 			}
@@ -329,8 +330,8 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		DbId:                     cfg.DbID,
 		CollectionId:             cfg.CollectionID,
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
-		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
-		RequiredFields:           cloneAndSortLoadFields(cfg.RequiredFields),
+		LoadFields:               loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.LoadFields)),
+		RequiredFields:           loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.RequiredFields)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
 	}
@@ -360,12 +361,12 @@ func generateQViewsLoadFields(loadedFields []int64, fieldIndexID map[int64]int64
 	return loadFields
 }
 
-func cloneAndSortLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
-	out := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+func cloneAndSortLoadFields(fields []*viewpb.LoadFieldConfig) []*viewpb.LoadFieldConfig {
+	out := make([]*viewpb.LoadFieldConfig, 0, len(fields))
 	for _, field := range fields {
-		out = append(out, &messagespb.LoadFieldConfig{
-			FieldId: field.GetFieldId(),
-			IndexId: field.GetIndexId(),
+		out = append(out, &viewpb.LoadFieldConfig{
+			FieldId:  field.GetFieldId(),
+			IndexIds: append([]int64(nil), field.GetIndexIds()...),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -438,11 +439,11 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 		return current
 	}
 	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
-	info.RequiredFields = cloneAndSortLoadFields(cfg.RequiredFields)
+	info.RequiredFields = loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.RequiredFields))
 	for _, field := range cfg.LoadFields {
 		info.LoadFields = append(info.LoadFields, field.GetFieldId())
-		if field.GetIndexId() != 0 {
-			info.FieldIndexID[field.GetFieldId()] = field.GetIndexId()
+		if len(field.GetIndexIds()) != 0 {
+			info.FieldIndexID[field.GetFieldId()] = field.GetIndexIds()[0]
 		}
 	}
 	current.Collection = &meta.Collection{CollectionLoadInfo: info}

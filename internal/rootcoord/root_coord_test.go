@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	querycatalog "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -58,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -167,7 +167,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
 	// DDL-only tests have no loaded collections. Use a recovered empty config
 	// store so schema publication still executes its real release/no-load path.
-	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), querycatalog.NewCatalog(catalogKV))
+	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	previous := qvresource.Resource()
 	notifications := readiness.NewNotifications()

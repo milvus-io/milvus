@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -44,28 +45,24 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(ctx, qviewsRuntimeDependencies{
-		queryCoordCatalog:    catalog,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     newRuntimeDataViewProvider(t),
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		queryViewCatalog:       &fakeQueryViewCatalog{},
+		viewSyncClient:         &fakeRuntimeViewSyncClient{},
+		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager:   &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:       newRuntimeDataViewProvider(t),
 		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},
 	})
 	require.NoError(t, err)
 
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	require.NoError(t, runtime.loadManager.UpdateLoadConfig(ctx, buildAlterLoadConfigBroadcastResult(100)))
 	require.Contains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
 	fakeBalancer.triggers = nil
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	s := &Server{qviewsRuntime: runtime}
-	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
-	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
 
 	require.NoError(t, s.dropLoadConfigV2AckCallback(ctx, buildDropLoadConfigBroadcastResult(100)))
 

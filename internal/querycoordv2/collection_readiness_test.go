@@ -41,11 +41,11 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -89,7 +89,7 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	catalog.EXPECT().GetCollections(mock.Anything).Return([]*querypb.CollectionLoadInfo{info}, nil).Once()
 	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
 	catalog.EXPECT().GetReplicas(mock.Anything).Return([]*querypb.Replica{{ID: 1000, CollectionID: 100}}, nil).Once()
-	store, err := loadmgr.RecoverLoadConfigStore(ctx, catalog)
+	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.FromLegacyCatalog(t, catalog))
 	require.NoError(t, err)
 	// Seed Up views with the recovered configuration identity; an update below
 	// must still wait for a new matching Up acknowledgement.
@@ -164,13 +164,11 @@ func TestEnsureCollectionReadyWaitsForLoadConfigVersion(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			const channel = "by-dev-rootcoord-dml_100v0"
 			shardID := qviews.ShardID{ReplicaID: 1000, VChannel: channel}
-			s, catalog, syncer := newReadinessTestServer(t, testPersistedQueryView(100, shardID))
+			s, _, syncer := newReadinessTestServer(t, testPersistedQueryView(100, shardID))
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			config := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
-			config.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 102}}
-			catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-			catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
+			config.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 102}}
 			require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(ctx, config))
 			entry := s.qviewsRuntime.loadConfigStore.Get(100)
 			require.NotEqual(t, uint64(1), entry.ConfigVersion)
@@ -224,7 +222,7 @@ func (c *readinessWaitContext) Done() <-chan struct{} {
 func TestWaitCollectionReadyTracksLoadConfigChangesWhileWaiting(t *testing.T) {
 	const channel = "by-dev-rootcoord-dml_100v0"
 	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: channel}
-	s, catalog, syncer := newReadinessTestServer(t)
+	s, _, syncer := newReadinessTestServer(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	initial := s.qviewsRuntime.loadConfigStore.Get(100)
@@ -239,9 +237,7 @@ func TestWaitCollectionReadyTracksLoadConfigChangesWhileWaiting(t *testing.T) {
 		t.Fatal("readiness did not reach its first wait")
 	}
 	config := initial.Config.Clone()
-	config.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 102}}
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
+	config.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 102}}
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(ctx, config))
 	current := s.qviewsRuntime.loadConfigStore.Get(100)
 	require.NotEqual(t, initial.ConfigVersion, current.ConfigVersion)
@@ -282,7 +278,7 @@ func assertReadinessBlocked(t *testing.T, result <-chan error) {
 func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 	for _, scenario := range []string{"release", "cancel", "shutdown"} {
 		t.Run(scenario, func(t *testing.T) {
-			s, catalog, _ := newReadinessTestServer(t)
+			s, _, _ := newReadinessTestServer(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			result := make(chan error, 1)
@@ -291,8 +287,7 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 			var want error = merr.ErrCollectionNotLoaded
 			switch scenario {
 			case "release":
-				catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
-				catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
+				s.qviewsRuntime.loadConfigStore.StopPlanning(100)
 				require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(ctx, 100))
 			case "cancel":
 				cancel()
@@ -312,7 +307,7 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 }
 
 func TestEnsureCollectionReadyGRPCContract(t *testing.T) {
-	s, catalog, _ := newReadinessTestServer(t)
+	s, _, _ := newReadinessTestServer(t)
 	broker := meta.NewMockBroker(t)
 	s.broker = broker
 	broker.EXPECT().DescribeCollection(mock.Anything, int64(200)).Return(nil, merr.WrapErrCollectionNotFound(200)).Once()
@@ -330,8 +325,7 @@ func TestEnsureCollectionReadyGRPCContract(t *testing.T) {
 	defer cancel()
 	_, err = client.EnsureCollectionReady(ctx, readinessRequest("by-dev-rootcoord-dml_100v0"))
 	require.Error(t, err, "a real RPC must honor its deadline")
-	catalog.EXPECT().ReleaseReplicas(mock.Anything, int64(100)).Return(nil).Once()
-	catalog.EXPECT().ReleaseCollection(mock.Anything, int64(100)).Return(nil).Once()
+	s.qviewsRuntime.loadConfigStore.StopPlanning(100)
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(context.Background(), 100))
 	status, err := client.EnsureCollectionReady(context.Background(), &querypb.EnsureCollectionReadyRequest{
 		CollectionID: 200, ExpectedVchannels: []string{"by-dev-rootcoord-dml_200v0"},
@@ -350,7 +344,6 @@ func TestEnsureCollectionReadyCancellationDoesNotWaitForCatalog(t *testing.T) {
 		close(writeStarted)
 		<-finishWrite
 	}).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	writeResult := make(chan error, 1)
 	go func() {
 		writeResult <- s.qviewsRuntime.loadConfigStore.Put(context.Background(), s.qviewsRuntime.loadConfigStore.Get(100).Config)
@@ -378,7 +371,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	total := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel))
 	success := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel))
 	fail := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel))
-	s, catalog, broker := newLoadConfigQViewsServer(t)
+	s, _, broker := newLoadConfigQViewsServer(t)
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	s.ctx = ctx
@@ -402,8 +395,6 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(3)
 	broker.EXPECT().GetPartitions(mock.Anything, int64(100)).Return([]int64{10}, nil).Once()
 	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, int64(100)).Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 
 	mix := mocks.NewMixCoord(t)
 	s.mixCoord = mix
@@ -467,7 +458,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	assertReadinessBlocked(t, done)
 	config := s.qviewsRuntime.loadConfigStore.GetConfig(100)
 	require.Len(t, config.LoadFields, 2)
-	require.EqualValues(t, 1000, config.LoadFields[1].GetIndexId())
+	require.Equal(t, []int64{1000}, config.LoadFields[1].GetIndexIds())
 	shardID := qviews.ShardID{ReplicaID: config.Replicas[0].ReplicaID, VChannel: channel}
 	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, &viewpb.DataViewOfCollection{
 		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, Shards: []*viewpb.DataViewOfShard{{Vchannel: channel}},
@@ -533,7 +524,7 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 		&indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}}, nil).Once()
 	config := &loadmgr.LoadConfig{
 		DbID: 1, CollectionID: 100, PartitionIDs: []int64{10}, UserSpecifiedReplicaMode: true,
-		LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexId: 1000}},
+		LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexIds: []int64{1000}}},
 		Replicas: []*loadmgr.ReplicaAssignment{
 			{ReplicaID: 1000, ResourceGroup: meta.DefaultResourceGroupName, Priority: commonpb.LoadPriority_HIGH},
 			{ReplicaID: 1001, ResourceGroup: meta.DefaultResourceGroupName, Priority: commonpb.LoadPriority_HIGH},
@@ -541,8 +532,6 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 		},
 	}
 	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().ReleaseReplica(mock.Anything, int64(100), int64(1001), int64(1002)).Return(nil).Once()
 
 	// The retained replica already has an Up view; the extra concurrent replicas do not.
@@ -594,7 +583,7 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 	assertReadinessBlocked(t, result)
 	entry := s.qviewsRuntime.loadConfigStore.Get(100)
 	loaded := entry.Config
-	require.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexId: 1000}, {FieldId: 102}}, loaded.LoadFields)
+	require.Equal(t, []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexIds: []int64{1000}}, {FieldId: 102}}, loaded.LoadFields)
 	require.Len(t, loaded.Replicas, 1)
 	require.EqualValues(t, 1000, loaded.Replicas[0].ReplicaID)
 	require.Equal(t, meta.DefaultResourceGroupName, loaded.Replicas[0].ResourceGroup)

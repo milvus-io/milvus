@@ -16,8 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -30,7 +30,7 @@ func TestQueryViewLoadProgressPublicAPIs(t *testing.T) {
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	t.Cleanup(func() { meta.GlobalFailedLoadCache = previousCache })
 	ctx := context.Background()
-	cfg := &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{2}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}
+	cfg := &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{2}, LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}
 	version := uint64(2)
 	stats := map[qviews.ShardID]*coordview.ShardStats{}
 	var duringSnapshot func()
@@ -111,7 +111,7 @@ func TestQueryViewLoadProgressPublicAPIs(t *testing.T) {
 	up(11, "v1")
 	check(100)
 	cfg = cfg.Clone()
-	cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{FieldId: 101})
+	cfg.LoadFields = append(cfg.LoadFields, &viewpb.LoadFieldConfig{FieldId: 101})
 	version++
 	check(0)
 	for _, r := range cfg.Replicas {

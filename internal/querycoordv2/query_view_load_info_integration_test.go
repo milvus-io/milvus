@@ -2,13 +2,11 @@ package querycoordv2
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -38,9 +36,7 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 		CollectionID: 1, Version: 9,
 		PartitionIds: []int64{10}, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100, IndexIds: []int64{200}}},
 	}
-	encoded, err := proto.Marshal(snapshot)
-	require.NoError(t, err)
-	require.NoError(t, storage.Save(ctx, fmt.Sprintf("%s/1/9", queryview.VersionedLoadInfoPrefix), string(encoded)))
+	require.NoError(t, queryview.NewCollectionLoadInfoCatalog(storage).Save(ctx, snapshot))
 	indexes := []*indexpb.IndexInfo{{FieldID: 100, IndexID: 200}, {FieldID: 101, IndexID: 201}}
 	patch := mockey.Mock((*loadInfoIndexSourceForTest).QueryViewCollectionIndexInfos).To(func(_ *loadInfoIndexSourceForTest, id int64, ids ...int64) []*indexpb.IndexInfo {
 		require.EqualValues(t, 1, id)
@@ -55,17 +51,18 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 			s.mixCoord = &loadInfoIndexSourceForTest{}
 		}
 		require.NoError(t, s.initMeta())
-		// The integrated QueryView runtime owns load metadata; initMeta only
-		// initializes the legacy coordinator metadata needed during recovery.
-		deps := newDefaultQViewsRuntimeDependencies(storage, client, s.store, nil, s.mixCoord)
+		require.Empty(t, s.meta.GetAll(ctx))
+		// QueryView runtime owns load recovery; initMeta only restores resource groups.
+		deps := newDefaultQViewsRuntimeDependencies(storage, client, nil, s.mixCoord)
 		t.Cleanup(func() {
 			deps.queryNodeManager.Close()
 			deps.streamingNodeHandler.Close()
 			deps.streamingCoordClient.Close()
 		})
-		configs, err := loadmgr.RecoverLoadConfigStore(ctx, s.store, deps.loadInfos)
+		configs, err := loadmgr.RecoverLoadConfigStore(ctx, deps.loadConfigDependencies)
 		require.NoError(t, err)
-		s.qviewsRuntime = &qviewsRuntime{loadConfigStore: configs, loadInfos: deps.loadInfos}
+		configs.StopPlanning(1) // the durable Release callback replays after recovery
+		s.qviewsRuntime = &qviewsRuntime{loadConfigStore: configs}
 		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
 		require.NoError(t, err)

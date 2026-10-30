@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -2844,8 +2843,6 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 // The feature switch controls completed-artifact publication only. Task
 // lifecycle states remain durable in etcd in both modes.
 func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
-	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
-
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
 			meta.WithSegmentIndexManifestWrites(t, enabled)

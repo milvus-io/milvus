@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -185,7 +185,7 @@ func TestOracleRefreshOnlyFetchesRequestedView(t *testing.T) {
 
 func TestOracleOnlyLoadsRequestedBM25Fields(t *testing.T) {
 	r, resource := newTestOracle(t)
-	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}
+	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}}
 	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{103}})
 	res := resource(20, 2)
 	res.Bm25Binlogs = append(res.Bm25Binlogs, &datapb.FieldBinlog{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "must-not-read"}}})

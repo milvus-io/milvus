@@ -19,10 +19,14 @@ package ddl
 import (
 	"context"
 
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (c *Callbacks) dropIndexV2Callback(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
 	header := result.Message.Header()
-	return c.IndexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds())
+	if err := c.IndexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds()); err != nil {
+		return err
+	}
+	return qvresource.PublishIndexes(ctx, header.GetCollectionId())
 }

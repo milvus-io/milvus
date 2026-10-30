@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -40,7 +41,7 @@ func TestShowLoadCollectionsQueryViewResourceGroups(t *testing.T) {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
 	ctx := context.Background()
-	store, err := loadmgr.RecoverLoadConfigStore(ctx, catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	cfg := &loadmgr.LoadConfig{CollectionID: 100, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10, ResourceGroup: "a"}, {ReplicaID: 20, ResourceGroup: "b"}}}
 	require.NoError(t, store.Put(ctx, cfg))
@@ -107,6 +108,7 @@ func TestShowLoadCollectionsQueryViewResourceGroups(t *testing.T) {
 	}
 	check("a", 0) // Configuration changes invalidate even a fully Up snapshot.
 	duringRead = nil
+	store.StopPlanning(100)
 	require.NoError(t, store.Remove(ctx, 100))
 	check("a", -1)
 	require.NoError(t, store.Put(ctx, cfg))
