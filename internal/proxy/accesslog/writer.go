@@ -22,6 +22,8 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,9 +162,16 @@ type RotateWriter struct {
 }
 
 func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioConfig) (*RotateWriter, error) {
+	localPath := logCfg.LocalPath.GetValue()
+	fileName := logCfg.Filename.GetValue()
+
+	if err := validateLogPath(localPath, fileName); err != nil {
+		return nil, err
+	}
+
 	logger := &RotateWriter{
-		localPath:   logCfg.LocalPath.GetValue(),
-		fileName:    logCfg.Filename.GetValue(),
+		localPath:   localPath,
+		fileName:    fileName,
 		rotatedTime: logCfg.RotatedTime.GetAsInt64(),
 		maxSize:     logCfg.MaxSize.GetAsInt(),
 		maxBackups:  logCfg.MaxBackups.GetAsInt(),
@@ -397,6 +406,32 @@ func (l *RotateWriter) start() {
 
 func (l *RotateWriter) max() int64 {
 	return int64(l.maxSize) * int64(megabyte)
+}
+
+func validateLogPath(localPath string, fileName string) error {
+	if strings.Contains(fileName, "..") || strings.Contains(fileName, string(filepath.Separator)) {
+		return merr.WrapErrParameterInvalidMsg("access log filename must not contain path separators or '..'")
+	}
+
+	dir := localPath
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "milvus_accesslog")
+	}
+	cleanedDir := filepath.Clean(dir)
+	joined := filepath.Clean(filepath.Join(cleanedDir, fileName))
+	if fileName != "" && !strings.HasPrefix(joined, cleanedDir+string(filepath.Separator)) {
+		return merr.WrapErrParameterInvalidMsg("access log file path escapes the configured directory")
+	}
+
+	resolved, err := filepath.EvalSymlinks(cleanedDir)
+	if err == nil && resolved != cleanedDir {
+		joined = filepath.Clean(filepath.Join(resolved, fileName))
+		if fileName != "" && !strings.HasPrefix(joined, resolved+string(filepath.Separator)) {
+			return merr.WrapErrParameterInvalidMsg("access log file path escapes the configured directory after symlink resolution")
+		}
+	}
+
+	return nil
 }
 
 func (l *RotateWriter) dir() string {
