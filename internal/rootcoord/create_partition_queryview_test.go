@@ -47,11 +47,24 @@ func TestCreatePartitionCallbackWaitsBeforeExpiringCaches(t *testing.T) {
 
 func mockQueryViewDDLResource(t *testing.T) {
 	t.Helper()
+	// Keep the real accessor: initStreamingSystemAndCore saves and restores
+	// its value. Mocking it here would restore the fake into the global store.
 	for _, patch := range []*mockey.Mocker{
-		mockey.Mock(qvresource.Resource).Return(&qvresource.Resources{}).Build(),
 		mockey.Mock((*qvresource.Resources).AddPartition).Return(nil).Build(),
 		mockey.Mock((*qvresource.Resources).Refresh).Return(nil).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
+}
+
+func TestQueryViewDDLResourceRestoresGlobalState(t *testing.T) {
+	previous := qvresource.Resource()
+	t.Cleanup(func() { qvresource.Init(previous) })
+	t.Run("DDL fixture", func(t *testing.T) {
+		mockQueryViewDDLResource(t)
+		initStreamingSystemAndCore(t)
+		require.NotNil(t, qvresource.Resource().ShardViews)
+		require.NotNil(t, qvresource.Resource().LoadConfigs)
+	})
+	require.True(t, previous == qvresource.Resource(), "DDL cleanup must restore the original global resource")
 }

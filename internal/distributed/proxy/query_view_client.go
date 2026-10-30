@@ -76,6 +76,7 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 		shardResolver,
 	)
 	closeFunc := func() {
+		client.Close()
 		shardResolver.Close()
 		streamingNodeClient.Close()
 		queryNodeClient.Close()

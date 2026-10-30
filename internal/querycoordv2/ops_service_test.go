@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -243,46 +245,15 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	// test success
-	channels := []*meta.DmChannel{
-		{
-			VchannelInfo: &datapb.VchannelInfo{
-				CollectionID: 1,
-				ChannelName:  "channel1",
-			},
-			Node: 1,
-		},
-		{
-			VchannelInfo: &datapb.VchannelInfo{
-				CollectionID: 1,
-				ChannelName:  "channel2",
-			},
-			Node: 1,
-		},
-	}
-
-	segments := []*meta.Segment{
-		{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: "channel1",
-			},
-			Node: 1,
-		},
-		{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            2,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: "channel2",
-			},
-			Node: 1,
-		},
-	}
-	suite.dist.ChannelDistManager.Update(1, channels...)
-	suite.dist.SegmentDistManager.Update(1, segments...)
+	registry := &coordview.ShardViewRegistry{}
+	suite.server.qviewsRuntime = &qviewsRuntime{shardViewRegistry: registry}
+	defer func() { suite.server.qviewsRuntime = nil }()
+	patch := mockey.Mock((*coordview.ShardViewRegistry).LoadedSegmentsOnNode).To(func(r *coordview.ShardViewRegistry, nodeID int64) []int64 {
+		suite.Same(registry, r)
+		suite.Equal(int64(1), nodeID)
+		return []int64{1, 2}
+	}).Build()
+	defer patch.UnPatch()
 
 	resp, err = suite.server.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 		NodeID: 1,
@@ -290,7 +261,7 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 
 	suite.NoError(err)
 	suite.True(merr.Ok(resp.Status))
-	suite.Equal(2, len(resp.GetChannelNames()))
+	suite.Empty(resp.GetChannelNames())
 	suite.Equal(2, len(resp.GetSealedSegmentIDs()))
 }
 

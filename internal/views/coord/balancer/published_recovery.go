@@ -48,6 +48,11 @@ func newPublishedRecoveryBase(id qviews.ShardID, recovery *coordview.PublishedRe
 			}
 		}
 	}
+	for _, ref := range recovery.View.GetStreamingNode().GetPartitionStats() {
+		if partition := partitions[ref.GetPartitionId()]; partition != nil {
+			partition.PartitionStatsVersion = ref.GetVersion()
+		}
+	}
 	api.PrepareCollectionDataView(&CollectionDataView{Shards: []*ShardDataView{shard}})
 	return &publishedRecoveryBase{
 		collectionID: meta.GetCollectionId(), shardID: id,

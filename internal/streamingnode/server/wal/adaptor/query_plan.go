@@ -308,7 +308,7 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		var minimum uint64
 		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded {
 			// Proxy supplies the bounded-staleness lower bound in the legacy request.
-			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp(), req.GetStatisticsRequest().GetGuaranteeTimestamp())
+			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
 		}
 		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Customized {
 			// A customized guarantee is a lower bound, not an exact historical

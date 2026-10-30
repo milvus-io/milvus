@@ -145,3 +145,10 @@ and [QueryView Leases](../query_view_lease.md).
 
 RecoveryStorage owns one persistence checkpoint. Runtime event buffers and
 query visibility watermarks do not introduce a second recovery checkpoint.
+
+## Partition statistics and pruning
+
+[Global segment pruning](../query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

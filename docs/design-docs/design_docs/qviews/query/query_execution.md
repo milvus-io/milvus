@@ -633,3 +633,10 @@ The first node-side Phase 2 milestone is:
 7. Implement `SearchOnView` and `QueryOnView` RPC paths using provider plus
    scheduler.
 8. Reuse QueryOnView for requery with the original View, Schema and MVCC.
+
+## Partition statistics and pruning
+
+[Global segment pruning](../query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

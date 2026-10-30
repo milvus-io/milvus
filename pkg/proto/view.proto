@@ -100,6 +100,8 @@ message DataViewOfPartition {
     // Parallel to segment_ids; tied to the selected Segment data revision.
     // Zero means legacy/unknown coverage, never a safe replay timestamp.
     repeated uint64 segment_transform_start_after_timeticks = 4 [packed = true];
+    // Immutable object version; zero means no clustering statistics.
+    int64 partition_stats_version = 5;
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.
@@ -141,6 +143,10 @@ message QueryViewOfStreamingNode {
     repeated ClusteredPartitionStats partition_stats = 1;
 }
 
+// Immutable statistics-object reference scoped by the enclosing QueryViewMeta's
+// vchannel and collection. Each partition appears at most once; only positive
+// versions are emitted. Runtime ownership/refcounts belong to the QueryView's
+// resource manager, not this wire descriptor.
 message ClusteredPartitionStats {
     int64 partition_id = 1;
     int64 version = 2;
@@ -337,24 +343,6 @@ message GetQueryPlanResponse {
     QueryPlanClientOptimizeInfo client_optimize_info = 4;
 }
 
-message ExecutionSummary {
-    GlobalOptimizerExecutionSummary global_optimizer = 1;
-}
-
-message GlobalOptimizerExecutionSummary {
-    // Offsets in flags, NOT masks: test/set a bit with uint32(1) << offset.
-    // Zero denotes a real bit offset, not an unspecified optimization.
-    enum BitOffset {
-        PrunedByPartitionFiltering = 0;
-        PrunedByScalarFiltering = 1;
-        PrunedByVectorFiltering = 2;
-    }
-    // Records actual candidate exclusions, not enabled optimizer settings.
-    // Extend beyond 32 bits by adding another uint32 field and its own offsets;
-    // do not renumber existing offsets or allocate unused words in advance.
-    uint32 flags = 1;
-}
-
 // Growing results computed during Phase 1, separate from the reusable query plan.
 // Additional result types can extend this oneof when SN inlines other queries.
 message GrowingInlineResponse {
@@ -381,7 +369,27 @@ message QueryPlan {
         internal.RetrieveRequest legacy_retrieve_request = 6;
         StatisticsRequest statistics_request = 8;
     }
-    optional int64 growing_row_count = 9;
+}
+
+// Diagnostic facts for the successful execution attempt, never execution controls.
+// Omit empty summaries. Each subprocess owns its bitmap vocabulary independently
+// of feature-usage counters; additional subprocesses can add optional summaries.
+message ExecutionSummary {
+    GlobalOptimizerExecutionSummary global_optimizer = 1;
+}
+
+message GlobalOptimizerExecutionSummary {
+    // Offsets in flags, NOT masks: test/set a bit with uint32(1) << offset.
+    // Zero denotes a real bit offset, not an unspecified optimization.
+    enum BitOffset {
+        PrunedByPartitionFiltering = 0;
+        PrunedByScalarFiltering = 1;
+        PrunedByVectorFiltering = 2;
+    }
+    // Records actual candidate exclusions, not enabled optimizer settings.
+    // Extend beyond 32 bits by adding another uint32 field and its own offsets;
+    // do not renumber existing offsets or allocate unused words in advance.
+    uint32 flags = 1;
 }
 
 message QueryPayloadReuse {
@@ -404,6 +412,19 @@ service ViewQueryService {
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
+}
+
+message VChannelReplicas {
+    string vchannel = 1;
+    // Complete replacement, including an empty set. Does not certify QN health
+    // or the availability of a particular schema version.
+    repeated Replica replicas = 2;
+
+    // VChannel plus replica_id identifies the shard. No full View is replicated.
+    message Replica {
+        int64 replica_id = 1;
+        QueryViewVersion max_up_view_version = 2;
+    }
 }
 
 // Runtime physical row statistics: no expression, TTL or historical snapshot.
@@ -451,24 +472,6 @@ message QueryOnViewRequest {
 message QueryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
-}
-
-message WatchVChannelReplicasRequest {
-    string vchannel = 1;
-    bool unsubscribe = 2;
-}
-
-message VChannelReplicas {
-    string vchannel = 1;
-    // Complete replacement, including an empty set. Does not certify QN health
-    // or the availability of a particular schema version.
-    repeated Replica replicas = 2;
-
-    // VChannel plus replica_id identifies the shard. No full View is replicated.
-    message Replica {
-        int64 replica_id = 1;
-        QueryViewVersion max_up_view_version = 2;
-    }
 }
 
 message QueryPlanClientOptimizeInfo {

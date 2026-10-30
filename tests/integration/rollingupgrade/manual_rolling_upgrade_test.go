@@ -141,11 +141,7 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	err = merr.Error(loadStatus)
-	if err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection fail reason", mlog.Err(err))
-	}
+	s.Require().NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 	mlog.Info(context.TODO(), "Load collection done")
 
@@ -347,14 +343,19 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	// expected 2 querynode found
 	resp3, err := s.Cluster.MixCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
 	s.NoError(err)
-	s.Len(resp3.GetNodeInfos(), 3)
+	s.Require().Len(resp3.GetNodeInfos(), 2)
 
 	// suspend Node
 	resp2, err := s.Cluster.MixCoordClient.SuspendNode(ctx, &querypb.SuspendNodeRequest{
 		NodeID: qn2.GetNodeID(),
 	})
-	s.NoError(err)
-	s.True(merr.Ok(resp2))
+	s.Require().NoError(merr.CheckRPCCall(resp2, err))
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		status, err := s.Cluster.MixCoordClient.ResumeNode(cleanupCtx, &querypb.ResumeNodeRequest{NodeID: qn2.GetNodeID()})
+		s.NoError(merr.CheckRPCCall(status, err))
+	}()
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -382,20 +383,54 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 	s.Len(resp4.GetChannelNames(), 0)
 	s.Len(resp4.GetSealedSegmentIDs(), 0)
 
-	// resume node, segment/channel will be balance to qn2
+	// Resume the node, then evacuate the original node. A small shard need
+	// not spread across all eligible QNs; evacuation proves qn2 can load again.
 	resp5, err := s.Cluster.MixCoordClient.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: qn2.GetNodeID(),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp5))
 
-	s.Eventually(func() bool {
+	for _, node := range resp3.GetNodeInfos() {
+		if node.GetID() == qn2.GetNodeID() {
+			continue
+		}
+		status, err := s.Cluster.MixCoordClient.SuspendNode(ctx, &querypb.SuspendNodeRequest{NodeID: node.GetID()})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		defer func(nodeID int64) {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			status, err := s.Cluster.MixCoordClient.ResumeNode(cleanupCtx, &querypb.ResumeNodeRequest{NodeID: nodeID})
+			s.NoError(merr.CheckRPCCall(status, err))
+		}(node.GetID())
+	}
+
+	s.Require().Eventually(func() bool {
 		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
 			NodeID: qn2.GetNodeID(),
 		})
-		s.NoError(err)
-		return len(resp.GetSealedSegmentIDs()) > 0 || len(resp.GetChannelNames()) > 0
-	}, 10*time.Second, 1*time.Second)
+		if merr.CheckRPCCall(resp, err) != nil || len(resp.GetSealedSegmentIDs()) == 0 {
+			return false
+		}
+		replicas, err := c.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			DbName: dbName, CollectionName: collectionName, WithShardNodes: true,
+		})
+		if merr.CheckRPCCall(replicas, err) != nil || len(replicas.GetReplicas()) != 1 {
+			return false
+		}
+		shards := replicas.GetReplicas()[0].GetShardReplicas()
+		if len(shards) != 2 {
+			return false
+		}
+		for _, shard := range shards {
+			// The public replica API includes the StreamingNode leader as well as QNs.
+			queryNodes := lo.Filter(shard.GetNodeIds(), func(id int64, _ int) bool { return id != shard.GetLeaderID() })
+			if len(queryNodes) != 1 || queryNodes[0] != qn2.GetNodeID() {
+				return false
+			}
+		}
+		return true
+	}, 30*time.Second, 1*time.Second)
 
 	mlog.Info(context.TODO(), "==================")
 	mlog.Info(context.TODO(), "==================")

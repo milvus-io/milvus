@@ -498,7 +498,7 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
     EXPECT_TRUE(precise_result[8]);
 }
 
-TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
+TEST(JsonIndexTest, JsonBinaryRangeFlatIndexFallsBackToRawJsonWithOffsetInput) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
 
@@ -511,6 +511,7 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
         R"({"n": null})",
         R"({"n": 4})",
         R"({"n": 5})",
+        R"({"n": [2, 3]})",
     };
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
@@ -525,6 +526,7 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
               valid_data + json_field->ValidDataSize(),
               static_cast<uint8_t>(0));
     valid_data[0] = 0b01111111;
+    valid_data[1] = 0b00000001;
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
@@ -534,21 +536,16 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
     raw_segment->LoadFieldData(raw_load_info);
 
     auto flat_segment = CreateSealedSegment(schema);
-    std::vector<int64_t> row_ids(json_strs.size());
-    std::iota(row_ids.begin(), row_ids.end(), 0);
-    auto row_id_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
-    row_id_field_data->FillFieldData(row_ids.data(), row_ids.size());
-    auto row_id_load_info = PrepareSingleFieldInsertBinlog(
-        1, 1, 1, RowFieldID.get(), {row_id_field_data}, cm);
-    flat_segment->LoadFieldData(row_id_load_info);
+    // Production preparation retains raw JSON alongside a flat index: its
+    // scalar postings cannot distinguish numbers from numeric array elements.
+    flat_segment->LoadFieldData(raw_load_info);
 
     InstallJsonConsumerIndex(*flat_segment,
                              json_fid,
                              {json_field},
                              "",
                              JsonCastType::FromString("JSON"));
-    ASSERT_FALSE(flat_segment->HasFieldData(json_fid));
+    ASSERT_TRUE(flat_segment->HasFieldData(json_fid));
 
     proto::plan::GenericValue lower;
     lower.set_int64_val(2);
@@ -568,7 +565,9 @@ TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
             plan.get(), segment, json_strs.size(), MAX_TIMESTAMP, offsets);
     };
 
-    exec::OffsetVector offsets = {6, 2, 4, 1, 3, 5, 7, 0, 2};
+    EXPECT_FALSE(milvus::test::CanExprExecuteAllAtOnce(
+        range_expr, flat_segment.get(), json_strs.size()));
+    exec::OffsetVector offsets = {8, 6, 2, 4, 1, 3, 5, 7, 0, 2, 8};
     auto raw_result = evaluate(raw_segment.get(), &offsets);
     ColumnVectorPtr flat_result;
     EXPECT_NO_THROW(flat_result = evaluate(flat_segment.get(), &offsets));

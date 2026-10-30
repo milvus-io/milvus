@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -56,6 +55,11 @@ var searchCollectionName = ""
 
 func (s *CoordDownSearch) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().LogCfg.Level.Key, "debug")
+	// The test bounds the complete outage/recovery below this window. With
+	// the default 5s window, graceful shutdown alone can expire a Bounded
+	// read's freshness guarantee before the first outage query starts.
+	s.WithMilvusConfig(paramtable.Get().CommonCfg.GracefulTime.Key,
+		strconv.Itoa(maxAllowedInitTimeInSeconds*1000))
 	s.MiniClusterSuite.SetupSuite()
 }
 
@@ -176,27 +180,17 @@ func (s *CoordDownSearch) checkCollections() bool {
 	return notLoaded == 0
 }
 
-func (s *CoordDownSearch) waitLeaderServiceable() {
-	checkQNLeaderServiceable := func() bool {
-		for _, c := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp, err := c.GetDataDistribution(context.TODO(), &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			for _, v := range resp.GetLeaderViews() {
-				if !v.GetStatus().GetServiceable() {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	for !checkQNLeaderServiceable() {
-		time.Sleep(time.Millisecond * 100)
-	}
+func (s *CoordDownSearch) waitQueryViewsReady() {
+	// Loading reaches 100% only after every expected shard has a current
+	// config Up QueryView. SN no longer serves the delegator leader RPC.
+	s.Require().Eventually(s.checkCollections, 30*time.Second, 100*time.Millisecond)
 }
 
 func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLevel commonpb.ConsistencyLevel) {
 	c := s.Cluster
 	var err error
+	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 10*time.Second)
+	defer cancel()
 	// Query
 	queryReq := &milvuspb.QueryRequest{
 		Base:               nil,
@@ -208,13 +202,16 @@ func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLeve
 		GuaranteeTimestamp: 0,
 		ConsistencyLevel:   consistencyLevel,
 	}
-	queryResult, err := c.MilvusClient.Query(context.TODO(), queryReq)
-	s.NoError(err)
-	s.Equal(len(queryResult.FieldsData), 1)
+	queryResult, err := c.MilvusClient.Query(ctx, queryReq)
+	s.Require().NoError(merr.CheckRPCCall(queryResult, err))
+	s.Require().Len(queryResult.FieldsData, 1)
 	numEntities := queryResult.FieldsData[0].GetScalars().GetLongData().Data[0]
 	s.Equal(numEntities, int64(rowsPerCollection))
 
 	// Search
+	cancel()
+	ctx, cancel = context.WithTimeout(s.Cluster.GetContext(), 10*time.Second)
+	defer cancel()
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
@@ -227,15 +224,16 @@ func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLeve
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk,
 		roundDecimal, false, consistencyLevel)
 
-	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
-	err = merr.Error(searchResult.GetStatus())
-	s.NoError(err)
+	s.Require().NoError(merr.CheckRPCCall(searchResult, err))
 }
 
 func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consistencyLevel commonpb.ConsistencyLevel) {
 	c := s.Cluster
 	var err error
+	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 10*time.Second)
+	defer cancel()
 	// Query
 	queryReq := &milvuspb.QueryRequest{
 		Base:               nil,
@@ -247,12 +245,13 @@ func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consisten
 		GuaranteeTimestamp: 0,
 		ConsistencyLevel:   consistencyLevel,
 	}
-	queryResp, err := c.MilvusClient.Query(context.TODO(), queryReq)
-	s.NoError(err)
-	err = merr.Error(queryResp.GetStatus())
-	s.Error(err)
+	queryResp, err := c.MilvusClient.Query(ctx, queryReq)
+	s.Error(merr.CheckRPCCall(queryResp, err))
 
 	// Search
+	cancel()
+	ctx, cancel = context.WithTimeout(s.Cluster.GetContext(), 10*time.Second)
+	defer cancel()
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
 	nq := 10
 	topk := 10
@@ -265,10 +264,8 @@ func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consisten
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk,
 		roundDecimal, false, consistencyLevel)
 
-	searchResult, err := c.MilvusClient.Search(context.TODO(), searchReq)
-	s.NoError(err)
-	err = merr.Error(searchResult.GetStatus())
-	s.Error(err)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
+	s.Error(merr.CheckRPCCall(searchResult, err))
 }
 
 func (s *CoordDownSearch) insertBatchCollections(prefix string, collectionBatchSize, idxStart, dim int, wg *sync.WaitGroup) {
@@ -300,9 +297,7 @@ func (s *CoordDownSearch) setupData() {
 	}
 	mlog.Info(context.TODO(), "=========================Data injection finished=========================")
 	s.checkCollections()
-	s.waitLeaderServiceable()
-	// wait for qc get new distribution
-	time.Sleep(paramtable.Get().QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond) + time.Second)
+	s.waitQueryViewsReady()
 	mlog.Info(context.TODO(),
 		fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, Dim, commonpb.ConsistencyLevel_Eventually)
