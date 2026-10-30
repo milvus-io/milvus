@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -82,50 +83,22 @@ func (w *placeholderLogWriter) finish() string {
 	return w.String()
 }
 
-// Keep only the first decoded query and its summary, without retaining all nq
-// values or formatting anything before the rate limiter admits the log entry.
-type placeholderLogValue struct {
-	kind  commonpb.PlaceholderType
-	nq    int
-	first []byte
-}
-
+// Decoding and rendering are deferred until the rate limiter admits the entry.
 type searchPlaceholderStringer struct {
 	request    *milvuspb.SearchRequest
 	queryInfos []*planpb.QueryInfo
-	groups     [][]placeholderLogValue
 	maxBytes   int
 }
 
-func newSearchPlaceholderLog() *searchPlaceholderStringer {
-	if !(paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat() > 0) || !mlog.LevelEnabled(mlog.InfoLevel) {
-		return nil
-	}
-	return &searchPlaceholderStringer{}
-}
-
-// Called by the existing placeholder decoder, before fp32 -> fp16/bf16 conversion.
-func (s *searchPlaceholderStringer) capture(group *commonpb.PlaceholderGroup) {
-	if s == nil {
-		return
-	}
-	values := make([]placeholderLogValue, len(group.GetPlaceholders()))
-	for i, ph := range group.GetPlaceholders() {
-		values[i] = placeholderLogValue{kind: ph.GetType(), nq: len(ph.GetValues())}
-		if len(ph.GetValues()) > 0 {
-			values[i].first = ph.GetValues()[0]
-		}
-	}
-	s.groups = append(s.groups, values)
-}
-
-func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvuspb.SearchRequest, queryInfos []*planpb.QueryInfo, preview *searchPlaceholderStringer) {
+func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvuspb.SearchRequest, queryInfos []*planpb.QueryInfo) {
 	limit := paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()
 	// Check before RatedInfo: its burst token would otherwise allow a zero-rate log.
-	if preview != nil && limit > 0 {
-		preview.request, preview.queryInfos = request, queryInfos
-		preview.maxBytes = paramtable.Get().ProxyCfg.SearchPlaceholderLogMaxBytes.GetAsInt()
-		log.RatedInfo(ctx, rate.Limit(limit), "proxy search request placeholder", mlog.Stringer("placeholder", preview))
+	if limit > 0 {
+		log.RatedInfo(ctx, rate.Limit(limit), "proxy search request placeholder",
+			mlog.Stringer("placeholder", searchPlaceholderStringer{
+				request: request, queryInfos: queryInfos,
+				maxBytes: paramtable.Get().ProxyCfg.SearchPlaceholderLogMaxBytes.GetAsInt(),
+			}))
 	}
 }
 
@@ -147,16 +120,19 @@ func (s searchPlaceholderStringer) String() string {
 			i, fieldID, nq, len(placeholder)), "] ") {
 			break
 		}
-		if i < len(s.groups) {
-			writePlaceholderGroup(w, s.groups[i])
-		}
+		writePlaceholderGroup(w, placeholder)
 		w.close("] ")
 	}
 	return w.finish()
 }
 
-func writePlaceholderGroup(w *placeholderLogWriter, values []placeholderLogValue) {
-	for i, value := range values {
+func writePlaceholderGroup(w *placeholderLogWriter, data []byte) {
+	var group commonpb.PlaceholderGroup
+	if err := proto.Unmarshal(data, &group); err != nil {
+		w.write("<invalid placeholder group>")
+		return
+	}
+	for i, value := range group.GetPlaceholders() {
 		if w.truncated {
 			break
 		}
@@ -167,8 +143,12 @@ func writePlaceholderGroup(w *placeholderLogWriter, values []placeholderLogValue
 	}
 }
 
-func writePlaceholderValue(w *placeholderLogWriter, value placeholderLogValue) {
-	phType, nq, first := value.kind, value.nq, value.first
+func writePlaceholderValue(w *placeholderLogWriter, value *commonpb.PlaceholderValue) {
+	phType, nq := value.GetType(), len(value.GetValues())
+	var first []byte
+	if nq > 0 {
+		first = value.GetValues()[0]
+	}
 
 	if !w.open(fmt.Sprintf("[type=%s nq=%d omitted_queries=%d", phType, nq, max(0, nq-1)), "]") {
 		return

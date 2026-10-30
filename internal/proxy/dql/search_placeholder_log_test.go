@@ -21,9 +21,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
@@ -48,41 +50,16 @@ func marshalLogPlaceholder(t testing.TB, kind commonpb.PlaceholderType, values .
 
 const testPlaceholderLogMaxBytes = 16 * 1024
 
-func decodeLogPlaceholder(t testing.TB, data []byte) *commonpb.PlaceholderGroup {
-	t.Helper()
-	group := &commonpb.PlaceholderGroup{}
-	require.NoError(t, proto.Unmarshal(data, group))
-	return group
-}
-
 func renderLogPlaceholder(t testing.TB, data []byte, limit int) string {
 	t.Helper()
-	preview := &searchPlaceholderStringer{}
-	preview.capture(decodeLogPlaceholder(t, data))
 	w := newPlaceholderLogWriter(limit)
-	writePlaceholderGroup(w, preview.groups[0])
+	writePlaceholderGroup(w, data)
 	return w.finish()
-}
-
-func captureLogRequest(t testing.TB, preview *searchPlaceholderStringer, request *milvuspb.SearchRequest) {
-	t.Helper()
-	if preview == nil {
-		return
-	}
-	if len(request.GetSubReqs()) == 0 {
-		preview.capture(decodeLogPlaceholder(t, request.GetPlaceholderGroup()))
-	} else {
-		for _, sub := range request.GetSubReqs() {
-			preview.capture(decodeLogPlaceholder(t, sub.GetPlaceholderGroup()))
-		}
-	}
 }
 
 func renderLogRequest(t testing.TB, request *milvuspb.SearchRequest, limit int) string {
 	t.Helper()
-	preview := &searchPlaceholderStringer{request: request, maxBytes: limit}
-	captureLogRequest(t, preview, request)
-	return preview.String()
+	return (searchPlaceholderStringer{request: request, maxBytes: limit}).String()
 }
 
 func TestPlaceholderLogPreview(t *testing.T) {
@@ -149,27 +126,9 @@ func TestPlaceholderLogLargeInput(t *testing.T) {
 	assert.LessOrEqual(t, len(got), testPlaceholderLogMaxBytes)
 }
 
-func TestPlaceholderLogCapture(t *testing.T) {
-	first := []byte("original first query")
-	ph := &commonpb.PlaceholderValue{Type: commonpb.PlaceholderType_VarChar, Values: [][]byte{first, []byte("second query")}}
-	preview := &searchPlaceholderStringer{}
-	preview.capture(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{ph, {}}})
-	require.Len(t, preview.groups, 1)
-	require.Len(t, preview.groups[0], 2)
-	value := preview.groups[0][0]
-	assert.Equal(t, 2, value.nq)
-	assert.Same(t, &first[0], &value.first[0]) // Reuse the decoded first value, without another payload copy.
-	ph.Type = commonpb.PlaceholderType_FloatVector
-	ph.Values = [][]byte{{0, 0, 0, 0}} // Later conversion must not change the preview.
-	w := newPlaceholderLogWriter(testPlaceholderLogMaxBytes)
-	writePlaceholderGroup(w, preview.groups[0])
-	got := w.finish()
-	assert.Contains(t, got, `type=VarChar nq=2`)
-	assert.Contains(t, got, `preview=["original first query"]`)
-	assert.Contains(t, got, `omitted_queries=1`)
-	assert.Contains(t, got, `nq=0`)
-	assert.NotContains(t, got, "second query")
-	assert.NotContains(t, got, "FloatVector")
+func TestPlaceholderLogInvalidGroup(t *testing.T) {
+	assert.Contains(t, renderLogPlaceholder(t, []byte{0xff}, testPlaceholderLogMaxBytes), "<invalid placeholder group>")
+	assert.Empty(t, renderLogPlaceholder(t, nil, testPlaceholderLogMaxBytes))
 }
 
 func TestPlaceholderLogUsesWholeBudgetForFirstQuery(t *testing.T) {
@@ -282,17 +241,21 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	})
 	log := mlog.With(mlog.FieldCollectionID(100))
 	ctx := context.Background()
-	emit := func(request *milvuspb.SearchRequest, infos []*planpb.QueryInfo) {
-		preview := newSearchPlaceholderLog()
-		captureLogRequest(t, preview, request)
-		logSearchPlaceholders(ctx, log, request, infos, preview)
-	}
+	var decodeCalls atomic.Int64
+	var unmarshal func([]byte, proto.Message) error
+	patch := mockey.Mock(proto.Unmarshal).Origin(&unmarshal).To(func(data []byte, message proto.Message) error {
+		if _, ok := message.(*commonpb.PlaceholderGroup); ok {
+			decodeCalls.Add(1)
+		}
+		return unmarshal(data, message)
+	}).Build()
+	defer patch.UnPatch()
 	// Even a fresh call site must not spend the initial burst token while disabled.
 	for _, limit := range []string{"0", "-1", "NaN"} {
 		require.NoError(t, params.Save(key, limit))
-		assert.Nil(t, newSearchPlaceholderLog())
-		emit(nil, nil)
+		logSearchPlaceholders(ctx, log, nil, nil)
 		assert.Empty(t, buf.String())
+		assert.Zero(t, decodeCalls.Load())
 	}
 
 	request := &milvuspb.SearchRequest{}
@@ -306,13 +269,15 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	}
 	// Prime the real limiter so this test also works with -count > 1.
 	require.NoError(t, params.Save(key, "+Inf"))
-	emit(request, infos)
+	logSearchPlaceholders(ctx, log, request, infos)
 	buf.Reset()
+	decodeCalls.Store(0)
 	require.NoError(t, params.Save(key, "0.000000001"))
 	for i := 0; i < 100; i++ {
-		emit(request, infos)
+		logSearchPlaceholders(ctx, log, request, infos)
 	}
 	assert.Equal(t, 1, strings.Count(buf.String(), "proxy search request placeholder"))
+	assert.Equal(t, int64(3), decodeCalls.Load(), "only the admitted request decodes its three sub-requests")
 	for i := 0; i < 3; i++ {
 		assert.Contains(t, buf.String(), fmt.Sprintf("index=%d anns_field_id=%d", i, 101+i))
 		assert.Contains(t, buf.String(), fmt.Sprintf("query-%d", i))
@@ -322,23 +287,22 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	ordinary := &milvuspb.SearchRequest{Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
 		PlaceholderGroup: marshalLogPlaceholder(t, commonpb.PlaceholderType_VarChar, []byte("ordinary")),
 	}}
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Empty(t, buf.String())
-	preview := newSearchPlaceholderLog()
-	require.NotNil(t, preview)
-	captureLogRequest(t, preview, ordinary)
+	assert.Equal(t, int64(3), decodeCalls.Load())
 	require.NoError(t, params.Save(key, "0"))
-	logSearchPlaceholders(ctx, log, ordinary, infos[:1], preview)
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Empty(t, buf.String())
+	assert.Equal(t, int64(3), decodeCalls.Load())
 	require.NoError(t, params.Save(key, "+Inf"))
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Contains(t, buf.String(), "ordinary")
 	buf.Reset()
+	decodeCalls.Store(0)
 	mlog.SetLevel(mlog.WarnLevel)
-	assert.Nil(t, newSearchPlaceholderLog())
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Empty(t, buf.String())
+	assert.Zero(t, decodeCalls.Load(), "disabled INFO logging must not unmarshal")
 	mlog.SetLevel(mlog.InfoLevel)
 
 	traceID, err := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
@@ -352,7 +316,7 @@ func TestLogSearchPlaceholders(t *testing.T) {
 		PlaceholderGroup: marshalLogPlaceholder(t, commonpb.PlaceholderType_FloatVector, large...),
 	}
 	ordinary.Nq = 1000
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Contains(t, buf.String(), "nq=1000")
 	assert.Contains(t, buf.String(), "dim=1536")
 	assert.Contains(t, buf.String(), traceID.String())
@@ -366,13 +330,13 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	}
 	require.NoError(t, params.Save(sizeKey, "256"))
 	buf.Reset()
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.Contains(t, buf.String(), "<truncated>")
 	assert.NotContains(t, buf.String(), "END_OF_FIRST_QUERY")
 	assert.Contains(t, buf.String(), traceID.String())
 	require.NoError(t, params.Save(sizeKey, "16384"))
 	buf.Reset()
-	emit(ordinary, infos[:1])
+	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
 	assert.NotContains(t, buf.String(), "<truncated>")
 	assert.Contains(t, buf.String(), "END_OF_FIRST_QUERY")
 }
@@ -382,16 +346,12 @@ func BenchmarkPlaceholderLogLargeInput(b *testing.B) {
 	for i := range values {
 		values[i] = make([]byte, 1536*4)
 	}
-	group := decodeLogPlaceholder(b, marshalLogPlaceholder(b, commonpb.PlaceholderType_FloatVector, values...))
-	// Search already decoded the group. Measure only the extra capture/render work.
+	data := marshalLogPlaceholder(b, commonpb.PlaceholderType_FloatVector, values...)
+	// Include the full Unmarshal performed by an admitted log entry.
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		preview := &searchPlaceholderStringer{}
-		preview.capture(group)
-		w := newPlaceholderLogWriter(testPlaceholderLogMaxBytes)
-		writePlaceholderGroup(w, preview.groups[0])
-		_ = w.finish()
+		renderLogPlaceholder(b, data, testPlaceholderLogMaxBytes)
 	}
 }
 
@@ -399,10 +359,8 @@ func FuzzPlaceholderLogBudget(f *testing.F) {
 	f.Add([]byte("hello"), int32(commonpb.PlaceholderType_VarChar), uint16(256))
 	f.Add([]byte{0xff}, int32(commonpb.PlaceholderType_FloatVector), uint16(1))
 	f.Fuzz(func(t *testing.T, value []byte, kind int32, limit uint16) {
-		preview := &searchPlaceholderStringer{}
-		preview.capture(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{Type: commonpb.PlaceholderType(kind), Values: [][]byte{value}}}})
 		w := newPlaceholderLogWriter(int(limit))
-		writePlaceholderGroup(w, preview.groups[0])
+		writePlaceholderValue(w, &commonpb.PlaceholderValue{Type: commonpb.PlaceholderType(kind), Values: [][]byte{value}})
 		got := w.finish()
 		require.LessOrEqual(t, len(got), int(limit))
 		require.True(t, utf8.ValidString(got))
