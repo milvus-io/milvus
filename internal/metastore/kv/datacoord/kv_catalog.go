@@ -574,6 +574,20 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
+// ChannelExists reports whether the channel marker is active. Missing keys are
+// treated as absent; other lookup failures are returned to the caller.
+func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
+	key := buildChannelRemovePath(channel)
+	v, err := kc.MetaKv.Load(ctx, key)
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, merr.Wrapf(err, "failed to load channel marker %s", channel)
+	}
+	return v == NonRemoveFlagTomestone, nil
+}
+
 // RemoveDroppedChannelFlags deletes every channel removal flag whose value is
 // "removed". Older versions rewrote the flag to "removed" when a channel was
 // dropped and never deleted it. A missing flag reads the same as "removed" for

@@ -229,6 +229,63 @@ func (_c *DataCoordCatalog_AlterSegments_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ChannelExists provides a mock function with given fields: ctx, channel
+func (_m *DataCoordCatalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
+	ret := _m.Called(ctx, channel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ChannelExists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, channel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, channel)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, channel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ChannelExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChannelExists'
+type DataCoordCatalog_ChannelExists_Call struct {
+	*mock.Call
+}
+
+// ChannelExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+func (_e *DataCoordCatalog_Expecter) ChannelExists(ctx interface{}, channel interface{}) *DataCoordCatalog_ChannelExists_Call {
+	return &DataCoordCatalog_ChannelExists_Call{Call: _e.mock.On("ChannelExists", ctx, channel)}
+}
+
+func (_c *DataCoordCatalog_ChannelExists_Call) Run(run func(ctx context.Context, channel string)) *DataCoordCatalog_ChannelExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ChannelExists_Call) Return(_a0 bool, _a1 error) *DataCoordCatalog_ChannelExists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ChannelExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *DataCoordCatalog_ChannelExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateIndex provides a mock function with given fields: ctx, index
 func (_m *DataCoordCatalog) CreateIndex(ctx context.Context, index *model.Index) error {
 	ret := _m.Called(ctx, index)

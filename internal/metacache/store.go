@@ -110,6 +110,7 @@ type MetaStore interface {
 
 	// Channel lifecycle
 	MarkChannelAdded(ctx context.Context, channel string) error
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	RemoveDroppedChannelFlags(ctx context.Context) (int, error)
 
 	// GC
@@ -578,6 +579,10 @@ func (s *metaStore) LoadChannelCheckpoints(checkpoints map[string]*msgpb.MsgPosi
 
 func (s *metaStore) MarkChannelAdded(ctx context.Context, channel string) error {
 	return s.catalog.MarkChannelAdded(ctx, channel)
+}
+
+func (s *metaStore) ChannelExists(ctx context.Context, channel string) (bool, error) {
+	return s.catalog.ChannelExists(ctx, channel)
 }
 
 func (s *metaStore) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {

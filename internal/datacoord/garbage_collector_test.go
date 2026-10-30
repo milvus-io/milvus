@@ -1647,8 +1647,8 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	collectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
-	defer collectionDropped.UnPatch()
+	channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+	defer channelExists.UnPatch()
 	catalog.On("DropChannelCheckpoint",
 		mock.Anything,
 		mock.Anything,
@@ -2383,6 +2383,17 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	})
 }
 
+func TestGarbageCollector_recycleDroppedChannelFlags(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := &meta{catalog: catalog, metaStore: metacache.NewMetaStore(catalog)}
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{checkInterval: time.Millisecond})
+
+	// A failed sweep is retried, and the first success ends the loop.
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(0, errors.New("mock error")).Once()
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(2, nil).Once()
+	gc.recycleDroppedChannelFlags(context.TODO())
+}
+
 func TestGarbageCollector_removeObjectPool(t *testing.T) {
 	paramtable.Init()
 	cm := mocks.NewChunkManager(t)
@@ -2881,8 +2892,8 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			collectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(true).Build()
-			defer collectionDropped.UnPatch()
+			channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(false, nil).Build()
+			defer channelExists.UnPatch()
 
 			store := metacache.NewMetaStore(catalog)
 			meta := &meta{
@@ -3017,7 +3028,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
+	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mock7.UnPatch()
 
 	dropSegmentCalled := false
@@ -3917,8 +3928,8 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	mockListSegmentIndexes := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).Return([]*model.SegmentIndex{}, nil).Build()
 	defer mockListSegmentIndexes.UnPatch()
 
-	mockCollectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
-	defer mockCollectionDropped.UnPatch()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
+	defer mockChannelExists.UnPatch()
 
 	dropSegmentCalled := false
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
@@ -4854,8 +4865,8 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
-	mockCollectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
-	defer mockCollectionDropped.UnPatch()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
+	defer mockChannelExists.UnPatch()
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
 		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
 		return nil
@@ -5568,8 +5579,8 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 	t.Run("import segment not GCed when commit_timestamp > cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		collectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
-		defer collectionDropped.UnPatch()
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:   catalog,
@@ -5588,14 +5599,14 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		}}
 
 		// cpTimestamp=3000: effective dml ts is 5000 > 3000 → should NOT GC
-		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 3000, func(int64) bool { return false })
+		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 3000)
 		assert.False(t, result, "import segment with commit_ts=5000 should NOT be GCed when cpTimestamp=3000")
 	})
 
 	t.Run("import segment GCed when commit_timestamp <= cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		collectionDropped := mockey.Mock((*garbageCollector).collectionDropped).Return(false).Build()
-		defer collectionDropped.UnPatch()
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:   catalog,
@@ -5616,7 +5627,7 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		}}
 
 		// cpTimestamp=6000: effective dml ts is 5000 <= 6000 → should GC (drop tolerance met since DroppedAt=0)
-		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 6000, func(int64) bool { return false })
+		result := gc.checkDroppedSegmentGC(segment, nil, typeutil.NewUniqueSet(), 6000)
 		assert.True(t, result, "import segment with commit_ts=5000 should be GCed when cpTimestamp=6000")
 	})
 }
@@ -6504,15 +6515,4 @@ func TestGarbageCollector_recycleUnusedImportV3Prefixes(t *testing.T) {
 	exist, err = cli.Exist(ctx, livePath)
 	require.NoError(t, err)
 	require.True(t, exist)
-}
-
-func TestGarbageCollector_collectionDroppedLookupFailure(t *testing.T) {
-	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, errors.New("mock error")).Once()
-	gc := newGarbageCollector(nil, nil, GcOption{broker: broker})
-
-	dropped := make(map[int64]bool)
-	assert.False(t, gc.collectionDropped(context.TODO(), dropped, 1))
-	// Memoized for the round, so the failed lookup is not repeated.
-	assert.False(t, gc.collectionDropped(context.TODO(), dropped, 1))
 }

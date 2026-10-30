@@ -858,22 +858,6 @@ func (s *Server) startServerLoop() {
 	s.garbageCollector.start()
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
-
-	s.serverLoopWg.Add(1)
-	go s.removeDroppedChannelFlags(s.serverLoopCtx)
-}
-
-// removeDroppedChannelFlags deletes the "removed" channel flags that older
-// versions left in the catalog for every dropped channel. It runs once per
-// start and is best effort: a failure leaves the flags for the next start.
-func (s *Server) removeDroppedChannelFlags(ctx context.Context) {
-	defer s.serverLoopWg.Done()
-	removed, err := s.meta.metaStore.RemoveDroppedChannelFlags(ctx)
-	if err != nil {
-		mlog.Warn(ctx, "failed to remove dropped channel flags", mlog.Err(err))
-		return
-	}
-	mlog.Info(ctx, "removed dropped channel flags", mlog.Int("count", removed))
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
