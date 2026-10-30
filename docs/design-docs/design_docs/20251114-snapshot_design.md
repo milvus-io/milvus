@@ -888,9 +888,11 @@ message ListSnapshotsResponse {
 }
 ```
 
-`SnapshotSummary` contains `name` (string, field 1), `create_ts` (int64,
-field 2), and `description` (string, field 3). Internal and public protocols
-have separate summary messages; Proxy explicitly maps between them.
+The internal `SnapshotSummary` contains `name` (string, field 1), `create_ts`
+(int64, field 2), and `description` (string, field 3). The public summary also
+has `create_utc_ts` (int64, field 4). Proxy explicitly maps the internal message
+and derives the UTC field; DataCoord and persisted snapshot metadata keep the
+original TT without another stored timestamp.
 
 DataCoord reads only cached metadata and returns both lists from the same
 sorted result: `create_ts` descending, then `name` ascending. Each name at index
@@ -899,9 +901,20 @@ it is a Milvus hybrid timestamp, not Unix milliseconds or creation completion
 time. A zero timestamp is preserved. Existing snapshot visibility and concurrent
 list semantics remain unchanged; internal 2PC state is not exposed.
 
+The public summary exposes `create_utc_ts` at field 4. It is Unix milliseconds
+extracted from `create_ts`
+using `tsoutil.ParseHybridTs`: the physical time of the snapshot WAL boundary,
+not the time snapshot creation completed. This minimum channel timestamp is a
+compatibility summary, not a shared visibility boundary for all channels.
+Zero remains zero and means unknown; older servers that omit the new field also
+decode as zero. Existing `create_ts` values and field numbers are unchanged.
+Entries with the same Unix millisecond may have different logical TT parts;
+sorting continues to use the original TT, not the derived milliseconds.
+
 REST retains its `data` array of names and adds a top-level `snapshotSummaries`
-array with `name`, `createTs`, and `description`. `createTs` uses the same int64
-formatting/header convention as DescribeSnapshot. Empty summaries are `[]`.
+array with `name`, `createTs`, `createUtcTs`, and `description`. Both timestamps
+use the existing int64 formatting/header convention. Empty summaries are `[]`.
+DescribeSnapshot and its REST response remain unchanged.
 
 Go SDK `ListSnapshotSummaries` and PyMilvus MilvusClient
 `list_snapshot_summaries` expose summaries without changing the existing
@@ -914,6 +927,12 @@ preserve the server-provided order without sorting locally. If both response lis
 are empty, they return an empty list. Protobuf repeated fields have no presence
 bit, so that response cannot distinguish an empty collection on an older server
 from one on a newer server.
+
+Go SDK exposes `GetCreateUtcTs()` on SnapshotSummary. PyMilvus exposes
+`create_utc_ts` on SnapshotSummary. Clients preserve the server field, including
+zero; they do not synthesize it from the legacy TT or issue another RPC.
+PyMilvus appends the new dataclass field with a default of zero to preserve
+positional constructors. SnapshotInfo and DescribeSnapshot remain unchanged.
 
 ### DescribeSnapshot
 

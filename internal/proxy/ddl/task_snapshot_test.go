@@ -33,7 +33,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestSnapshotCreateUTCTimestamp(t *testing.T) {
+	const unixMillis int64 = 1700000000123
+	for _, logical := range []int64{0, 1, (1 << 18) - 1} {
+		tt := tsoutil.ComposeTS(unixMillis, logical)
+		assert.Equal(t, unixMillis, snapshotCreateUTCTimestamp(int64(tt)))
+	}
+	assert.Zero(t, snapshotCreateUTCTimestamp(0))
+}
 
 // =========================== CreateSnapshotTask Tests ===========================
 
@@ -610,8 +620,10 @@ func TestListSnapshotsTask_Execute_Success(t *testing.T) {
 	require.Len(t, task.result.GetSnapshotSummaries(), 2)
 	assert.Equal(t, "snapshot1", task.result.GetSnapshotSummaries()[0].GetName())
 	assert.Equal(t, int64(9007199254740993), task.result.GetSnapshotSummaries()[0].GetCreateTs())
+	assert.Equal(t, int64(34359738368), task.result.GetSnapshotSummaries()[0].GetCreateUtcTs())
 	assert.Equal(t, "daily", task.result.GetSnapshotSummaries()[0].GetDescription())
 	assert.Zero(t, task.result.GetSnapshotSummaries()[1].GetCreateTs())
+	assert.Zero(t, task.result.GetSnapshotSummaries()[1].GetCreateUtcTs())
 	assert.Empty(t, task.result.GetSnapshotSummaries()[1].GetDescription())
 }
 

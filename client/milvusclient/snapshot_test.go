@@ -592,10 +592,10 @@ func TestListSnapshotSummaries(t *testing.T) {
 					resp.Snapshots = []string{"old", "b", "a"}
 				}
 				if scenario == "server order" {
-					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "old"}, {Name: "b", CreateTs: 9007199254740993, Description: "daily"}, {Name: "a", CreateTs: 9007199254740993}}
+					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "old"}, {Name: "b", CreateTs: 9007199254740993, Description: "daily", CreateUtcTs: 34359738368}, {Name: "a", CreateTs: 9007199254740993}}
 				}
 				if scenario == "ordered" {
-					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "a", CreateTs: 9007199254740993}, {Name: "b", CreateTs: 9007199254740993, Description: "daily"}, {Name: "old"}}
+					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "a", CreateTs: 9007199254740993}, {Name: "b", CreateTs: 9007199254740993, Description: "daily", CreateUtcTs: 34359738368}, {Name: "old"}}
 				}
 				return resp, nil
 			}).Build()
@@ -634,6 +634,9 @@ func TestListSnapshotSummaries(t *testing.T) {
 					require.Equal(t, name, infos[i].GetName())
 				}
 				require.Equal(t, int64(9007199254740993), infos[1].GetCreateTs())
+				require.Equal(t, int64(34359738368), infos[1].GetCreateUtcTs())
+				require.Zero(t, infos[0].GetCreateUtcTs())
+				require.Zero(t, infos[2].GetCreateUtcTs())
 				require.Equal(t, "daily", infos[1].GetDescription())
 			}
 		})

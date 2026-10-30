@@ -7669,6 +7669,40 @@ type snapshotSummaryRESTProxy struct {
 	types.ProxyComponent
 }
 
+func TestSnapshotSummaryRESTV2UTCTimestamps(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	const hybridTimestamp int64 = 445644800032243754
+	for _, timestamp := range []struct{ tt, utc int64 }{{hybridTimestamp, 1700000000123}, {hybridTimestamp, 0}, {0, 0}} {
+		for _, allowInt64 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d/%d/%t", timestamp.tt, timestamp.utc, allowInt64), func(t *testing.T) {
+				proxy := &snapshotSummaryRESTProxy{}
+				list := mockey.Mock((*snapshotSummaryRESTProxy).ListSnapshots).Return(&milvuspb.ListSnapshotsResponse{
+					Status:            merr.Success(),
+					Snapshots:         []string{"backup"},
+					SnapshotSummaries: []*milvuspb.SnapshotSummary{{Name: "backup", CreateTs: timestamp.tt, CreateUtcTs: timestamp.utc}},
+				}, nil).Build()
+				defer list.UnPatch()
+				server := initHTTPServerV2(proxy, false)
+				req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewBufferString(`{"collectionName":"books"}`))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprint(allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Zero(t, gjson.Get(recorder.Body.String(), "code").Int())
+				for field, value := range map[string]int64{"createTs": timestamp.tt, "createUtcTs": timestamp.utc} {
+					expected := fmt.Sprint(value)
+					if !allowInt64 {
+						expected = fmt.Sprintf("%q", expected)
+					}
+					assert.Equal(t, expected, gjson.Get(recorder.Body.String(), "snapshotSummaries.0."+field).Raw)
+				}
+			})
+		}
+	}
+}
+
 func TestListSnapshotSummariesRESTV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")

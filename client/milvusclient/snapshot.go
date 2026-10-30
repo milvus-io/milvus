@@ -74,6 +74,9 @@ func (c *Client) ListSnapshots(ctx context.Context, opt ListSnapshotsOption, cal
 
 // ListSnapshotSummaries returns lightweight metadata in the server-provided order.
 // Servers returning only names are rejected as unsupported.
+// CreateTs is the original Milvus hybrid timestamp; CreateUtcTs is its physical
+// Unix time in milliseconds, not snapshot completion time. Zero means unknown
+// or that the server does not provide the UTC field.
 func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOption, callOptions ...grpc.CallOption) ([]*milvuspb.SnapshotSummary, error) {
 	if opt == nil {
 		return nil, merr.WrapErrParameterInvalid("ListSnapshotsOption", "nil", "option cannot be nil")

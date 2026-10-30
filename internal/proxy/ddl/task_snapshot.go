@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 const (
@@ -40,6 +41,13 @@ const (
 	PinSnapshotDataTaskName         = "PinSnapshotDataTask"
 	UnpinSnapshotDataTaskName       = "UnpinSnapshotDataTask"
 )
+
+// snapshotCreateUTCTimestamp extracts Unix milliseconds from a snapshot's WAL
+// boundary timestamp. An unknown (zero) timestamp remains zero.
+func snapshotCreateUTCTimestamp(createTs int64) int64 {
+	physical, _ := tsoutil.ParseHybridTs(uint64(createTs))
+	return physical
+}
 
 // resolveCollectionNames resolves collection ID to (dbName, collectionName) via MetaCache.
 // Returns empty strings on failure (best-effort for display purposes).
@@ -486,6 +494,7 @@ func (lst *ListSnapshotsTask) Execute(ctx context.Context) error {
 		summaries = append(summaries, &milvuspb.SnapshotSummary{
 			Name:        info.GetName(),
 			CreateTs:    info.GetCreateTs(),
+			CreateUtcTs: snapshotCreateUTCTimestamp(info.GetCreateTs()),
 			Description: info.GetDescription(),
 		})
 	}

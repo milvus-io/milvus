@@ -84,6 +84,7 @@ func (h *HandlersV2) listSnapshots(ctx context.Context, c *gin.Context, anyReq a
 			summaries = append(summaries, gin.H{
 				"name":        info.GetName(),
 				"createTs":    formatRESTInt64(info.GetCreateTs(), allowInt64),
+				"createUtcTs": formatRESTInt64(info.GetCreateUtcTs(), allowInt64),
 				"description": info.GetDescription(),
 			})
 		}
