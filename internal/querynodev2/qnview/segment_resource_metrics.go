@@ -22,8 +22,8 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 			continue
 		}
 		for _, base := range r.bases {
-			r.queryRefs++
-			base.queryRefs++
+			r.operations.Add(1)
+			base.operationRefs++
 			bases = append(bases, pinnedBase{r, base})
 		}
 	}
@@ -32,9 +32,9 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		for _, pinned := range bases {
-			pinned.resource.queryRefs--
-			pinned.base.queryRefs--
+			pinned.base.operationRefs--
 			pinned.resource.wakeLocked()
+			pinned.resource.operations.Done()
 		}
 	}()
 	byID := make(map[int64]*metricsinfo.Segment)

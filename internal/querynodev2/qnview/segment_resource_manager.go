@@ -81,7 +81,7 @@ type segmentBase struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	anchor         *preparedSegmentRead
-	queryRefs      int
+	operationRefs  int // Query handles and metrics pins that prevent base pruning.
 	segment        TransformSegment
 	snapshot       SegmentLoadInfoSnapshot
 	registration   TransformRegistration
@@ -102,7 +102,6 @@ type segmentResource struct {
 	snapshot     *SegmentLoadInfoSnapshot
 	bases        []*segmentBase
 	reads        []*preparedSegmentRead
-	queryRefs    int
 	// scheduled covers only running or immediately queued work, never backoff.
 	scheduled  bool
 	retryTimer *time.Timer
@@ -110,6 +109,8 @@ type segmentResource struct {
 	closing    bool
 	done       chan struct{}
 	cursor     int
+	// Query handles, metrics sampling and catch-up pin this incarnation until
+	// completion. Only bindings determine whether it can admit new consumers.
 	operations sync.WaitGroup
 }
 
@@ -304,7 +305,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	prepared := false
 	for {
 		r.dirty = false
-		if r.closing || (len(r.bindings) == 0 && r.queryRefs == 0) {
+		if r.closing || len(r.bindings) == 0 {
 			r.closing = true
 			r.cancel()
 			go r.close()
@@ -576,6 +577,9 @@ func (r *segmentResource) catchup(base *segmentBase) {
 func (r *segmentResource) close() {
 	m := r.manager
 	defer m.drain.Done()
+	// Closing fences query/metrics admission under mu. Reconcile has finished
+	// synchronous preparation, including admission of any catch-up goroutine,
+	// before starting close, so no operation can be added after Wait begins.
 	r.operations.Wait()
 	for _, base := range r.bases {
 		if base.registration != nil {
@@ -603,13 +607,14 @@ func (r *segmentResource) close() {
 	m.mu.Unlock()
 }
 
-// closeIfUnusedLocked fences an unreferenced incarnation before a new binding
-// can reuse it. The caller holds manager.mu; closing itself runs asynchronously.
+// closeIfUnusedLocked fences an incarnation when its final View binding leaves.
+// Existing operations delay destruction, not Closing or its completion promise.
+// The caller holds manager.mu; closing itself runs asynchronously.
 func (r *segmentResource) closeIfUnusedLocked() bool {
 	if r.closing {
 		return true
 	}
-	if len(r.bindings) != 0 || r.queryRefs != 0 {
+	if len(r.bindings) != 0 {
 		return false
 	}
 	r.wakeLocked()
@@ -654,8 +659,8 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 			m.mu.Lock()
 			var closed []<-chan struct{}
 			for _, r := range resources {
-				// Other Views or their queries may still own the segment. Do not
-				// wait for those references or a later takeover. An already-closing
+				// Other View bindings may still own the segment. Do not wait for
+				// those bindings or a later takeover. An already-closing
 				// incarnation must finish even if successor bindings now wait on it.
 				if r.closeIfUnusedLocked() {
 					closed = append(closed, r.done)
@@ -840,7 +845,7 @@ func (r *segmentResource) pruneBasesLocked() []*segmentBase {
 				break
 			}
 		}
-		if used[base] || base.queryRefs > 0 || base.catchupRunning || pending {
+		if used[base] || base.operationRefs > 0 || base.catchupRunning || pending {
 			kept = append(kept, base)
 		} else {
 			retired = append(retired, base)
