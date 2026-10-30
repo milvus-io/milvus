@@ -144,6 +144,38 @@ chain = (
 
 External model credentials are resolved by Milvus server-side provider configuration. SDK requests should not carry API keys.
 
+##### SGLang rerank provider
+
+Milvus supports SGLang's text-only `POST /v1/rerank` protocol. It sends all
+candidates as `query` and `documents`, with `return_documents=false`, and
+expects a JSON array of `{index, score}` entries. It does not send `top_n`: a
+rerank function requires one score for every candidate, and Milvus rejects
+missing, duplicate, and out-of-range indexes rather than assigning a score to
+the wrong document.
+
+Configure the SGLang base URL and optional bearer credential on the server:
+
+```yaml
+credential:
+  sglang:
+    apikey: ${SGLANG_API_KEY}
+
+function:
+  rerank:
+    model:
+      providers:
+        sglang:
+          enable: true
+          url: http://sglang-reranker.default.svc.cluster.local:30000
+          credential: sglang
+```
+
+Then set `provider="sglang"` in `fn.rerank_model`. `endpoint` may override the
+configured URL for an individual function. `timeout_ms` overrides
+`function.model.requestTimeout`; both deadline expiry and caller cancellation
+abort the in-flight HTTP request. The adapter accepts only SGLang's text
+protocol, not its multimodal rerank extensions.
+
 ### JSON and dynamic-field column references
 
 JSON paths use the existing identifier grammar, including nested object keys and array indexes. A path must declare one of `DataType.BOOL`, `DataType.INT64`, `DataType.DOUBLE`, or `DataType.VARCHAR`.

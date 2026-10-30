@@ -203,6 +203,12 @@ func (p *functionConfig) init(base *BaseTable) {
 				return "Your Hugging Face Inference Providers router URL, default is https://router.huggingface.co"
 			case "huggingface.enable":
 				return "Whether to enable Hugging Face rerank service"
+			case "sglang.credential":
+				return "The name in the credential configuration item"
+			case "sglang.url":
+				return "Your SGLang rerank service URL"
+			case "sglang.enable":
+				return "Whether to enable SGLang rerank service"
 			default:
 				return ""
 			}

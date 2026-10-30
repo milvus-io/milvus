@@ -1869,6 +1869,10 @@ function:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable siliconflow model service
           url:  # Your siliconflow rerank url, Default is the official rerank url
+        sglang:
+          credential:  # The name in the credential configuration item
+          enable: true # Whether to enable SGLang rerank service
+          url:  # Your SGLang rerank service URL
         tei:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable TEI rerank service
