@@ -243,6 +243,8 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.RootShouldBindRole.Key)
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
+		meta.EXPECT().GetDatabaseByID(mock.Anything, int64(1), mock.Anything).
+			Return(&model.Database{ID: 1, Name: "test db"}, nil).Once()
 
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
@@ -276,6 +278,8 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
+		meta.EXPECT().GetDatabaseByID(mock.Anything, int64(1), mock.Anything).
+			Return(&model.Database{ID: 1, Name: "test db"}, nil).Once()
 
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
@@ -297,6 +301,8 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
+		meta.EXPECT().GetDatabaseByID(mock.Anything, int64(1), mock.Anything).
+			Return(&model.Database{ID: 1, Name: "test db"}, nil).Once()
 
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
@@ -360,6 +366,8 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 		meta := mockrootcoord.NewIMetaTable(t)
 		core := newTestCore(withMeta(meta))
+		meta.EXPECT().GetDatabaseByID(mock.Anything, int64(1), mock.Anything).
+			Return(&model.Database{ID: 1, Name: "test db"}, nil).Once()
 
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,

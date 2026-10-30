@@ -105,11 +105,6 @@ class DiskSlotFile {
     Close();
 
     uint32_t
-    GetNumSlots() const {
-        return num_slots_;
-    }
-
-    uint32_t
     GetUsedCount() const;
 
     bool
@@ -118,11 +113,6 @@ class DiskSlotFile {
     uint32_t
     GetSlotSize() const {
         return slot_size_;
-    }
-
-    uint64_t
-    GetFileSizeBytes() const {
-        return kFileHeaderSize + static_cast<uint64_t>(num_slots_) * slot_size_;
     }
 
     uint64_t

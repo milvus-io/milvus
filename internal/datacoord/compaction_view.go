@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -144,9 +143,14 @@ func (s *SegmentView) Clone() *SegmentView {
 
 func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
+		stats := segment.EnsureStats()
 		numOfRows := segment.GetNumOfRows()
 		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			numOfRows = segmentutil.CalcDelRowCountFromDeltaLog(segment.SegmentInfo)
+			// L0 segments record deleted-row count under numOfRows for view
+			// purposes (no inserts). DeleteNumRows on Statistics is the
+			// persisted equivalent of the legacy CalcDelRowCountFromDeltaLog
+			// iteration.
+			numOfRows = stats.GetDeleteNumRows()
 		}
 		return &SegmentView{
 			ID: segment.ID,
@@ -163,12 +167,16 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 			startPos: segment.GetStartPosition(),
 			dmlPos:   segment.GetDmlPosition(),
 
-			DeltaSize:     GetBinlogSizeAsBytes(segment.GetDeltalogs()),
-			DeltalogCount: GetBinlogCount(segment.GetDeltalogs()),
-			DeltaRowCount: GetBinlogEntriesNum(segment.GetDeltalogs()),
+			// Aggregate metrics come from Statistics. StatslogCount stays on
+			// the array path because Statistics has no per-segment stat-file
+			// count; V3 segments' empty statslogs read as 0, which matches
+			// the manifest-driven layout.
+			DeltaSize:     float64(stats.GetDeltaBinlogSize()),
+			DeltalogCount: int(stats.GetDeltaBinlogCount()),
+			DeltaRowCount: int(stats.GetDeleteNumRows()),
 
-			Size:          GetBinlogSizeAsBytes(segment.GetBinlogs()),
-			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
+			Size:          float64(stats.GetInsertBinlogSize()),
+			BinlogCount:   int(stats.GetInsertBinlogCount()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
 			NumOfRows: numOfRows,

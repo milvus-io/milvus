@@ -84,8 +84,7 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        const auto& offset_mapping = GetOffsetMapping();
-        if (offset_mapping.IsEnabled() && offset_mapping.GetValidCount() == 0) {
+        if (HasValidData() && GetValidCount() == 0) {
             return 0;
         }
         if (IsEmptyEmbListIndex()) {
@@ -134,7 +133,17 @@ class VectorMemIndex : public VectorIndex {
                   bool is_cosine,
                   milvus::OpContext* op_context = nullptr) const override;
 
+    void
+    SetGrowingMapping() override {
+        build_options_.growing = true;
+    }
+
  protected:
+    const knowhere::Index<knowhere::IndexNode>&
+    GetNativeIndex() const override {
+        return index_;
+    }
+
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
@@ -156,6 +165,7 @@ class VectorMemIndex : public VectorIndex {
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
+    knowhere::BuildOptions build_options_;
     std::vector<size_t> empty_emb_list_offsets_;
 };
 

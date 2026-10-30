@@ -16,7 +16,9 @@
 #include "ThreadPools.h"
 
 #include <math.h>
+#include <array>
 #include <atomic>
+#include <exception>
 #include <mutex>
 #include <utility>
 
@@ -82,6 +84,7 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
                 coefficient = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load();
                 break;
             case milvus::ThreadPoolPriority::MIDDLE:
+            case milvus::ThreadPoolPriority::SEARCH_FANOUT:
                 coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load();
                 break;
             default:
@@ -118,6 +121,22 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
                     &monitor::
                         internal_storage_pool_execute_duration_seconds_middle);
                 break;
+            case SEARCH_FANOUT:
+                pool.SetMetrics(
+                    &monitor::internal_storage_pool_capacity_search_fanout,
+                    &monitor::
+                        internal_storage_pool_active_threads_search_fanout,
+                    &monitor::internal_storage_pool_idle_threads_search_fanout,
+                    &monitor::internal_storage_pool_queue_depth_search_fanout,
+                    &monitor::
+                        internal_storage_pool_task_submitted_total_search_fanout,
+                    &monitor::
+                        internal_storage_pool_task_completed_total_search_fanout,
+                    &monitor::
+                        internal_storage_pool_queue_duration_seconds_search_fanout,
+                    &monitor::
+                        internal_storage_pool_execute_duration_seconds_search_fanout);
+                break;
             case LOW:
                 pool.SetMetrics(
                     &monitor::internal_storage_pool_capacity_low,
@@ -144,6 +163,44 @@ ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
         LOG_ERROR("Failed to resize threadPool, size:{}", size);
         return;
     }
+    size = ClampThreadPoolMaxThreads(size);
+    if (priority == MIDDLE || priority == SEARCH_FANOUT) {
+        constexpr std::array priorities{MIDDLE, SEARCH_FANOUT};
+        std::array<ThreadPool*, priorities.size()> pools{};
+        {
+            std::unique_lock<std::shared_mutex> lock(mutex_);
+            // Publish with creation excluded so lazy pools see the latest ratio.
+            MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.store(ratio);
+            for (size_t i = 0; i < priorities.size(); ++i) {
+                const auto it = thread_pool_map.find(priorities[i]);
+                if (it != thread_pool_map.end()) {
+                    pools[i] = it->second.get();
+                }
+            }
+        }
+        // Retiring workers may need the registry; resize outside its lock.
+        std::exception_ptr first_error;
+        for (size_t i = 0; i < pools.size(); ++i) {
+            if (pools[i] == nullptr) {
+                continue;
+            }
+            try {
+                pools[i]->Resize(size);
+                LOG_INFO("Resized threadPool priority:{}, size:{}",
+                         priorities[i],
+                         size);
+            } catch (...) {
+                // Attempt both pools even if one executor cannot resize.
+                if (!first_error) {
+                    first_error = std::current_exception();
+                }
+            }
+        }
+        if (first_error) {
+            std::rethrow_exception(first_error);
+        }
+        return;
+    }
     auto is_load_pool = priority == ThreadPoolPriority::HIGH ||
                         priority == ThreadPoolPriority::LOW;
     ThreadPool* pool = nullptr;
@@ -156,7 +213,6 @@ ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
         }
         pool = iter->second.get();
     }
-    size = ClampThreadPoolMaxThreads(size);
     auto old_size = pool->GetMaxThreadNum();
     auto old_load_workers =
         is_load_pool ? GetLoadExecutorWorkers() : int64_t{0};

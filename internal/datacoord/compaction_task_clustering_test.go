@@ -408,7 +408,9 @@ func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFile
 		s.T().Cleanup(func() {
 			paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
 		})
-		s.NoError(s.meta.UpdateFileResources(context.TODO(), expectedResources, 1))
+		resourceBroker := broker.NewMockBroker(s.T())
+		resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(expectedResources, nil)
+		s.meta.broker = resourceBroker
 		task := s.newNamespaceClusteringTask(true, []int64{7})
 		plan, err := task.BuildCompactionRequest()
 		s.Require().NoError(err)
@@ -685,6 +687,7 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	}, nil).Once()
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+	s.Equal("compaction task failed", task.GetTaskProto().GetFailReason())
 
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 		State: datapb.CompactionTaskState_failed,

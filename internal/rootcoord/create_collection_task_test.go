@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -811,7 +812,7 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of vector")
 	})
 
-	t.Run("struct array field - nested array", func(t *testing.T) {
+	t.Run("struct array field - old-style nested element_type", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -837,7 +838,42 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		}
 		err := task.validateSchema(context.TODO(), schema)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "nested array is not supported")
+		assert.Contains(t, err.Error(), "nested array field nested_array must specify type_schema")
+	})
+
+	t.Run("struct array field - non-nested type schema rejected", func(t *testing.T) {
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					Name: "struct_field",
+					Fields: []*schemapb.FieldSchema{
+						{
+							Name:       "array_of_vector",
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							TypeSchema: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+								Kind: &schemapb.TypeSchema_ArrayElement{
+									ArrayElement: &schemapb.TypeSchema{
+										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type_schema is only supported for nested array")
 	})
 
 	t.Run("struct array field - invalid element type", func(t *testing.T) {
@@ -1934,7 +1970,7 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		schema.ExternalSource = "file:///tmp/snapshot.json"
 		err := baseTask(schema).prepareMilvusTableSnapshotSchema(context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "external_source scheme")
+		assert.Contains(t, err.Error(), "external_source is invalid")
 	})
 
 	t.Run("empty source is noop", func(t *testing.T) {
@@ -1960,6 +1996,30 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "read milvus-table snapshot metadata")
 	})
+
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
+			defer read.UnPatch()
+
+			err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Status(err).GetCode())
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		})
+	}
 
 	t.Run("missing source schema", func(t *testing.T) {
 		mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).

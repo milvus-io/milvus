@@ -20,8 +20,8 @@
 namespace milvus::index {
 
 IndexStatsPtr
-IndexStats::NewFromSizeMap(int64_t mem_size,
-                           std::map<std::string, int64_t>& index_size_map) {
+IndexStats::NewFromSizeMap(
+    int64_t mem_size, const std::map<std::string, int64_t>& index_size_map) {
     std::vector<SerializedIndexFileInfo> serialized_index_infos;
     serialized_index_infos.reserve(index_size_map.size());
     for (auto& file : index_size_map) {

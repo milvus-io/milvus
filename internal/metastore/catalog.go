@@ -219,6 +219,17 @@ type DataCoordCatalog interface {
 	SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error
 	ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error)
 	DropPreImportTask(ctx context.Context, taskID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+	SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error
+	ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error)
+	DropPreImportTaskV3(ctx context.Context, taskID int64) error
 	SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error
 	ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2, error)
 	DropImportTask(ctx context.Context, taskID int64) error
@@ -262,10 +273,6 @@ type DataCoordCatalog interface {
 	SaveExternalCollectionRefreshTask(ctx context.Context, task *datapb.ExternalCollectionRefreshTask) error
 	DropExternalCollectionRefreshTask(ctx context.Context, taskID typeutil.UniqueID) error
 
-	// Analyzer Resource
-	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
-	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
-	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64, error)
 	// snapshot related
 	SaveSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) error
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
@@ -273,6 +280,19 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
+
+	// Update applies a composite set of UpdateActions as a single write. Each
+	// action is dispatched on its (Entry, Type) into a kv encoding, accumulated
+	// into a txn.Builder, and committed atomically - or via the caller-ordered
+	// chunked fallback when the op set exceeds the store's txn limit.
+	Update(ctx context.Context, actions ...UpdateAction) error
+
+	// SegmentChangeGroup persistence. Per-record writes go through the
+	// composite Update (metastore.SaveSegmentChangeGroup / DeleteSegmentChangeGroup)
+	// so they can be composed atomically with segment and DataView actions;
+	// List/Drop provide recovery scanning and collection-drop cleanup.
+	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
+	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
 }
 
 type QueryCoordCatalog interface {

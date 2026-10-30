@@ -11,8 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -258,25 +256,6 @@ func getFieldSchema(schema *schemapb.CollectionSchema, fieldID int64) (*schemapb
 	return nil, merr.WrapErrFieldNotFound(fieldID, "not in schema")
 }
 
-func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) bool {
-	enableMmap, exist := common.IsMmapIndexEnabled(indexInfo.IndexParams...)
-	// fast path for returning disabled, need to perform index type check for enabled case
-	if exist && !enableMmap {
-		return enableMmap
-	}
-	indexType := common.GetIndexType(indexInfo.IndexParams)
-	var indexSupportMmap bool
-	// var defaultEnableMmap bool
-	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
-		indexSupportMmap = vecindexmgr.GetVecIndexMgrInstance().IsMMapSupported(indexType)
-		enableMmap = params.Params.QueryNodeCfg.MmapVectorIndex.GetAsBool() || enableMmap
-	} else {
-		indexSupportMmap = indexparamcheck.IsScalarMmapIndex(indexType)
-		enableMmap = params.Params.QueryNodeCfg.MmapScalarIndex.GetAsBool() || enableMmap
-	}
-	return indexSupportMmap && enableMmap
-}
-
 // Except accepting whether the raw data is loaded in mmap or not, it also affects the stats index such as
 // text match index and json key stats index.
 func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
@@ -308,22 +287,6 @@ func getFieldWarmupPolicy(fieldSchema *schemapb.FieldSchema) string {
 		return params.Params.QueryNodeCfg.TieredWarmupVectorField.GetValue()
 	}
 	return params.Params.QueryNodeCfg.TieredWarmupScalarField.GetValue()
-}
-
-// getIndexWarmupPolicy returns the warmup policy for index loading.
-// Priority: index params (propagated from collection-level by QueryCoord, including autoWarmupForNonPKIsolationCollection) > global config
-func getIndexWarmupPolicy(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.FieldIndexInfo) string {
-	// Check index params (collection-level warmup.scalarIndex/warmup.vectorIndex
-	// and autoWarmupForNonPKIsolationCollection are propagated to index params by QueryCoord)
-	policy, exist := common.GetWarmupPolicy(indexInfo.IndexParams...)
-	if exist {
-		return policy
-	}
-	// Fall back to global config
-	if typeutil.IsVectorType(fieldSchema.GetDataType()) {
-		return params.Params.QueryNodeCfg.TieredWarmupVectorIndex.GetValue()
-	}
-	return params.Params.QueryNodeCfg.TieredWarmupScalarIndex.GetValue()
 }
 
 // getScalarDataWarmupPolicy returns the warmup policy for scalar data, but also include json key stats and text match.

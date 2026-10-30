@@ -238,6 +238,68 @@ func (_c *MockShardClientManager_GetShardLeaderList_Call) RunAndReturn(run func(
 	return _c
 }
 
+// GetShardLeaders provides a mock function with given fields: ctx, withCache, database, collectionName, collectionID
+func (_m *MockShardClientManager) GetShardLeaders(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64) (map[string][]NodeInfo, error) {
+	ret := _m.Called(ctx, withCache, database, collectionName, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetShardLeaders")
+	}
+
+	var r0 map[string][]NodeInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64) (map[string][]NodeInfo, error)); ok {
+		return rf(ctx, withCache, database, collectionName, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64) map[string][]NodeInfo); ok {
+		r0 = rf(ctx, withCache, database, collectionName, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]NodeInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, bool, string, string, int64) error); ok {
+		r1 = rf(ctx, withCache, database, collectionName, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardClientManager_GetShardLeaders_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetShardLeaders'
+type MockShardClientManager_GetShardLeaders_Call struct {
+	*mock.Call
+}
+
+// GetShardLeaders is a helper method to define mock.On call
+//   - ctx context.Context
+//   - withCache bool
+//   - database string
+//   - collectionName string
+//   - collectionID int64
+func (_e *MockShardClientManager_Expecter) GetShardLeaders(ctx interface{}, withCache interface{}, database interface{}, collectionName interface{}, collectionID interface{}) *MockShardClientManager_GetShardLeaders_Call {
+	return &MockShardClientManager_GetShardLeaders_Call{Call: _e.mock.On("GetShardLeaders", ctx, withCache, database, collectionName, collectionID)}
+}
+
+func (_c *MockShardClientManager_GetShardLeaders_Call) Run(run func(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64)) *MockShardClientManager_GetShardLeaders_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(bool), args[2].(string), args[3].(string), args[4].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardClientManager_GetShardLeaders_Call) Return(_a0 map[string][]NodeInfo, _a1 error) *MockShardClientManager_GetShardLeaders_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardClientManager_GetShardLeaders_Call) RunAndReturn(run func(context.Context, bool, string, string, int64) (map[string][]NodeInfo, error)) *MockShardClientManager_GetShardLeaders_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // InvalidateShardLeaderCache provides a mock function with given fields: collections
 func (_m *MockShardClientManager) InvalidateShardLeaderCache(collections []int64) {
 	_m.Called(collections)

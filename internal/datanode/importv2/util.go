@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"path"
 	"strconv"
 	"time"
 
@@ -36,13 +35,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -76,8 +75,7 @@ func NewSyncTask(ctx context.Context,
 		}
 		// init first manifest path
 		if useLoonFFI {
-			k := metautil.JoinIDPath(collectionID, partitionID, segmentID)
-			basePath := path.Join(storageConfig.GetRootPath(), common.SegmentInsertLogPath, k)
+			basePath := storage.SegmentManifestBasePath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID)
 			// ManifestEarliest for first write
 			segment.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 		}
@@ -106,19 +104,40 @@ func NewSyncTask(ctx context.Context,
 		syncPack.WithBM25Stats(bm25Stats)
 	}
 
-	writeRetryAttempts := paramtable.Get().DataNodeCfg.ImportMaxWriteRetryAttempts.GetAsUint()
-	retryOpts := []retry.Option{
-		retry.Attempts(writeRetryAttempts), // default retry always
-		retry.MaxSleepTime(10 * time.Second),
-	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig).
-		WithWriteRetryOptions(retryOpts...)
+		WithWriteRetryOptions(newWriteRetryOptions()...)
 	return task, nil
+}
+
+// newWriteRetryOptions builds the retry options for import writes. The options are
+// order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
+// follow Sleep. The paramtable formatters guarantee both intervals are positive, which
+// keeps retry.Do from degenerating into a zero-delay loop under attempts=0. RetryErr is
+// order-independent and is appended last.
+func newWriteRetryOptions() []retry.Option {
+	params := &paramtable.Get().DataNodeCfg
+	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
+	maxInterval := time.Duration(params.ImportWriteRetryMaxInterval.GetAsInt()) * time.Second
+	return []retry.Option{
+		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
+		retry.Sleep(initialInterval),
+		retry.MaxSleepTime(maxInterval),
+		// The write-retry loop only exists to absorb transient storage faults. ID
+		// exhaustion cannot be fixed by retrying against the same local allocator, so
+		// treat it as terminal. Supplying a RetryErr predicate replaces retry.Do's
+		// default InputError abort, so preserve that too.
+		retry.RetryErr(func(err error) bool {
+			if allocator.IsIDExhausted(err) {
+				return false
+			}
+			return merr.GetErrorType(err) != merr.InputError
+		}),
+	}
 }
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
@@ -141,6 +160,9 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		Bm25Logs:     lo.Values(bm25Log),
 		Deltalogs:    deltaLogs,
 		ManifestPath: segment.ManifestPath(),
+		// Report the writer-built cumulative Statistics so DataCoord persists
+		// it directly.
+		Stats: segment.Statistics().Publish(),
 	}, nil
 }
 
@@ -170,7 +192,7 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	rows, baseFieldID := GetInsertDataRowCount(data, schema)
 	for fieldID, d := range data.Data {
 		tempField := idToField[fieldID]
-		if d.RowNum() == 0 && (CanBeZeroRowField(tempField)) {
+		if d.RowNum() == 0 && CanBeZeroRowField(tempField) {
 			continue
 		}
 		if d.RowNum() != rows {
@@ -379,22 +401,44 @@ func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
 	}
 }
 
-func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
+// appendSystemFieldsDataWithCursor assigns the autoID PK/RowID/timestamp of a batch read
+// from one import file. Row ids come from the file's per-file range (cur), or from the
+// task's log id range when the file carries none (legacy / binlog jobs). A row only takes an
+// id when a PK (autoID, none present in the file) or a RowID is missing, so a backup restore
+// does not burn ids it already carries.
+func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData, rowNum int, cur *importid.FileIDRange) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, rowNum)
-	start, _, err := task.allocator.Alloc(uint32(rowNum))
-	if err != nil {
-		return err
-	}
-	for i := 0; i < rowNum; i++ {
-		ids[i] = start + int64(i)
-	}
 	pkData, ok := data.Data[pkField.GetFieldID()]
 	allowInsertAutoID, _ := common.IsAllowInsertAutoID(task.req.Schema.GetProperties()...)
-	if pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+	// A row only needs synthesized IDs when a primary key (autoID and none present in
+	// the file) or a RowID is missing. Backup/binlog restore carries its own PK, RowID
+	// and timestamp, so it must not burn one ID per row from the task's IDRange -- that
+	// is what made the pre-allocated budget scale with totalRows (and overflow uint32)
+	// instead of with its actual logID-only demand.
+	needPK := pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID)
+	_, hasRowID := data.Data[common.RowIDField]
+	needRowID := !hasRowID
+
+	var ids []int64
+	if needPK || needRowID {
+		ids = make([]int64, rowNum)
+		var start int64
+		if cur != nil {
+			start, err = cur.Take(rowNum)
+		} else {
+			start, _, err = task.allocator.Alloc(uint32(rowNum))
+		}
+		if err != nil {
+			return err
+		}
+		for i := 0; i < rowNum; i++ {
+			ids[i] = start + int64(i)
+		}
+	}
+	if needPK {
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
@@ -402,10 +446,10 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 			strIDs := lo.Map(ids, func(id int64, _ int) string {
 				return strconv.FormatInt(id, 10)
 			})
-			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs, DataType: pkField.GetDataType()}
 		}
 	}
-	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
+	if needRowID {
 		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {
@@ -416,6 +460,47 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 		}
 		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
 	}
+	return nil
+}
+
+// AppendPreallocatedSystemFields materializes the deterministic RowID and
+// AutoID PK assigned to one ordinary ImportFile.  The range is [begin, end)
+// and the caller owns the per-file offset.  Backup import does not call this
+// helper and therefore keeps the source PK/RowID/timestamp.
+func AppendPreallocatedSystemFields(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int, idRange *commonpb.IDRange, offset *int64) error {
+	if schema == nil || data == nil || offset == nil || idRange == nil || rowNum < 0 {
+		return merr.WrapErrDataIntegrityMsg("invalid preallocated import ID input")
+	}
+	if idRange.GetEnd() < idRange.GetBegin() || *offset < 0 || int64(rowNum) > idRange.GetEnd()-idRange.GetBegin()-*offset {
+		return merr.WrapErrDataIntegrityMsg(
+			"preallocated import ID range exhausted: begin=%d end=%d offset=%d rows=%d",
+			idRange.GetBegin(), idRange.GetEnd(), *offset, rowNum)
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, rowNum)
+	for index := range ids {
+		ids[index] = idRange.GetBegin() + *offset + int64(index)
+	}
+	*offset += int64(rowNum)
+
+	pkData, hasPK := data.Data[pkField.GetFieldID()]
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
+	if pkField.GetAutoID() && (!hasPK || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+		switch pkField.GetDataType() {
+		case schemapb.DataType_Int64:
+			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+		case schemapb.DataType_VarChar:
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: lo.Map(ids, func(id int64, _ int) string {
+				return strconv.FormatInt(id, 10)
+			})}
+		default:
+			return merr.WrapErrDataIntegrityMsg("unsupported AutoID PK type %s", pkField.GetDataType())
+		}
+	}
+	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	return nil
 }
 

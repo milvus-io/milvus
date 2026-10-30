@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "common/Tracer.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/Task.h"
 #include "fmt/core.h"
@@ -49,8 +50,7 @@ ExecPlanNodeVisitor::ExecuteTask(
     plan::PlanFragment& plan,
     std::shared_ptr<milvus::exec::QueryContext> query_context) {
     tracer::AutoSpan span("ExecuteTask", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("active_count",
-                                 query_context->get_active_count());
+    span.SetAttribute("active_count", query_context->get_active_count());
 
     LOG_DEBUG("plannode: {}, active_count: {}, timestamp: {}",
               plan.plan_node_->ToString(),
@@ -104,22 +104,10 @@ ExecPlanNodeVisitor::ExecuteTask(
             ret = result;
         }
     }
-    span.GetSpan()->SetAttribute("total_rows", processed_num);
-    span.GetSpan()->SetAttribute("matched_rows",
-                                 ret ? processed_num - ret->nullCount() : 0);
+    span.SetAttribute("total_rows", processed_num);
+    span.SetAttribute("matched_rows",
+                      ret ? processed_num - ret->nullCount() : 0);
     return ret;
-}
-
-std::unique_ptr<RetrieveResult>
-wrap_num_entities(int64_t cnt) {
-    auto retrieve_result = std::make_unique<RetrieveResult>();
-    DataArray arr;
-    arr.set_type(milvus::proto::schema::Int64);
-    auto scalar = arr.mutable_scalars();
-    scalar->mutable_long_data()->mutable_data()->Add(cnt);
-    retrieve_result->field_data_ = {arr};
-    retrieve_result->total_data_cnt_ = 0;
-    return retrieve_result;
 }
 
 template <typename S, typename T>
@@ -153,7 +141,7 @@ fillDataArrayFromColumnVector(const ColumnVectorPtr& column_vector,
     // Always copy validity data from ColumnVector
     // ColumnVector always tracks validity via valid_values_, so we should
     // always propagate it to ensure correctness for nullable fields
-    auto valid_data = data_array.mutable_valid_data();
+    auto valid_data = MutableFieldDataRowValidData(&data_array);
     const uint8_t* src_bitmap =
         static_cast<const uint8_t*>(column_vector->GetValidRawData());
     AssertInfo(src_bitmap,
@@ -295,6 +283,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
     query_context->set_op_context(&op_context);
@@ -345,11 +336,12 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             tmp_retrieve_result.element_level_ = true;
             tracer::AutoSpan _(
                 "Element Level Find", tracer::GetRootSpan(), true);
-            auto array_offsets = query_context->get_array_offsets();
+            auto struct_element_offsets =
+                query_context->get_struct_element_offsets();
             auto [doc_offsets, element_indices, has_more] =
                 segment->find_first_n_element(node.limit_,
                                               view,
-                                              array_offsets.get(),
+                                              struct_element_offsets.get(),
                                               node.query_iterator_cursor_);
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
@@ -445,6 +437,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                                    std::shared_ptr<milvus::exec::BaseConfig>>(),
                 entity_ttl_physical_time_us_);
 
+            // Pin the sealed published snapshot exactly once for this request.
+            query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
             if (enable_expr_cache_) {
                 query_context->set_enable_expr_cache(true);
                 query_context->set_enable_sub_expr_cache_write(false);
@@ -502,6 +497,9 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us_);
 
+    // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
+
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
     if (enable_expr_cache_) {
@@ -519,6 +517,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Store result
     search_result_opt_ = std::move(query_context->get_search_result());
+    search_result_opt_->read_snapshot_ = query_context->get_read_snapshot();
     search_result_opt_->search_storage_cost_.scanned_remote_bytes =
         op_context.storage_usage.scanned_cold_bytes.load();
     search_result_opt_->search_storage_cost_.scanned_total_bytes =

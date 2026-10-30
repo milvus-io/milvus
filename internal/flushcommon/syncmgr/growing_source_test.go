@@ -2,6 +2,7 @@ package syncmgr
 
 import (
 	"context"
+	"path"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -20,7 +21,9 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -145,6 +148,31 @@ func TestGrowingSourceSyncTaskHandleErrorSkipsFailureCallbackForStaleMetaErrors(
 	}
 }
 
+// GrowingSourceSyncTask.Run calls HandleError from its own defer and
+// syncManager.submit's handler calls it again for the same failure, so the
+// failure callback would otherwise run twice.
+func TestGrowingSourceSyncTaskHandleErrorIsIdempotent(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	metrics.DataNodeFlushBufferCount.Reset()
+
+	callbackCount := 0
+	task := NewGrowingSourceSyncTask().
+		WithFailureCallback(func(error) {
+			callbackCount++
+		})
+
+	err := merr.WrapErrServiceInternalMsg("flush growing source data failed")
+	task.HandleError(err)
+	task.HandleError(err)
+
+	require.Equal(t, 1, callbackCount)
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.DataNodeFlushBufferCount.WithLabelValues(
+		paramtable.GetStringNodeID(),
+		metrics.FailLabel,
+		task.level.String(),
+	)))
+}
+
 func pkStatsAsOracle(stats *storage.PrimaryKeyStats) *storage.PkStatistics {
 	return &storage.PkStatistics{
 		PkFilter: stats.BF,
@@ -203,7 +231,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25(t *testing.T) {
 		PartitionID:    2,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   `{"ver":7,"base_path":"/root/insert_log/3/2/1"}`,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -237,7 +265,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigStartsFromEarliestManifest(t *test
 		ID:             1,
 		PartitionID:    2,
 		StorageVersion: storage.StorageV3,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -252,6 +280,127 @@ func TestGrowingSourceSyncTaskBuildFlushConfigStartsFromEarliestManifest(t *test
 	require.EqualValues(t, packed.ManifestEarliest, config.ReadVersion)
 }
 
+func TestGrowingSourceFlushManifestNamespace(t *testing.T) {
+	params := paramtable.Get()
+	params.Init(paramtable.NewBaseTable())
+	// New segments use the canonical storage prefix on every backend. Existing
+	// local segments also retain legacy namespaces recorded in their manifests.
+	for _, tc := range []struct {
+		name, root, legacyPrefix string
+		local                    bool
+	}{
+		{"local", t.TempDir(), "", true},
+		{"legacy local", t.TempDir(), "files", true},
+		{"remote", "files", "", false},
+		{"bucket root", "", "", false},
+		{"dot bucket root", ".", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, existing := range []bool{false, true} {
+				name := "new segment"
+				if existing {
+					name = "existing segment"
+				}
+				t.Run(name, func(t *testing.T) {
+					segmentBase := path.Join(tc.root, "insert_log/3/2/1")
+					manifestPath := ""
+					version := packed.ManifestEarliest
+					if existing {
+						segmentBase = path.Join(tc.root, tc.legacyPrefix, "insert_log/3/2/1")
+						version = 7
+						manifestPath = packed.MarshalManifestPath(segmentBase, version)
+					}
+					partitionBase := path.Dir(segmentBase)
+					if tc.local {
+						require.True(t, path.IsAbs(segmentBase))
+					}
+					var cm storage.ChunkManager
+					if tc.local {
+						cm = storage.NewLocalChunkManager(objectstorage.RootPath(tc.root))
+					} else {
+						mockCM := mock_storage.NewMockChunkManager(t)
+						mockCM.EXPECT().RootPath().Return(tc.root)
+						cm = mockCM
+					}
+					segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+						ID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
+						ManifestPath: manifestPath,
+					}, pkoracle.NewBloomFilterSet(), nil, nil)
+					task := NewGrowingSourceSyncTask().WithCollectionID(3).WithPartitionID(2).
+						WithSegmentID(1).WithChunkManager(cm).WithSchema(&schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Text}},
+					})
+					config, err := task.buildFlushConfig(segment, nil)
+					require.NoError(t, err)
+					require.Equal(t, segmentBase, config.SegmentBasePath)
+					require.Equal(t, partitionBase, config.PartitionBasePath)
+					require.Equal(t, []string{partitionBase + "/lobs/101"}, config.TextLobPaths)
+					require.EqualValues(t, version, config.ReadVersion)
+				})
+			}
+		})
+	}
+}
+
+func TestGrowingSourceFlushResumesLegacyLocalManifest(t *testing.T) {
+	params := paramtable.Get()
+	params.Init(paramtable.NewBaseTable())
+	root := t.TempDir()
+	for _, setting := range []struct{ key, value, previous string }{
+		{params.CommonCfg.StorageType.Key, "local", params.CommonCfg.StorageType.GetValue()},
+		{params.LocalStorageCfg.Path.Key, root, params.LocalStorageCfg.Path.GetValue()},
+	} {
+		require.NoError(t, params.Save(setting.key, setting.value))
+		t.Cleanup(func() { require.NoError(t, params.Save(setting.key, setting.previous)) })
+	}
+	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	legacyBase := path.Join(root, "files/insert_log/3/2/1")
+	statPath := path.Join(legacyBase, "_stats/bloom_filter.100/1")
+	require.NoError(t, packed.WriteFile(storageConfig, statPath, []byte("original stats")))
+	manifest := packed.MarshalManifestPath(legacyBase, packed.ManifestEarliest)
+	for version := int64(0); version < 7; version++ {
+		var err error
+		manifest, err = packed.CommitManifestUpdates(legacyBase, version, storageConfig, &packed.ManifestUpdates{
+			Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}},
+		})
+		require.NoError(t, err)
+	}
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 3, PartitionID: 2, StorageVersion: storage.StorageV3, ManifestPath: manifest,
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
+	task := NewGrowingSourceSyncTask().WithCollectionID(3).WithPartitionID(2).WithSegmentID(1).
+		WithChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(root))).
+		WithSchema(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Text}}})
+	config, err := task.buildFlushConfig(segment, nil)
+	require.NoError(t, err)
+	require.Equal(t, legacyBase, config.SegmentBasePath)
+	require.EqualValues(t, 7, config.ReadVersion)
+	require.Equal(t, path.Dir(legacyBase), config.PartitionBasePath)
+	require.Equal(t, []string{path.Join(path.Dir(legacyBase), "lobs/101")}, config.TextLobPaths)
+
+	// Reopen the actual loon manifest, then append through the same base/version
+	// that growing flush will use. A canonical base paired with legacy version 7
+	// cannot even reopen the old manifest, let alone preserve its existing stats.
+	stats, err := packed.GetManifestStats(packed.MarshalManifestPath(config.SegmentBasePath, config.ReadVersion), storageConfig)
+	require.NoError(t, err)
+	require.Equal(t, []string{statPath}, stats["bloom_filter.100"].Paths)
+	newStatPath := path.Join(config.SegmentBasePath, "_stats/bm25.102/2")
+	require.NoError(t, packed.WriteFile(storageConfig, newStatPath, []byte("new stats")))
+	updatedManifest, err := packed.CommitManifestUpdates(config.SegmentBasePath, config.ReadVersion, storageConfig, &packed.ManifestUpdates{
+		Stats: []packed.StatEntry{{Key: "bm25.102", Files: []string{newStatPath}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, packed.MarshalManifestPath(legacyBase, 8), updatedManifest)
+	stats, err = packed.GetManifestStats(updatedManifest, storageConfig)
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+	require.Equal(t, []string{statPath}, stats["bloom_filter.100"].Paths)
+	require.Equal(t, []string{newStatPath}, stats["bm25.102"].Paths)
+	content, err := packed.ReadFile(storageConfig, statPath)
+	require.NoError(t, err)
+	require.Equal(t, "original stats", string(content))
+}
+
 func TestGrowingSourceSyncTaskBuildFlushConfigBM25AllocatorError(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "bm25",
@@ -261,7 +410,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25AllocatorError(t *testing.T) {
 	}
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().RootPath().Return("/root").Maybe()
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, StorageVersion: storage.StorageV3}, pkoracle.NewBloomFilterSet(), nil)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, StorageVersion: storage.StorageV3}, pkoracle.NewBloomFilterSet(), nil, nil)
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithPartitionID(2).
@@ -285,7 +434,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigBM25RequiresAllocator(t *testing.T
 	}
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().RootPath().Return("/root").Maybe()
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, StorageVersion: storage.StorageV3}, pkoracle.NewBloomFilterSet(), nil)
+	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, StorageVersion: storage.StorageV3}, pkoracle.NewBloomFilterSet(), nil, nil)
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
 		WithPartitionID(2).
@@ -321,7 +470,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigUsesCurrentSplitPattern(t *testing
 			{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
 			{FieldID: 102, ChildFields: []int64{102}, Format: "parquet"},
 		},
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -361,7 +510,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigRequiresCurrentSplitFormatForExist
 			{FieldID: 0, ChildFields: []int64{100}},
 			{FieldID: 101, ChildFields: []int64{101}, Format: "parquet"},
 		},
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -397,7 +546,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigAllowsMissingFormatForEarliestMani
 			{FieldID: 0, ChildFields: []int64{100}},
 			{FieldID: 101, ChildFields: []int64{101}},
 		},
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -442,7 +591,7 @@ func TestGrowingSourceSyncTaskBuildFlushConfigProjectsToCurrentSplit(t *testing.
 			{FieldID: 101, ChildFields: []int64{101}, Format: "vortex"},
 			{FieldID: 102, ChildFields: []int64{102}, Format: "parquet"},
 		},
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	task := NewGrowingSourceSyncTask().
 		WithCollectionID(3).
@@ -482,7 +631,7 @@ func TestGrowingSourceSyncTaskBuildsColumnGroupBinlogs(t *testing.T) {
 		PartitionID:    2,
 		State:          commonpb.SegmentState_Growing,
 		StorageVersion: storage.StorageV3,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
 		action(segment)
@@ -557,7 +706,7 @@ func TestGrowingSourceSyncTaskBuildsMergedPKStatsForFlush(t *testing.T) {
 		State:          commonpb.SegmentState_Flushing,
 		StorageVersion: storage.StorageV3,
 		NumOfRows:      10,
-	}, bfs, nil)
+	}, bfs, nil, nil)
 	mc := metacache.NewMockMetaCache(t)
 	mc.EXPECT().Collection().Return(int64(3)).Maybe()
 	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Maybe()
@@ -670,7 +819,7 @@ func TestGrowingSourceSyncTaskRequiresPrimaryKeysForGrowingFlush(t *testing.T) {
 		PartitionID:    2,
 		State:          commonpb.SegmentState_Growing,
 		StorageVersion: storage.StorageV3,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
 
 	cm := mock_storage.NewMockChunkManager(t)
@@ -723,7 +872,7 @@ func TestGrowingSourceSyncTaskCommitRetainedSourceOnlyOnFinalization(t *testing.
 			PartitionID:    2,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   "manifest",
-		}, pkoracle.NewBloomFilterSet(), nil)
+		}, pkoracle.NewBloomFilterSet(), nil, nil)
 		metacache.UpdateNumOfRows(10)(segment)
 		source := &fakeCommitGrowingFlushSource{}
 
@@ -839,7 +988,7 @@ func TestGrowingSourceSyncTaskMergesReturnedBM25Stats(t *testing.T) {
 		PartitionID:    2,
 		State:          commonpb.SegmentState_Growing,
 		StorageVersion: storage.StorageV3,
-	}, pkoracle.NewBloomFilterSet(), nil)
+	}, pkoracle.NewBloomFilterSet(), nil, nil)
 
 	mc.EXPECT().GetSegmentByID(segmentID).Return(segment, true)
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {

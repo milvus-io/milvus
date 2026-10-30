@@ -23,7 +23,6 @@ import (
 
 	"github.com/samber/lo"
 
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -157,12 +156,6 @@ func (e *executor) completeTask(planID int64, result *datapb.CompactionPlanResul
 		e.mu.Unlock()
 
 		task.compactor.Complete()
-
-		// Publish filesystem metrics after compaction task completion
-		storageConfig := task.compactor.GetStorageConfig()
-		if _, err := storagev2.PublishFilesystemMetricsWithConfig(storageConfig); err != nil {
-			mlog.Warn(context.TODO(), "failed to publish filesystem metrics", mlog.Err(err))
-		}
 		return
 	}
 

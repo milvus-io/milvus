@@ -25,7 +25,7 @@
 
 #include "TimestampData.h"
 #include "TimestampIndex.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/TrackingStdAllocator.h"
@@ -283,7 +283,7 @@ class OffsetMap {
         find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
+            const IStructElementOffsets* struct_element_offsets,
             const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     virtual void
@@ -424,7 +424,7 @@ class OffsetOrderedMap : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         std::shared_lock<std::shared_mutex> lck(mtx_);
 
@@ -433,7 +433,7 @@ class OffsetOrderedMap : public OffsetMap {
         }
 
         return find_first_n_element_by_index(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     void
@@ -484,7 +484,7 @@ class OffsetOrderedMap : public OffsetMap {
     find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
@@ -542,7 +542,8 @@ class OffsetOrderedMap : public OffsetMap {
                 ++n;
                 --gather_idx;
             }
-            array_offsets->CopyRowElementRanges(batch_offsets, n, batch_ranges);
+            struct_element_offsets->CopyRowElementRanges(
+                batch_offsets, n, batch_ranges);
 
             for (int64_t k = 0; k < n && hit_num < limit; ++k) {
                 const auto* pk_entry = batch_pks[k];
@@ -751,7 +752,7 @@ class OffsetOrderedArray : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         check_search();
 
@@ -760,7 +761,7 @@ class OffsetOrderedArray : public OffsetMap {
         }
 
         return find_first_n_element_by_index(
-            limit, element_bitset, array_offsets, cursor);
+            limit, element_bitset, struct_element_offsets, cursor);
     }
 
     void
@@ -804,7 +805,7 @@ class OffsetOrderedArray : public OffsetMap {
     find_first_n_element_by_index(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const {
         std::vector<int64_t> doc_offsets;
         std::vector<std::vector<int32_t>> element_indices;
@@ -834,7 +835,8 @@ class OffsetOrderedArray : public OffsetMap {
             for (int64_t k = 0; k < n; ++k) {
                 batch_rows[k] = array_[base + k].second;
             }
-            array_offsets->CopyRowElementRanges(batch_rows, n, batch_ranges);
+            struct_element_offsets->CopyRowElementRanges(
+                batch_rows, n, batch_ranges);
 
             for (int64_t k = 0; k < n && hit_num < limit; ++k) {
                 const auto& entry = array_[base + k];
@@ -1034,7 +1036,7 @@ class VirtualPKOffsetMap : public OffsetMap {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override {
         // External tables don't support array fields, but implement
         // the interface for completeness.
@@ -1060,7 +1062,7 @@ class VirtualPKOffsetMap : public OffsetMap {
         for (int64_t base = 0; base < num_rows_ && hit_num < limit;
              base += kRowBatchSize) {
             const int64_t n = std::min(kRowBatchSize, num_rows_ - base);
-            array_offsets->CopyRowElementStarts(base, n, batch_starts);
+            struct_element_offsets->CopyRowElementStarts(base, n, batch_starts);
             for (int64_t i = 0; i < n && hit_num < limit; i++) {
                 const int64_t doc = base + i;
                 const int32_t first_elem = batch_starts[i];
@@ -1566,13 +1568,6 @@ class InsertRecordGrowing {
         return pk2offset_->empty();
     }
 
-    void
-    seal_pks() {
-        std::lock_guard lck(shared_mutex_);
-        pk2offset_
-            ->seal();  // will throw for growing map, consistent with previous behavior
-    }
-
     const ConcurrentVector<Timestamp>&
     timestamps() const {
         return timestamps_;
@@ -1739,8 +1734,13 @@ class InsertRecordGrowing {
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(
-                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                if (field_meta.is_nested_array()) {
+                    this->append_data<ArrayValue>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                } else {
+                    this->append_data<Array>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                }
                 return;
             }
             case DataType::GEOMETRY: {
@@ -1907,13 +1907,6 @@ class InsertRecordGrowing {
         data_.emplace(field_id, std::move(column));
     }
 
-    void
-    drop_field_data(FieldId field_id) {
-        std::unique_lock<std::shared_mutex> lck(field_map_mutex_);
-        data_.erase(field_id);
-        valid_data_.erase(field_id);
-    }
-
     int64_t
     row_count() const {
         return ack_responder_.GetAck();
@@ -1967,7 +1960,7 @@ class InsertRecordGrowing {
     std::unordered_map<FieldId, ThreadSafeValidDataPtr> valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     // Protects the structure of data_ / valid_data_ against concurrent
-    // rehash: structural writes (append_*/drop/clear during schema evolution)
+    // rehash: structural writes (append_*/clear during schema evolution)
     // take it unique, lookups (get_data_base/get_valid_data/...) take it shared.
     // Kept separate from shared_mutex_ so frequent reads do not contend with
     // pk inserts.
@@ -1976,10 +1969,10 @@ class InsertRecordGrowing {
     // lifetime. The raw VectorBase* returned by get_data_base() escapes the
     // shared lock, so callers rely on no concurrent erase()/clear() of the
     // entry they hold (append-only mutation is safe). Today that holds because
-    // drop_field_data() has no callers and clear() is never called
-    // concurrently with reads; whoever adds drop-field support (e.g. schema
-    // evolution dropping fields) must also fence element lifetime, this lock
-    // alone will not save the escaped pointers.
+    // the maps are append-only -- there is no per-field erase, and clear() is
+    // never called concurrently with reads. Whoever adds drop-field support
+    // (e.g. schema evolution dropping fields) must also fence element
+    // lifetime; this lock alone will not save the escaped pointers.
     mutable std::shared_mutex field_map_mutex_{};
 };
 

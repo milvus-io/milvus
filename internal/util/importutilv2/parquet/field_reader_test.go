@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -163,6 +165,149 @@ func TestReadTextFieldData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, insertData)
 	assert.Equal(t, numRows, insertData.Data[fieldID].RowNum())
+}
+
+func TestReadNullableGeometryDataFillsDefaultAndValidData(t *testing.T) {
+	const (
+		pkFieldID   = int64(100)
+		geomFieldID = int64(101)
+		numRows     = 3
+		defaultWKT  = "POINT (1 2)"
+	)
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  geomFieldID,
+				Name:     "geom",
+				DataType: schemapb.DataType_Geometry,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+				},
+			},
+		},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "geom", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	filePath := fmt.Sprintf("/tmp/test_%d_nullable_geometry_default_reader.parquet", rand.Int())
+	defer os.Remove(filePath)
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	pkArr := pkBuilder.NewArray()
+	defer pkArr.Release()
+
+	geomBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer geomBuilder.Release()
+	geomBuilder.Append("POINT (0 0)")
+	geomBuilder.AppendNull()
+	geomBuilder.Append("POINT (3 3)")
+	geomArr := geomBuilder.NewArray()
+	defer geomArr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, geomArr}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	require.NoError(t, err)
+	geomData := insertData.Data[geomFieldID].(*storage.GeometryFieldData)
+	require.Equal(t, []bool{true, true, true}, geomData.ValidData)
+	require.Equal(t, defaultWKB, geomData.Data[1])
+	require.NotEmpty(t, geomData.Data[1])
+	_, err = common.ConvertWKBToWKT(geomData.Data[1])
+	require.NoError(t, err)
+}
+
+func TestReadNullableTimestamptzDataFillsDefaultAndValidData(t *testing.T) {
+	const (
+		pkFieldID    = int64(100)
+		tsFieldID    = int64(101)
+		numRows      = 3
+		defaultValue = int64(1700000000000000)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  tsFieldID,
+				Name:     "ts",
+				DataType: schemapb.DataType_Timestamptz,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: defaultValue},
+				},
+			},
+		},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "ts", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	filePath := fmt.Sprintf("%s/test_%d_nullable_timestamptz_default_reader.parquet", t.TempDir(), rand.Int())
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	pkArr := pkBuilder.NewArray()
+	defer pkArr.Release()
+
+	tsBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer tsBuilder.Release()
+	tsBuilder.Append("2024-01-01T00:00:00Z")
+	tsBuilder.AppendNull()
+	tsBuilder.Append("2024-01-02T00:00:00Z")
+	tsArr := tsBuilder.NewArray()
+	defer tsArr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, tsArr}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	require.NoError(t, err)
+	tsData := insertData.Data[tsFieldID].(*storage.TimestamptzFieldData)
+	require.Equal(t, []bool{true, true, true}, tsData.ValidData)
+	require.Equal(t, defaultValue, tsData.Data[1])
+	require.Equal(t, defaultValue, tsData.GetRow(1))
 }
 
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function
@@ -1450,4 +1595,22 @@ func TestBuildVectorArrayFieldRejectsInvalidFloat(t *testing.T) {
 		_, err := buildVectorArrayFieldFromFixedSizeBinary(field, 4, vectors, 0, 1)
 		assert.Error(t, err)
 	})
+}
+
+// TestWrapParquetErr pins the column-level classification: a decode failure on
+// an immutable source is an input error, while a typed IO fault from the
+// retryable reader keeps its own code.
+func TestWrapParquetErr(t *testing.T) {
+	require.NoError(t, wrapParquetErr(nil))
+
+	decodeErr := wrapParquetErr(errors.New("parquet: invalid page header"))
+	require.True(t, errors.Is(decodeErr, merr.ErrImportFailed),
+		"a corrupt page must be an input error: %v", decodeErr)
+
+	ioErr := wrapParquetErr(merr.WrapErrIoFailed("a.parquet", errors.New("connection reset")))
+	require.Equal(t, merr.Code(merr.ErrIoFailed), merr.Code(ioErr),
+		"a typed object-store fault keeps its code: %v", ioErr)
+
+	alreadyInput := merr.WrapErrImportFailedMsg("bad value")
+	require.Same(t, alreadyInput, wrapParquetErr(alreadyInput), "an existing classification is not rewritten")
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -25,25 +26,33 @@ var errWALManagerClosed = status.NewOnShutdownError("wal manager is closed")
 func OpenManager() (Manager, error) {
 	resource.Resource().Logger().Info(context.TODO(), "open wal manager with dynamic opener")
 	// Create dynamic opener directly with interceptors
-	opener := adaptor.NewOpenerAdaptor(
-		[]interceptors.InterceptorBuilder{
-			redo.NewInterceptorBuilder(),
-			lock.NewInterceptorBuilder(),
-			replicate.NewInterceptorBuilder(),
-			timetick.NewInterceptorBuilder(),
-			shard.NewInterceptorBuilder(),
-		},
-	)
+	opener := adaptor.NewOpenerAdaptor(newInterceptorBuilders())
 	return newManager(opener), nil
+}
+
+// newInterceptorBuilders keeps shard validation ahead of partial-update write
+// tracking while both remain inside the TimeTick publication boundary.
+func newInterceptorBuilders() []interceptors.InterceptorBuilder {
+	return []interceptors.InterceptorBuilder{
+		redo.NewInterceptorBuilder(),
+		lock.NewInterceptorBuilder(),
+		replicate.NewInterceptorBuilder(),
+		timetick.NewInterceptorBuilder(),
+		shard.NewInterceptorBuilder(),
+		partialupdate.NewInterceptorBuilder(),
+	}
 }
 
 // newManager create a wal manager.
 func newManager(opener wal.Opener) Manager {
+	openingCtx, cancelOpening := context.WithCancel(context.Background())
 	return &managerImpl{
-		lifetime: typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
-		wltMap:   typeutil.NewConcurrentMap[string, *walLifetime](),
-		opener:   opener,
-		logger:   resource.Resource().Logger().With(mlog.FieldComponent("wal-manager")),
+		lifetime:      typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
+		wltMap:        typeutil.NewConcurrentMap[string, *walLifetime](),
+		opener:        opener,
+		logger:        resource.Resource().Logger().With(mlog.FieldComponent("wal-manager")),
+		openingCtx:    openingCtx,
+		cancelOpening: cancelOpening,
 	}
 }
 
@@ -51,9 +60,11 @@ func newManager(opener wal.Opener) Manager {
 type managerImpl struct {
 	lifetime *typeutil.GenericLifetime[managerState]
 
-	wltMap *typeutil.ConcurrentMap[string, *walLifetime]
-	opener wal.Opener // wal allocator
-	logger *mlog.Logger
+	wltMap        *typeutil.ConcurrentMap[string, *walLifetime]
+	opener        wal.Opener // wal allocator
+	logger        *mlog.Logger
+	openingCtx    context.Context    // done when the manager is closing, all wal open operations are canceled.
+	cancelOpening context.CancelFunc // cancels openingCtx.
 }
 
 // Open opens a wal instance for the channel on this Manager.
@@ -136,6 +147,8 @@ func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 // Close these manager and release all managed WAL.
 func (m *managerImpl) Close() {
 	m.lifetime.SetState(managerRemoveable)
+	// Cancel the in-progress wal open operations, so the Open calls waiting for them can return.
+	m.cancelOpening()
 	m.lifetime.Wait()
 	// close all underlying walLifetime.
 	m.wltMap.Range(func(channel string, wlt *walLifetime) bool {
@@ -156,7 +169,7 @@ func (m *managerImpl) getWALLifetime(channel string) *walLifetime {
 	}
 
 	// Perform a cas here.
-	newWLT := newWALLifetime(m.opener, channel, m.logger)
+	newWLT := newWALLifetime(m.openingCtx, m.opener, channel, m.logger)
 	wlt, loaded := m.wltMap.GetOrInsert(channel, newWLT)
 	// if loaded, lifetime is exist, close the redundant lifetime.
 	if loaded {

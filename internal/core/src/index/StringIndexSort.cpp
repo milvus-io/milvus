@@ -75,7 +75,7 @@ SetIdxToOffset(std::vector<int32_t>& idx_to_offsets,
 }
 
 bool
-IsArrayField(const storage::FileManagerContext& file_manager_context) {
+IsStringArrayField(const storage::FileManagerContext& file_manager_context) {
     return file_manager_context.Valid() &&
            file_manager_context.fieldDataMeta.field_schema.data_type() ==
                proto::schema::DataType::Array;
@@ -140,9 +140,9 @@ StringIndexSortImpl::ParseBinaryData(const uint8_t* data, size_t data_size) {
 
 const std::string STRING_INDEX_SORT_FILE = "string_index_sort";
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t STRING_SORT_ALIGNMENT = 32;  // 32-byte alignment
 
-const uint64_t MMAP_INDEX_PADDING = 1;
+const uint64_t STRING_SORT_MMAP_INDEX_PADDING = 1;
 
 StringIndexSort::StringIndexSort(
     const storage::FileManagerContext& file_manager_context,
@@ -150,7 +150,7 @@ StringIndexSort::StringIndexSort(
     : StringIndex(ASCENDING_SORT),
       is_built_(false),
       is_nested_index_(is_nested_index),
-      is_array_field_(IsArrayField(file_manager_context)) {
+      is_array_field_(IsStringArrayField(file_manager_context)) {
     if (file_manager_context.Valid()) {
         field_id_ = file_manager_context.fieldDataMeta.field_id;
         this->file_manager_ =
@@ -337,7 +337,8 @@ StringIndexSort::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
@@ -622,20 +623,28 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
     is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
 
-    // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
-    auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
-    auto expected_valid_bitset_size = (total_num_rows_ + 7) / 8;
-    AssertInfo(valid_bitset_entry.data.size() >= expected_valid_bitset_size,
-               "invalid valid_bitset size: expected at least {}, got {}",
-               expected_valid_bitset_size,
-               valid_bitset_entry.data.size());
+    const auto expected_valid_bitset_size = (total_num_rows_ + 7) / 8;
+    AssertInfo(
+        reader.GetEntrySize("valid_bitset") >= expected_valid_bitset_size,
+        "invalid valid_bitset size");
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    for (size_t i = 0; i < total_num_rows_; ++i) {
-        uint8_t byte = valid_bitset_entry.data[i / 8];
-        if (byte & (1 << (i % 8))) {
-            valid_bitset_.set(i);
-        }
-    }
+    reader.ReadEntryStreamAt(
+        "valid_bitset", [&](size_t offset, const uint8_t* data, size_t len) {
+            // Plain and encrypted stream slices begin on 4 KiB boundaries, so
+            // concurrent callbacks never update the same bitmap storage word.
+            if (offset >= expected_valid_bitset_size)
+                return;
+            const auto bytes =
+                std::min(len, expected_valid_bitset_size - offset);
+            for (size_t i = 0; i < bytes; ++i) {
+                for (size_t bit = 0; bit < 8; ++bit) {
+                    const auto row = (offset + i) * 8 + bit;
+                    if (row < total_num_rows_ && (data[i] & (1u << bit))) {
+                        valid_bitset_.set(row);
+                    }
+                }
+            }
+        });
 
     auto load_priority =
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
@@ -666,46 +675,30 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         std::filesystem::create_directories(
             std::filesystem::path(mmap_path).parent_path());
         auto data_size = reader.GetEntrySize("index_data");
-        {
-            auto fw = storage::FileWriter(
-                mmap_path,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-            reader.ReadEntryStream(
-                "index_data",
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-
-            auto aligned =
-                ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-            if (aligned > data_size) {
-                std::vector<uint8_t> padding(aligned - data_size, 0);
-                fw.Write(padding.data(), padding.size());
-            }
-            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
-            fw.Write(mmap_pad.data(), mmap_pad.size());
-            fw.Finish();
+        reader.ReadEntryStreamToFile(
+            "index_data",
+            mmap_path,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
+        const auto aligned =
+            ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+            STRING_SORT_ALIGNMENT;
+        if (::truncate(mmap_path.c_str(),
+                       aligned + STRING_SORT_MMAP_INDEX_PADDING) != 0) {
+            const auto saved_errno = errno;
+            ::unlink(mmap_path.c_str());
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to extend string mmap file: {}",
+                      strerror(saved_errno));
         }
 
         if (reader.HasEntry("idx_to_offsets")) {
             // Stream idx_to_offsets to meta file, then mmap it
             mmap_meta_filepath_ = mmap_path + "-meta";
             size_t offsets_bytes = get_idx_to_offsets_bytes();
-            {
-                auto fw = storage::FileWriter(
-                    mmap_meta_filepath_,
-                    storage::io::GetPriorityFromLoadPriority(load_priority));
-                size_t written = 0;
-                reader.ReadEntryStream("idx_to_offsets",
-                                       [&](const uint8_t* d, size_t len) {
-                                           fw.Write(d, len);
-                                           written += len;
-                                       });
-                AssertInfo(written == offsets_bytes,
-                           "idx_to_offsets stream read size mismatch: got {}, "
-                           "expected {}",
-                           written,
-                           offsets_bytes);
-                fw.Finish();
-            }
+            reader.ReadEntryStreamToFile(
+                "idx_to_offsets",
+                mmap_meta_filepath_,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
             mmap_meta_size_ = offsets_bytes;
             auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
             mmap_meta_data_ = static_cast<char*>(mmap(NULL,
@@ -748,11 +741,10 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_.resize(total_num_rows_);
         auto data_size = reader.GetEntrySize("index_data");
         std::vector<uint8_t> buf(data_size);
-        size_t wo = 0;
-        reader.ReadEntryStream("index_data", [&](const uint8_t* d, size_t len) {
-            memcpy(buf.data() + wo, d, len);
-            wo += len;
-        });
+        reader.ReadEntryStreamAt(
+            "index_data", [&](size_t offset, const uint8_t* d, size_t len) {
+                memcpy(buf.data() + offset, d, len);
+            });
         auto mmap_impl = std::make_unique<StringIndexSortMmapImpl>();
         mmap_impl->LoadFromBuffer(
             std::move(buf), total_num_rows_, valid_bitset_, idx_to_offsets_);
@@ -859,7 +851,7 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
             auto* array =
                 reinterpret_cast<const Array*>(field_data->RawValue(i));
             for (int64_t j = 0; j < array->length(); j++) {
-                auto value = array->get_data<std::string>(j);
+                auto value = array->get_data_unchecked<std::string>(j);
                 map[value].push_back(static_cast<int32_t>(element_id));
                 valid_bitset.set(element_id);
                 element_id++;
@@ -1424,7 +1416,9 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
-    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+        STRING_SORT_ALIGNMENT;
     {
         auto file_writer = storage::FileWriter(mmap_filepath_);
         file_writer.Write(data, data_size);
@@ -1434,7 +1428,7 @@ StringIndexSortMmapImpl::LoadFromData(const uint8_t* data,
             file_writer.Write(padding.data(), padding.size());
         }
         // write padding in case of all null values
-        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        std::vector<uint8_t> padding(STRING_SORT_MMAP_INDEX_PADDING, 0);
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
@@ -1490,14 +1484,16 @@ StringIndexSortMmapImpl::MmapAndParse(size_t data_size,
                                       TargetBitmap& valid_bitset,
                                       std::vector<int32_t>& idx_to_offsets,
                                       bool skip_idx_to_offsets) {
-    auto aligned_size = ((data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((data_size + STRING_SORT_ALIGNMENT - 1) / STRING_SORT_ALIGNMENT) *
+        STRING_SORT_ALIGNMENT;
 
     auto fd = open(mmap_filepath_.c_str(), O_RDONLY);
     if (fd == -1) {
         ThrowInfo(DataFormatBroken, "Failed to open mmap file");
     }
 
-    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    mmap_size_ = aligned_size + STRING_SORT_MMAP_INDEX_PADDING;
     data_size_ = data_size;
     mmap_data_ = static_cast<char*>(
         mmap(nullptr, mmap_size_, PROT_READ, MAP_PRIVATE, fd, 0));

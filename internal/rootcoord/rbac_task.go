@@ -139,13 +139,18 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 			}
 			switch operateType {
 			case milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup:
-				newPrivs := lo.Union(v, in.Privileges)
+				newPrivs := append(append([]*milvuspb.PrivilegeEntity{}, v...), in.Privileges...)
 				newGroups[k] = lo.UniqBy(newPrivs, func(p *milvuspb.PrivilegeEntity) string {
 					return p.Name
 				})
 			case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
-				newPrivs, _ := lo.Difference(v, in.Privileges)
-				newGroups[k] = newPrivs
+				removedPrivs := lo.SliceToMap(in.Privileges, func(p *milvuspb.PrivilegeEntity) (string, struct{}) {
+					return p.Name, struct{}{}
+				})
+				newGroups[k] = lo.Filter(v, func(p *milvuspb.PrivilegeEntity, _ int) bool {
+					_, ok := removedPrivs[p.Name]
+					return !ok
+				})
 			default:
 				return merr.WrapErrParameterInvalidMsg("invalid operate type")
 			}

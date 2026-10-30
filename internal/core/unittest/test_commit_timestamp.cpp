@@ -60,7 +60,7 @@ CreateImportSegment(SchemaPtr schema,
     auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     EXPECT_NE(impl, nullptr);
     impl->SetCommitTimestamp(T_commit);
-    // This triggers load_system_field_internal which overwrites ts to T_commit.
+    // Loading field data overwrites the timestamp column with T_commit.
     LoadGeneratedDataIntoSegment(dataset, segment.get());
     return segment;
 }
@@ -251,7 +251,7 @@ TEST(CommitTimestamp, Boundary_CommitEqualsMaxRowTs) {
 //
 // On v2/v3 import segments the raw timestamp column (original row_ts) is
 // published in runtime by load_field_data_common, while the timestamp index is
-// built from commit_ts via init_storage_v1_timestamp_index. The V1 fixture
+// built from commit_ts during field loading. The V1 fixture
 // above (CreateImportSegment / LoadGeneratedDataIntoSegment) never reproduces
 // this state because the V1 path stores timestamps in insert_record_ instead
 // of runtime. CommitTimestampV2TestAccess publishes the raw column into a

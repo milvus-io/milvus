@@ -207,7 +207,9 @@ class FileManagerImpl : public milvus::FileManager {
      * remote object path.
      */
     std::shared_ptr<OutputStream>
-    OpenOutputStream(const std::string& local_full_file_path) override final {
+    OpenOutputStream(
+        const std::string& local_full_file_path,
+        milvus::OutputStreamOptions /*options*/ = {}) override final {
         return OpenOutputStream(local_full_file_path, /*is_index_file=*/true);
     }
 
@@ -302,9 +304,7 @@ class FileManagerImpl : public milvus::FileManager {
 
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         if (index_meta_.index_store_path_version >=
             ::milvus::proto::index::IndexStorePathVersion::
                 INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {
@@ -329,9 +329,7 @@ class FileManagerImpl : public milvus::FileManager {
         if (!stats_base_path_.empty()) {
             return stats_base_path_;
         }
-        boost::filesystem::path prefix = index::kOverrideRootPathForUT.empty()
-                                             ? rcm_->GetRootPath()
-                                             : index::kOverrideRootPathForUT;
+        boost::filesystem::path prefix = rcm_->GetRootPath();
         boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
         boost::filesystem::path path1 =
             std::to_string(index_meta_.build_id) + "/" +

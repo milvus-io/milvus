@@ -941,6 +941,9 @@ func newValidMockBroker() *mockBroker {
 	broker.ShowResourceGroupsFunc = func(ctx context.Context) ([]string, error) {
 		return []string{}, nil
 	}
+	broker.SyncNewCreatedPartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+		return nil
+	}
 	return broker
 }
 

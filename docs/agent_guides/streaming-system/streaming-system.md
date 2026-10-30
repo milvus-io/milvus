@@ -30,6 +30,7 @@ Every WAL entry is a [**Message**](message/message.md) representing a system eve
 
 **StreamingNode** (multiple instances, each manages a subset of PChannels):
 - [**TimeTick & Transaction**](wal/timetick_and_txn.md): TimeTick allocation/confirmation, transaction lifecycle, LastConfirmedMessageID.
+- [**Local Flush**](wal/local-flush.md): Receiving-cluster Flush, durable transaction abort and CDC replay.
 - [**Lock**](wal/lock.md): Exclusive/shared append access at VChannel or PChannel scope.
 - [**Shard Management**](wal/shard-management.md): Per-PChannel collection/partition/segment metadata and segment assignment.
 - [**RecoveryStorage**](wal/recovery-storage.md): Checkpoint, metadata and data persistence and WAL-based state recovery.

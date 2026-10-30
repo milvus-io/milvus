@@ -19,6 +19,10 @@ import (
 
 type ParserVisitorArgs struct {
 	Timezone string
+	// MembershipBudget is request-scoped when set: the main predicate, every
+	// hybrid sub-request and every scorer filter share one preflight budget and
+	// one validation cache. Nil means single-expression scope.
+	MembershipBudget *MembershipPreflightBudget
 }
 
 // int64OverflowError is a special error type used to handle the case where
@@ -43,7 +47,8 @@ type ParserVisitor struct {
 	parser.BasePlanVisitor
 	schema *typeutil.SchemaHelper
 	args   *ParserVisitorArgs
-	// currentStructArrayField stores the struct array field name when processing ElementFilter
+	// currentStructArrayField stores the struct array field name while processing
+	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
 }
 
@@ -960,7 +965,7 @@ func (v *ParserVisitor) parseTextMatchOperand(identifier string, queryExpr parse
 }
 
 func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match", "text_match query")
 	if err != nil {
@@ -999,7 +1004,7 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 }
 
 func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) interface{} {
-	identifier := ctx.Identifier(0).GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(), "text match fuzzy", "text_match_fuzzy query")
 	if err != nil {
@@ -1009,7 +1014,7 @@ func (v *ParserVisitor) VisitTextMatchFuzzy(ctx *parser.TextMatchFuzzyContext) i
 	// The option name is a soft keyword (a plain identifier) so that a scalar
 	// field literally named "max_edit_distance" is still usable elsewhere in a
 	// filter; only accept the expected option name here.
-	optionName := ctx.Identifier(1).GetText()
+	optionName := ctx.Identifier().GetText()
 	if !strings.EqualFold(optionName, "max_edit_distance") {
 		return merr.WrapErrParameterInvalidMsg(
 			"invalid option %q for text_match_fuzzy, expected max_edit_distance", optionName)
@@ -1063,7 +1068,7 @@ func (v *ParserVisitor) VisitTextMatchOption(ctx *parser.TextMatchOptionContext)
 }
 
 func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
-	identifier := ctx.Identifier().GetText()
+	identifier := ctx.FieldName().GetText()
 	columnInfo, value, placeholder, isTemplate, err := v.parseTextMatchOperand(
 		identifier, ctx.Expr(0), "phrase match", "phrase_match query")
 	if err != nil {
@@ -1271,7 +1276,7 @@ func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
 	case *planpb.Expr_CompareExpr:
 		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside MATCH predicate")
 	case *planpb.Expr_JsonContainsExpr:
-		return false, merr.WrapErrParameterInvalidMsg("array/JSON contains expressions are not supported inside MATCH predicate")
+		return validateMatchColumnInfo(realExpr.JsonContainsExpr.GetColumnInfo())
 	case *planpb.Expr_NullExpr:
 		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
 	case *planpb.Expr_ExistsExpr:
@@ -1389,7 +1394,7 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	}, nil
 }
 
-func (v *ParserVisitor) getChildColumnInfo(identifier, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getChildColumnInfo(identifier parser.IFieldNameContext, child, structSubField, structIndexField antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		childExpr, err := v.translateIdentifier(identifier.GetText())
 		if err != nil {
@@ -1434,7 +1439,7 @@ func (v *ParserVisitor) getStructArrayParentColumnInfo(fieldName string) (*planp
 	}, true, nil
 }
 
-func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
+func (v *ParserVisitor) getNullExprColumnInfo(identifier parser.IFieldNameContext, child antlr.TerminalNode) (*planpb.ColumnInfo, error) {
 	if identifier != nil {
 		// try struct first
 		if columnInfo, ok, err := v.getStructArrayParentColumnInfo(identifier.GetText()); ok || err != nil {
@@ -1444,13 +1449,20 @@ func (v *ParserVisitor) getNullExprColumnInfo(identifier, child antlr.TerminalNo
 	return v.getChildColumnInfo(identifier, child, nil, nil)
 }
 
-func isUnsupportedNullExprVectorType(dataType schemapb.DataType) bool {
-	return typeutil.IsVectorType(dataType) && !typeutil.IsVectorArrayType(dataType)
-}
-
 // VisitCall parses the expr to call plan.
 func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	functionName := strings.ToLower(ctx.Identifier().GetText())
+	if functionName == "bloom_match" || functionName == "roaring_match" {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s is not supported; use %s(field, {blob}) with optional type=bloom|roaring",
+			functionName, MembershipMatchFunctionName)
+	}
+	if isMembershipFunctionName(functionName) {
+		// membership_match is compiled on the proxy into a deferred CallExpr that
+		// carries the client pre-built blob; FillExpressionValue materializes it
+		// into the matching plan node.
+		return v.visitMembershipCall(ctx, functionName)
+	}
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
 	for _, param := range ctx.AllExpr() {
@@ -1473,10 +1485,68 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	}
 }
 
+// VisitMembershipMatchWithOption handles the soft-keyword form
+// membership_match(field, {blob}, type=bloom|roaring). Both the function and
+// option names remain ordinary identifiers outside this call shape.
+func (v *ParserVisitor) VisitMembershipMatchWithOption(ctx *parser.MembershipMatchWithOptionContext) interface{} {
+	functionName := strings.ToLower(ctx.GetFunction().GetText())
+	if functionName != MembershipMatchFunctionName {
+		return merr.WrapErrParameterInvalidMsg("named membership option is only supported by %s", MembershipMatchFunctionName)
+	}
+	optionName := ctx.GetOption().GetText()
+	if !strings.EqualFold(optionName, "type") {
+		return merr.WrapErrParameterInvalidMsg("invalid option %q for %s, expected type", optionName, MembershipMatchFunctionName)
+	}
+	typeName := strings.ToLower(ctx.GetKind().GetText())
+	if typeName != "bloom" && typeName != "roaring" {
+		return merr.WrapErrParameterInvalidMsg("%s type must be bloom or roaring, got %q", MembershipMatchFunctionName, typeName)
+	}
+
+	var fieldText string
+	var fieldInfo *planpb.ColumnInfo
+	var err error
+	field := ctx.GetField()
+	fieldText = field.GetText()
+	switch {
+	case field.FieldName() != nil || field.Meta() != nil:
+		var fieldExpr *ExprWithType
+		fieldExpr, err = v.translateIdentifier(fieldText)
+		if err == nil {
+			fieldInfo = toColumnInfo(fieldExpr)
+		}
+	case field.JSONIdentifier() != nil:
+		fieldInfo, err = v.getColumnInfoFromJSONIdentifier(fieldText)
+	case field.StructFieldIdentifier() != nil:
+		fieldInfo, err = v.getColumnInfoFromStructField(fieldText)
+	case field.StructIndexFieldIdentifier() != nil:
+		fieldInfo, err = v.getColumnInfoFromStructIndexField(fieldText)
+	case field.StructSubFieldIdentifier() != nil:
+		fieldInfo, err = v.getColumnInfoFromStructSubField(fieldText)
+	}
+	if err != nil {
+		return err
+	}
+	if fieldInfo == nil {
+		return merr.WrapErrParameterInvalidMsg("the first argument of %s must be a scalar field name, got: %s", MembershipMatchFunctionName, fieldText)
+	}
+	fieldExpr := &ExprWithType{expr: &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: fieldInfo}}}, dataType: fieldInfo.GetDataType(), nodeDependent: true}
+	blob := ctx.Expr().Accept(v)
+	if err := getError(blob); err != nil {
+		return err
+	}
+	valueExpr := getValueExpr(blob)
+	if valueExpr == nil || !isTemplateExpr(valueExpr) {
+		return merr.WrapErrParameterInvalidMsg("the second argument of %s must be a {template} placeholder carrying a client pre-built membership filter blob", MembershipMatchFunctionName)
+	}
+	args := []*planpb.Expr{fieldExpr.expr, {Expr: &planpb.Expr_ValueExpr{ValueExpr: valueExpr}, IsTemplate: true}}
+	args = append(args, &planpb.Expr{Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{Value: NewString(typeName)}}})
+	return &ExprWithType{expr: &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{FunctionName: MembershipMatchFunctionName, FunctionParameters: args}}, IsTemplate: true}, dataType: schemapb.DataType_Bool}
+}
+
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 	columnInfo, err := v.getChildColumnInfo(
-		ctx.Identifier(),
+		ctx.FieldName(),
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
@@ -1556,7 +1626,7 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
 	columnInfo, err := v.getChildColumnInfo(
-		ctx.Identifier(),
+		ctx.FieldName(),
 		ctx.JSONIdentifier(),
 		ctx.StructSubFieldIdentifier(),
 		ctx.StructIndexFieldIdentifier(),
@@ -2144,30 +2214,34 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 }
 
 // VisitStructField handles struct_array[sub_field] syntax for struct sub-field access.
-func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
-	// Get the full identifier text, e.g., "struct_array[sub_int]"
-	identifier := ctx.StructFieldIdentifier().GetText()
-
-	// Look up the field directly by its full name
+func (v *ParserVisitor) getColumnInfoFromStructField(identifier string) (*planpb.ColumnInfo, error) {
 	field, err := v.schema.GetFieldFromName(identifier)
 	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
+		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
+	}
+	return &planpb.ColumnInfo{
+		FieldId:     field.FieldID,
+		DataType:    field.DataType,
+		ElementType: field.GetElementType(),
+		Nullable:    field.GetNullable(),
+	}, nil
+}
+
+func (v *ParserVisitor) VisitStructField(ctx *parser.StructFieldContext) interface{} {
+	columnInfo, err := v.getColumnInfoFromStructField(ctx.StructFieldIdentifier().GetText())
+	if err != nil {
+		return err
 	}
 
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ColumnExpr{
 				ColumnExpr: &planpb.ColumnExpr{
-					Info: &planpb.ColumnInfo{
-						FieldId:     field.FieldID,
-						DataType:    field.DataType,
-						ElementType: field.GetElementType(),
-						Nullable:    field.GetNullable(),
-					},
+					Info: columnInfo,
 				},
 			},
 		},
-		dataType:      field.DataType,
+		dataType:      columnInfo.GetDataType(),
 		nodeDependent: true,
 	}
 }
@@ -2301,13 +2375,9 @@ func (v *ParserVisitor) VisitEmptyArray(ctx *parser.EmptyArrayContext) interface
 }
 
 func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{} {
-	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
-	}
-
-	if isUnsupportedNullExprVectorType(column.DataType) {
-		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {
@@ -2348,13 +2418,9 @@ func (v *ParserVisitor) VisitIsNotNull(ctx *parser.IsNotNullContext) interface{}
 }
 
 func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
-	column, err := v.getNullExprColumnInfo(ctx.Identifier(), ctx.JSONIdentifier())
+	column, err := v.getNullExprColumnInfo(ctx.FieldName(), ctx.JSONIdentifier())
 	if err != nil {
 		return err
-	}
-
-	if isUnsupportedNullExprVectorType(column.DataType) {
-		return merr.WrapErrParameterInvalidMsg("IsNull/IsNotNull operations are not supported on vector fields")
 	}
 
 	if len(column.NestedPath) != 0 {
@@ -2400,13 +2466,75 @@ func (v *ParserVisitor) VisitIsNull(ctx *parser.IsNullContext) interface{} {
 	}
 }
 
+func (v *ParserVisitor) resolveContainsField(
+	field *ExprWithType,
+) (*planpb.ColumnInfo, error) {
+	columnInfo := toColumnInfo(field)
+	if columnInfo == nil {
+		return columnInfo, nil
+	}
+	if !columnInfo.GetIsElementLevel() {
+		if !typeutil.IsArrayType(columnInfo.GetDataType()) {
+			return columnInfo, nil
+		}
+		fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+		if err != nil {
+			return nil, err
+		}
+		if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+			return nil, merr.WrapErrQueryPlanMsg(
+				"contains operation is not supported on nested array field: %s",
+				fieldSchema.GetName())
+		}
+		return columnInfo, nil
+	}
+
+	// A recursive StructArray sub-field is stored as Array<Array<T>> across
+	// rows, but $[sub_field] addresses one struct element and therefore has the
+	// logical type Array<T> inside MATCH_*. Keep this reinterpretation local to
+	// contains expressions so scalar comparison operators remain unsupported.
+	fieldSchema, err := v.schema.GetFieldFromID(columnInfo.GetFieldId())
+	if err != nil {
+		return nil, err
+	}
+	typeSchema := fieldSchema.GetTypeSchema()
+	if fieldSchema.GetDataType() != schemapb.DataType_Array || typeSchema == nil {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains requires an Array<scalar> struct sub-field, got: %s",
+			fieldSchema.GetName())
+	}
+	elementSchema := typeSchema.GetArrayElement()
+	if elementSchema == nil {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains requires an Array<scalar> struct sub-field, got: %s",
+			fieldSchema.GetName())
+	}
+
+	logicalElement := elementSchema.GetArrayElement()
+	if logicalElement == nil ||
+		logicalElement.GetArrayElement() != nil ||
+		!typeutil.IsPrimitiveType(logicalElement.GetLeafType()) {
+		return nil, merr.WrapErrQueryPlanMsg(
+			"element-level contains only supports Array<scalar> struct sub-fields, got: %s",
+			fieldSchema.GetName())
+	}
+
+	columnInfo.DataType = schemapb.DataType_Array
+	columnInfo.ElementType = logicalElement.GetLeafType()
+	return columnInfo, nil
+}
+
 func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) interface{} {
 	field := ctx.Expr(0).Accept(v)
 	if err := getError(field); err != nil {
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2427,7 +2555,7 @@ func (v *ParserVisitor) VisitJSONContains(ctx *parser.JSONContainsContext) inter
 	if !isTemplateExpr(elementExpr) {
 		elements = make([]*planpb.GenericValue, 1)
 		elementValue := elementExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_Contains, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_Contains, elementValue); err != nil {
 			return err
 		}
 		elements[0] = elementValue
@@ -2457,7 +2585,11 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2479,7 +2611,7 @@ func (v *ParserVisitor) VisitJSONContainsAll(ctx *parser.JSONContainsAllContext)
 	var sameType bool
 	if !isTemplateExpr(elementExpr) {
 		elementValue := elementExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_ContainsAll, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_ContainsAll, elementValue); err != nil {
 			return err
 		}
 		elements = elementValue.GetArrayVal().GetArray()
@@ -2510,7 +2642,11 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 		return err
 	}
 
-	columnInfo := toColumnInfo(field.(*ExprWithType))
+	fieldExpr := field.(*ExprWithType)
+	columnInfo, err := v.resolveContainsField(fieldExpr)
+	if err != nil {
+		return err
+	}
 	if columnInfo == nil ||
 		(!typeutil.IsJSONType(columnInfo.GetDataType()) && !typeutil.IsArrayType(columnInfo.GetDataType())) {
 		return merr.WrapErrParameterInvalidMsg(
@@ -2532,7 +2668,7 @@ func (v *ParserVisitor) VisitJSONContainsAny(ctx *parser.JSONContainsAnyContext)
 	var sameType bool
 	if !isTemplateExpr(valueExpr) {
 		elementValue := valueExpr.GetValue()
-		if err := checkContainsElement(field.(*ExprWithType), planpb.JSONContainsExpr_ContainsAny, elementValue); err != nil {
+		if err := checkContainsElement(fieldExpr, planpb.JSONContainsExpr_ContainsAny, elementValue); err != nil {
 			return err
 		}
 		elements = elementValue.GetArrayVal().GetArray()
@@ -2574,14 +2710,19 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 			Nullable:    field.GetNullable(),
 		}
 	} else {
-		if ctx.Identifier() != nil {
-			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.Identifier().GetText()); ok || parentErr != nil {
+		if ctx.FieldName() != nil {
+			if parentColumnInfo, ok, parentErr := v.getStructArrayParentColumnInfo(ctx.FieldName().GetText()); ok || parentErr != nil {
 				columnInfo = parentColumnInfo
 				err = parentErr
 			}
 		}
 		if columnInfo == nil && err == nil {
-			columnInfo, err = v.getChildColumnInfo(ctx.Identifier(), ctx.JSONIdentifier(), nil, nil)
+			columnInfo, err = v.getChildColumnInfo(
+				ctx.FieldName(),
+				ctx.JSONIdentifier(),
+				ctx.StructSubFieldIdentifier(),
+				nil,
+			)
 		}
 		if err != nil {
 			return err
@@ -2623,7 +2764,7 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 			Expr: &planpb.Expr_ValueExpr{
 				ValueExpr: &planpb.ValueExpr{
 					Value:                nil,
-					TemplateVariableName: ctx.Identifier().GetText(),
+					TemplateVariableName: ctx.FieldName().GetText(),
 				},
 			},
 			IsTemplate: true,
@@ -2632,7 +2773,7 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 }
 
 func (v *ParserVisitor) VisitSpatialBinary(ctx *parser.SpatialBinaryContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -2692,7 +2833,7 @@ func (v *ParserVisitor) VisitSpatialBinary(ctx *parser.SpatialBinaryContext) int
 }
 
 func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{} {
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -2718,7 +2859,7 @@ func (v *ParserVisitor) VisitSTIsValid(ctx *parser.STIsValidContext) interface{}
 
 func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{} {
 	// Process the geometry field identifier
-	childExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
+	childExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
 	if err != nil {
 		return err
 	}
@@ -2802,8 +2943,8 @@ func (v *ParserVisitor) VisitSTDWithin(ctx *parser.STDWithinContext) interface{}
 //  2. Slow Path: If an INTERVAL exists, it generates a TimestamptzArithCompareExpr
 //     for specialized arithmetic evaluation.
 func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCompareForwardContext) interface{} {
-	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	identifier := ctx.Identifier().Accept(v)
+	colExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
+	identifier := ctx.FieldName().GetText()
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
@@ -2876,8 +3017,8 @@ func (v *ParserVisitor) VisitTimestamptzCompareForward(ctx *parser.TimestamptzCo
 //  3. Slow Path: For complex expressions involving INTERVAL, it produces a
 //     TimestamptzArithCompareExpr with the reversed operator.
 func (v *ParserVisitor) VisitTimestamptzCompareReverse(ctx *parser.TimestamptzCompareReverseContext) interface{} {
-	colExpr, err := v.translateIdentifier(ctx.Identifier().GetText())
-	identifier := ctx.Identifier().GetText()
+	colExpr, err := v.translateIdentifier(ctx.FieldName().GetText())
+	identifier := ctx.FieldName().GetText()
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("can not translate identifier: %s", identifier)
 	}
@@ -2993,7 +3134,7 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	}
 
 	// Get struct array field name (first parameter)
-	arrayFieldName := ctx.Identifier().GetText()
+	arrayFieldName := ctx.FieldName().GetText()
 
 	// Set current context for element expression parsing
 	v.currentStructArrayField = arrayFieldName
@@ -3007,6 +3148,20 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 	exprWithType := getExpr(elementExpr)
 	if exprWithType == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid element expression: %s", ctx.Expr().GetText())
+	}
+
+	// No membership filter may appear inside an element_filter element
+	// expression, regardless of kind: element_filter evaluates the sub-expression
+	// per ELEMENT, feeding global element IDs where the membership executors
+	// expect scalar-field row offsets — which would read the wrong row, go out
+	// of bounds, or assert. Approximate kinds would additionally break MATCH_*
+	// style upper bounds; exactness (roaring) does not fix the offset mismatch.
+	// The legal doc-level combination membership(field, {bf}) && element_filter(...)
+	// is unaffected: that call is a sibling of element_filter, not inside its
+	// element expression. Mirrors the guard in parseMatchExpr.
+	if hasMembershipFilterExpr(exprWithType.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"membership_match filters are not supported inside element_filter element expressions")
 	}
 
 	// Build ElementFilterExpr proto
@@ -3100,12 +3255,27 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
+
 	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
 	}
 	if !isElementLevel {
 		return merr.WrapErrParameterInvalidMsg("predicate expression in %s must use element-level fields", funcName)
+	}
+
+	// No membership filter may appear inside a MATCH_* element predicate.
+	// bloom_match's one-sided error (false positives) is only safe for monotonic
+	// aggregations; MATCH_MOST / MATCH_EXACT bound the hit count from above, so
+	// a false positive would wrongly drop a true row (row-level false
+	// negative), breaking the never-miss-a-member guarantee. roaring_match is
+	// exact, but its executor is row-offset based while every MATCH_*
+	// predicate field is element-level, so it is rejected for the same reason
+	// element_filter rejects it. Reject rather than ship a per-kind,
+	// per-MatchType error-semantics matrix.
+	if hasMembershipFilterExpr(predicateExpr.expr) {
+		return merr.WrapErrParameterInvalidMsg(
+			"membership_match filters are not supported inside %s element predicates", funcName)
 	}
 
 	// Build MatchExpr proto
@@ -3128,7 +3298,7 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 // VisitMatchSimple handles MATCH_ALL and MATCH_ANY expressions
 // Syntax: MATCH_ALL/MATCH_ANY(structArrayField, $[intField] == 1 && $[strField] == "aaa")
 func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	structArrayFieldName := ctx.FieldName().GetText()
 	var matchType planpb.MatchType
 	var opName string
 	switch ctx.GetOp().GetTokenType() {
@@ -3147,7 +3317,7 @@ func (v *ParserVisitor) VisitMatchSimple(ctx *parser.MatchSimpleContext) interfa
 // VisitMatchThreshold handles MATCH_LEAST, MATCH_MOST, and MATCH_EXACT expressions
 // Syntax: MATCH_LEAST/MATCH_MOST/MATCH_EXACT(structArrayField, $[intField] == 1, threshold=N)
 func (v *ParserVisitor) VisitMatchThreshold(ctx *parser.MatchThresholdContext) interface{} {
-	structArrayFieldName := ctx.Identifier().GetText()
+	structArrayFieldName := ctx.FieldName().GetText()
 
 	countStr := ctx.IntegerConstant().GetText()
 	count, err := strconv.ParseInt(countStr, 10, 64)

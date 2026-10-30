@@ -32,6 +32,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -130,6 +131,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.vector_field_enable_mmap =
             c_mmap_config.vector_field_enable_mmap;
         mmap_config.mmap_populate = c_mmap_config.mmap_populate;
+        mmap_config.mmap_writeback = c_mmap_config.mmap_writeback;
         mmap_config.json_stats_enable_mmap =
             c_mmap_config.json_stats_enable_mmap;
         mmap_config.json_stats_mmap_path =
@@ -200,6 +202,26 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     }
 }
 
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled) {
+    milvus::storage::SetExternalVectorPartialNullAsRowNull(enabled);
+}
+
+bool
+GetExternalVectorPartialNullAsRowNull() {
+    return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    return milvus::storage::SetExternalSparseConversionMemoryLimit(bytes);
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return milvus::storage::GetExternalSparseConversionMemoryLimit();
+}
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads) {
     try {
@@ -256,6 +278,22 @@ InitIndexBuildReadWindow(int64_t window_bytes) {
     }
 }
 
+CStatus
+InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
+    try {
+        if (initial_rate == 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "external IOPS initial rate must be greater than zero");
+        }
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetExternalIopsConfig(initial_rate, max_rate);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 void
 CleanRemoteChunkManagerSingleton() {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
@@ -277,8 +315,25 @@ InitPluginLoader(const char* plugin_path) {
     try {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+    }
+    // Plugin callbacks can throw opaque messages containing configuration.
+    // Sanitize before FailureCStatus: its untyped-exception observer also logs
+    // the message. Keep the same code/OOM/fallback rules as the CGO boundary.
+    catch (const std::bad_alloc&) {
+        return milvus::FailureCStatus(
+            milvus::MemAllocateFailed,
+            "Plugin initialization ran out of memory");
+    } catch (const milvus::SegcoreError& error) {
+        return milvus::FailureCStatus(error.get_error_code(),
+                                      "Native plugin initialization failed");
+    } catch (const std::exception&) {
+        const std::runtime_error safe_error(
+            "Native plugin initialization failed");
+        return milvus::FailureCStatus(&safe_error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "Unknown exception during native plugin initialization");
     }
 }
 

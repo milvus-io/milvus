@@ -17,7 +17,9 @@
 package index
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +47,43 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type statsTaskLogBuffer struct {
+	bytes.Buffer
+}
+
+func (*statsTaskLogBuffer) Sync() error {
+	return nil
+}
+
+func captureStatsTaskLogs(t *testing.T) *statsTaskLogBuffer {
+	t.Helper()
+
+	oldLogger := mlog.L()
+	oldLevel := mlog.GetAtomicLevel()
+	logs := &statsTaskLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
+	})
+	return logs
+}
+
+func statsLogSentinel(parts ...string) string {
+	return strings.Join(parts, "_")
+}
+
+func statsLogCredentialJSON(value string) string {
+	return `{"private_key":"` + value + `"}`
+}
 
 func TestTaskStatsSuite(t *testing.T) {
 	suite.Run(t, new(TaskStatsSuite))
@@ -185,6 +225,49 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 		_, err = task.sort(ctx)
 		s.Error(err)
 	})
+}
+
+func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
+	logs := captureStatsTaskLogs(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	accessKey := statsLogSentinel("STORAGE", "ACCESS", "KEY", "SENTINEL")
+	secretKey := statsLogSentinel("STORAGE", "SECRET", "KEY", "SENTINEL")
+	caCert := statsLogSentinel("STORAGE", "CA", "CERT", "SENTINEL")
+	gcpCredential := statsLogSentinel("GCP", "CREDENTIAL", "JSON", "SENTINEL")
+
+	manager := NewTaskManager(ctx)
+	task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
+		ClusterID:    s.clusterID,
+		TaskID:       100,
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		SegmentID:    102,
+		StorageConfig: &indexpb.StorageConfig{
+			Address:           "storage.example.test",
+			StorageType:       "s3",
+			BucketName:        "stats-bucket",
+			RootPath:          "stats/root",
+			AccessKeyID:       accessKey,
+			SecretAccessKey:   secretKey,
+			SslCACert:         caCert,
+			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
+		},
+	}, manager, s.mockChunkManager, nil)
+
+	err := task.PreExecute(ctx)
+	s.Require().NoError(err)
+	output := logs.String()
+	s.NotContains(output, accessKey)
+	s.NotContains(output, secretKey)
+	s.NotContains(output, caCert)
+	s.NotContains(output, gcpCredential)
+	s.Contains(output, "storageConfig")
+	s.Contains(output, "storage.example.test")
+	s.Contains(output, "stats-bucket")
+	s.Contains(output, "stats/root")
+	s.Contains(output, "s3")
+	s.Contains(output, "<redacted>")
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {
@@ -474,4 +557,52 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 		insertBinlogs, 256, 0.3, 81920)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "field binlog not found for field 201")
+}
+
+// A recovered StorageV3 segment reloads with empty InsertLogs but an
+// authoritative ManifestPath. The empty-InsertLogs guard must not skip the
+// text-index build: the V3 build path reads the manifest, so gating only on an
+// empty ManifestPath lets the manifest-aware build proceed.
+func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	mgr := NewTaskManager(ctx)
+	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+
+	req := &workerpb.CreateStatsRequest{
+		ClusterID:       "c1",
+		TaskID:          1,
+		CollectionID:    100,
+		PartitionID:     101,
+		TargetSegmentID: 102,
+		SegmentID:       103,
+		InsertChannel:   "ch",
+		TaskVersion:     1,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "/root"},
+		SubJobType:      indexpb.StatsSubJob_TextIndexJob,
+		StorageVersion:  storage.StorageV3,
+		ManifestPath:    "files/manifest/103/1", // manifest is authoritative for V3
+		InsertLogs:      nil,                    // empty after a DataCoord restart
+		NumRows:         10,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil)
+
+	var called bool
+	m := mockey.Mock((*statsTask).createTextIndex).To(
+		func(_ *statsTask, _ context.Context, _ *indexpb.StorageConfig, _, _, _, _, _ int64, _ []*datapb.FieldBinlog) error {
+			called = true
+			return nil
+		}).Build()
+	defer m.UnPatch()
+
+	err := st.Execute(ctx)
+	require.NoError(t, err)
+	require.True(t, called, "text index build must proceed for a manifest-backed V3 segment with empty InsertLogs")
 }

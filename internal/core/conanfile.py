@@ -1,6 +1,7 @@
 required_conan_version = ">=2.0"
 
 from conan import ConanFile
+from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
 from conan.tools.files import copy
 import os
@@ -12,13 +13,14 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5@milvus/dev#67b8ae76ad7be5f779082f67416f89bf",
         "onetbb/2021.9.0#f9d7a3aa294ac4a594a93f9b4c7f272d",
         "zstd/1.5.5#70dc5eb8ea16708fc946fbac884c507e",
-        "arrow/17.0.0@milvus/dev#fdcd2c841ebbb57a07fd19b01e43da05",
+        "arrow/17.0.0@milvus/dev#17b7257ae0de563ed6ab7b7843cedf86",
         "libevent/2.1.12#95065aaefcd58d3956d6dfbfc5631d97",
         "googleapis/cci.20221108#4553d68a2429cc0fff7d2bab4e5b3ea9",
         "gtest/1.13.0#2cf98fac7337eb73fc4ee839dbcd4468",
         "benchmark/1.7.0#459f3bb1a64400a886ba43047576df3c",
         "yaml-cpp/0.7.0#355a88fb838abacfeb022dd52b91e248",
         "marisa/0.2.6#a1352b20c0c6c48fee4968584ffef631",
+        "metis/5.2.1#85cfe7ee0dfc0cba7c0334e92efcbbc6",
         "glog/0.7.1#a306e61d7b8311db8cb148ad62c48030",
         "gflags/2.2.2#7671803f1dc19354cc90bd32874dcfda",
         "double-conversion/3.3.0#640e35791a4bac95b0545e2f54b7aceb",
@@ -28,10 +30,10 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "re2/20230301#f8efaf45f98d0193cd0b2ea08b6b4060",
         "folly/2026.04.20.00@milvus/dev#06852bea5b6449f0c4eb0df002b5779c",
-        "milvus-common/1.0.0-b589c5a@milvus/dev#d431af735c8acb829feb7a94f05daf42",
+        "milvus-common/1.0.0-78f2c29@milvus/dev#af77e5f5444d6dd7cc5573182b958491",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/1.9.1#ec1a00d5414f618555799be9566adfb7",
+        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -39,10 +41,16 @@ class MilvusConan(ConanFile):
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
         "geos/3.12.0#a923af6dc4c18f87a7dfa960118f3166",
         "icu/74.2#cd1937b9561b8950a2ae6311284c5813",
-        "libavrocpp/1.12.1.1@milvus/dev#cde7bb587a29f6f233bae7e18b71815d",
+        "libavrocpp/1.12.1.1@milvus/dev#b4854183542196740ec9a004fdfff7ec",
     )
 
     default_options = {
+        # SDK initialization must reach the same CRT state in every shared
+        # library and executable. Static AWS archives create private copies.
+        "aws-sdk-cpp/*:shared": True,
+        "aws-crt-cpp/*:shared": True,
+        "aws-c-*/*:shared": True,
+        "aws-checksums/*:shared": True,
         "openssl/*:shared": True,
         "openssl/*:no_apps": True,
         "libevent/*:shared": True,
@@ -85,6 +93,7 @@ class MilvusConan(ConanFile):
         "fmt/*:header_only": False,
         "openblas/*:dynamic_arch": True,
         "openblas/*:shared": False,
+        "metis/*:with_64bit_types": True,
         "onetbb/*:tbbmalloc": False,
         "onetbb/*:tbbproxy": False,
         "gflags/*:shared": True,
@@ -131,6 +140,11 @@ class MilvusConan(ConanFile):
         # Without this, find_package(Azure) can't find include directories.
         self.requires("azure-sdk-for-cpp/1.16.4@milvus/dev#7c95e3df67cfea28b3cf6dbd60fbf137", force=True)
         self.requires("aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d", force=True)
+        # Tests call CRT APIs directly. A direct requirement exposes its link
+        # libraries even when the shared SDK hides transitive libraries.
+        # Keep this version in sync with the SDK recipe; do not force it, so
+        # an incompatible SDK upgrade produces a Conan dependency conflict.
+        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750")
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
@@ -146,6 +160,15 @@ class MilvusConan(ConanFile):
         # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
         if self.settings.os in ["Linux", "FreeBSD"]:
             self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
+
+    def validate(self):
+        # Profiles and command-line options can override default_options.
+        # Reject a partially static runtime before generating linker inputs.
+        for dep in self.dependencies.host.values():
+            if dep.ref.name.startswith("aws-") and not dep.options.get_safe("shared"):
+                raise ConanInvalidConfiguration(
+                    f"{dep.ref.name} must use shared=True: Milvus requires a single AWS runtime"
+                )
 
     def generate(self):
         deps = CMakeDeps(self)

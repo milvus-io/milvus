@@ -17,16 +17,155 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	var params MinioConfig
+	params.Init(base)
+	assert.Equal(t, "minio.multipartCopyThreshold", params.MultipartCopyThreshold.Key)
+	assert.Equal(t, "3.0.3", params.MultipartCopyThreshold.Version)
+	assert.True(t, params.MultipartCopyThreshold.Export)
+	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  int64
+	}{
+		{name: "minimum", value: "1", want: 1},
+		{name: "lower_threshold", value: "500000000", want: 500_000_000},
+		{name: "higher_threshold", value: "2000000000", want: 2_000_000_000},
+		{name: "single_copy_limit", value: "5368709120", want: 5 * 1024 * 1024 * 1024},
+		{name: "above_single_copy_limit", value: "5368709121", want: 5*1024*1024*1024 + 1},
+		{name: "ten_gib", value: "10737418240", want: 10 * 1024 * 1024 * 1024},
+		{name: "max_int64", value: "9223372036854775807", want: 1<<63 - 1},
+		{name: "zero", value: "0", want: 1024 * 1024 * 1024},
+		{name: "negative", value: "-1", want: 1024 * 1024 * 1024},
+		{name: "empty", value: "", want: 1024 * 1024 * 1024},
+		{name: "invalid", value: "invalid", want: 1024 * 1024 * 1024},
+		{name: "unit_suffix", value: "1GB", want: 1024 * 1024 * 1024},
+		{name: "overflow", value: "9223372036854775808", want: 1024 * 1024 * 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, base.Save(params.MultipartCopyThreshold.Key, tc.value))
+			assert.Equal(t, tc.want, params.MultipartCopyThreshold.GetAsInt64())
+		})
+	}
+	require.NoError(t, base.Reset(params.MultipartCopyThreshold.Key))
+	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+}
+
+// Every local storage key is a complete filesystem path that starts with
+// localStorage.path, and the loon local filesystem is rooted at "/", so the
+// configured value must never depend on the process working directory.
+func TestLocalStorageConfig_PathIsAbsolute(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "default", want: filepath.Clean(defaultLocalStoragePath)},
+		{name: "absolute", configured: "/var/lib/milvus/data", want: "/var/lib/milvus/data"},
+		{name: "clean_absolute", configured: "  /var/lib/milvus/./old/../data/  ", want: "/var/lib/milvus/data"},
+		{name: "filesystem_root", configured: "/", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(bt.mgr.Close)
+			if tc.configured != "" {
+				require.NoError(t, bt.Save("localStorage.path", tc.configured))
+			}
+			var params ServiceParam
+			require.NotPanics(t, func() { params.init(bt) })
+			require.Equal(t, tc.want, params.LocalStorageCfg.Path.GetValue())
+			require.True(t, filepath.IsAbs(params.LocalStorageCfg.Path.GetValue()))
+		})
+	}
+}
+
+func TestLocalStorageConfig_RejectsInvalidPathDuringInit(t *testing.T) {
+	assertInvalidInit := func(t *testing.T, bt *BaseTable) {
+		t.Helper()
+		t.Cleanup(bt.mgr.Close)
+		var panicValue any
+		func() {
+			defer func() { panicValue = recover() }()
+			var params ServiceParam
+			params.init(bt)
+		}()
+		require.NotNil(t, panicValue, "service initialization must reject the configured path before starting components")
+		panicErr, ok := panicValue.(error)
+		require.True(t, ok, "initialization must panic with a typed configuration error, got %T", panicValue)
+		require.ErrorIs(t, panicErr, merr.ErrParameterInvalid)
+		require.Contains(t, panicErr.Error(), "localStorage.path must be an absolute filesystem path")
+	}
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "relative", value: "relative/data"},
+		{name: "current_directory_relative", value: "./data"},
+		{name: "parent_directory_relative", value: "../data"},
+		{name: "current_directory", value: "."},
+		{name: "empty", value: ""},
+		{name: "blank", value: " \t\n "},
+	} {
+		t.Run("saved/"+tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			// Save before initialization exercises the startup path, rather
+			// than calling the formatter through a later GetValue.
+			require.NoError(t, bt.Save("localStorage.path", tc.value))
+			assertInvalidInit(t, bt)
+		})
+		t.Run("environment/"+tc.name, func(t *testing.T) {
+			t.Setenv("LOCALSTORAGE_PATH", tc.value)
+			bt := NewBaseTable(SkipRemote(true), Files([]string{}))
+			assertInvalidInit(t, bt)
+		})
+	}
+}
+
+func TestLocalStorageConfig_PathDoesNotChangeAtRuntime(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	configFile := filepath.Join(dir, "local-storage.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: /var/lib/milvus/data\n"), 0o600))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+
+	var params ServiceParam
+	require.NotPanics(t, func() { params.init(bt) })
+	require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+
+	// File and config-center sources replace their stored value before emitting
+	// an update event. A forbidden path must retain its startup value even then.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.NotPanics(t, func() {
+		require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+	})
+	value, raw, err := params.LocalStorageCfg.Path.getWithRaw()
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/milvus/data", value)
+	require.Equal(t, "relative/data", raw)
+}
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
@@ -132,6 +271,8 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
+		assert.Equal(t, wpCfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds(), float64(330))
+		assert.Equal(t, wpCfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds(), float64(60))
 		assert.True(t, wpCfg.DirectReadEnabled.GetAsBool())
 		assert.Equal(t, int64(16*1024*1024), wpCfg.DirectReadMaxBatchSize.GetAsSize())
 		assert.Equal(t, 4, wpCfg.DirectReadMaxFetchThreads.GetAsInt())
@@ -160,6 +301,10 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.CompactionSize.GetAsSize(), int64(2*1024*1024))
 		assert.Equal(t, wpCfg.CompactionMaxParallelUploads.GetAsInt(), 4)
 		assert.Equal(t, wpCfg.CompactionMaxParallelReads.GetAsInt(), 8)
+		assert.Equal(t, wpCfg.CompactionTimeout.GetAsDurationByParse().Seconds(), float64(300))
+		assert.Equal(t, wpCfg.CompactionMaxInflightMemory.GetAsSize(), int64(1000000000))
+		assert.Equal(t, wpCfg.CompactionMemoryHighWatermark.GetAsFloat(), 0.7)
+		assert.Equal(t, wpCfg.SyncSchedulerMaxWorkers.GetAsInt(), 32)
 		assert.Equal(t, wpCfg.ReaderMaxBatchSize.GetAsSize(), int64(16*1024*1024))
 		assert.Equal(t, wpCfg.ReaderMaxFetchThreads.GetAsInt(), 32)
 		assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(72*60*60))
@@ -331,6 +476,16 @@ func TestServiceParam(t *testing.T) {
 	t.Run("pulsar_backlog_auto_clear_bytes", func(t *testing.T) {
 		Params := &SParams.PulsarCfg
 		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
+	})
+
+	t.Run("pulsar_producer_access_mode", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "exclusive", Params.ProducerAccessMode.GetValue())
+	})
+
+	t.Run("pulsar_producer_create_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "1m", Params.ProducerCreateTimeout.GetValue())
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {

@@ -30,8 +30,7 @@
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
-#include "common/ArrayOffsets.h"
-#include "common/OffsetMapping.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "knowhere/index/index_node.h"
@@ -40,7 +39,8 @@ namespace milvus {
 
 namespace segcore {
 class SegmentReadLease;
-}
+class SegmentReadSnapshot;
+}  // namespace segcore
 
 // scan cost in each search/query
 struct StorageCost {
@@ -48,57 +48,7 @@ struct StorageCost {
     int64_t scanned_total_bytes = 0;
 
     StorageCost() = default;
-
-    StorageCost(int64_t scanned_remote_bytes, int64_t scanned_total_bytes)
-        : scanned_remote_bytes(scanned_remote_bytes),
-          scanned_total_bytes(scanned_total_bytes) {
-    }
-
-    StorageCost
-    operator+(const StorageCost& rhs) const {
-        return {scanned_remote_bytes + rhs.scanned_remote_bytes,
-                scanned_total_bytes + rhs.scanned_total_bytes};
-    }
-
-    void
-    operator+=(const StorageCost& rhs) {
-        scanned_remote_bytes += rhs.scanned_remote_bytes;
-        scanned_total_bytes += rhs.scanned_total_bytes;
-    }
-
-    StorageCost
-    operator*(const double factor) const {
-        return {static_cast<int64_t>(scanned_remote_bytes * factor),
-                static_cast<int64_t>(scanned_total_bytes * factor)};
-    }
-
-    void
-    operator*=(const double factor) {
-        scanned_remote_bytes =
-            static_cast<int64_t>(scanned_remote_bytes * factor);
-        scanned_total_bytes =
-            static_cast<int64_t>(scanned_total_bytes * factor);
-    }
-
-    void
-    operator=(const StorageCost& rhs) {
-        scanned_remote_bytes = rhs.scanned_remote_bytes;
-        scanned_total_bytes = rhs.scanned_total_bytes;
-    }
-
-    std::string
-    ToString() const {
-        return fmt::format("scanned_remote_bytes: {}, scanned_total_bytes: {}",
-                           scanned_remote_bytes,
-                           scanned_total_bytes);
-    }
 };
-
-inline std::ostream&
-operator<<(std::ostream& os, const StorageCost& cost) {
-    os << cost.ToString();
-    return os;
-}
 
 struct OffsetDisPair {
  private:
@@ -163,13 +113,8 @@ class VectorIterator {
 // returning results in distance-sorted order.
 class ChunkMergeIterator : public VectorIterator {
  public:
-    // Pass nullptr for VECTOR_ARRAY element-level search: the iterator
-    // returns element IDs, which will be processed by IArrayOffsets.
-    ChunkMergeIterator(int chunk_count,
-                       const milvus::OffsetMapping* offset_mapping,
-                       bool larger_is_closer = false)
-        : offset_mapping_(offset_mapping),
-          heap_(OffsetDisPairComparator(larger_is_closer)) {
+    ChunkMergeIterator(int chunk_count, bool larger_is_closer = false)
+        : heap_(OffsetDisPairComparator(larger_is_closer)) {
         iterators_.reserve(chunk_count);
     }
 
@@ -197,11 +142,7 @@ class ChunkMergeIterator : public VectorIterator {
                     origin_pair.value(), top->GetIteratorIdx());
                 heap_.push(off_dis_pair);
             }
-            auto result = top->GetOffDis();
-            if (offset_mapping_ != nullptr) {
-                result.first = offset_mapping_->GetLogicalOffset(result.first);
-            }
-            return result;
+            return top->GetOffDis();
         }
         return std::nullopt;
     }
@@ -249,12 +190,13 @@ class ChunkMergeIterator : public VectorIterator {
                         OffsetDisPairComparator>
         heap_;
     bool sealed = false;
-    const milvus::OffsetMapping* offset_mapping_ = nullptr;
     //currently, ChunkMergeIterator is guaranteed to be used serially without concurrent problem, in the future
     //we may need to add mutex to protect the variable sealed
 };
 
 struct SearchResult {
+    using FilteredVectorSearchFn =
+        std::function<void(const BitsetView&, int64_t, SearchResult&)>;
     SearchResult() = default;
 
     int64_t
@@ -274,7 +216,6 @@ struct SearchResult {
         int64_t nq,
         int chunk_count,
         const std::vector<knowhere::IndexNode::IteratorPtr>& kw_iterators,
-        const milvus::OffsetMapping* offset_mapping,
         bool larger_is_closer = false) {
         AssertInfo(kw_iterators.size() == nq * chunk_count,
                    "kw_iterators count:{} is not equal to nq*chunk_count:{}, "
@@ -287,7 +228,7 @@ struct SearchResult {
             vec_iter_idx = vec_iter_idx % nq;
             if (vector_iterators.size() < nq) {
                 auto chunk_merge_iter = std::make_shared<ChunkMergeIterator>(
-                    chunk_count, offset_mapping, larger_is_closer);
+                    chunk_count, larger_is_closer);
                 vector_iterators.emplace_back(chunk_merge_iter);
             }
             const auto& kw_iterator = kw_iterators[i];
@@ -313,6 +254,79 @@ struct SearchResult {
         return view;
     }
 
+    void
+    SetVectorSearchProvider(const BitsetView& base_filter,
+                            FilteredVectorSearchFn provider) {
+        vector_search_base_filter_.reset();
+        vector_search_base_filter_view_ = base_filter;
+        // The execution pipeline owns its input column. Direct callers without
+        // an owner retain a defensive copy of their filter.
+        if (!vector_search_filter_owner_) {
+            GetVectorSearchBaseFilter();
+        }
+        filtered_vector_search_fn_ = std::move(provider);
+    }
+
+    void
+    ClearVectorSearchProvider() {
+        filtered_vector_search_fn_ = {};
+        vector_search_base_filter_view_ = {};
+        vector_search_base_filter_.reset();
+        vector_search_filter_owner_.reset();
+    }
+
+    const TargetBitmap*
+    GetVectorSearchBaseFilter() {
+        const auto& base_filter = vector_search_base_filter_view_;
+        if (!vector_search_base_filter_ && !base_filter.empty()) {
+            auto copied_filter =
+                std::make_unique<TargetBitmap>(base_filter.size(), false);
+            if (!base_filter.has_out_ids()) {
+                std::memcpy(copied_filter->data(),
+                            base_filter.data(),
+                            base_filter.byte_size());
+            } else {
+                for (size_t i = 0; i < base_filter.size(); ++i) {
+                    (*copied_filter)[i] = base_filter.test(i);
+                }
+            }
+            vector_search_base_filter_ = std::move(copied_filter);
+            vector_search_base_filter_view_ =
+                BitsetView(*vector_search_base_filter_);
+        }
+        return vector_search_base_filter_.get();
+    }
+
+    bool
+    CanSearchFilteredVectors() const {
+        return allow_filtered_vector_search_ &&
+               static_cast<bool>(filtered_vector_search_fn_);
+    }
+
+    // Synchronous ordinary top-k search. Serial callers may reuse the bitmap
+    // after releasing the result; each invocation gets a fresh BitsetView.
+    std::optional<std::unique_ptr<SearchResult>>
+    SearchFilteredVectors(const std::shared_ptr<TargetBitmap>& filter,
+                          int64_t topk) {
+        if (!filter || topk <= 0 || !CanSearchFilteredVectors()) {
+            return std::nullopt;
+        }
+        const auto* base = GetVectorSearchBaseFilter();
+        if (base && base->size() != filter->size()) {
+            return std::nullopt;
+        }
+        if (base) {
+            *filter |= *base;
+        }
+        auto result = std::make_unique<SearchResult>();
+        result->allow_filtered_vector_search_ = false;
+        result->vector_search_filter_owner_ = filter;
+        filtered_vector_search_fn_(BitsetView(*filter), topk, *result);
+        AssertInfo(!result->vector_iterators_.has_value(),
+                   "ordinary filtered search must not return iterators");
+        return result;
+    }
+
  public:
     int64_t total_nq_{0};
     int64_t unity_topK_{0};
@@ -322,6 +336,14 @@ struct SearchResult {
     // Sealed search requests keep publication blocked until the result is
     // deleted. Growing search results leave this empty.
     std::shared_ptr<segcore::SegmentReadLease> read_lease_;
+
+    // Request-pinned sealed read snapshot, captured once while the read lease
+    // is held. Result fill / export reuse it at the fill layer (FillTargetEntry
+    // / bulk_subscript / take) instead of re-capturing the published state per
+    // output field. Deeper column/index helpers (get_raw_data, PinIndex,
+    // HasFieldData, ...) may still self-capture; migrating them is a Phase 4
+    // follow-up. Growing and non-pinned paths leave this empty.
+    std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_;
 
     // Pins resources whose iterators or offset mappings may outlive the
     // original search call independently from segment snapshot publication.
@@ -364,15 +386,15 @@ struct SearchResult {
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
     std::vector<TargetBitmapPtr> pinned_bitsets_{};
-
-    bool
-    HasIterators() const {
-        return (element_level_ && element_iterators_.has_value()) ||
-               (!element_level_ && vector_iterators_.has_value());
-    }
+    FilteredVectorSearchFn filtered_vector_search_fn_{};
+    TargetBitmapPtr vector_search_base_filter_{};
+    BitsetView vector_search_base_filter_view_{};
+    std::shared_ptr<const void> vector_search_filter_owner_{};
+    bool allow_filtered_vector_search_{true};
 
     // For two-stage search: count of rows that pass the filter in this segment
     // Set to -1 when not applicable (normal search mode)

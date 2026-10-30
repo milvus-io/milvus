@@ -226,16 +226,18 @@ func TestClientWithDb(t *testing.T) {
 
 	listCollOpt := client.NewListCollectionOption()
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	newClientConfig := func(dbName string) *client.ClientConfig {
+		cfg := hp.GetDefaultClientConfig()
+		cfg.DBName = dbName
+		return cfg
+	}
 
 	// connect with not existed db
-	_, err := base.NewMilvusClient(ctx, &client.ClientConfig{Address: hp.GetAddr(), DBName: "dbName"})
+	_, err := base.NewMilvusClient(ctx, newClientConfig("dbName"))
 	common.CheckErr(t, err, false, "database not found")
 
 	// connect default db -> create a collection in default db
-	mcDefault, errDefault := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		// DBName:  common.DefaultDb,
-	})
+	mcDefault, errDefault := base.NewMilvusClient(ctx, newClientConfig(""))
 	common.CheckErr(t, errDefault, true)
 	_, defCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDefault, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	defCollections, _ := mcDefault.ListCollections(ctx, listCollOpt)
@@ -248,10 +250,7 @@ func TestClientWithDb(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// and connect with db
-	mcDb, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		DBName:  dbName,
-	})
+	mcDb, err := base.NewMilvusClient(ctx, newClientConfig(dbName))
 	common.CheckErr(t, err, true)
 	_, dbCol1 := hp.CollPrepare.CreateCollection(ctx, t, mcDb, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
@@ -265,10 +264,7 @@ func TestClientWithDb(t *testing.T) {
 	require.NotContains(t, defCollections, dbCol1.CollectionName)
 
 	// connect empty db (actually default db)
-	mcEmpty, err := base.NewMilvusClient(ctx, &client.ClientConfig{
-		Address: hp.GetAddr(),
-		DBName:  "",
-	})
+	mcEmpty, err := base.NewMilvusClient(ctx, newClientConfig(""))
 	common.CheckErr(t, err, true)
 	defCollections, _ = mcEmpty.ListCollections(ctx, listCollOpt)
 	require.Contains(t, defCollections, defCol1.CollectionName)

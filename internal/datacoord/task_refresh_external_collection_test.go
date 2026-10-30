@@ -911,6 +911,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 	})
 
 	t.Run("task_failed_on_worker", func(t *testing.T) {
+		paramtable.Init()
 		catalog := &stubCatalog{}
 		refreshMeta, err := newExternalCollectionRefreshMeta(context.Background(), catalog)
 		assert.NoError(t, err)
@@ -922,6 +923,7 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 			State:          indexpb.JobState_JobStateInProgress,
 			ExternalSource: "s3://bucket/path",
 			ExternalSpec:   "iceberg",
+			TaskIds:        []int64{1001, 1002},
 		}
 		err = refreshMeta.AddJob(job)
 		assert.NoError(t, err)
@@ -937,16 +939,26 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		}
 		err = refreshMeta.AddTask(protoTask)
 		assert.NoError(t, err)
+		// A failed task must terminate the job without waiting for siblings.
+		sibling := proto.Clone(protoTask).(*datapb.ExternalCollectionRefreshTask)
+		sibling.TaskId = 1002
+		assert.NoError(t, refreshMeta.AddTask(sibling))
 
 		alloc := &stubAllocator{nextID: 99999}
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc)
+		var failedJobs []int64
+		checker := newRefreshChecker(t.Context(), nil, refreshMeta, make(chan struct{}), nil, nil,
+			func(jobID int64) { failedJobs = append(failedJobs, jobID) }, nil, nil)
+		task.processFinishedJob = checker.processJobByID
 
 		cluster := &stubCluster{}
 
-		// Mock QueryRefreshExternalCollectionTask to return failed state
+		// Missing explore manifests surface as a worker failure, even when
+		// the native reader classifies the underlying error as transient.
+		failReason := "failed to read explore manifest: File not found: loon FFI transient error"
 		mockQuery := mockey.Mock((*stubCluster).QueryRefreshExternalCollectionTask).Return(&datapb.RefreshExternalCollectionTaskResponse{
 			State:      indexpb.JobState_JobStateFailed,
-			FailReason: "worker error",
+			FailReason: failReason,
 		}, nil).Build()
 		defer mockQuery.UnPatch()
 
@@ -955,7 +967,11 @@ func TestRefreshExternalCollectionTask_QueryTaskOnWorker(t *testing.T) {
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
-		assert.Contains(t, metaTask.GetFailReason(), "worker error")
+		assert.Equal(t, failReason, metaTask.GetFailReason())
+		assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState())
+		assert.Equal(t, failReason, refreshMeta.GetJob(1).GetFailReason())
+		assert.Equal(t, []int64{1}, failedJobs)
+		assert.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetTask(1002).GetState())
 	})
 
 	t.Run("task_finished_success", func(t *testing.T) {
@@ -1502,6 +1518,64 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
+}
+
+func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSegment(t *testing.T) {
+	// A replayed patch is not harmless: applyExternalRefreshPatch clears
+	// TextStatsLogs and JsonKeyStats unconditionally, so writing the same
+	// result twice discards a text index or JSON key stats built between the
+	// two applies and orphans their files. New segments have always had this
+	// short-circuit; patches need it for the same reason.
+	ctx := context.Background()
+	collectionID := int64(100)
+	segmentID := int64(10)
+	base := "files/insert_log/100/1/10"
+	catalog := &stubCatalog{}
+	mt := &meta{
+		collections: newTestCollections(collectionID),
+		segments:    NewSegmentsInfo(),
+		catalog:     catalog,
+	}
+
+	baseline := newTestExternalRefreshSegment(segmentID, collectionID, 100)
+	baseline.ManifestPath = packed.MarshalManifestPath(base, 1)
+	mt.segments.SetSegment(segmentID, NewSegmentInfo(baseline))
+
+	patch := proto.Clone(baseline).(*datapb.SegmentInfo)
+	patch.ManifestPath = packed.MarshalManifestPath(base, 2)
+	patch.SchemaVersion = 2
+
+	err := applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
+
+	// Model what the index wait exists to let happen: indexes built on the
+	// freshly patched segment.
+	indexed := mt.segments.GetSegment(segmentID).Clone()
+	indexed.TextStatsLogs = map[int64]*datapb.TextIndexStats{1: {FieldID: 1}}
+	indexed.JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {FieldID: 2}}
+	mt.segments.SetSegment(segmentID, indexed)
+	catalog.alteredSegments = nil
+
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+	assert.NoError(t, err)
+	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
+		"a replayed patch must not discard a text index built since the first apply")
+	assert.Contains(t, mt.segments.GetSegment(segmentID).GetJsonKeyStats(), int64(2))
+
+	// The short-circuit keys on the manifest, not on "seen before": a later
+	// refresh installs a strictly newer manifest and must still apply.
+	newer := proto.Clone(patch).(*datapb.SegmentInfo)
+	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
+	err = applyExternalCollectionSegmentUpdateForBaseline(
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+	assert.NoError(t, err)
+	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
+	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
+		"a genuine patch still invalidates the stats it supersedes")
 }
 
 func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {

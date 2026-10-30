@@ -90,23 +90,21 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		ChildManifestPaths: segment.GetChildManifestPaths(),
 		CommitTimestamp:    segment.GetCommitTimestamp(),
 		DataVersion:        segment.GetDataVersion(),
+		Stats:              segment.GetStats(),
+		TextStatsLogs:      segment.GetTextStatsLogs(),
+		JsonKeyStatsLogs:   segment.GetJsonKeyStats(),
 	}
 
-	// Deltalogs are always populated (delta log loading has its own manifest path)
+	// Preserve legacy deltalog metadata when available. Manifest-backed internal
+	// V3 loads resolve their own delta paths from the manifest.
 	loadInfo.Deltalogs = segment.Deltalogs
 
 	// When manifest_path is set, stats are stored in the manifest.
-	// Skip populating legacy stats fields, but keep JSON stats placeholders.
-	// QueryNode uses these placeholders to decide which manifest JSON stats are
-	// still valid for the segment before resolving the actual files from the
-	// manifest.
+	// Skip populating legacy stats fields. Text and JSON stats metadata stays in
+	// the load info so QueryNode can resolve the corresponding manifest entries.
 	if segment.GetManifestPath() == "" {
 		loadInfo.Statslogs = segment.Statslogs
 		loadInfo.Bm25Logs = segment.Bm25Statslogs
-		loadInfo.TextStatsLogs = segment.GetTextStatsLogs()
-		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
-	} else {
-		loadInfo.JsonKeyStatsLogs = segment.GetJsonKeyStats()
 	}
 
 	return loadInfo

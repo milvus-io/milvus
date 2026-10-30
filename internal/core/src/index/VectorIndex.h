@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstring>
+#include <limits>
 #include "common/FastMem.h"
 #include <map>
 #include <memory>
@@ -26,11 +27,11 @@
 
 #include "Utils.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/index/index.h"
 #include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
-#include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
 #include "common/OpContext.h"
@@ -47,9 +48,7 @@ class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
                          const MetricType& metric_type)
-        : IndexBase(index_type),
-          offset_mapping_(std::make_unique<milvus::GrowingOffsetMapping>()),
-          metric_type_(metric_type) {
+        : IndexBase(index_type), metric_type_(metric_type) {
     }
 
  public:
@@ -89,6 +88,12 @@ class VectorIndex : public IndexBase {
 
     virtual bool
     IsIndexRefineEnabled() const = 0;
+
+    virtual void
+    SetGrowingMapping() {
+        ThrowInfo(Unsupported,
+                  "growing mapping is not supported by this index");
+    }
 
     virtual knowhere::expected<knowhere::DataSetPtr>
     CalcDistByIDs(const knowhere::DataSetPtr query_dataset,
@@ -187,58 +192,115 @@ class VectorIndex : public IndexBase {
         return search_cfg;
     }
 
-    void
-    UpdateValidData(const bool* valid_data, int64_t count) {
-        auto* growing_mapping =
-            dynamic_cast<milvus::GrowingOffsetMapping*>(offset_mapping_.get());
-        AssertInfo(growing_mapping != nullptr,
-                   "cannot update growing valid data from sealed mapping");
-        growing_mapping->Append(valid_data, count);
-    }
-
-    void
-    BuildValidData(const bool* valid_data,
-                   int64_t total_count,
-                   const milvus::OffsetMappingBuildOptions& options = {}) {
-        auto sealed_mapping = std::make_unique<milvus::SealedOffsetMapping>();
-        sealed_mapping->Build(valid_data, total_count, options);
-        offset_mapping_ = std::move(sealed_mapping);
-    }
-
+    // Keep nullable mapping access behind Knowhere's semantic Index APIs.
     bool
     IsRowValid(int64_t logical_offset) const {
-        if (!offset_mapping_->IsEnabled()) {
-            return true;
-        }
-        return offset_mapping_->IsValid(logical_offset);
+        const auto result = GetNativeIndex().IsRowValid(logical_offset);
+        AssertInfo(result.has_value(),
+                   "failed to read row validity: {}",
+                   result.what());
+        return result.value();
+    }
+
+    void
+    ApplyValidDataByRange(int64_t logical_offset,
+                          int64_t count,
+                          TargetBitmapView valid_result) const {
+        AssertInfo(
+            count >= 0 && valid_result.size() == static_cast<size_t>(count),
+            "validity range result size mismatch");
+        const auto status =
+            GetNativeIndex().IntersectValidity(logical_offset,
+                                               static_cast<size_t>(count),
+                                               ValidityTarget(valid_result));
+        AssertInfo(status == knowhere::Status::success,
+                   "failed to apply validity range: {}",
+                   KnowhereStatusString(status));
+    }
+
+    void
+    ApplyValidDataByOffsets(const int64_t* offsets,
+                            int64_t count,
+                            TargetBitmapView valid_result) const {
+        AssertInfo(
+            count >= 0 && valid_result.size() == static_cast<size_t>(count),
+            "validity offset result size mismatch");
+        const auto status = GetNativeIndex().IntersectValidityAt(
+            offsets, static_cast<size_t>(count), ValidityTarget(valid_result));
+        AssertInfo(status == knowhere::Status::success,
+                   "failed to apply validity offsets: {}",
+                   KnowhereStatusString(status));
     }
 
     bool
     HasValidData() const {
-        return offset_mapping_->IsEnabled();
+        const auto result = GetNativeIndex().HasValidity();
+        AssertInfo(result.has_value(),
+                   "failed to inspect nullable validity: {}",
+                   result.what());
+        return result.value();
     }
 
     int64_t
     GetValidCount() const {
-        return offset_mapping_->GetValidCount();
+        const auto result = GetNativeIndex().ValidCount();
+        AssertInfo(result.has_value(),
+                   "failed to read valid count: {}",
+                   result.what());
+        return static_cast<int64_t>(result.value());
     }
 
     int64_t
-    GetPhysicalOffset(int64_t logical_offset) const {
-        return offset_mapping_->GetPhysicalOffset(logical_offset);
-    }
-
-    int64_t
-    GetLogicalOffset(int64_t physical_offset) const {
-        return offset_mapping_->GetLogicalOffset(physical_offset);
-    }
-
-    const milvus::OffsetMapping&
-    GetOffsetMapping() const {
-        return *offset_mapping_;
+    GetLogicalCount() const {
+        const auto result = GetNativeIndex().LogicalCount();
+        AssertInfo(result.has_value(),
+                   "failed to read logical count: {}",
+                   result.what());
+        return static_cast<int64_t>(result.value());
     }
 
  protected:
+    virtual const knowhere::Index<knowhere::IndexNode>&
+    GetNativeIndex() const = 0;
+
+    static knowhere::MutableBitmapView
+    ValidityTarget(TargetBitmapView view) {
+        if (view.size() == 0) {
+            return {};
+        }
+        const auto intra = view.offset() % 8;
+        AssertInfo(view.size() <= std::numeric_limits<size_t>::max() - intra,
+                   "validity window overflows");
+        const auto span = intra + view.size();
+        auto* bytes = reinterpret_cast<uint8_t*>(view.data());
+        AssertInfo(bytes != nullptr, "validity window data is null");
+        return {bytes + view.offset() / 8, span / 8 + (span % 8 != 0), intra};
+    }
+
+    void
+    CheckEmptyEmbListIds(const int64_t* ids,
+                         int64_t rows,
+                         int64_t fallback_list_count) const {
+        AssertInfo(rows >= 0, "emb list ids row count is negative");
+        if (rows == 0) {
+            return;
+        }
+        AssertInfo(ids != nullptr, "emb list ids are null");
+        const bool has_valid_data = HasValidData();
+        const auto logical_count =
+            has_valid_data ? GetLogicalCount() : fallback_list_count;
+        for (int64_t i = 0; i < rows; ++i) {
+            const auto id = ids[i];
+            AssertInfo(id >= 0 && id < logical_count,
+                       "emb list id {} out of range {}",
+                       id,
+                       logical_count);
+            if (has_valid_data) {
+                AssertInfo(IsRowValid(id), "emb list id {} is null", id);
+            }
+        }
+    }
+
     template <typename T>
     static std::vector<uint8_t>
     DecodeVectorByIdsResult(const knowhere::DataSetPtr& result) {
@@ -272,8 +334,6 @@ class VectorIndex : public IndexBase {
         std::vector<size_t> offsets(offsets_ptr, offsets_ptr + num_el_ids + 1);
         return {std::move(raw_data), std::move(offsets)};
     }
-
-    std::unique_ptr<milvus::OffsetMapping> offset_mapping_;
 
  private:
     MetricType metric_type_;

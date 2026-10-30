@@ -140,50 +140,6 @@ class InstrumentedLobColumnReader : public LobColumnReader {
     bool closed_{false};
 };
 
-class FailingLobColumnReader : public LobColumnReader {
- public:
-    explicit FailingLobColumnReader(arrow::Status status)
-        : status_(std::move(status)) {
-    }
-
-    arrow::Result<std::vector<uint8_t>>
-    ReadData(const uint8_t*, size_t) override {
-        return status_;
-    }
-
-    arrow::Result<std::vector<std::vector<uint8_t>>>
-    ReadBatchData(const std::vector<EncodedRef>&) override {
-        return status_;
-    }
-
-    arrow::Result<std::shared_ptr<arrow::BinaryArray>>
-    ReadArrowArray(const std::shared_ptr<arrow::BinaryArray>&) override {
-        return status_;
-    }
-
-    arrow::Result<std::vector<std::vector<uint8_t>>>
-    TakeData(const std::string&, const std::vector<int32_t>&) override {
-        return status_;
-    }
-
-    arrow::Status
-    Close() override {
-        return arrow::Status::OK();
-    }
-
-    bool
-    IsClosed() const override {
-        return false;
-    }
-
-    void
-    ClearCache() override {
-    }
-
- private:
-    arrow::Status status_;
-};
-
 TextLobReaderFactory
 MakeReaderFactory(std::shared_ptr<BlockingCallTracker> tracker,
                   std::shared_ptr<std::atomic<int>> factory_calls) {
@@ -270,30 +226,6 @@ ExpectTaskUsesCachedReaderLock(
     }
 }
 
-TEST(TextColumnCache, ReadTextSerializesCallsOnCachedReader) {
-    auto tracker = std::make_shared<BlockingCallTracker>();
-    auto factory_calls = std::make_shared<std::atomic<int>>(0);
-    auto cache = std::make_shared<TextColumnCache>(
-        TextColumnCacheConfig{}, MakeReaderFactory(tracker, factory_calls));
-    auto properties = std::make_shared<milvus_storage::api::Properties>();
-    const std::string lob_base_path = "/tmp/text-column-cache";
-    auto ref = std::make_shared<std::vector<uint8_t>>(MakeLobReference());
-    auto text = std::make_shared<std::string>();
-
-    auto cached_reader =
-        cache->GetOrCreateReader(lob_base_path, nullptr, *properties);
-    ASSERT_NE(cached_reader, nullptr);
-
-    ExpectTaskUsesCachedReaderLock(cached_reader, tracker, [=] {
-        *text = cache->ReadText(
-            lob_base_path, nullptr, *properties, ref->data(), ref->size());
-    });
-
-    EXPECT_EQ(*text, "mock-text");
-    EXPECT_EQ(factory_calls->load(std::memory_order_relaxed), 1);
-    EXPECT_EQ(tracker->CallCount(), 1);
-}
-
 TEST(TextColumnCache, ReadBatchSerializesCallsOnCachedReader) {
     auto tracker = std::make_shared<BlockingCallTracker>();
     auto factory_calls = std::make_shared<std::atomic<int>>(0);
@@ -372,35 +304,6 @@ TEST(TextColumnCache, PreservesStorageErrorWhenCreatingReader) {
         EXPECT_EQ(error.get_error_code(),
                   milvus::ErrorCode::StorageTransientError);
         EXPECT_NE(std::string(error.what()).find("storage timeout"),
-                  std::string::npos);
-    }
-}
-
-TEST(TextColumnCache, PreservesStorageErrorWhenReadingText) {
-    auto status = milvus_storage::MakeExtendError(
-        milvus_storage::ExtendStatusCode::AwsErrorAccessDenied,
-        "access denied");
-    TextColumnCache cache(
-        TextColumnCacheConfig{},
-        [status](std::shared_ptr<arrow::fs::FileSystem>, const LobColumnConfig&)
-            -> arrow::Result<std::unique_ptr<LobColumnReader>> {
-            std::unique_ptr<LobColumnReader> reader =
-                std::make_unique<FailingLobColumnReader>(status);
-            return reader;
-        });
-    milvus_storage::api::Properties properties;
-    auto ref = MakeLobReference();
-
-    try {
-        static_cast<void>(cache.ReadText("/tmp/text-column-cache",
-                                         nullptr,
-                                         properties,
-                                         ref.data(),
-                                         ref.size()));
-        FAIL() << "expected storage error";
-    } catch (const milvus::SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::StorageError);
-        EXPECT_NE(std::string(error.what()).find("access denied"),
                   std::string::npos);
     }
 }

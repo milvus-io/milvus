@@ -129,6 +129,16 @@ class ScalarIndex : public IndexBase {
     virtual TargetBitmap
     IsNotNull() = 0;
 
+    // Some indexes persist absolute null offsets independently of Count().
+    // They may override this to project validity into a caller-owned row
+    // space. The default keeps the capability explicit instead of guessing
+    // that an unknown tail is non-null.
+    virtual TargetBitmap
+    IsNotNull(int64_t /*row_count*/) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "row-count-aware IsNotNull is not supported");
+    }
+
     virtual const TargetBitmap
     InApplyFilter(size_t n,
                   const T* values,
@@ -157,6 +167,16 @@ class ScalarIndex : public IndexBase {
 
     virtual std::optional<T>
     Reverse_Lookup(size_t offset) const = 0;
+
+    // True iff per-row Reverse_Lookup is cheap (O(1)/O(log n)/O(strlen)).
+    // BITMAP without an offset cache reverse-looks-up in O(cardinality) per
+    // row, so it overrides this to reflect its offset-cache state. Callers
+    // that drive Reverse_Lookup once per row (e.g. bloom_match's index-only
+    // fallback) use this to avoid an O(rows * cardinality) scan.
+    virtual bool
+    SupportFastReverseLookup() const {
+        return true;
+    }
 
     virtual const TargetBitmap
     Query(const DatasetPtr& dataset);

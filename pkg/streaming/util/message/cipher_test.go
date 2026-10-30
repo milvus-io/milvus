@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
 // mockCipher is a simple mock implementation for testing
@@ -238,6 +240,68 @@ func TestGetDecryptorWithRetry_MaxBackoffCap(t *testing.T) {
 				"backoff %d should be around 3s, got %v", i, backoffs[i])
 		}
 	}
+}
+
+func TestDecodePayloadReturnsDecryptErrors(t *testing.T) {
+	origCipher := cipher
+	t.Cleanup(func() { cipher = origCipher })
+
+	encodedHeader, err := EncodeProto(&messagespb.CipherHeader{
+		EzId:         1,
+		CollectionId: 10,
+		SafeKey:      []byte("safe-key"),
+	})
+	assert.NoError(t, err)
+	msg := &messageImpl{
+		payload: []byte("ciphertext"),
+		properties: propertiesImpl{
+			messageCipherHeader: encodedHeader,
+		},
+	}
+
+	t.Run("cipher unavailable", func(t *testing.T) {
+		cipher = nil
+		_, err := DecodePayload(context.Background(), msg)
+		assert.ErrorContains(t, err, "cipher not registered")
+	})
+
+	t.Run("get decryptor", func(t *testing.T) {
+		expected := errors.New("decryptor unavailable")
+		cipher = &mockCipher{
+			getDecryptorFunc: func(int64, int64, []byte) (hook.Decryptor, error) {
+				return nil, expected
+			},
+		}
+		_, err := DecodePayload(context.Background(), msg)
+		assert.ErrorIs(t, err, expected)
+	})
+
+	t.Run("decrypt", func(t *testing.T) {
+		expected := errors.New("decrypt failed")
+		cipher = &mockCipher{
+			getDecryptorFunc: func(int64, int64, []byte) (hook.Decryptor, error) {
+				return &mockDecryptor{
+					decryptFunc: func([]byte) ([]byte, error) {
+						return nil, expected
+					},
+				}, nil
+			},
+		}
+		_, err := DecodePayload(context.Background(), msg)
+		assert.ErrorIs(t, err, expected)
+	})
+
+	t.Run("context canceled during retry", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cipher = &mockCipher{
+			getDecryptorFunc: func(int64, int64, []byte) (hook.Decryptor, error) {
+				cancel()
+				return nil, ErrKmsKeyInvalid
+			},
+		}
+		_, err := DecodePayload(ctx, msg)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 func TestIsKmsKeyInvalidError(t *testing.T) {

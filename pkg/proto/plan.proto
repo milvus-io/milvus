@@ -60,6 +60,10 @@ message GenericValue {
     double float_val = 3;
     string string_val = 4;
     Array array_val = 5;
+    // Raw binary payload, carried from a schemapb.TemplateValue.bytes_val. Used
+    // to pass a client pre-built membership-filter blob into an expression
+    // (e.g. membership_match with type=bloom) without base64-inflating a string field.
+    bytes bytes_val = 6;
   };
 }
 
@@ -297,6 +301,21 @@ message TimestamptzArithCompareExpr {
   GenericValue compare_value = 5;
 }
 
+message BloomFilterExpr {
+  ColumnInfo column_info = 1;
+  // MBF1-enveloped Parquet Split-Block Bloom Filter blob (see design doc 20260707).
+  bytes filter_blob = 2;
+}
+
+message RoaringFilterExpr {
+  ColumnInfo column_info = 1;
+  // MRB1-enveloped portable Roaring64 bitmap for exact signed-integer
+  // membership (see design doc 20260714). Unlike bloom_filter_expr this is
+  // exact: it has no false positives, and its size follows the value
+  // distribution rather than the member count alone.
+  bytes bitmap_blob = 2;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -319,6 +338,8 @@ message Expr {
     TimestamptzArithCompareExpr timestamptz_arith_compare_expr = 18;
     ElementFilterExpr element_filter_expr = 19;
     MatchExpr match_expr = 21;
+    BloomFilterExpr bloom_filter_expr = 22;
+    RoaringFilterExpr roaring_filter_expr = 23;
   };
   bool is_template = 20;
 }

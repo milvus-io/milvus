@@ -28,7 +28,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
@@ -64,14 +64,6 @@ class BaseConfig {
         }
     }
 
-    virtual bool
-    IsValueExists(const std::string& key) const = 0;
-
-    virtual const std::unordered_map<std::string, std::string>&
-    values() const {
-        ThrowInfo(NotImplemented, "method values() is not supported");
-    }
-
     virtual ~BaseConfig() = default;
 };
 
@@ -99,26 +91,12 @@ class MemConfig : public BaseConfig {
         return val;
     }
 
-    bool
-    IsValueExists(const std::string& key) const override {
-        return values_.find(key) != values_.end();
-    }
-
-    const std::unordered_map<std::string, std::string>&
-    values() const override {
-        return values_;
-    }
-
  private:
     std::unordered_map<std::string, std::string> values_;
 };
 
 class QueryConfig : public MemConfig {
  public:
-    // Whether to use the simplified expression evaluation path. False by default.
-    static constexpr const char* kExprEvalSimplified =
-        "expression.eval_simplified";
-
     static constexpr const char* kExprEvalBatchSize =
         "expression.eval_batch_size";
 
@@ -128,11 +106,6 @@ class QueryConfig : public MemConfig {
     }
 
     QueryConfig() = default;
-
-    bool
-    get_expr_eval_simplified() const {
-        return BaseConfig::Get<bool>(kExprEvalSimplified, false);
-    }
 
     int64_t
     get_expr_batch_size() const {
@@ -212,11 +185,6 @@ class QueryContext : public Context {
         return executor_;
     }
 
-    const std::unordered_map<std::string, std::shared_ptr<Config>>&
-    connector_configs() const {
-        return connector_configs_;
-    }
-
     std::shared_ptr<QueryConfig>
     query_config() const {
         return query_config_;
@@ -288,16 +256,6 @@ class QueryContext : public Context {
     }
 
     void
-    set_retrieve_result(milvus::RetrieveResult&& result) {
-        retrieve_result_ = std::move(result);
-    }
-
-    milvus::RetrieveResult&&
-    get_retrieve_result() {
-        return std::move(retrieve_result_);
-    }
-
-    void
     set_op_context(milvus::OpContext* op_context) {
         op_context_ = op_context;
     }
@@ -328,13 +286,32 @@ class QueryContext : public Context {
     }
 
     void
-    set_array_offsets(std::shared_ptr<const IArrayOffsets> offsets) {
-        array_offsets_ = std::move(offsets);
+    set_struct_element_offsets(
+        std::shared_ptr<const IStructElementOffsets> offsets) {
+        struct_element_offsets_ = std::move(offsets);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    get_array_offsets() const {
-        return array_offsets_;
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets() const {
+        return struct_element_offsets_;
+    }
+
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets(FieldId field_id) const {
+        return read_snapshot_
+                   ? read_snapshot_->GetStructElementOffsets(field_id)
+                   : segment_->GetStructElementOffsets(field_id);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const {
+        if (read_snapshot_) {
+            auto schema = read_snapshot_->get_schema_snapshot();
+            AssertInfo(schema != nullptr,
+                       "query read snapshot must provide a non-null schema");
+            return schema;
+        }
+        return segment_->get_schema_snapshot();
     }
 
     void
@@ -345,24 +322,6 @@ class QueryContext : public Context {
     int64_t
     get_active_element_count() const {
         return active_element_count_;
-    }
-
-    void
-    set_element_level_bitset(TargetBitmap&& bitset) {
-        element_level_bitset_ = std::move(bitset);
-    }
-
-    std::optional<TargetBitmap>
-    get_element_level_bitset() {
-        if (element_level_bitset_.has_value()) {
-            return std::move(element_level_bitset_.value());
-        }
-        return std::nullopt;
-    }
-
-    bool
-    has_element_level_bitset() const {
-        return element_level_bitset_.has_value();
     }
 
     void
@@ -408,10 +367,19 @@ class QueryContext : public Context {
         return enable_sub_expr_cache_write_;
     }
 
+    void
+    set_read_snapshot(std::shared_ptr<const segcore::SegmentReadSnapshot> s) {
+        read_snapshot_ = std::move(s);
+    }
+
+    std::shared_ptr<const segcore::SegmentReadSnapshot>
+    get_read_snapshot() const {
+        return read_snapshot_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
-    std::unordered_map<std::string, std::shared_ptr<Config>> connector_configs_;
     std::shared_ptr<QueryConfig> query_config_;
     std::string query_id_;
 
@@ -429,9 +397,8 @@ class QueryContext : public Context {
     milvus::SearchInfo search_info_;
     const query::PlaceholderGroup* placeholder_group_;
 
-    // used for store segment search/retrieve result
+    // used for store segment search result
     milvus::SearchResult search_result_;
-    milvus::RetrieveResult retrieve_result_;
 
     // used for save op context
     milvus::OpContext* op_context_{nullptr};
@@ -441,13 +408,19 @@ class QueryContext : public Context {
     query::PlanOptions plan_options_;
 
     std::string struct_name_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
-    std::optional<TargetBitmap> element_level_bitset_;
     // Whether the current bitset has been converted to element-level.
     // Set by element-level filter/search operators after row-to-element
     // conversion.
     bool bitset_is_element_level_{false};
+
+    // Request-scoped sealed read snapshot, captured exactly once in
+    // ExecPlanNodeVisitor::visit() while the request read lease is held.
+    // Expressions borrow the raw pointer at construction; the shared_ptr here
+    // is the single owner for the whole ExecuteTask.
+    std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_{nullptr};
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};

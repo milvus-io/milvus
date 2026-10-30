@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -85,7 +84,30 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 	return cr, nil
 }
 
+// wrapParquetErr classifies a failure raised while decoding one column's data.
+//
+// A Milvus error keeps its code and retry class: the retryable reader in front
+// of the decoder maps transient object-store faults to typed IO errors, and
+// Arrow wraps them with %w, so a persistent outage must stay retriable. Any
+// other error is a property of the immutable file -- a corrupt data page, a
+// bad dictionary, an invalid JSON/WKT value -- which a retry cannot fix, so it
+// becomes a terminal input error like the header/footer checks.
+func wrapParquetErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if merr.IsMilvusError(err) {
+		return err
+	}
+	return common.WrapDecodeErr(err, "read parquet column data")
+}
+
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	data, validData, err := c.next(count)
+	return data, validData, wrapParquetErr(err)
+}
+
+func (c *FieldReader) next(count int64) (any, any, error) {
 	// Check if this FieldReader wraps a StructFieldReader
 	if c.structReader != nil {
 		return c.structReader.Next(count)
@@ -211,15 +233,14 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if c.field.GetNullable() {
 			return ReadNullableFloatVectorData(c, count)
 		}
-		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
+		data, err := ReadIntegerOrFloatFlatData[float32](c, count)
 		if err != nil {
 			return nil, nil, err
 		}
-		if arrayData == nil {
+		if data == nil {
 			return nil, nil, nil
 		}
-		vectors := lo.Flatten(arrayData.([][]float32))
-		return vectors, nil, typeutil.VerifyFloats32(vectors)
+		return data, nil, typeutil.VerifyFloats32(data)
 	case schemapb.DataType_SparseFloatVector:
 		if c.field.GetNullable() {
 			return ReadNullableSparseFloatVectorData(c, count)
@@ -230,15 +251,14 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if c.field.GetNullable() {
 			return ReadNullableInt8VectorData(c, count)
 		}
-		arrayData, err := ReadIntegerOrFloatArrayData[int8](c, count)
+		data, err := ReadIntegerOrFloatFlatData[int8](c, count)
 		if err != nil {
 			return nil, nil, err
 		}
-		if arrayData == nil {
+		if data == nil {
 			return nil, nil, nil
 		}
-		vectors := lo.Flatten(arrayData.([][]int8))
-		return vectors, nil, nil
+		return data, nil, nil
 	case schemapb.DataType_Array:
 		// array has not supported default_value
 		if c.field.GetNullable() {
@@ -761,13 +781,12 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 
 	// 2. Initialize the target array for internal int64 timestamps (UTC microseconds).
 	int64Ts := make([]int64, 0, len(data))
-	defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
 
 	// 3. Iterate over the string array and convert each timestamp.
 	for i, strValue := range data {
 		// Check the validity mask: If it's null, append the zero value (0) and continue.
 		if !validData[i] {
-			int64Ts = append(int64Ts, defaultValue)
+			int64Ts = append(int64Ts, 0)
 			continue
 		}
 
@@ -779,6 +798,10 @@ func ReadNullableTimestamptzData(pcr *FieldReader, count int64) (any, []bool, er
 			return nil, nil, err
 		}
 		int64Ts = append(int64Ts, tz)
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue := pcr.field.GetDefaultValue().GetTimestamptzData()
+		return fillWithDefaultValueImpl(int64Ts, defaultValue, validData, pcr.field)
 	}
 	return int64Ts, validData, nil
 }
@@ -820,22 +843,23 @@ func ReadNullableGeometryData(pcr *FieldReader, count int64) (any, []bool, error
 	if data == nil {
 		return nil, nil, nil
 	}
-	wkbValues := make([][]byte, 0)
-	defaultValueStr := pcr.field.GetDefaultValue().GetStringData()
-	defaultValue := []byte(nil)
-	if defaultValueStr != "" {
-		defaultValue, _ = pkgcommon.ConvertWKTToWKB(defaultValueStr)
-	}
+	wkbValues := make([][]byte, len(data))
 	for i, wktValue := range data {
 		if !validData[i] {
-			wkbValues = append(wkbValues, defaultValue)
 			continue
 		}
 		wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 		if err != nil {
 			return nil, nil, err
 		}
-		wkbValues = append(wkbValues, wkbValue)
+		wkbValues[i] = wkbValue
+	}
+	if pcr.field.GetDefaultValue() != nil {
+		defaultValue, err := pkgcommon.ConvertWKTToWKB(pcr.field.GetDefaultValue().GetStringData())
+		if err != nil {
+			return nil, nil, merr.WrapErrImportSysFailedMsg("invalid default value for geometry field %s", pcr.field.GetName())
+		}
+		return fillWithDefaultValueImpl(wkbValues, defaultValue, validData, pcr.field)
 	}
 	return wkbValues, validData, nil
 }
@@ -1068,7 +1092,7 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 	case arrow.INT32:
 		indicesList := indicesList.ListValues().(*array.Int32)
 		getIndexFunc = func(position int) uint32 {
-			return (uint32)(indicesList.Value(position))
+			return uint32(indicesList.Value(position))
 		}
 	case arrow.UINT32:
 		indicesList := indicesList.ListValues().(*array.Uint32)
@@ -1078,12 +1102,12 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 	case arrow.INT64:
 		indicesList := indicesList.ListValues().(*array.Int64)
 		getIndexFunc = func(position int) uint32 {
-			return (uint32)(indicesList.Value(position))
+			return uint32(indicesList.Value(position))
 		}
 	case arrow.UINT64:
 		indicesList := indicesList.ListValues().(*array.Uint64)
 		getIndexFunc = func(position int) uint32 {
-			return (uint32)(indicesList.Value(position))
+			return uint32(indicesList.Value(position))
 		}
 	default:
 		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: index type must be uint32/int32/uint64/int64 but actual type is '%s'", indicesListType.Elem().Name())
@@ -1100,7 +1124,7 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 	case arrow.FLOAT64:
 		valuesList := valuesList.ListValues().(*array.Float64)
 		getValueFunc = func(position int) float32 {
-			return (float32)(valuesList.Value(position))
+			return float32(valuesList.Value(position))
 		}
 	default:
 		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: value type must be float32 or float64 but actual type is '%s'", valuesListType.Elem().Name())
@@ -1109,8 +1133,8 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 
 	start, end := indicesList.ValueOffsets(row)
 	start2, end2 := valuesList.ValueOffsets(row)
-	rowLen := (int)(end - start)
-	rowLenValues := (int)(end2 - start2)
+	rowLen := int(end - start)
+	rowLenValues := int(end2 - start2)
 	if rowLenValues != rowLen {
 		msg := fmt.Sprintf("Invalid parquet struct for SparseFloatVector: number of elements of 'indices' and 'values' mismatched, '%d' vs '%d'", rowLen, rowLenValues)
 		return nil, 0, merr.WrapErrImportFailed(msg)
@@ -1119,8 +1143,8 @@ func parseSparseFloatVectorStructRow(st map[string]arrow.Array, row int) ([]byte
 	rowIndices := make([]uint32, rowLen)
 	rowValues := make([]float32, rowLen)
 	for i := start; i < end; i++ {
-		rowIndices[i-start] = getIndexFunc((int)(i))
-		rowValues[i-start] = getValueFunc((int)(i))
+		rowIndices[i-start] = getIndexFunc(int(i))
+		rowValues[i-start] = getValueFunc(int(i))
 	}
 
 	// ensure the indices is sorted
@@ -1436,6 +1460,39 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 	return data, nil
 }
 
+// ReadIntegerOrFloatFlatData reads list-like vector columns directly into one
+// flat slice, avoiding the per-row slices and the flatten pass.
+func ReadIntegerOrFloatFlatData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) ([]T, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]T, 0, int(count)*pcr.dim)
+
+	for _, chunk := range chunked.Chunks() {
+		if chunk.NullN() > 0 {
+			return nil, WrapNullRowErr(pcr.field)
+		}
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, err
+		}
+		dataType := pcr.field.GetDataType()
+		if typeutil.IsVectorType(dataType) {
+			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
+			}
+		}
+		if data, err = appendFlatIntegerOrFloatListLike(pcr.field, listReader, data); err != nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
+}
+
 func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) (any, []bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -1543,30 +1600,6 @@ func isFP16BF16FloatArrowType(dataType arrow.DataType) bool {
 	}
 }
 
-func readFloatListLikeDataAsFloat32(field *schemapb.FieldSchema, listReader *listLikeArray, outputArray func(arr []float32, valid bool)) error {
-	valueReader := listReader.ListValues()
-	switch valueReader.DataType().ID() {
-	case arrow.FLOAT32:
-		float32Reader := valueReader.(*array.Float32)
-		return getListLikeArrayData(listReader, func(i int) (float32, error) {
-			if float32Reader.IsNull(i) {
-				return 0, WrapNullElementErr(field)
-			}
-			return float32Reader.Value(i), nil
-		}, outputArray)
-	case arrow.FLOAT64:
-		float64Reader := valueReader.(*array.Float64)
-		return getListLikeArrayData(listReader, func(i int) (float32, error) {
-			if float64Reader.IsNull(i) {
-				return 0, WrapNullElementErr(field)
-			}
-			return float32(float64Reader.Value(i)), nil
-		}, outputArray)
-	default:
-		return WrapTypeErr(field, valueReader.DataType().Name())
-	}
-}
-
 func ReadFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -1584,13 +1617,11 @@ func ReadFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, error) {
 		if err = checkListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
 			return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
-		floatRows := make([][]float32, 0, int(count))
-		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
-			floatRows = append(floatRows, arr)
-		}); err != nil {
+		floatFlat := make([]float32, 0, listReader.Len()*pcr.dim)
+		if floatFlat, err = appendFlatFloatListLikeDataAsFloat32(pcr.field, listReader, floatFlat); err != nil {
 			return nil, err
 		}
-		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(lo.Flatten(floatRows), pcr.field.GetDataType())
+		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(floatFlat, pcr.field.GetDataType())
 		if err != nil {
 			return nil, err
 		}
@@ -1622,16 +1653,11 @@ func ReadNullableFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, []
 		if err = checkNullableListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
 			return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
-		floatRows := make([][]float32, 0, int(count))
-		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
-			validData = append(validData, valid)
-			if valid {
-				floatRows = append(floatRows, arr)
-			}
-		}); err != nil {
+		floatFlat := make([]float32, 0, listReader.Len()*pcr.dim)
+		if floatFlat, validData, err = appendFlatNullableFloatListLikeDataAsFloat32(pcr.field, listReader, floatFlat, validData); err != nil {
 			return nil, nil, err
 		}
-		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(lo.Flatten(floatRows), pcr.field.GetDataType())
+		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(floatFlat, pcr.field.GetDataType())
 		if err != nil {
 			return nil, nil, err
 		}

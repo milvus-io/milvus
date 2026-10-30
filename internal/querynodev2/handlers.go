@@ -85,19 +85,22 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			}
 			if len(segmentInfo.GetBinlogs()) > 0 || segmentInfo.GetManifestPath() != "" {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
-					SegmentID:      segmentInfo.ID,
-					Level:          segmentInfo.GetLevel(),
-					PartitionID:    segmentInfo.PartitionID,
-					CollectionID:   segmentInfo.CollectionID,
-					BinlogPaths:    segmentInfo.Binlogs,
-					NumOfRows:      segmentInfo.NumOfRows,
-					Statslogs:      segmentInfo.Statslogs,
-					Deltalogs:      segmentInfo.Deltalogs,
-					Bm25Logs:       segmentInfo.Bm25Statslogs,
-					InsertChannel:  segmentInfo.InsertChannel,
-					StartPosition:  segmentInfo.GetStartPosition(),
-					StorageVersion: segmentInfo.GetStorageVersion(),
-					ManifestPath:   segmentInfo.GetManifestPath(),
+					SegmentID:        segmentInfo.ID,
+					Level:            segmentInfo.GetLevel(),
+					PartitionID:      segmentInfo.PartitionID,
+					CollectionID:     segmentInfo.CollectionID,
+					BinlogPaths:      segmentInfo.Binlogs,
+					NumOfRows:        segmentInfo.NumOfRows,
+					Statslogs:        segmentInfo.Statslogs,
+					Deltalogs:        segmentInfo.Deltalogs,
+					Bm25Logs:         segmentInfo.Bm25Statslogs,
+					TextStatsLogs:    segmentInfo.GetTextStatsLogs(),
+					JsonKeyStatsLogs: segmentInfo.GetJsonKeyStats(),
+					InsertChannel:    segmentInfo.InsertChannel,
+					StartPosition:    segmentInfo.GetStartPosition(),
+					StorageVersion:   segmentInfo.GetStorageVersion(),
+					ManifestPath:     segmentInfo.GetManifestPath(),
+					Stats:            segmentInfo.GetStats(),
 				})
 			} else {
 				mlog.Info(ctx, "skip segment which has no binlog and no manifest path",
@@ -226,6 +229,9 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	if err != nil {
 		return nil, err
 	}
+	// The delegator fixed this snapshot before querying any segments. Reading
+	// tSafe again here could report a newer snapshot than the returned data.
+	resp.MvccTimestamp = req.GetReq().GetMvccTimestamp()
 	// aggregate cost
 	requestCosts := lo.FilterMap(results, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
 		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
@@ -258,6 +264,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), queryLabel, metrics.SuccessLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
+	resp.Status = merr.Success()
 	return resp, nil
 }
 

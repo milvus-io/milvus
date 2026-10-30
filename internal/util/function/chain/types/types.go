@@ -139,10 +139,19 @@ type FunctionArgValidator interface {
 	ValidateArgs(args []*schemapb.FunctionChainExprArg) error
 }
 
-// FunctionBuildContext contains runtime-only context used while constructing a FunctionExpr.
+// SearchRuntimeInfo contains runtime-only facts about the search inputs used
+// while constructing a function chain. MetricTypes are ordered exactly like
+// the DataFrames passed to multi-input operators.
+type SearchRuntimeInfo struct {
+	MetricTypes []string
+}
+
+// FunctionBuildContext contains runtime-only context used while constructing a
+// FunctionExpr or a context-aware operator.
 // It is not serialized in public FunctionChain proto params.
 type FunctionBuildContext struct {
 	ModelExtraInfo *models.ModelExtraInfo
+	Search         *SearchRuntimeInfo
 }
 
 // FunctionConfig contains the public function expression configuration from FunctionChain proto.

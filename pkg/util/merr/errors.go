@@ -82,6 +82,9 @@ var (
 	ErrCollectionReplicateMode         = newMilvusError("can't operate on the collection under standby mode", 108, false, WithErrorType(InputError))
 	ErrCollectionSchemaMismatch        = newMilvusError("collection schema mismatch", 109, false, WithErrorType(InputError))
 	ErrCollectionSchemaVersionNotReady = newMilvusError("collection schema version not ready", 110, true)
+	// ErrCollectionPartialUpdateConflict prevents clients from automatically
+	// replaying non-idempotent relative updates after a CAS rejection.
+	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
@@ -219,7 +222,7 @@ var (
 
 	// field related
 	ErrFieldNotFound    = newMilvusError("field not found", 1700, false) // SystemError by default; proxy boundaries stamp InputError where the field name is user-supplied (e.g. group_by/anns field), while result-assembly lookups stay system.
-	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
+	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false, WithErrorType(InputError))
 
 	// high-level restful api related
 	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false, WithErrorType(InputError))

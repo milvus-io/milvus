@@ -176,7 +176,7 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface
 	return handleExprInternal(schema, exprStr, &ParserVisitorArgs{})
 }
 
-func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
 	ret := handleExprInternal(schema, exprStr, visitorArgs)
 
 	if err := getError(ret); err != nil {
@@ -201,17 +201,37 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 		}
 	}
 
+	return predicate.expr, nil
+}
+
+func ParseExprTemplate(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	if visitorArgs == nil {
+		visitorArgs = &ParserVisitorArgs{}
+	}
+	return parseExprTemplateInner(schema, exprStr, visitorArgs)
+}
+
+func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
+	expr, err := parseExprTemplateInner(schema, exprStr, visitorArgs)
+	if err != nil {
+		return nil, err
+	}
+
 	valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := FillExpressionValue(predicate.expr, valueMap); err != nil {
+	var membershipBudget *MembershipPreflightBudget
+	if visitorArgs != nil {
+		membershipBudget = visitorArgs.MembershipBudget
+	}
+	if err := fillExpressionValueWithBudgetAndSchema(expr, valueMap, membershipBudget, schema); err != nil {
 		return nil, err
 	}
 
-	predicate.expr = rewriter.RewriteExpr(predicate.expr)
-	return predicate.expr, nil
+	expr = rewriter.RewriteExpr(expr)
+	return expr, nil
 }
 
 func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.Expr, error) {
@@ -268,6 +288,14 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 }
 
 func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore, visitorArgs *ParserVisitorArgs) (*planpb.PlanNode, error) {
+	if visitorArgs == nil {
+		visitorArgs = &ParserVisitorArgs{}
+	}
+	// One budget for the whole plan: the main predicate below and every scorer
+	// filter parsed further down must share the quota and the validation cache.
+	if visitorArgs.MembershipBudget == nil {
+		visitorArgs.MembershipBudget = NewMembershipPreflightBudget()
+	}
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
@@ -329,7 +357,7 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		return nil, merr.WrapErrQueryPlanMsg("unsupported vector data type: %v", dataType)
 	}
 
-	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
+	scorers, options, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues, visitorArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -420,16 +448,19 @@ func setBoostType(schema *typeutil.SchemaHelper, scorer *planpb.ScoreFunction, p
 	return nil
 }
 
-func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.ScoreFunction, error) {
+func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.ScoreFunction, error) {
 	rerankerName := rerank.GetRerankName(function)
 	switch rerankerName {
 	case rerank.BoostName:
 		scorer := &planpb.ScoreFunction{}
 		filter, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.FilterKey, function.GetParams())
 		if ok {
-			expr, err := ParseExpr(schema, filter, exprTemplateValues)
+			expr, err := parseExprInner(schema, filter, exprTemplateValues, visitorArgs)
 			if err != nil {
-				return nil, merr.WrapErrQueryPlan(err, "parse expr failed")
+				// merr.Wrap, not WrapErrQueryPlan: the latter replaces the inner
+				// code, so an over-limit scorer filter surfaced as 2201 while the
+				// identical main predicate surfaced as 1102.
+				return nil, merr.Wrap(err, "parse scorer filter failed")
 			}
 			scorer.Filter = expr
 		}
@@ -483,11 +514,11 @@ func ParseFunctionMode(s string) (planpb.FunctionMode, error) {
 	}
 }
 
-func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, *planpb.ScoreOption, error) {
+func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) ([]*planpb.ScoreFunction, *planpb.ScoreOption, error) {
 	scorers := []*planpb.ScoreFunction{}
 	for _, function := range functionScore.GetFunctions() {
 		// create scorer for search plan
-		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues)
+		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues, visitorArgs)
 		if err != nil {
 			return nil, nil, err
 		}

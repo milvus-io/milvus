@@ -203,6 +203,9 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 		used[idx] = true
 	}
 	for _, g := range groups {
+		if len(g.lowers)+len(g.uppers) == 1 {
+			continue
+		}
 		// Use the effective type stored in the group
 		var bestLower *bound
 		for i := range g.lowers {
@@ -962,6 +965,11 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 				mergedLowerInc := first.lowerInc
 				mergedUpper := second.upper
 				mergedUpperInc := second.upperInc
+
+				// Lower bound: same value, prefer inclusive
+				if cmpGeneric(g.effDt, first.lower, second.lower) == 0 && second.lowerInc {
+					mergedLowerInc = true
+				}
 
 				// Upper bound: take maximum
 				cmpUppers := cmpGeneric(g.effDt, first.upper, second.upper)

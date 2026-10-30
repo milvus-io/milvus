@@ -98,13 +98,14 @@ std::shared_ptr<milvus::rescores::Scorer>
 ParseScorer(milvus::query::Plan* plan,
             const void* serialized_score_function,
             int64_t serialized_score_function_size) {
-    milvus::proto::plan::ScoreFunction score_function;
-    auto ok = score_function.ParseFromArray(serialized_score_function,
-                                            serialized_score_function_size);
+    auto score_function =
+        std::make_unique<milvus::proto::plan::ScoreFunction>();
+    auto ok = score_function->ParseFromArray(serialized_score_function,
+                                             serialized_score_function_size);
     AssertInfo(ok, "failed to parse score function");
 
     milvus::query::ProtoParser parser(plan->schema_);
-    return parser.ParseScorer(score_function);
+    return parser.ParseScorer(std::move(score_function));
 }
 
 OffsetChunks

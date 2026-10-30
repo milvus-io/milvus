@@ -62,7 +62,7 @@
 namespace milvus::segcore::storagev2translator {
 
 // See GroupChunkTranslator.cpp for explanation of g_mmap_path_generation.
-static std::atomic<uint64_t> g_mmap_path_generation{0};
+static std::atomic<uint64_t> g_manifest_mmap_path_generation{0};
 
 ColumnSizeEstimateResult
 FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader) {
@@ -93,7 +93,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     const std::string& cache_key_suffix,
     int64_t fallback_bytes_per_row,
     std::string shard,
-    std::optional<ColumnSizeEstimateResult> column_size_estimate)
+    std::optional<ColumnSizeEstimateResult> column_size_estimate,
+    MmapChunkWritebackMode writeback_mode)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -145,6 +146,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                        return field.second.get_data_type() ==
                                               DataType::ARRAY;
                                    })),
+      writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
@@ -456,7 +458,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
         meta_.chunk_memory_size_.push_back(cell_size);
     }
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} merged {} row groups into {} cells "
         "(cell_target_size_bytes={})",
         key_,
@@ -575,7 +577,7 @@ ManifestGroupTranslator::get_cells(
                 tables, static_cast<milvus::cachinglayer::cid_t>(cid));
         });
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[StorageV2] translator {} submits {} batch tasks for manifest "
         "column group {}",
         key_,
@@ -722,8 +724,8 @@ ManifestGroupTranslator::load_group_chunk(
     } else {
         // Mmap mode — use unique generation suffix to avoid truncating files
         // that old MAP_SHARED mmaps still reference (see #48658).
-        auto gen =
-            g_mmap_path_generation.fetch_add(1, std::memory_order_relaxed);
+        auto gen = g_manifest_mmap_path_generation.fetch_add(
+            1, std::memory_order_relaxed);
         std::filesystem::path filepath;
         switch (group_chunk_type_) {
             case GroupChunkType::DEFAULT:
@@ -757,10 +759,11 @@ ManifestGroupTranslator::load_group_chunk(
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_);
+                                    load_priority_,
+                                    writeback_mode_);
     }
 
-    return std::make_unique<milvus::GroupChunk>(chunks);
+    return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }
 
 int64_t

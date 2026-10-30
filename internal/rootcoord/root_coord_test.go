@@ -117,6 +117,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
+			ctx:              context.Background(),
 			catalog:          rootcoord.NewCatalog(catalogKV),
 			names:            testDB,
 			aliases:          newNameDb(),
@@ -155,7 +156,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-		msg = msg.WithBroadcastID(1)
+		// Stamp the header the way the real broadcaster does, control channel included.
+		msg = msg.OverwriteBroadcastHeader(1)
+		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
@@ -1786,10 +1789,6 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
 	assert.NoError(t, err)
 	assert.Equal(t, priv, util.AnyWord)
-
-	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
-	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
-	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {
@@ -2272,6 +2271,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
 			clientAdded = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientAdded)
 		})
@@ -2290,6 +2290,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
 		})
@@ -2307,6 +2308,19 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 
 		c := newTestCore()
 		c.proxyClientManager = proxyManager
+		c.addProxyClient(session)
+	})
+
+	t.Run("empty resources", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+		observer.EXPECT().IsEmpty().Return(true)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
 		c.addProxyClient(session)
 	})
 }
@@ -2334,6 +2348,26 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetResources())
+	})
+}
+
+func TestRootCoord_GetFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := []*internalpb.FileResourceInfo{{Id: 1, Name: "test", Path: "test_path"}}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(expected, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
 	})
 }
 

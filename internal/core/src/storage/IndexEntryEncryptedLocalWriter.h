@@ -68,6 +68,11 @@ class IndexEntryEncryptedLocalWriter : public IndexEntryWriter {
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
     int64_t ez_id_;
     int64_t collection_id_;
+    // The DEK that produced edek_. Every slice of this file must be encrypted
+    // with it: the plugin mints a fresh DEK on each GetEncryptor() call, and
+    // only edek_ is persisted in the directory table, so a per-slice encryptor
+    // would leave the data undecryptable.
+    std::shared_ptr<plugin::IEncryptor> encryptor_;
     std::string edek_;
     size_t slice_size_;
 

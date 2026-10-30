@@ -114,9 +114,10 @@ func (b *ServerBroker) SyncNewCreatedPartition(ctx context.Context, collectionID
 	log := mlog.With(mlog.Int64("collection", collectionID), mlog.Int64("partitionID", partitionID))
 	log.Info(ctx, "begin to sync new partition")
 	resp, err := b.s.mixCoord.SyncNewCreatedPartition(ctx, &querypb.SyncNewCreatedPartitionRequest{
-		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions)),
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
+		Base:          commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CreatePartition)),
+		CollectionID:  collectionID,
+		PartitionID:   partitionID,
+		SkipWaitReady: true,
 	})
 	if err != nil {
 		return err
@@ -246,8 +247,8 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectio
 	}
 
 	partitionIDs := make([]int64, len(colMeta.Partitions))
-	for _, p := range colMeta.Partitions {
-		partitionIDs = append(partitionIDs, p.PartitionID)
+	for i, p := range colMeta.Partitions {
+		partitionIDs[i] = p.PartitionID
 	}
 	dcReq := &datapb.AlterCollectionRequest{
 		CollectionID:   collectionID,

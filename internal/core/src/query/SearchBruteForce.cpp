@@ -188,6 +188,7 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // in offsets which equals to the total number of vectors.
         base_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                           raw_ds.raw_data_offsets);
+        base_dataset->Set(knowhere::meta::EMB_LIST_COUNT, raw_ds.num_raw_data);
 
         // the length of offsets equals to the number of embedding lists + 1
         base_dataset->SetRows(raw_ds.raw_data_offsets[raw_ds.num_raw_data]);
@@ -199,6 +200,8 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
         // ditto
         query_dataset->Set(knowhere::meta::EMB_LIST_OFFSET,
                            query_ds.query_offsets);
+        query_dataset->Set(knowhere::meta::EMB_LIST_COUNT,
+                           query_ds.num_queries);
         query_dataset->Set(knowhere::meta::NQ, query_ds.num_queries);
 
         query_dataset->SetRows(query_ds.query_offsets[query_ds.num_queries]);

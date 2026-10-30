@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -31,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -77,12 +77,25 @@ type SyncTask struct {
 
 	manifestPath string
 
+	// stats is the writer-built Statistics for SegmentInfo.Stats: insert /
+	// delta counts and sizes, bloom-filter / BM25 stats_binlog_size,
+	// timestamp_from/to/quantiles. DataCoord persists it directly on
+	// SaveBinlogPathsRequest.Stats; for V2 (or any flush that returns nil
+	// here) the handler falls back to computing from FieldBinlog arrays.
+	stats *datapb.Statistics
+
 	writeRetryOpts []retry.Option
 
 	failureCallback func(err error)
 
 	tr *timerecord.TimeRecorder
 
+	// statsMu serializes Run's writes to flushedSize, execTime and
+	// pack.deltaData (cleared by ReleaseData) with MarshalJSON, which reads
+	// them from another goroutine: the task stays registered in the sync
+	// manager's task stats and can be serialized at any point of its
+	// execution. Run itself is the only writer, so it may read them unlocked.
+	statsMu     sync.Mutex
 	flushedSize int64
 	execTime    time.Duration
 
@@ -134,23 +147,36 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	columnGroups := t.getColumnGroups(segmentInfo)
 
+	// statsWriter, when set (V2 / V3), exposes this sync's prepared cumulative
+	// stats. SyncTask.Run installs it on the metaCache only after the DataCoord
+	// ack below, so a failed/retried sync never double-counts.
+	var statsWriter interface {
+		PreparedStats() *metacache.SegmentStats
+	}
+
+	var flushedSize int64
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
 		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
 		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	case storage.StorageV3:
 		writer := NewBulkPackWriterV3(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
 			packed.DefaultMultiPartUploadSize, t.storageConfig, columnGroups, segmentInfo.ManifestPath(), t.writeRetryOpts...)
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.manifestPath, flushedSize, t.stats, err = writer.Write(ctx, t.pack)
+		statsWriter = writer
 	default:
 		writer, writerErr := NewBulkPackWriter(t.metacache, t.schema, t.chunkManager, t.allocator, t.writeRetryOpts...)
 		if writerErr != nil {
 			return writerErr
 		}
-		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
+		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, flushedSize, err = writer.Write(ctx, t.pack)
 	}
+	t.statsMu.Lock()
+	t.flushedSize = flushedSize
+	t.statsMu.Unlock()
 
 	if err != nil {
 		logger.Warn(ctx, "failed to write sync data with storage v2 format", mlog.Err(err))
@@ -182,7 +208,9 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		}
 	}
 
+	t.statsMu.Lock()
 	t.pack.ReleaseData()
+	t.statsMu.Unlock()
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
 	if columnGroups != nil {
@@ -191,6 +219,11 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	if t.pack.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
+	// Install the prepared cumulative stats directly in the commit transaction:
+	// no digest work, the exact object whose Publish() DataCoord just persisted.
+	if statsWriter != nil {
+		actions = append(actions, metacache.SetStatistics(statsWriter.PreparedStats()))
+	}
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segmentID))
 
 	if t.pack.isDrop {
@@ -198,16 +231,15 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 		logger.Info(ctx, "segment removed", mlog.FieldSegmentID(t.segmentID), mlog.String("channel", t.channelName))
 	}
 
+	t.statsMu.Lock()
 	t.execTime = t.tr.ElapseSpan()
+	t.statsMu.Unlock()
 	logger.Info(ctx, "task done", mlog.Int64("flushedSize", t.flushedSize), mlog.Duration("timeTaken", t.execTime))
 
 	if !t.pack.isFlush {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
 	}
 	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.SuccessLabel, t.level.String()).Inc()
-
-	// Publish filesystem metrics after sync task completion
-	storagev2.PublishFilesystemMetricsWithConfig(t.storageConfig)
 
 	return nil
 }
@@ -322,10 +354,13 @@ func (t *SyncTask) Binlogs() (map[int64]*datapb.FieldBinlog, map[int64]*datapb.F
 }
 
 func (t *SyncTask) MarshalJSON() ([]byte, error) {
+	t.statsMu.Lock()
 	deltaRowCount := int64(0)
 	if t.pack != nil && t.pack.deltaData != nil {
 		deltaRowCount = t.pack.deltaData.RowCount
 	}
+	flushedSize, execTime := t.flushedSize, t.execTime
+	t.statsMu.Unlock()
 	return json.Marshal(&metricsinfo.SyncTask{
 		SegmentID:     t.segmentID,
 		BatchRows:     t.batchRows,
@@ -333,8 +368,8 @@ func (t *SyncTask) MarshalJSON() ([]byte, error) {
 		TSFrom:        tsoutil.PhysicalTimeFormat(t.tsFrom),
 		TSTo:          tsoutil.PhysicalTimeFormat(t.tsTo),
 		DeltaRowCount: deltaRowCount,
-		FlushSize:     t.flushedSize,
-		RunningTime:   t.execTime.String(),
+		FlushSize:     flushedSize,
+		RunningTime:   execTime.String(),
 		NodeID:        paramtable.GetNodeID(),
 	})
 }

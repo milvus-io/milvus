@@ -1707,7 +1707,6 @@ TEST(DiskSlotFileTest, PutGetBasic) {
 
     {
         milvus::exec::DiskSlotFile dsf(100, path, row_count, max_file_size);
-        ASSERT_GT(dsf.GetNumSlots(), 0u);
         ASSERT_EQ(dsf.GetUsedCount(), 0u);
 
         auto bits = MakeRandomBits(row_count, 0.3, 42);
@@ -1869,7 +1868,6 @@ TEST(DiskSlotFileTest, ClockEviction) {
     auto path = (tmpdir / "seg_400.excr").string();
 
     milvus::exec::DiskSlotFile dsf(400, path, row_count, max_file_size);
-    ASSERT_EQ(dsf.GetNumSlots(), 5u);
 
     // Put 5 entries — fills all slots
     auto valid_bits = MakeBits(row_count, true);

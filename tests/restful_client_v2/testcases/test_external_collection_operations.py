@@ -1181,6 +1181,34 @@ class TestRestExternalCollection(TestBase):
         assert self._query_count(name, "id >= 1000") == 20
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_rest_external_collection_create_sparse_vector(self, external_store):
+        """
+        target: verify REST v2 accepts source-backed sparse vector fields
+        method: create an external collection with a sparse field and describe it
+        expected: the sparse type and external field mapping are persisted
+        """
+        name = gen_collection_name()
+        source = external_store["source"]
+        spec = _external_spec(external_store["cfg"])
+        payload = _external_collection_payload(name, source, spec)
+        payload["schema"]["fields"].append(
+            {
+                "fieldName": "sparse_embedding",
+                "dataType": "SparseFloatVector",
+                "externalField": "sparse_embedding",
+                "elementTypeParams": {},
+            }
+        )
+        rsp = self.collection_client.collection_create(payload)
+        _assert_success_default_response(rsp)
+
+        desc = self.collection_client.collection_describe(name)
+        _assert_describe_external_collection_response(desc, name, expected_source=source, expected_spec=spec)
+        fields = {field["name"]: field for field in desc["data"]["fields"]}
+        assert fields["sparse_embedding"]["type"] == "SparseFloatVector"
+        assert fields["sparse_embedding"]["externalField"] == "sparse_embedding"
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_rest_external_collection_create_rejections(self, external_store):
         """
         target: verify REST v2 create-time external collection validation
@@ -1196,13 +1224,6 @@ class TestRestExternalCollection(TestBase):
         spec_without_source = _external_collection_payload(gen_collection_name(), "", spec)
         duplicate_external_field = _external_collection_payload(gen_collection_name(), source, spec)
         duplicate_external_field["schema"]["fields"][1]["externalField"] = "id"
-        unsupported_field_type = _external_collection_payload(gen_collection_name(), source, spec)
-        unsupported_field_type["schema"]["fields"][1] = {
-            "fieldName": "sparse_embedding",
-            "dataType": "SparseFloatVector",
-            "externalField": "sparse_embedding",
-            "elementTypeParams": {},
-        }
         invalid_data_type_enum = _external_collection_payload(gen_collection_name(), source, spec)
         invalid_data_type_enum["schema"]["fields"][2]["dataType"] = "floatvector"
         dynamic_field_enabled = _external_collection_payload(gen_collection_name(), source, spec)
@@ -1277,7 +1298,6 @@ class TestRestExternalCollection(TestBase):
                 "external",
             ),
             ("duplicate_external_field", duplicate_external_field, "mapped by multiple fields"),
-            ("unsupported_field_type", unsupported_field_type, "does not support field type"),
             ("invalid_data_type_enum", invalid_data_type_enum, "invalid(case sensitive)"),
             ("dynamic_field_enabled", dynamic_field_enabled, "does not support dynamic field"),
             ("multi_shard_external", multi_shard_external, "multiple shards"),
@@ -1569,9 +1589,19 @@ class TestRestExternalCollection(TestBase):
         second_rsp = self._refresh_external_collection(payload)
         if second_rsp.get("code") == 0:
             second_job_id = _assert_refresh_response(second_rsp)
-            assert second_job_id == first_job_id, (
-                f"duplicate refresh returned a different job id: first={first_job_id}, second={second_job_id}"
-            )
+            if second_job_id != first_job_id:
+                # On fast machines the first refresh job can reach a terminal state
+                # before the second request's duplicate check runs, in which case the
+                # server legitimately allocates a fresh job id. Only fail when the first
+                # job is still active yet a different job id was returned.
+                first_job_rsp = self._describe_external_collection_job(first_job_id)
+                first_state = first_job_rsp.get("data", {}).get("state")
+                assert first_state in TERMINAL_JOB_STATES, (
+                    f"duplicate refresh returned a different job id while the first job is still active: "
+                    f"first={first_job_id} (state={first_state}), second={second_job_id}"
+                )
+                _, second_finished = self._wait_refresh_completed(second_job_id)
+                assert second_finished
         else:
             _assert_error_response(second_rsp)
             message = second_rsp["message"].lower()

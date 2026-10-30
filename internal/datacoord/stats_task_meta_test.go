@@ -265,6 +265,15 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 	})
 
+	s.Run("HasStatsTask", func() {
+		s.False(m.HasStatsTask(100, indexpb.StatsSubJob_Sort))
+		s.False(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_BM25Job))
+		// The task is already Finished here: it keeps blocking resubmission
+		// until GC recycles it, matching AddStatsTask's duplicate guard.
+		s.Equal(indexpb.JobState_JobStateFinished, m.GetStatsTaskStateBySegmentID(s.segmentID, indexpb.StatsSubJob_Sort))
+		s.True(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_Sort))
+	})
+
 	s.Run("DropStatsTask", func() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
@@ -280,6 +289,8 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.NoError(m.DropStatsTask(context.TODO(), 1))
 			_, ok := m.tasks.Get(1)
 			s.False(ok)
+			// Once recycled the segment becomes submittable again.
+			s.False(m.HasStatsTask(s.segmentID, indexpb.StatsSubJob_Sort))
 
 			s.NoError(m.DropStatsTask(context.TODO(), 1000))
 		})

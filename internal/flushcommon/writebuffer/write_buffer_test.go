@@ -102,7 +102,7 @@ func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 	}
 
 	s.Run("write_buffer_mode", func() {
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil)
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil)
 		metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer)(segment)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
 			action(segment)
@@ -117,7 +117,7 @@ func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
 
 	s.Run("growing_mode", func() {
 		segmentID := int64(1002)
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID, StorageVersion: storage.StorageV3}, nil, nil)
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID, StorageVersion: storage.StorageV3}, nil, nil, nil)
 		notifiedSegmentID = 0
 		notifiedMode = metacache.FlushSourceUnknown
 		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
@@ -500,7 +500,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 2,
-		}, nil, nil)
+		}, nil, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.MatchedBy(func(task syncmgr.Task) bool {
@@ -529,7 +529,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 4,
-		}, nil, nil)
+		}, nil, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(4)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -606,7 +606,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 5,
-		}, nil, nil)
+		}, nil, nil, nil)
 		metaCache.EXPECT().GetSegmentByID(int64(5)).Return(segment, true)
 		metaCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -682,7 +682,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 			ID:          1001,
 			PartitionID: 10,
 			Level:       datapb.SegmentLevel_L0,
-		}, nil, nil)
+		}, nil, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(l0Segment, true).Maybe()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
 
@@ -808,7 +808,7 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:    1002,
 			State: commonpb.SegmentState_Sealed,
-		}, nil, nil)
+		}, nil, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(segment, true).Once()
 
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1002, &growingSourceProgress{
@@ -832,7 +832,7 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 	s.Run("below_row_threshold", func() {
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1004,
-		}, nil, nil)
+		}, nil, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(1004)).Return(segment, true).Once()
 
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1004, &growingSourceProgress{
@@ -848,7 +848,7 @@ func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
 	s.Run("row_threshold", func() {
 		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1005,
-		}, nil, nil)
+		}, nil, nil, nil)
 		s.metacache.EXPECT().GetSegmentByID(int64(1005)).Return(segment, true).Once()
 
 		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1005, &growingSourceProgress{

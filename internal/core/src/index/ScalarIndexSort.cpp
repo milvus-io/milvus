@@ -63,14 +63,14 @@ const std::string MMAP_PATH_FOR_TEST = "/tmp/milvus/mmap_test";
 
 const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t SCALAR_SORT_ALIGNMENT = 32;  // 32-byte alignment
 
-const uint64_t MMAP_INDEX_PADDING = 1;
+const uint64_t SCALAR_SORT_MMAP_INDEX_PADDING = 1;
 
 namespace {
 
 bool
-IsArrayField(const storage::FileManagerContext& file_manager_context) {
+IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
     return file_manager_context.Valid() &&
            file_manager_context.fieldDataMeta.field_schema.data_type() ==
                proto::schema::DataType::Array;
@@ -84,7 +84,7 @@ ScalarIndexSort<T>::ScalarIndexSort(
     bool is_nested_index)
     : ScalarIndex<T>(ASCENDING_SORT),
       is_nested_index_(is_nested_index),
-      is_array_field_(IsArrayField(file_manager_context)),
+      is_array_field_(IsScalarArrayField(file_manager_context)),
       is_built_(false),
       data_() {
     // not valid means we are in unit test
@@ -232,7 +232,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
                 data_.emplace_back(
-                    IndexStructure(array->get_data<T>(j), offset));
+                    IndexStructure(array->get_data_unchecked<T>(j), offset));
                 offset++;
             }
         }
@@ -302,7 +302,8 @@ ScalarIndexSort<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
@@ -321,7 +322,9 @@ ScalarIndexSort<T>::SetupMmapFromData(
     std::filesystem::create_directories(
         std::filesystem::path(mmap_filepath_).parent_path());
 
-    auto aligned_size = ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+    auto aligned_size =
+        ((size + SCALAR_SORT_ALIGNMENT - 1) / SCALAR_SORT_ALIGNMENT) *
+        SCALAR_SORT_ALIGNMENT;
 
     // Write data to file with alignment padding
     {
@@ -334,19 +337,20 @@ ScalarIndexSort<T>::SetupMmapFromData(
             file_writer.Write(padding.data(), padding.size());
         }
         // Write extra padding for safety
-        std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+        std::vector<uint8_t> padding(SCALAR_SORT_MMAP_INDEX_PADDING, 0);
         file_writer.Write(padding.data(), padding.size());
         file_writer.Finish();
     }
 
     // mmap the file
     auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ = static_cast<char*>(mmap(NULL,
-                                         aligned_size + MMAP_INDEX_PADDING,
-                                         PROT_READ,
-                                         MAP_PRIVATE,
-                                         file.Descriptor(),
-                                         0));
+    mmap_data_ =
+        static_cast<char*>(mmap(NULL,
+                                aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING,
+                                PROT_READ,
+                                MAP_PRIVATE,
+                                file.Descriptor(),
+                                0));
 
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
@@ -355,7 +359,7 @@ ScalarIndexSort<T>::SetupMmapFromData(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
-    mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+    mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
     data_size_ = size;
     file.Close();
 }
@@ -482,7 +486,8 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(Count(), true);
+    // NotIn must keep null rows false, so start from the validity bitmap.
+    auto bitset = valid_bitset_.clone();
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -498,8 +503,6 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
             bitset[lb->idx_] = false;
         }
     }
-    // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    bitset &= valid_bitset_;
     return bitset;
 }
 
@@ -507,8 +510,7 @@ template <typename T>
 const TargetBitmap
 ScalarIndexSort<T>::IsNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
+    auto bitset = valid_bitset_.clone();
     bitset.flip();
     return bitset;
 }
@@ -517,9 +519,7 @@ template <typename T>
 TargetBitmap
 ScalarIndexSort<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap bitset(total_num_rows_, true);
-    bitset &= valid_bitset_;
-    return bitset;
+    return valid_bitset_.clone();
 }
 
 template <typename T>
@@ -734,30 +734,23 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         std::filesystem::create_directories(
             std::filesystem::path(mmap_filepath_).parent_path());
 
-        size_t total_data_size = 0;
-        {
-            auto file_writer = storage::FileWriter(
-                mmap_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-
-            reader.ReadEntryStream("index_data",
-                                   [&](const uint8_t* data, size_t len) {
-                                       file_writer.Write(data, len);
-                                       total_data_size += len;
-                                   });
-
-            auto aligned_size =
-                ((total_data_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-            if (aligned_size > total_data_size) {
-                std::vector<uint8_t> padding(aligned_size - total_data_size, 0);
-                file_writer.Write(padding.data(), padding.size());
-            }
-            std::vector<uint8_t> mmap_pad(MMAP_INDEX_PADDING, 0);
-            file_writer.Write(mmap_pad.data(), mmap_pad.size());
-            file_writer.Finish();
-
-            data_size_ = total_data_size;
-            mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
+        const auto total_data_size = reader.GetEntrySize("index_data");
+        reader.ReadEntryStreamToFile(
+            "index_data",
+            mmap_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
+        const auto aligned_size =
+            ((total_data_size + SCALAR_SORT_ALIGNMENT - 1) /
+             SCALAR_SORT_ALIGNMENT) *
+            SCALAR_SORT_ALIGNMENT;
+        data_size_ = total_data_size;
+        mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
+        if (::truncate(mmap_filepath_.c_str(), mmap_size_) != 0) {
+            const auto saved_errno = errno;
+            ::unlink(mmap_filepath_.c_str());
+            ThrowInfo(ErrorCode::FileWriteFailed,
+                      "failed to extend scalar mmap file: {}",
+                      strerror(saved_errno));
         }
 
         auto file = File::Open(mmap_filepath_, O_RDONLY);
@@ -774,34 +767,37 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     } else {
         // Stream index_data entry to pre-allocated memory
         data_.resize(index_size);
-        size_t write_offset = 0;
-        reader.ReadEntryStream(
-            "index_data", [&](const uint8_t* data, size_t len) {
+        const auto entry_bytes = reader.GetEntrySize("index_data");
+        AssertInfo(entry_bytes == index_size * sizeof(IndexStructure<T>),
+                   "stream read size mismatch: got {}, expected {}",
+                   entry_bytes,
+                   index_size * sizeof(IndexStructure<T>));
+        reader.ReadEntryStreamAt(
+            "index_data", [&](size_t offset, const uint8_t* data, size_t len) {
                 milvus::fastmem::FastMemcpy(
-                    reinterpret_cast<uint8_t*>(data_.data()) + write_offset,
+                    reinterpret_cast<uint8_t*>(data_.data()) + offset,
                     data,
                     len);
-                write_offset += len;
             });
-        AssertInfo(write_offset == index_size * sizeof(IndexStructure<T>),
-                   "stream read size mismatch: got {}, expected {}",
-                   write_offset,
-                   index_size * sizeof(IndexStructure<T>));
     }
 
     setup_data_pointers();
 
     auto load_valid_bitset = [&]() {
         valid_bitset_ = TargetBitmap(total_num_rows_, false);
-        auto bitset_entry = reader.ReadEntry("valid_bitset");
-        auto bitset_bytes = valid_bitset_.size_in_bytes();
-        AssertInfo(bitset_entry.data.size() >= bitset_bytes,
-                   "invalid valid_bitset size: expected at least {}, got {}",
-                   bitset_bytes,
-                   bitset_entry.data.size());
-        memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()),
-               bitset_entry.data.data(),
-               bitset_bytes);
+        const auto bitset_bytes = valid_bitset_.size_in_bytes();
+        AssertInfo(reader.GetEntrySize("valid_bitset") >= bitset_bytes,
+                   "invalid valid_bitset size");
+        reader.ReadEntryStreamAt(
+            "valid_bitset",
+            [&](size_t offset, const uint8_t* data, size_t len) {
+                if (offset < bitset_bytes) {
+                    memcpy(reinterpret_cast<uint8_t*>(valid_bitset_.data()) +
+                               offset,
+                           data,
+                           std::min(len, bitset_bytes - offset));
+                }
+            });
     };
     auto get_idx_to_offsets_bytes = [&]() {
         auto offsets_bytes = reader.GetEntrySize("idx_to_offsets");
@@ -829,16 +825,10 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
         auto offsets_bytes = get_idx_to_offsets_bytes();
 
-        {
-            auto fw = storage::FileWriter(
-                mmap_meta_filepath_,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-
-            reader.ReadEntryStream(
-                "idx_to_offsets",
-                [&](const uint8_t* d, size_t len) { fw.Write(d, len); });
-            fw.Finish();
-        }
+        reader.ReadEntryStreamToFile(
+            "idx_to_offsets",
+            mmap_meta_filepath_,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
 
         mmap_meta_size_ = offsets_bytes;
         auto meta_file = File::Open(mmap_meta_filepath_, O_RDONLY);
@@ -866,19 +856,19 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
         idx_to_offsets_.resize(total_num_rows_);
-        size_t wo = 0;
-        reader.ReadEntryStream(
-            "idx_to_offsets", [&](const uint8_t* d, size_t len) {
-                memcpy(reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + wo,
-                       d,
-                       len);
-                wo += len;
-            });
-        AssertInfo(wo == offsets_bytes,
+        const auto entry_bytes = reader.GetEntrySize("idx_to_offsets");
+        AssertInfo(entry_bytes == offsets_bytes,
                    "idx_to_offsets stream read size mismatch: got {}, "
                    "expected {}",
-                   wo,
+                   entry_bytes,
                    offsets_bytes);
+        reader.ReadEntryStreamAt(
+            "idx_to_offsets", [&](size_t offset, const uint8_t* d, size_t len) {
+                memcpy(
+                    reinterpret_cast<uint8_t*>(idx_to_offsets_.data()) + offset,
+                    d,
+                    len);
+            });
         idx_to_offsets_ptr_ = idx_to_offsets_.data();
         idx_to_offsets_size_ = idx_to_offsets_.size();
 
@@ -899,9 +889,9 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
     is_built_ = true;
     ComputeByteSize();
 
-    LOG_INFO("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
-             field_id_,
-             is_mmap_);
+    LOG_DEBUG("LoadEntries ScalarIndexSort done, field_id: {}, is_mmap:{}",
+              field_id_,
+              is_mmap_);
 }
 
 template class ScalarIndexSort<bool>;

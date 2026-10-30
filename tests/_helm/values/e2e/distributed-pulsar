@@ -76,6 +76,13 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    proxy:
+      # Temporary preview switch; removed together with the element-null / nested Array gate.
+      enableElementNullAndNestedArray: true
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       storage:
         enablev2: true
@@ -85,9 +92,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
-      targetVecIndexVersion: 10
+      targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 3
+      targetScalarIndexVersion: 4
       compaction:
         bumpSchemaVersion:
           enabled: true

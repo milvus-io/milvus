@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -112,33 +114,96 @@ type clusteringCompactionTask struct {
 type ClusterBuffer struct {
 	id                      int
 	writer                  *MultiSegmentWriter
+	builder                 *storage.RecordBuilder
+	appendErr               error
+	closed                  bool
 	clusteringKeyFieldStats *storage.FieldStats
 
 	lock sync.RWMutex
 }
 
-func (b *ClusterBuffer) Write(v *storage.Value) error {
+// WriteRecord copies a row into the bucket's batch, independently of the input
+// Record's lifetime. The writer receives Records sized by bytes, not input rows.
+func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return b.writer.WriteValue(v)
+	if b.appendErr != nil {
+		return b.appendErr
+	}
+	if b.closed {
+		return merr.WrapErrServiceInternalMsg("cannot write to closed clustering buffer")
+	}
+	if b.builder == nil {
+		if b.writer.storageVersion == storage.StorageV3 {
+			b.builder = storage.NewRecordBuilderWithFieldID(b.writer.schema)
+		} else {
+			b.builder = storage.NewRecordBuilder(b.writer.schema)
+		}
+	}
+	if err := b.builder.Append(r, row, row+1); err != nil {
+		// Append can leave columns at different lengths. Poison this bucket
+		// before another mapping worker can acquire it, and discard the batch.
+		b.appendErr = err
+		b.releaseBuilder()
+		return err
+	}
+	// Leave room for buffering in the underlying writer.
+	if b.builder.GetMemorySize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
+		return b.writeRecord()
+	}
+	return nil
 }
 
-func (b *ClusterBuffer) Flush() error {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-	return b.writer.Flush()
+// writeRecord requires b.lock. Submitting a Record may transfer its buffers to
+// the writer; it does not imply that the underlying writer released memory.
+func (b *ClusterBuffer) writeRecord() error {
+	if b.appendErr != nil {
+		return b.appendErr
+	}
+	if b.builder == nil || b.builder.GetRowNum() == 0 {
+		return nil
+	}
+	record := b.builder.Build()
+	defer record.Release()
+	if err := b.writer.Write(record); err != nil {
+		// Another mapping worker may reach this bucket before cancellation.
+		// Keep the first write failure and reject every later row.
+		b.appendErr = err
+		b.releaseBuilder()
+		return err
+	}
+	return nil
 }
 
 func (b *ClusterBuffer) FlushChunk() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.writeRecord(); err != nil {
+		return err
+	}
 	return b.writer.FlushChunk()
 }
 
 func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return b.writer.Close()
+	defer b.releaseBuilder()
+	if b.closed {
+		return nil
+	}
+	defer func() { b.closed = true }()
+	err := b.writeRecord()
+	closeErr := b.writer.Close()
+	// Keep the write/append failure as the primary cause while retaining any
+	// close failure. Closing must release the writer even after a failed flush.
+	return merr.Combine(closeErr, err)
+}
+
+func (b *ClusterBuffer) releaseBuilder() {
+	if b.builder != nil {
+		b.builder.Release()
+		b.builder = nil
+	}
 }
 
 func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
@@ -150,7 +215,11 @@ func (b *ClusterBuffer) GetCompactionSegments() []*datapb.CompactionSegment {
 func (b *ClusterBuffer) GetBufferSize() uint64 {
 	b.lock.RLock()
 	defer b.lock.RUnlock()
-	return b.writer.GetBufferUncompressed()
+	size := b.writer.GetBufferUncompressed()
+	if b.builder != nil {
+		size += b.builder.GetMemorySize()
+	}
+	return size
 }
 
 func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStats *storage.FieldStats) *ClusterBuffer {
@@ -236,6 +305,10 @@ func (t *clusteringCompactionTask) init() error {
 		if field.GetFieldID() == t.plan.GetClusteringKeyField() {
 			t.clusteringKeyField = field
 		}
+	}
+
+	if pkField == nil {
+		return merr.WrapErrServiceInternalMsg("no primary key field found")
 	}
 
 	for _, function := range t.plan.Schema.Functions {
@@ -494,24 +567,31 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	mapStart := time.Now()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	for _, segment := range inputSegments {
-		segmentClone := &datapb.CompactionSegmentBinlogs{
-			SegmentID: segment.SegmentID,
-			// only FieldBinlogs and deltalogs needed
-			Deltalogs:      segment.Deltalogs,
-			FieldBinlogs:   segment.FieldBinlogs,
-			StorageVersion: segment.StorageVersion,
-			Manifest:       segment.GetManifest(),
-		}
 		future := t.mappingPool.Submit(func() (any, error) {
-			err := t.mappingSegment(ctx, segmentClone)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			err := t.mappingSegment(ctx, segment)
+			if err != nil {
+				cancel(err)
+			}
 			return struct{}{}, err
 		})
 		futures = append(futures, future)
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	// Join every worker before Compact's deferred cleanup releases shared buffers.
+	if err := conc.BlockOnAll(futures...); err != nil {
+		// A sibling may return context.Canceled before the failed future is
+		// visited. Preserve the failure that triggered cancellation. If several
+		// workers fail independently, the first cancellation cause wins.
+		if cause := context.Cause(ctx); cause != nil {
+			return nil, nil, cause
+		}
 		return nil, nil, err
 	}
 
@@ -592,21 +672,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 	}
 
-	// Get the number of field binlog files from non-empty segment
-	var binlogNum int
-	for _, b := range segment.GetFieldBinlogs() {
-		if b != nil {
-			binlogNum = len(b.GetBinlogs())
-			break
-		}
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(segment.GetManifest())
+	if err != nil {
+		return err
 	}
-	// Unable to deal with all empty segments cases, so return error
-	if binlogNum == 0 {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return merr.WrapErrIllegalCompactionPlan()
-	}
-
-	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig,
+	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, segment, t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
@@ -626,12 +696,23 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)
+	rr = wrapReaderWithTimestampOverwrite(rr, segment.GetCommitTimestamp())
 	defer rr.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
+	var ttlField *schemapb.FieldSchema
+	if hasTTLField {
+		ttlField = typeutil.GetField(t.plan.Schema, t.ttlFieldID)
+	}
 
 	offset := int64(-1)
+	done := ctx.Done()
 	for {
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
 		r, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
@@ -641,46 +722,55 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
-			mlog.Warn(context.TODO(), "compact wrong, failed to deserialize data", mlog.Err(err))
-			return err
+		pkColumn, _ := storage.TryRecordColumn(r, t.primaryKeyField.GetFieldID())
+		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
+		tsColumn, ok := ts.(*array.Int64)
+		if !exists || !ok {
+			return merr.WrapErrServiceInternalMsg("timestamp field is not an int64 column in clustering compaction record")
 		}
-
-		for _, v := range vs {
+		var ttlColumn, clusteringKeyColumn arrow.Array
+		if hasTTLField {
+			ttlColumn, _ = storage.TryRecordColumn(r, t.ttlFieldID)
+		}
+		if !t.isVectorClusteringKey {
+			clusteringKeyColumn, _ = storage.TryRecordColumn(r, t.clusteringKeyField.GetFieldID())
+		}
+		for row := 0; row < r.Len(); row++ {
+			select {
+			case <-done:
+				return ctx.Err()
+			default:
+			}
 			offset++
-
-			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
-			if !ok {
-				mlog.Warn(context.TODO(), "convert interface to map wrong")
-				return merr.WrapErrServiceInternalMsg("unexpected error")
+			pk, err := clusteringScalarValue(pkColumn, t.primaryKeyField, row)
+			if err != nil {
+				return err
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
-				if val, exists := row[t.ttlFieldID]; exists {
-					if v, ok := val.(int64); ok {
-						expireTs = v
-					}
+				value, err := clusteringScalarValue(ttlColumn, ttlField, row)
+				if err != nil {
+					return err
+				}
+				if timestamp, ok := value.(int64); ok {
+					expireTs = timestamp
 				}
 			}
-			if entityFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp), expireTs) {
+			if entityFilter.Filtered(pk, uint64(tsColumn.Value(row)), expireTs) {
 				continue
 			}
 
-			// Normalize import segment timestamps: overwrite to commit_ts
-			// so the output segment becomes a normal segment (commit_ts = 0).
-			if commitTs := segment.GetCommitTimestamp(); commitTs != 0 {
-				v.Timestamp = int64(commitTs)
-			}
-
-			clusteringKey := row[t.clusteringKeyField.FieldID]
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
-				clusterBuffer = t.keyToBufferFunc(clusteringKey)
+				key, err := clusteringScalarValue(clusteringKeyColumn, t.clusteringKeyField, row)
+				if err != nil {
+					return err
+				}
+				clusterBuffer = t.keyToBufferFunc(key)
 			}
-			if err := clusterBuffer.Write(v); err != nil {
+			if err := clusterBuffer.WriteRecord(r, row); err != nil {
 				return err
 			}
 			t.writtenRowNum.Inc()
@@ -698,11 +788,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 				}
 			}
 		}
-
-		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
-		for _, buffer := range t.clusterBuffers {
-			buffer.Flush()
-		}
 	}
 
 	missing := entityFilter.GetMissingDeleteCount()
@@ -719,6 +804,40 @@ func (t *clusteringCompactionTask) mappingSegment(
 	metrics.DataNodeCompactionDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(entityFilter.GetDeltalogDeleteCount()))
 	metrics.DataNodeCompactionMissingDeleteCount.WithLabelValues(fmt.Sprint(t.collectionID)).Add(float64(missing))
 	return nil
+}
+
+// clusteringScalarValue reads only the routing/filter columns. Keep null and
+// default-value semantics consistent with the scalar analysis deserializer.
+func clusteringScalarValue(column arrow.Array, field *schemapb.FieldSchema, row int) (any, error) {
+	if column == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing clustering scalar column for field %d", field.GetFieldID())
+	}
+	if column.IsNull(row) {
+		if field.GetDefaultValue() != nil {
+			return storage.GetDefaultValue(field), nil
+		}
+		return nil, nil
+	}
+	switch column := column.(type) {
+	case *array.Boolean:
+		return column.Value(row), nil
+	case *array.Int8:
+		return column.Value(row), nil
+	case *array.Int16:
+		return column.Value(row), nil
+	case *array.Int32:
+		return column.Value(row), nil
+	case *array.Int64:
+		return column.Value(row), nil
+	case *array.Float32:
+		return column.Value(row), nil
+	case *array.Float64:
+		return column.Value(row), nil
+	case *array.String:
+		return column.Value(row), nil
+	default:
+		return nil, merr.WrapErrServiceInternalMsg("unsupported clustering scalar column %T", column)
+	}
 }
 
 func (t *clusteringCompactionTask) getWorkerPoolSize() int {
@@ -782,7 +901,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 			break
 		}
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
 	}
 
@@ -803,7 +922,7 @@ func (t *clusteringCompactionTask) flushAll() error {
 		})
 		futures = append(futures, future)
 	}
-	if err := conc.AwaitAll(futures...); err != nil {
+	if err := conc.BlockOnAll(futures...); err != nil {
 		return err
 	}
 	return nil
@@ -832,6 +951,17 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 
 // cleanUp try best to clean all temp datas
 func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
+	for _, buffer := range t.clusterBuffers {
+		buffer.lock.Lock()
+		buffer.releaseBuilder()
+		// Mapping has joined all workers. Discard pending rows on failure and
+		// close any writer that flushAll did not reach.
+		err := buffer.writer.Close()
+		buffer.lock.Unlock()
+		if err != nil {
+			mlog.RatedWarn(ctx, 1.0, "failed to close clustering compaction writer during cleanup", mlog.Int("bufferID", buffer.id), mlog.Err(err))
+		}
+	}
 	if t.mappingPool != nil {
 		t.mappingPool.Release()
 	}
@@ -885,21 +1015,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	defer span.End()
 	processStart := time.Now()
 
-	// Get the number of field binlog files from non-empty segment
-	var binlogNum int
-	for _, b := range segment.GetFieldBinlogs() {
-		if b != nil {
-			binlogNum = len(b.GetBinlogs())
-			break
-		}
-	}
-	// Unable to deal with all empty segments cases, so return error
-	if binlogNum == 0 {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
-	}
-	mlog.Debug(context.TODO(), "binlogNum", mlog.Int("binlogNum", binlogNum))
-
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime, segment.GetCommitTimestamp())
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
@@ -913,7 +1028,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	readSchema.Fields = selectedFields
 	readSchema.StructArrayFields = nil
 
-	rr, _, err := newCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(segment.GetManifest())
+	if err != nil {
+		return nil, err
+	}
+	rr, _, err := newTextDecodedCompactionSegmentRecordReader(ctx, segment, readSchema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
@@ -1067,16 +1186,17 @@ func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 // Includes TEXT column configs when lobContext requires REWRITE_ALL.
 func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
 	opts := []storage.RwOption{
-		storage.WithBufferSize(t.bufferSize),
+		storage.WithBufferSize(max(int64(1), t.bufferSize/2)),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
-		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
-		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		// LOB base path at partition level, sharing the manifest root rule so
+		// the reader (which reconstructs lobs/ from the manifest base) resolves
+		// the same files (see #53051).
+		lobBasePath := storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
 		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
 			lobBasePath,
 			t.compactionParams.TextInlineThreshold,
@@ -1130,6 +1250,25 @@ func (t *clusteringCompactionTask) initLOBCompactionContext(ctx context.Context)
 
 	// compute strategies (will use forced REWRITE_ALL for all TEXT fields)
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	sourceManifests := make(map[int64]string)
+	for _, segment := range t.plan.GetSegmentBinlogs() {
+		if segment.GetManifest() != "" {
+			sourceManifests[segment.GetSegmentID()] = segment.GetManifest()
+		}
+	}
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		mlog.Info(ctx, "forcing source-side TEXT LOB decoding across partition namespaces",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("outputPartitionBase", outputPartitionBase),
+			mlog.Int64s("textFieldIDs", textFieldIDs))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {

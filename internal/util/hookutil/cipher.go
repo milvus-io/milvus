@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/config"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -206,7 +208,7 @@ func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) (
 
 		case common.EncryptionRootKeyKey:
 			defaultRootKey = property.Value
-			mlog.Info(context.TODO(), "User explicitly set rootKey", mlog.Int64("ezID", ezID), mlog.String("value", property.GetValue()))
+			mlog.Info(context.TODO(), "User explicitly set rootKey", mlog.Int64("ezID", ezID))
 		}
 	}
 
@@ -421,6 +423,28 @@ func initCipher() error {
 
 	pathGo := paramtable.GetCipherParams().SoPathGo.GetValue()
 	pathCpp := paramtable.GetCipherParams().SoPathCpp.GetValue()
+
+	// A cipher compiled into this binary replaces the Go half of the plug-in
+	// pair, cipherPlugin.soPathGo, and only that half: the C++ half is still
+	// loaded by the core from cipherPlugin.soPathCpp, so that path stays the
+	// deployment's declaration that encryption is on. A compiled-in cipher
+	// with no soPathCpp is left idle, exactly as no plug-in would be loaded.
+	// Configuring soPathGo beside a compiled-in cipher is refused: both would
+	// answer for the same keys, and picking silently would make which one
+	// wins depend on start-up order rather than on the deployment.
+	if compiled := ext.InstalledCipher(); compiled != nil {
+		if pathGo != "" {
+			return merr.WrapErrServiceInternalMsg(
+				"hookutil: cipherPlugin.soPathGo is set to %q and a cipher is also compiled in; "+
+					"both answer for the encryption keys, and only one can", pathGo)
+		}
+		if pathCpp == "" {
+			mlog.Info(context.TODO(), "empty cipherPlugin.soPathCpp, encryption is off and the compiled-in cipher stays idle")
+			return nil
+		}
+		return useCipher(compiled, "compiled-in cipher")
+	}
+
 	if pathGo == "" || pathCpp == "" {
 		mlog.Info(context.TODO(), "empty so path for cipher plugin, skip to load plugin")
 		return nil
@@ -430,14 +454,21 @@ func initCipher() error {
 	if err != nil {
 		return err
 	}
+	return useCipher(cipherVal, "cipher plugin")
+}
 
-	initConfigs := buildCipherInitConfig()
-	if err = cipherVal.Init(initConfigs); err != nil {
-		return merr.Wrap(err, "fail to init configs for the cipher plugin")
+// useCipher initializes a cipher with the cipherPlugin.* configuration,
+// registers the reload callbacks and installs it. It is the same for a
+// plug-in and a compiled-in cipher, which is the point: a cipher a
+// distribution compiled in must not be a second-class one. origin names it
+// in the error and the log.
+func useCipher(cipherVal hook.Cipher, origin string) error {
+	if err := cipherVal.Init(buildCipherInitConfig()); err != nil {
+		return merr.Wrap(err, "fail to init configs for the "+origin)
 	}
-
 	registerCallback()
-	storeCipher((cipherVal))
+	storeCipher(cipherVal)
+	mlog.Info(context.TODO(), "using the "+origin)
 	return nil
 }
 
@@ -445,11 +476,11 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			mlog.Panic(context.TODO(),
-				fmt.Sprintf("fail to init cipher plugin, go_so_path=%s, cpp_so_path=%s, error=%v",
-					paramtable.GetCipherParams().SoPathGo.GetValue(),
-					paramtable.GetCipherParams().SoPathCpp.GetValue(),
-					err))
+			// Init receives credentials and topology; its error can echo either.
+			mlog.Panic(context.TODO(), "fail to init cipher plugin",
+				mlog.String("go_so_path", config.RedactedValue),
+				mlog.String("cpp_so_path", config.RedactedValue),
+				mlog.String("error", config.RedactedValue))
 		}
 	})
 }
@@ -471,7 +502,7 @@ func registerCallback() {
 	mlog.Info(context.TODO(), "cipher config callbacks registered")
 }
 
-func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) error {
+func reloadCipherConfig(ctx context.Context, key, _, _ string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		mlog.Warn(ctx, "cipher plugin not loaded, skip config reload", mlog.String("key", key))
@@ -481,16 +512,13 @@ func reloadCipherConfig(ctx context.Context, key, oldValue, newValue string) err
 	cipherReloadMutex.Lock()
 	defer cipherReloadMutex.Unlock()
 
-	mlog.Info(ctx, "reloading cipher plugin config",
-		mlog.String("key", key),
-		mlog.String("oldValue", oldValue),
-		mlog.String("newValue", newValue))
+	mlog.Info(ctx, "reloading cipher plugin config", mlog.String("key", key))
 
 	initConfigs := buildCipherInitConfig()
 	if err := cipher.Init(initConfigs); err != nil {
 		mlog.Error(ctx, "fail to reload cipher plugin config",
 			mlog.String("key", key),
-			mlog.Err(err))
+			mlog.String("error", config.RedactedValue))
 		return err
 	}
 

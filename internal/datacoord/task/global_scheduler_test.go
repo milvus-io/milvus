@@ -18,66 +18,24 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func init() {
 	paramtable.Init()
 }
-
-type versionAwareSchedulerCluster struct {
-	session.Cluster
-	slots map[int64]*session.WorkerSlots
-}
-
-func (c *versionAwareSchedulerCluster) QuerySlot() map[int64]*session.WorkerSlots {
-	return c.slots
-}
-
-type versionAwareSchedulerTask struct {
-	id             int64
-	slot           int64
-	minimumVersion semver.Version
-	state          atomic.Int32
-	nodeID         atomic.Int64
-}
-
-func newVersionAwareSchedulerTask(id int64, minimumVersion semver.Version) *versionAwareSchedulerTask {
-	task := &versionAwareSchedulerTask{id: id, slot: 1, minimumVersion: minimumVersion}
-	task.state.Store(int32(taskcommon.Init))
-	task.nodeID.Store(NullNodeID)
-	return task
-}
-
-func (t *versionAwareSchedulerTask) GetTaskID() int64             { return t.id }
-func (t *versionAwareSchedulerTask) GetTaskType() taskcommon.Type { return taskcommon.CopySegment }
-func (t *versionAwareSchedulerTask) GetTaskState() taskcommon.State {
-	return taskcommon.State(t.state.Load())
-}
-func (t *versionAwareSchedulerTask) GetTaskSlot() int64                         { return t.slot }
-func (t *versionAwareSchedulerTask) SetTaskTime(taskcommon.TimeType, time.Time) {}
-func (t *versionAwareSchedulerTask) GetTaskTime(taskcommon.TimeType) time.Time  { return time.Time{} }
-func (t *versionAwareSchedulerTask) GetTaskVersion() int64                      { return 0 }
-func (t *versionAwareSchedulerTask) MinimumWorkerVersion() semver.Version {
-	return t.minimumVersion
-}
-
-func (t *versionAwareSchedulerTask) CreateTaskOnWorker(nodeID int64, _ session.Cluster) {
-	t.nodeID.Store(nodeID)
-	t.state.Store(int32(taskcommon.InProgress))
-}
-func (t *versionAwareSchedulerTask) QueryTaskOnWorker(session.Cluster) {}
-func (t *versionAwareSchedulerTask) DropTaskOnWorker(session.Cluster)  {}
 
 func TestGlobalScheduler_Enqueue(t *testing.T) {
 	cluster := session.NewMockCluster(t)
@@ -90,8 +48,10 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
@@ -100,8 +60,59 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Compaction))
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
+}
+
+func TestGlobalScheduler_GetPendingTaskCountIsScopedByTaskType(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+
+	enqueue := func(taskID int64, taskType taskcommon.Type) {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID)
+		task.EXPECT().GetTaskState().Return(taskcommon.Init)
+		task.EXPECT().GetTaskType().Return(taskType)
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+		scheduler.Enqueue(task)
+	}
+
+	enqueue(1, taskcommon.Stats)
+	enqueue(2, taskcommon.Compaction)
+	enqueue(3, taskcommon.Index)
+	enqueue(4, taskcommon.Compaction)
+
+	// An index/compaction backlog must not consume the stats admission budget.
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Stats))
+	assert.Equal(t, 2, scheduler.GetPendingTaskCount(taskcommon.Compaction))
+	assert.Equal(t, 1, scheduler.GetPendingTaskCount(taskcommon.Index))
+}
+
+func TestGlobalScheduler_GetPendingTaskCountIncludesBackoff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "60")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+
+	cluster := session.NewMockCluster(t)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+	globalScheduler := scheduler.(*globalTaskScheduler)
+
+	tasks := make(map[int64]Task)
+	for taskID := int64(1); taskID <= 2; taskID++ {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskID().Return(taskID)
+		task.EXPECT().GetTaskState().Return(taskcommon.Init)
+		task.EXPECT().GetTaskType().Return(taskcommon.Stats)
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+		scheduler.Enqueue(task)
+		tasks[taskID] = task
+	}
+
+	// A task waiting on its retry backoff still occupies queue depth: excluding it
+	// would let a worker-side failure storm silently disable the admission gate.
+	globalScheduler.recordTaskFailure(tasks[2])
+	assert.Equal(t, 2, scheduler.GetPendingTaskCount(taskcommon.Stats))
 }
 
 func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
@@ -129,6 +140,272 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
 	scheduler.AbortAndRemoveTask(2)
 	assert.Equal(t, 0, scheduler.(*globalTaskScheduler).runningTasks.Len())
+}
+
+func newFinalizeTestTask(t *testing.T, initial taskcommon.State) (*MockTask, *atomic.Int32) {
+	t.Helper()
+	state := &atomic.Int32{}
+	state.Store(int32(initial))
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return taskcommon.State(state.Load())
+	})
+	task.EXPECT().GetTaskType().Return(taskcommon.Import)
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	return task, state
+}
+
+func TestGlobalScheduler_FinalizeRemovesOwnershipBeforeCleanup(t *testing.T) {
+	for _, initial := range []taskcommon.State{taskcommon.Init, taskcommon.InProgress} {
+		t.Run(initial.String(), func(t *testing.T) {
+			scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+			task, state := newFinalizeTestTask(t, initial)
+			scheduler.Enqueue(task)
+			scheduler.backoffs.Insert(1, &taskBackoff{failures: 1})
+
+			cleaned := false
+			scheduler.Finalize(1, func() {
+				assert.Nil(t, scheduler.pendingTasks.Get(1))
+				assert.False(t, scheduler.runningTasks.Contain(1))
+				assert.False(t, scheduler.backoffs.Contain(1))
+				state.Store(int32(taskcommon.Failed))
+				cleaned = true
+			})
+			assert.True(t, cleaned)
+			// Finalize leaves worker cleanup to its caller; it must not issue a
+			// separate best-effort Drop before the latest assignment is re-read.
+			task.AssertNotCalled(t, "DropTaskOnWorker", mock.Anything)
+		})
+	}
+}
+
+func TestGlobalScheduler_FinalizeWaitsForInFlightCreate(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	task.EXPECT().GetTaskSlot().Return(int64(1))
+	createStarted := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	task.EXPECT().CreateTaskOnWorker(int64(10), cluster).Run(func(int64, session.Cluster) {
+		close(createStarted)
+		<-releaseCreate
+		state.Store(int32(taskcommon.InProgress))
+	}).Once()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-createStarted
+
+	finalizeStarted := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		close(finalizeStarted)
+		scheduler.Finalize(1, func() {
+			assert.Equal(t, taskcommon.InProgress, task.GetTaskState())
+			assert.False(t, scheduler.runningTasks.Contain(1))
+			state.Store(int32(taskcommon.Failed))
+		})
+		close(finalizeDone)
+	}()
+	<-finalizeStarted
+	select {
+	case <-finalizeDone:
+		t.Error("cleanup ran before the Create callback finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseCreate)
+	<-scheduleDone
+	<-finalizeDone
+	assert.Equal(t, taskcommon.Failed, task.GetTaskState())
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsQueuedCreate(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	task.EXPECT().GetTaskSlot().Return(int64(1))
+	callbackQueued := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	scheduler.execPool.Release()
+	scheduler.execPool = conc.NewPool[struct{}](1, conc.WithPreHandler(func() {
+		close(callbackQueued)
+		<-releaseCallback
+	}))
+	defer scheduler.execPool.Release()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-callbackQueued
+
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releaseCallback)
+	<-scheduleDone
+	task.AssertNotCalled(t, "CreateTaskOnWorker", mock.Anything, mock.Anything)
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsQueuedQuery(t *testing.T) {
+	for _, replace := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replacement=%t", replace), func(t *testing.T) {
+			scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+			task, _ := newFinalizeTestTask(t, taskcommon.InProgress)
+			callbackQueued := make(chan struct{})
+			releaseCallback := make(chan struct{})
+			scheduler.checkPool.Release()
+			scheduler.checkPool = conc.NewPool[struct{}](1, conc.WithPreHandler(func() {
+				close(callbackQueued)
+				<-releaseCallback
+			}))
+			defer scheduler.checkPool.Release()
+			scheduler.Enqueue(task)
+			checkDone := make(chan struct{})
+			go func() { scheduler.check(); close(checkDone) }()
+			<-callbackQueued
+
+			scheduler.Finalize(1, func() {})
+			var replacement *MockTask
+			if replace {
+				replacement, _ = newFinalizeTestTask(t, taskcommon.InProgress)
+				scheduler.Enqueue(replacement)
+			}
+			close(releaseCallback)
+			<-checkDone
+			task.AssertNotCalled(t, "QueryTaskOnWorker", mock.Anything)
+			task.AssertNotCalled(t, "DropTaskOnWorker", mock.Anything)
+			assert.Zero(t, scheduler.pendingTasks.TaskCount())
+			if replace {
+				current, ok := scheduler.runningTasks.Get(1)
+				require.True(t, ok)
+				assert.Same(t, replacement, current)
+			} else {
+				assert.Zero(t, scheduler.runningTasks.Len())
+			}
+		})
+	}
+}
+
+func TestGlobalScheduler_FinalizeStopsNoSlotRequeue(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	calculatingSlot := make(chan struct{})
+	releaseSlot := make(chan struct{})
+	task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		close(calculatingSlot)
+		<-releaseSlot
+		return 1
+	}).Once()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-calculatingSlot
+
+	finalizeStarted := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		close(finalizeStarted)
+		scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+		close(finalizeDone)
+	}()
+	<-finalizeStarted
+	// Before the fix, Finalize completes while slot calculation is outside
+	// the task lock, then the no-slot branch resurrects the task. With the
+	// lock, Finalize waits and removes the requeued task after this round.
+	select {
+	case <-finalizeDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseSlot)
+	<-scheduleDone
+	<-finalizeDone
+	assert.Nil(t, scheduler.pendingTasks.Get(1))
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsDelayedRequeue(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	scheduler.Enqueue(task)
+	scheduler.backoffs.Insert(1, &taskBackoff{notBefore: time.Now().Add(time.Hour)})
+
+	// The second task pauses this round after task 1 has moved into delayed,
+	// before the scheduler gets to its delayed-task requeue loop.
+	secondTask := NewMockTask(t)
+	secondTask.EXPECT().GetTaskID().Return(int64(2))
+	secondTask.EXPECT().GetTaskState().Return(taskcommon.Init)
+	secondTask.EXPECT().GetTaskType().Return(taskcommon.Import)
+	secondTask.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+	secondPopped := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	secondTask.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		close(secondPopped)
+		<-releaseSecond
+		return 1
+	}).Once()
+	scheduler.Enqueue(secondTask)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-secondPopped
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releaseSecond)
+	<-scheduleDone
+	assert.Nil(t, scheduler.pendingTasks.Get(1))
+	assert.Same(t, secondTask, scheduler.pendingTasks.Get(2))
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsSlotCalculationAfterPop(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	state := &atomic.Int32{}
+	state.Store(int32(taskcommon.Init))
+	var armed atomic.Bool
+	var identityReads atomic.Int32
+	taskPopped := make(chan struct{})
+	releasePopped := make(chan struct{})
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().RunAndReturn(func() int64 {
+		// Pop's first identity read removes the task from its queue map.
+		// The next read happens after Pop returns, before taking its key lock.
+		if armed.Load() && identityReads.Add(1) == 2 {
+			close(taskPopped)
+			<-releasePopped
+		}
+		return 1
+	})
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return taskcommon.State(state.Load())
+	})
+	task.EXPECT().GetTaskType().Return(taskcommon.Import)
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+	var slotCalculations atomic.Int32
+	task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		// Real import slot calculation dereferences the job. GC has removed
+		// it by this point, so reaching this call would panic in production.
+		slotCalculations.Add(1)
+		return 1
+	}).Maybe()
+	scheduler.Enqueue(task)
+	armed.Store(true)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-taskPopped
+
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releasePopped)
+	<-scheduleDone
+	assert.Zero(t, slotCalculations.Load())
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
+	assert.Zero(t, scheduler.runningTasks.Len())
 }
 
 func TestGlobalScheduler_pickNode(t *testing.T) {
@@ -202,51 +479,6 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 
 	// Empty cluster.
 	assert.Equal(t, int64(NullNodeID), scheduler.pickNode(newNodeSlotHeap(nil), 1))
-}
-
-func TestGlobalScheduler_pickNodeWithMinimumVersion(t *testing.T) {
-	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
-	minimumVersion := semver.MustParse("3.0.1")
-	nodes := map[int64]*session.WorkerSlots{
-		1: {NodeID: 1, AvailableSlots: 100, Version: "3.0.0"},
-		2: {NodeID: 2, AvailableSlots: 20, Version: "3.0.1"},
-	}
-	slotHeap := newNodeSlotHeap(nodes)
-
-	assert.Equal(t, int64(2), scheduler.pickNodeWithMinimumVersion(slotHeap, 10, minimumVersion))
-	assert.Equal(t, int64(10), nodes[2].AvailableSlots)
-	assert.Equal(t, int64(1), scheduler.pickNode(slotHeap, 10))
-	assert.Equal(t, int64(90), nodes[1].AvailableSlots)
-}
-
-func TestWorkerSupportsMinimumVersion(t *testing.T) {
-	minimumVersion := semver.MustParse("3.0.1")
-	assert.False(t, workerSupportsMinimumVersion("", minimumVersion))
-	assert.False(t, workerSupportsMinimumVersion("3.0.0", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("3.0.1-rc.1", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("v3.0.2", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("master-20260810-deadbeef", minimumVersion))
-	assert.True(t, workerSupportsMinimumVersion("", semver.Version{}))
-}
-
-func TestGlobalScheduler_IncompatibleTaskDoesNotBlockOrdinaryTask(t *testing.T) {
-	cluster := &versionAwareSchedulerCluster{
-		slots: map[int64]*session.WorkerSlots{
-			1: {NodeID: 1, AvailableSlots: 10, Version: "3.0.0"},
-		},
-	}
-	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
-	externalTask := newVersionAwareSchedulerTask(1, semver.MustParse("3.0.1"))
-	ordinaryTask := newVersionAwareSchedulerTask(2, semver.Version{})
-
-	scheduler.Enqueue(externalTask)
-	scheduler.Enqueue(ordinaryTask)
-	scheduler.schedule()
-
-	assert.Equal(t, int64(NullNodeID), externalTask.nodeID.Load())
-	assert.NotNil(t, scheduler.pendingTasks.Get(externalTask.GetTaskID()))
-	assert.Equal(t, int64(1), ordinaryTask.nodeID.Load())
-	assert.True(t, scheduler.runningTasks.Contain(ordinaryTask.GetTaskID()))
 }
 
 // TestGlobalScheduler_pickNode_Balancing verifies that successive picks spread

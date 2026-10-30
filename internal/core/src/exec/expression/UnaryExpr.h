@@ -477,19 +477,20 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                               \
-    do {                                                                     \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
-            res[i] = false;                                                  \
-        } else {                                                             \
-            if (index >= src[offset].length()) {                             \
-                res[i] = false;                                              \
-                valid_res[i] = false;                                        \
-                continue;                                                    \
-            }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
-            res[i] = (cmp);                                                  \
-        }                                                                    \
+#define UnaryArrayCompare(cmp)                                           \
+    do {                                                                 \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {     \
+            res[i] = false;                                              \
+        } else {                                                         \
+            if (index >= src[offset].length()) {                         \
+                res[i] = false;                                          \
+                valid_res[i] = false;                                    \
+                continue;                                                \
+            }                                                            \
+            auto array_data =                                            \
+                src[offset].template get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                              \
+        }                                                                \
     } while (false)
 
 template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
@@ -499,7 +500,7 @@ struct UnaryElementFuncForArray {
                                        ValueType>;
     void
     operator()(const ArrayView* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t size,
                const ValueType& val,
                int index,
@@ -532,7 +533,7 @@ struct UnaryElementFuncForArray {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -549,7 +550,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data == val;
                 }
             } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -562,7 +563,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
@@ -591,7 +592,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -611,7 +612,7 @@ struct UnaryElementFuncForArray {
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*regex_matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -633,7 +634,9 @@ struct UnaryIndexFuncForMatch {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val, proto::plan::OpType op) {
+    operator()(Index* index,
+               const IndexInnerType& val,
+               proto::plan::OpType op) {
         AssertInfo(op == proto::plan::OpType::Match ||
                        op == proto::plan::OpType::PostfixMatch ||
                        op == proto::plan::OpType::InnerMatch ||
@@ -691,7 +694,7 @@ struct UnaryIndexFunc {
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using Index = index::ScalarIndex<IndexInnerType>;
     TargetBitmap
-    operator()(Index* index, IndexInnerType val) {
+    operator()(Index* index, const IndexInnerType& val) {
         if constexpr (op == proto::plan::OpType::Equal) {
             return index->In(1, &val);
         } else if constexpr (op == proto::plan::OpType::NotEqual) {
@@ -881,7 +884,7 @@ class ShreddingExecutor {
 
     void
     operator()(const GetType* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
@@ -891,7 +894,7 @@ class ShreddingExecutor {
                       "shredding data");
         } else {
             ExecuteOperation(src, size, res);
-            HandleValidData(valid, size, res, valid_res);
+            ApplyValidMask(valid, res, valid_res, size);
         }
     }
 
@@ -899,20 +902,6 @@ class ShreddingExecutor {
     void
     ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
         BatchUnaryCompare<GetType, InnerType>(src, size, val_, op_type_, res);
-    }
-
-    void
-    HandleValidData(const bool* valid,
-                    size_t size,
-                    TargetBitmapView res,
-                    TargetBitmapView valid_res) {
-        if (valid != nullptr) {
-            for (int i = 0; i < size; ++i) {
-                if (!valid[i]) {
-                    res[i] = valid_res[i] = false;
-                }
-            }
-        }
     }
 
     proto::plan::OpType op_type_;
@@ -932,12 +921,12 @@ class ShreddingArrayBsonExecutor {
 
     void
     operator()(const std::string_view* src,
-               const bool* valid,
+               ValidityView valid,
                size_t size,
                TargetBitmapView res,
                TargetBitmapView valid_res) {
         for (size_t i = 0; i < size; ++i) {
-            if (valid != nullptr && !valid[i]) {
+            if (valid && !valid[i]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -974,7 +963,7 @@ class ShreddingArrayBsonExecutor {
 class PhyUnaryRangeFilterExpr : public SegmentExpr {
  public:
     PhyUnaryRangeFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -1008,8 +997,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
              expr_->op_type_ == proto::plan::OpType::RegexMatch)) {
             // try to pin ngram index for json
             auto field_id = expr_->column_.field_id_;
-            auto schema = segment->get_schema();
-            auto field_meta = schema[field_id];
+            auto schema = segment->get_schema_snapshot();
+            const auto& field_meta = (*schema)[field_id];
 
             if (field_meta.is_json()) {
                 auto pointer =
@@ -1048,6 +1037,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
+    bool
     IsSource() const override {
         return true;
     }
@@ -1055,21 +1049,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::shared_ptr<const milvus::expr::UnaryRangeFilterExpr>
     GetLogicalExpr() {
         return expr_;
-    }
-
-    proto::plan::OpType
-    GetOpType() {
-        return expr_->op_type_;
-    }
-
-    FieldId
-    GetFieldId() {
-        return expr_->column_.field_id_;
-    }
-
-    DataType
-    GetFieldType() {
-        return expr_->column_.data_type_;
     }
 
     int64_t
@@ -1141,7 +1120,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr
-    PreCheckOverflow(OffsetVector* input = nullptr);
+    PreCheckOverflow(int64_t batch_size, OffsetVector* input = nullptr);
 
     template <typename T>
     bool
@@ -1149,12 +1128,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
-
-    // Check if ngram index exists
-    bool
-    HasNgramIndex() const {
-        return pinned_ngram_index_.get() != nullptr;
-    }
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);

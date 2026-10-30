@@ -399,6 +399,7 @@ TEST(JsonPathIndexTest, InvertedDouble_ComparisonUnknowns) {
     idx.finish();
     idx.create_reader(milvus::index::SetBitsetSealed);
 
+    EXPECT_EQ(idx.ValidityBitmapByteSize(), sizeof(uint64_t));
     AssertDoubleComparisonUnknowns(idx);
 }
 

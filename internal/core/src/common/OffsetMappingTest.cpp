@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -20,9 +21,12 @@
 #include <string>
 #include <vector>
 
+#include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
+#include "common/SealedOffsetMapping.h"
 #include "index/VectorIndexValidDataUtils.h"
-#include "storage/MmapChunkManager.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/version.h"
 
 namespace milvus {
 
@@ -52,23 +56,6 @@ MakeMmapRoot(const std::string& test_name) {
            ("milvus_offset_mapping_" + test_name + "_" +
             std::to_string(
                 std::chrono::steady_clock::now().time_since_epoch().count()));
-}
-
-storage::MmapChunkManagerPtr
-MakeMmapChunkManager(const std::filesystem::path& mmap_root) {
-    return std::make_shared<storage::MmapChunkManager>(
-        mmap_root.string(), 64 * 1024 * 1024, 4 * 1024);
-}
-
-OffsetMappingBuildOptions
-MmapOptions(const std::filesystem::path& mmap_dir,
-            bool enable_i2o = true,
-            bool enable_o2i = true) {
-    OffsetMappingBuildOptions options;
-    options.enable_mmap_i2o_map = enable_i2o;
-    options.enable_mmap_o2i_map = enable_o2i;
-    options.mmap_dir_path = mmap_dir.string();
-    return options;
 }
 
 std::vector<std::filesystem::path>
@@ -123,42 +110,19 @@ ExpectMappingValues(const SealedOffsetMapping& mapping,
         EXPECT_EQ(mapping.GetLogicalOffset(i), expected_p2l[i])
             << "physical offset: " << i;
     }
+    if (!expected_p2l.empty()) {
+        auto ids = mapping.GetPhysicalToLogicalIds(0, expected_p2l.size());
+        ASSERT_FALSE(ids.empty());
+        ASSERT_EQ(ids.count, expected_p2l.size());
+        for (size_t i = 0; i < expected_p2l.size(); ++i) {
+            EXPECT_EQ(ids.data[i], expected_p2l[i])
+                << "physical offset in p2l view: " << i;
+        }
+    }
 }
 
 void
-ExpectStorageMode(const SealedOffsetMapping& mapping,
-                  bool i2o_mmap,
-                  bool o2i_mmap,
-                  bool i2o_map,
-                  bool o2i_map) {
-    EXPECT_EQ(mapping.IsI2OMmap(), i2o_mmap);
-    EXPECT_EQ(mapping.IsO2IMmap(), o2i_mmap);
-    EXPECT_EQ(mapping.IsMmap(), i2o_mmap || o2i_mmap);
-    EXPECT_EQ(mapping.IsI2OUsingMap(), i2o_map);
-    EXPECT_EQ(mapping.IsO2IUsingMap(), o2i_map);
-    EXPECT_EQ(mapping.IsUsingMap(), i2o_map || o2i_map);
-}
-
-void
-ExpectTransformOperations(const SealedOffsetMapping& mapping) {
-    TargetBitmap bitset(5, false);
-    bitset.set(2);
-    TargetBitmap transformed;
-    EXPECT_EQ(mapping.TransformBitset(bitset, transformed),
-              OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(transformed.size(), 3);
-    EXPECT_FALSE(transformed[0]);
-    EXPECT_TRUE(transformed[1]);
-    EXPECT_FALSE(transformed[2]);
-
-    std::vector<int64_t> physical_offsets{0, 1, 2, -1};
-    mapping.TransformOffsets(physical_offsets);
-    EXPECT_EQ(physical_offsets, (std::vector<int64_t>{0, 2, 3, -1}));
-
-    std::vector<int64_t> logical_offsets{0, 1, 3, 4};
-    mapping.TransformLogicalOffsets(logical_offsets);
-    EXPECT_EQ(logical_offsets, (std::vector<int64_t>{0, -1, 2, -1}));
-
+ExpectFilterValidLogicalOffsets(const SealedOffsetMapping& mapping) {
     const int64_t input_offsets[] = {0, 1, 2, 4};
     bool input_valid_data[4] = {};
     std::vector<int64_t> filtered_offsets;
@@ -171,92 +135,25 @@ ExpectTransformOperations(const SealedOffsetMapping& mapping) {
     EXPECT_EQ(filtered_offsets, (std::vector<int64_t>{0, 1}));
 }
 
-class TestVectorIndex : public index::VectorIndex {
- public:
-    TestVectorIndex() : index::VectorIndex("TEST", knowhere::metric::L2) {
+knowhere::Index<knowhere::IndexNode>
+CreateValidityIndex() {
+    auto result = knowhere::IndexFactory::Instance().Create<float>(
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    if (!result.has_value()) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "create validity helper fixture: {}",
+                  result.what());
     }
+    return std::move(result.value());
+}
 
-    BinarySet
-    Serialize(const Config& config) override {
-        (void)config;
-        return {};
-    }
-
-    void
-    Load(const BinarySet& binary_set, const Config& config) override {
-        (void)binary_set;
-        (void)config;
-    }
-
-    void
-    Load(milvus::tracer::TraceContext ctx, const Config& config) override {
-        (void)ctx;
-        (void)config;
-    }
-
-    void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config) override {
-        (void)dataset;
-        (void)config;
-    }
-
-    void
-    Build(const Config& config) override {
-        (void)config;
-    }
-
-    int64_t
-    Count() override {
-        return 0;
-    }
-
-    index::IndexStatsPtr
-    Upload(const Config& config) override {
-        (void)config;
-        return nullptr;
-    }
-
-    void
-    Query(const DatasetPtr dataset,
-          const SearchInfo& search_info,
-          const BitsetView& bitset,
-          milvus::OpContext* op_context,
-          SearchResult& search_result) const override {
-        (void)dataset;
-        (void)search_info;
-        (void)bitset;
-        (void)op_context;
-        (void)search_result;
-    }
-
-    const bool
-    HasRawData() const override {
-        return false;
-    }
-
-    bool
-    IsIndexRefineEnabled() const override {
-        return false;
-    }
-
-    std::vector<uint8_t>
-    GetVector(const DatasetPtr dataset) const override {
-        (void)dataset;
-        return {};
-    }
-
-    std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
-    GetSparseVector(const DatasetPtr dataset) const override {
-        (void)dataset;
-        return nullptr;
-    }
-};
 }  // namespace
 
 // ---------- Default (disabled) state ----------
 
 TEST(OffsetMapping, DefaultIsDisabledAndPassThrough) {
-    OffsetMapping mapping;
+    NoOpOffsetMapping mapping;
     EXPECT_FALSE(mapping.IsEnabled());
     EXPECT_EQ(mapping.GetValidCount(), 0);
     EXPECT_EQ(mapping.GetTotalCount(), 0);
@@ -272,58 +169,12 @@ TEST(OffsetMapping, BuildBasicVecMode) {
     const std::vector<int64_t> expected_l2p{0, -1, 1, 2, -1};
     const std::vector<int64_t> expected_p2l{0, 2, 3};
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, false, false, false);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("basic_both");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, true, true, false, false);
-        ExpectMmapBlockFiles(mmap_root,
-                             {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
-    }
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
+    ExpectMappingValues(mapping, expected_l2p, expected_p2l);
 }
 
-TEST(OffsetMapping, BuildBasicVecModeMapsDirectionsIndependently) {
-    auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
-    const std::vector<int64_t> expected_l2p{0, -1, 1, 2, -1};
-    const std::vector<int64_t> expected_p2l{0, 2, 3};
-
-    {
-        const auto mmap_root = MakeMmapRoot("basic_i2o");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir, true, false));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, true, false, false, false);
-        ExpectMmapBlockFiles(mmap_root, {3 * sizeof(int32_t)});
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("basic_o2i");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir, false, true));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, true, false, false);
-        ExpectMmapBlockFiles(mmap_root, {5 * sizeof(int32_t)});
-    }
-}
-
-TEST(OffsetMapping, BuildMapModeOnSparse) {
+TEST(OffsetMapping, BuildSparseUsesContiguousStorage) {
     std::vector<uint8_t> valid(100, 0);
     valid[5] = 1;
     valid[50] = 1;
@@ -332,74 +183,18 @@ TEST(OffsetMapping, BuildMapModeOnSparse) {
     expected_l2p[50] = 1;
     const std::vector<int64_t> expected_p2l{5, 50};
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()), 100);
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, false, true, true);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("sparse_both");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      100,
-                      MmapOptions(mmap_dir));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, true, true, false, false);
-        ExpectMmapBlockFiles(mmap_root,
-                             {2 * sizeof(int32_t), 100 * sizeof(int32_t)});
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("sparse_i2o");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      100,
-                      MmapOptions(mmap_dir, true, false));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, true, false, false, true);
-        ExpectMmapBlockFiles(mmap_root, {2 * sizeof(int32_t)});
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("sparse_o2i");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      100,
-                      MmapOptions(mmap_dir, false, true));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, true, true, false);
-        ExpectMmapBlockFiles(mmap_root, {100 * sizeof(int32_t)});
-    }
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 100);
+    ExpectMappingValues(mapping, expected_l2p, expected_p2l);
 }
 
 TEST(OffsetMapping, BuildAllValid) {
     std::vector<uint8_t> valid(4, 1);
     const std::vector<int64_t> expected{0, 1, 2, 3};
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
-        ExpectMappingValues(mapping, expected, expected);
-        ExpectStorageMode(mapping, false, false, false, false);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("all_valid");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      4,
-                      MmapOptions(mmap_dir));
-        ExpectMappingValues(mapping, expected, expected);
-        ExpectStorageMode(mapping, true, true, false, false);
-        ExpectMmapBlockFiles(mmap_root,
-                             {4 * sizeof(int32_t), 4 * sizeof(int32_t)});
-    }
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
+    ExpectMappingValues(mapping, expected, expected);
 }
 
 TEST(OffsetMapping, BuildAllNull) {
@@ -407,46 +202,18 @@ TEST(OffsetMapping, BuildAllNull) {
     const std::vector<int64_t> expected_l2p(4, -1);
     const std::vector<int64_t> expected_p2l;
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, false, true, true);
-        EXPECT_EQ(mapping.GetLogicalOffset(0), -1);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("all_null");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      4,
-                      MmapOptions(mmap_dir));
-        ExpectMappingValues(mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(mapping, false, true, false, false);
-        EXPECT_EQ(mapping.GetLogicalOffset(0), -1);
-        ExpectMmapBlockFiles(mmap_root, {4 * sizeof(int32_t)});
-    }
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 4);
+    ExpectMappingValues(mapping, expected_l2p, expected_p2l);
+    EXPECT_EQ(mapping.GetLogicalOffset(0), -1);
 }
 
 TEST(OffsetMapping, TransformOperationsMatchBuildMode) {
     auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
-        ExpectTransformOperations(mapping);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("transform");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir));
-        ExpectTransformOperations(mapping);
-    }
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
+    ExpectFilterValidLogicalOffsets(mapping);
 }
 
 TEST(OffsetMapping, BuildNoopOnNullOrZero) {
@@ -459,208 +226,126 @@ TEST(OffsetMapping, BuildNoopOnNullOrZero) {
         mapping.Build(reinterpret_cast<const bool*>(valid.data()), 0);
         EXPECT_FALSE(mapping.IsEnabled());
     }
-
-    {
-        const auto mmap_root = MakeMmapRoot("noop");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
-
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir));
-        EXPECT_TRUE(mapping.IsEnabled());
-        EXPECT_TRUE(mapping.IsMmap());
-
-        mapping.Build(nullptr, 100, MmapOptions(mmap_dir));
-        EXPECT_FALSE(mapping.IsEnabled());
-        EXPECT_FALSE(mapping.IsMmap());
-        EXPECT_FALSE(mapping.IsUsingMap());
-        EXPECT_EQ(mapping.GetPhysicalOffset(3), 3);
-
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      0,
-                      MmapOptions(mmap_dir));
-        EXPECT_FALSE(mapping.IsEnabled());
-        EXPECT_FALSE(mapping.IsMmap());
-        EXPECT_FALSE(mapping.IsUsingMap());
-    }
 }
 
 TEST(OffsetMapping, BuildTwiceResetsState) {
     auto v1 = ToBoolBytes(MakeValid({1, 1, 0, 0, 1}));
     auto v2 = ToBoolBytes(MakeValid({1, 0, 0}));
 
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(v1.data()), 5);
-        EXPECT_EQ(mapping.GetValidCount(), 3);
-        EXPECT_EQ(mapping.GetTotalCount(), 5);
+    SealedOffsetMapping mapping;
+    mapping.Build(reinterpret_cast<const bool*>(v1.data()), 5);
+    EXPECT_EQ(mapping.GetValidCount(), 3);
+    EXPECT_EQ(mapping.GetTotalCount(), 5);
 
-        mapping.Build(reinterpret_cast<const bool*>(v2.data()), 3);
-        EXPECT_EQ(mapping.GetValidCount(), 1);
-        EXPECT_EQ(mapping.GetTotalCount(), 3);
-        EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-        EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
-        EXPECT_EQ(mapping.GetPhysicalOffset(2), -1);
-        EXPECT_FALSE(mapping.IsMmap());
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("build_twice");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(
-            reinterpret_cast<const bool*>(v1.data()), 5, MmapOptions(mmap_dir));
-        EXPECT_TRUE(mapping.IsMmap());
-
-        mapping.Build(reinterpret_cast<const bool*>(v2.data()), 3);
-        EXPECT_EQ(mapping.GetValidCount(), 1);
-        EXPECT_EQ(mapping.GetTotalCount(), 3);
-        EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
-        EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
-        EXPECT_EQ(mapping.GetPhysicalOffset(2), -1);
-        EXPECT_FALSE(mapping.IsMmap());
-    }
+    mapping.Build(reinterpret_cast<const bool*>(v2.data()), 3);
+    EXPECT_EQ(mapping.GetValidCount(), 1);
+    EXPECT_EQ(mapping.GetTotalCount(), 3);
+    EXPECT_EQ(mapping.GetPhysicalOffset(0), 0);
+    EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
+    EXPECT_EQ(mapping.GetPhysicalOffset(2), -1);
 }
 
-TEST(OffsetMapping, MmapOptionsUseOnlyIdMappingConfigKeys) {
-    Config config;
-    config[index::ENABLE_MMAP] = true;
-
-    auto options = index::GetOffsetMappingMmapOptions(config);
-    EXPECT_FALSE(options.enable_mmap_i2o_map);
-    EXPECT_FALSE(options.enable_mmap_o2i_map);
-
-    config[index::ENABLE_MMAP_I2O_MAP] = true;
-    config[index::ENABLE_MMAP_O2I_MAP] = false;
-
-    options = index::GetOffsetMappingMmapOptions(config);
-    EXPECT_TRUE(options.enable_mmap_i2o_map);
-    EXPECT_FALSE(options.enable_mmap_o2i_map);
-
-    config[index::ENABLE_MMAP_I2O_MAP] = "false";
-    config[index::ENABLE_MMAP_O2I_MAP] = "true";
-
-    options = index::GetOffsetMappingMmapOptions(config);
-    EXPECT_FALSE(options.enable_mmap_i2o_map);
-    EXPECT_TRUE(options.enable_mmap_o2i_map);
-}
-
-TEST(OffsetMapping, OffsetMappingMmapDirUsesDedicatedIndexSubdirectory) {
-    const auto local_index_prefix = (std::filesystem::temp_directory_path() /
-                                     "milvus_local_chunk/index_files/1_2_3_4")
-                                        .string();
-    const auto mmap_dir = index::GetOffsetMappingMmapDir(local_index_prefix);
-
-    EXPECT_EQ(mmap_dir,
-              (std::filesystem::path(local_index_prefix) /
-               index::OFFSET_MAPPING_MMAP_DIR)
-                  .string());
-    EXPECT_EQ(std::filesystem::path(mmap_dir).parent_path(),
-              std::filesystem::path(local_index_prefix));
-}
-
-TEST(OffsetMapping, FileBackedMmapDoesNotResetMmapChunkManagerAccounting) {
-    const auto manager_root = MakeMmapRoot("accounting_manager");
-    auto mmap_chunk_manager = MakeMmapChunkManager(manager_root);
-    auto descriptor = mmap_chunk_manager->Register();
-    mmap_chunk_manager->Allocate(descriptor, sizeof(int32_t));
-    const auto allocated_size = mmap_chunk_manager->GetDiskAllocSize();
-    ASSERT_GT(allocated_size, 0);
-
-    auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
-    const auto mmap_root = MakeMmapRoot("accounting_mapping");
-    auto mmap_dir = mmap_root;
-    {
-        SealedOffsetMapping mapping;
-        mapping.Build(reinterpret_cast<const bool*>(valid.data()),
-                      5,
-                      MmapOptions(mmap_dir));
-        EXPECT_TRUE(mapping.IsMmap());
-        ExpectMmapBlockFiles(mmap_root,
-                             {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
-        EXPECT_EQ(mmap_chunk_manager->GetDiskAllocSize(), allocated_size);
-    }
-
-    EXPECT_EQ(mmap_chunk_manager->GetDiskAllocSize(), allocated_size);
-}
-
-TEST(OffsetMapping, NeedOffsetMappingMmapMatchesDirectionSizes) {
-    OffsetMappingBuildOptions options;
-    EXPECT_FALSE(index::NeedOffsetMappingMmap(options, 10, 5));
-
-    options.enable_mmap_i2o_map = true;
-    EXPECT_TRUE(index::NeedOffsetMappingMmap(options, 10, 5));
-    EXPECT_FALSE(index::NeedOffsetMappingMmap(options, 10, 0));
-
-    options.enable_mmap_i2o_map = false;
-    options.enable_mmap_o2i_map = true;
-    EXPECT_TRUE(index::NeedOffsetMappingMmap(options, 10, 0));
-    EXPECT_FALSE(index::NeedOffsetMappingMmap(options, 0, 0));
-}
-
-TEST(OffsetMapping, ValidDataHelpersPreserveMappingValuesWithMmapOptions) {
+TEST(IdMapValidDataHelpers, ConfigureMmapUsesOnlyIdMappingConfigKeys) {
     const std::vector<uint8_t> bitmap{0b00001101};
-    const std::vector<int64_t> expected_l2p{0, -1, 1, 2, -1};
-    const std::vector<int64_t> expected_p2l{0, 2, 3};
-
-    {
-        TestVectorIndex vector_index;
-        index::BuildValidDataFromBitmap(&vector_index, 5, bitmap.data());
-        const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
-            &vector_index.GetOffsetMapping());
-        ASSERT_NE(mapping, nullptr);
-        ExpectMappingValues(*mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(*mapping, false, false, false, false);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("bitmap_helper");
-        auto mmap_dir = mmap_root;
-        TestVectorIndex vector_index;
-        index::BuildValidDataFromBitmap(
-            &vector_index, 5, bitmap.data(), MmapOptions(mmap_dir));
-        const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
-            &vector_index.GetOffsetMapping());
-        ASSERT_NE(mapping, nullptr);
-        ExpectMappingValues(*mapping, expected_l2p, expected_p2l);
-        ExpectStorageMode(*mapping, true, true, false, false);
+    for (int flags = 0; flags < 4; ++flags) {
+        const auto mmap_root =
+            MakeMmapRoot("semantic_mmap_" + std::to_string(flags));
+        Config config;
+        // Payload mmap must not implicitly enable nullable mapping mmap.
+        config[index::ENABLE_MMAP] = true;
+        config[index::ENABLE_MMAP_I2O_MAP] = (flags & 1) ? "true" : "false";
+        config[index::ENABLE_MMAP_O2I_MAP] = (flags & 2) != 0;
+        {
+            auto native = CreateValidityIndex();
+            const auto input = index::MakeNullableLoadInput(
+                {true, 5, bitmap.data()}, config, mmap_root.string());
+            ASSERT_TRUE(input.validity.has_value());
+            ASSERT_EQ(native.ImportValidity(*input.validity, input.mmap),
+                      knowhere::Status::success);
+            EXPECT_EQ(native.LogicalCount().value(), 5);
+            EXPECT_EQ(native.ValidCount().value(), 3);
+            EXPECT_FALSE(native.IsRowValid(1).value());
+            std::vector<uint64_t> expected;
+            if (flags & 1) {
+                expected.push_back(3 * sizeof(int32_t));
+            }
+            if (flags & 2) {
+                expected.push_back(5 * sizeof(int32_t));
+            }
+            ExpectMmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR, expected);
+        }
+        EXPECT_TRUE(MmapBlockFiles(mmap_root / index::ID_MAP_MMAP_DIR).empty());
+        std::filesystem::remove_all(mmap_root);
     }
 }
 
-TEST(OffsetMapping, LoadValidDataFromBinarySetUsesProvidedMmapOptions) {
-    SealedOffsetMapping source_mapping;
-    auto valid = ToBoolBytes(MakeValid({1, 0, 1, 1, 0}));
-    source_mapping.Build(reinterpret_cast<const bool*>(valid.data()), 5);
-
-    BinarySet binary_set;
-    index::AppendValidDataToBinarySet(source_mapping, binary_set);
-
-    {
-        TestVectorIndex vector_index;
-        ASSERT_TRUE(
-            index::LoadValidDataFromBinarySet(binary_set, &vector_index));
-        const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
-            &vector_index.GetOffsetMapping());
-        ASSERT_NE(mapping, nullptr);
-        EXPECT_FALSE(mapping->IsMmap());
-        EXPECT_EQ(mapping->GetPhysicalOffset(3), 2);
-        EXPECT_EQ(mapping->GetLogicalOffset(2), 3);
+TEST(IdMapValidDataHelpers, ValidDataHelpersPreserveSnapshotValues) {
+    const std::vector<uint8_t> bitmap{0b00001101};
+    for (const bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap);
+        const auto mmap_root = MakeMmapRoot("bitmap_helper");
+        knowhere::ValidityData snapshot;
+        {
+            auto native = CreateValidityIndex();
+            ASSERT_EQ(native.ImportValidity(
+                          {bitmap.data(), bitmap.size(), 5},
+                          {enable_mmap, enable_mmap, mmap_root.string()}),
+                      knowhere::Status::success);
+            auto exported = native.ExportValidity();
+            ASSERT_TRUE(exported.has_value());
+            ASSERT_TRUE(exported.value().has_value());
+            snapshot = std::move(*exported.value());
+            EXPECT_EQ(native.ValidCount().value(), 3);
+            if (enable_mmap) {
+                ExpectMmapBlockFiles(
+                    mmap_root, {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+            }
+        }
+        // The exported value owns its bytes after the native index is gone.
+        EXPECT_EQ(snapshot.logical_row_count, 5);
+        EXPECT_EQ(snapshot.packed_bits, bitmap);
+        EXPECT_TRUE(MmapBlockFiles(mmap_root).empty());
+        std::filesystem::remove_all(mmap_root);
     }
+}
 
+TEST(IdMapValidDataHelpers, BinarySetRoundTripPreservesWireData) {
+    const std::vector<uint8_t> bitmap{0x0d};
+    BinarySet binary_set;
     {
+        auto native = CreateValidityIndex();
+        ASSERT_EQ(native.ImportValidity({bitmap.data(), bitmap.size(), 5}),
+                  knowhere::Status::success);
+        index::AppendValidDataToBinarySet(native, binary_set);
+    }
+    ASSERT_EQ(binary_set.GetByName(index::VALID_DATA_COUNT_KEY)->size,
+              sizeof(uint64_t));
+    ASSERT_EQ(binary_set.GetByName(index::VALID_DATA_KEY)->size, 1);
+    EXPECT_EQ(binary_set.GetByName(index::VALID_DATA_KEY)->data[0], 0x0d);
+    for (const bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap);
         const auto mmap_root = MakeMmapRoot("binary_set_helper");
-        auto mmap_dir = mmap_root;
-        TestVectorIndex vector_index;
-        ASSERT_TRUE(index::LoadValidDataFromBinarySet(
-            binary_set, &vector_index, MmapOptions(mmap_dir)));
-        const auto* mapping = dynamic_cast<const SealedOffsetMapping*>(
-            &vector_index.GetOffsetMapping());
-        ASSERT_NE(mapping, nullptr);
-        EXPECT_TRUE(mapping->IsMmap());
-        EXPECT_EQ(mapping->GetPhysicalOffset(3), 2);
-        EXPECT_EQ(mapping->GetLogicalOffset(2), 3);
+        {
+            auto native = CreateValidityIndex();
+            auto input = index::MakeNullableLoadInput(
+                index::LoadValidDataViewFromBinarySet(binary_set));
+            input.mmap = {enable_mmap, enable_mmap, mmap_root.string()};
+            ASSERT_TRUE(input.validity.has_value());
+            ASSERT_EQ(native.ImportValidity(*input.validity, input.mmap),
+                      knowhere::Status::success);
+            EXPECT_EQ(native.LogicalCount().value(), 5);
+            EXPECT_EQ(native.ValidCount().value(), 3);
+            for (int64_t row = 0; row < 5; ++row) {
+                EXPECT_EQ(native.IsRowValid(row).value(),
+                          ((bitmap[0] >> row) & 1) != 0);
+            }
+            if (enable_mmap) {
+                ExpectMmapBlockFiles(
+                    mmap_root, {3 * sizeof(int32_t), 5 * sizeof(int32_t)});
+            }
+        }
+        EXPECT_TRUE(MmapBlockFiles(mmap_root).empty());
+        std::filesystem::remove_all(mmap_root);
     }
 }
 
@@ -723,18 +408,6 @@ TEST(OffsetMapping, IsValidMatchesPhysicalOffsetSign) {
         EXPECT_TRUE(mapping.IsValid(2));
         EXPECT_FALSE(mapping.IsValid(3));
     }
-
-    {
-        const auto mmap_root = MakeMmapRoot("is_valid");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(
-            reinterpret_cast<const bool*>(v.data()), 4, MmapOptions(mmap_dir));
-        EXPECT_TRUE(mapping.IsValid(0));
-        EXPECT_FALSE(mapping.IsValid(1));
-        EXPECT_TRUE(mapping.IsValid(2));
-        EXPECT_FALSE(mapping.IsValid(3));
-    }
 }
 
 // ---------- Out-of-bounds queries ----------
@@ -745,16 +418,6 @@ TEST(OffsetMapping, OutOfBoundsReturnsMinusOne) {
     {
         SealedOffsetMapping mapping;
         mapping.Build(reinterpret_cast<const bool*>(v.data()), 3);
-        EXPECT_EQ(mapping.GetPhysicalOffset(99), -1);
-        EXPECT_EQ(mapping.GetLogicalOffset(99), -1);
-    }
-
-    {
-        const auto mmap_root = MakeMmapRoot("out_of_bounds");
-        auto mmap_dir = mmap_root;
-        SealedOffsetMapping mapping;
-        mapping.Build(
-            reinterpret_cast<const bool*>(v.data()), 3, MmapOptions(mmap_dir));
         EXPECT_EQ(mapping.GetPhysicalOffset(99), -1);
         EXPECT_EQ(mapping.GetLogicalOffset(99), -1);
     }

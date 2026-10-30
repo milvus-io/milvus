@@ -279,7 +279,8 @@ StringIndexMarisa::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_paths_to_size);
 }
@@ -893,15 +894,10 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             .value_or(milvus::proto::common::LoadPriority::HIGH);
 
     // Stream trie entry directly to temp file (no full-size temp buffer)
-    {
-        auto file_writer = storage::FileWriter(
-            file_name, storage::io::GetPriorityFromLoadPriority(load_priority));
-        reader.ReadEntryStream(MARISA_TRIE_INDEX,
-                               [&](const uint8_t* data, size_t len) {
-                                   file_writer.Write(data, len);
-                               });
-        file_writer.Finish();
-    }
+    reader.ReadEntryStreamToFile(
+        MARISA_TRIE_INDEX,
+        file_name,
+        storage::io::GetPriorityFromLoadPriority(load_priority));
 
     if (config.contains(MMAP_FILE_PATH)) {
         auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
@@ -924,22 +920,10 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     if (config.contains(MMAP_FILE_PATH)) {
         // mmap path: stream to disk file, then mmap
         auto str_ids_path = file_name + ".str_ids";
-        {
-            auto fw = storage::FileWriter(
-                str_ids_path,
-                storage::io::GetPriorityFromLoadPriority(load_priority));
-            size_t written = 0;
-            reader.ReadEntryStream(MARISA_STR_IDS,
-                                   [&](const uint8_t* d, size_t len) {
-                                       fw.Write(d, len);
-                                       written += len;
-                                   });
-            AssertInfo(written == str_ids_bytes,
-                       "str_ids stream read size mismatch: got {}, expected {}",
-                       written,
-                       str_ids_bytes);
-            fw.Finish();
-        }
+        reader.ReadEntryStreamToFile(
+            MARISA_STR_IDS,
+            str_ids_path,
+            storage::io::GetPriorityFromLoadPriority(load_priority));
         auto str_ids_file_raii = std::make_unique<MmapFileRAII>(str_ids_path);
         auto str_ids_file = File::Open(str_ids_path, O_RDONLY);
         auto* mapped = mmap(NULL,
@@ -963,19 +947,18 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     } else {
         // memory path: stream to pre-allocated vector
         str_ids_.resize(str_ids_bytes / sizeof(int64_t), MARISA_NULL_KEY_ID);
-        size_t write_offset = 0;
-        reader.ReadEntryStream(
-            MARISA_STR_IDS, [&](const uint8_t* d, size_t len) {
+        const auto entry_bytes = reader.GetEntrySize(MARISA_STR_IDS);
+        AssertInfo(entry_bytes == str_ids_bytes,
+                   "str_ids stream read size mismatch: got {}, expected {}",
+                   entry_bytes,
+                   str_ids_bytes);
+        reader.ReadEntryStreamAt(
+            MARISA_STR_IDS, [&](size_t offset, const uint8_t* d, size_t len) {
                 milvus::fastmem::FastMemcpy(
-                    reinterpret_cast<uint8_t*>(str_ids_.data()) + write_offset,
+                    reinterpret_cast<uint8_t*>(str_ids_.data()) + offset,
                     d,
                     len);
-                write_offset += len;
             });
-        AssertInfo(write_offset == str_ids_bytes,
-                   "str_ids stream read size mismatch: got {}, expected {}",
-                   write_offset,
-                   str_ids_bytes);
         str_ids_ptr_ = str_ids_.data();
         str_ids_size_ = str_ids_.size();
     }
@@ -1040,25 +1023,27 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
             auto csr_path = file_name + ".csr";
 
             {
-                auto fw = storage::FileWriter(
+                // Keep the legacy contiguous layout; the second entry need not
+                // start at an O_DIRECT-aligned offset.
+                auto fw = storage::PositionedFileWriter(
                     csr_path,
-                    storage::io::GetPriorityFromLoadPriority(load_priority));
-                size_t written = 0;
-                reader.ReadEntryStream(MARISA_CSR_INDEX,
-                                       [&](const uint8_t* d, size_t len) {
-                                           fw.Write(d, len);
-                                           written += len;
-                                       });
-                reader.ReadEntryStream(MARISA_CSR_OFFSETS,
-                                       [&](const uint8_t* d, size_t len) {
-                                           fw.Write(d, len);
-                                           written += len;
-                                       });
-                AssertInfo(written == idx_bytes + off_bytes,
-                           "CSR stream read size mismatch: got {}, expected {}",
-                           written,
-                           idx_bytes + off_bytes);
+                    idx_bytes + off_bytes,
+                    storage::io::GetPriorityFromLoadPriority(load_priority),
+                    storage::FileWriter::WriteMode::BUFFERED);
+                auto cleanup =
+                    folly::makeGuard([&] { ::unlink(csr_path.c_str()); });
+                reader.ReadEntryStreamAt(
+                    MARISA_CSR_INDEX,
+                    [&](size_t offset, const uint8_t* d, size_t len) {
+                        fw.WriteAt(offset, d, len);
+                    });
+                reader.ReadEntryStreamAt(
+                    MARISA_CSR_OFFSETS,
+                    [&](size_t offset, const uint8_t* d, size_t len) {
+                        fw.WriteAt(idx_bytes + offset, d, len);
+                    });
                 fw.Finish();
+                cleanup.dismiss();
             }
 
             auto csr_file_raii = std::make_unique<MmapFileRAII>(csr_path);
@@ -1086,36 +1071,38 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
         } else {
             // memory path: stream into vectors
             csr_index_.resize(idx_bytes / sizeof(uint32_t));
-            size_t wo = 0;
-            reader.ReadEntryStream(
-                MARISA_CSR_INDEX, [&](const uint8_t* d, size_t len) {
-                    milvus::fastmem::FastMemcpy(
-                        reinterpret_cast<uint8_t*>(csr_index_.data()) + wo,
-                        d,
-                        len);
-                    wo += len;
-                });
-            AssertInfo(wo == idx_bytes,
+            const auto entry_bytes = reader.GetEntrySize(MARISA_CSR_INDEX);
+            AssertInfo(entry_bytes == idx_bytes,
                        "CSR index stream read size mismatch: got {}, expected "
                        "{}",
-                       wo,
+                       entry_bytes,
                        idx_bytes);
-
-            csr_offsets_.resize(off_bytes / sizeof(uint32_t));
-            wo = 0;
-            reader.ReadEntryStream(
-                MARISA_CSR_OFFSETS, [&](const uint8_t* d, size_t len) {
+            reader.ReadEntryStreamAt(
+                MARISA_CSR_INDEX,
+                [&](size_t offset, const uint8_t* d, size_t len) {
                     milvus::fastmem::FastMemcpy(
-                        reinterpret_cast<uint8_t*>(csr_offsets_.data()) + wo,
+                        reinterpret_cast<uint8_t*>(csr_index_.data()) + offset,
                         d,
                         len);
-                    wo += len;
                 });
-            AssertInfo(wo == off_bytes,
+
+            csr_offsets_.resize(off_bytes / sizeof(uint32_t));
+            const auto offset_entry_bytes =
+                reader.GetEntrySize(MARISA_CSR_OFFSETS);
+            AssertInfo(offset_entry_bytes == off_bytes,
                        "CSR offsets stream read size mismatch: got {}, "
                        "expected {}",
-                       wo,
+                       offset_entry_bytes,
                        off_bytes);
+            reader.ReadEntryStreamAt(
+                MARISA_CSR_OFFSETS,
+                [&](size_t offset, const uint8_t* d, size_t len) {
+                    milvus::fastmem::FastMemcpy(
+                        reinterpret_cast<uint8_t*>(csr_offsets_.data()) +
+                            offset,
+                        d,
+                        len);
+                });
 
             csr_index_ptr_ = csr_index_.data();
             csr_offsets_ptr_ = csr_offsets_.data();

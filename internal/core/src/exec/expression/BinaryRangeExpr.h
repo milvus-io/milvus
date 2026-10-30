@@ -115,7 +115,7 @@ struct BinaryRangeElementFunc {
 // 'cmp' must reference 'value' (int64_t or double depending on the JSON value).
 #define BinaryRangeJSONCompare(cmp)                                    \
     do {                                                               \
-        if (valid_data != nullptr && !valid_data[offset]) {            \
+        if (valid_data && !valid_data[offset]) {                       \
             res[i] = valid_res[i] = false;                             \
             break;                                                     \
         }                                                              \
@@ -162,7 +162,7 @@ struct BinaryRangeElementFuncForJson {
                const ValueType& val2,
                const std::string& pointer,
                const milvus::Json* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -201,7 +201,7 @@ struct BinaryRangeElementFuncForArray {
                const ValueType& val2,
                int index,
                const milvus::ArrayView* src,
-               const bool* valid_data,
+               ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
@@ -219,7 +219,7 @@ struct BinaryRangeElementFuncForArray {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            if (valid_data != nullptr && !valid_data[offset]) {
+            if (valid_data && !valid_data[offset]) {
                 res[i] = valid_res[i] = false;
                 continue;
             }
@@ -228,7 +228,7 @@ struct BinaryRangeElementFuncForArray {
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data<GetType>(index);
+            auto value = src[offset].get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
@@ -266,7 +266,7 @@ struct BinaryRangeIndexFunc {
 class PhyBinaryRangeFilterExpr : public SegmentExpr {
  public:
     PhyBinaryRangeFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -313,6 +313,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
  private:
     // Check overflow and cache result for performace
     template <
@@ -328,6 +333,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
                      HighPrecisionType& val2,
                      bool& lower_inclusive,
                      bool& upper_inclusive,
+                     int64_t batch_size,
                      OffsetVector* input = nullptr);
 
     template <typename T>

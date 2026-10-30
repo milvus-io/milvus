@@ -46,7 +46,7 @@ BuildExprCacheKey(const plan::FilterBitsNode& filter,
     auto* segment =
         query_context != nullptr ? query_context->get_segment() : nullptr;
     if (segment != nullptr &&
-        segment->get_schema().get_ttl_field_id().has_value()) {
+        segment->get_schema_snapshot()->get_ttl_field_id().has_value()) {
         key += fmt::format("|entity_ttl_physical_time_us:{}",
                            query_context->get_entity_ttl_physical_time_us());
     }
@@ -67,10 +67,8 @@ ConvertPredicateToFilteredBitset(TargetBitmapView data,
         return true;
     }
 
+    data.inplace_and(valid, size);
     data.flip();
-    TargetBitmap invalid(valid);
-    invalid.flip();
-    data.inplace_or(invalid, size);
     valid.set();
     return false;
 }
@@ -93,6 +91,19 @@ PhyFilterBitsNode::PhyFilterBitsNode(
     num_processed_rows_ = 0;
 
     enable_expr_cache_ = query_context_->get_enable_expr_cache();
+    if (enable_expr_cache_) {
+        // Only cache the predicate result when EVERY expression in it is
+        // cacheable. A bloom_match subtree is non-cacheable (its slim ToString
+        // cache key cannot distinguish distinct filter blobs), and that
+        // propagates up, so a predicate containing bloom_match is never cached
+        // and can never reuse another query's bitmap.
+        for (const auto& e : exprs_->exprs()) {
+            if (e && !e->IsCacheable()) {
+                enable_expr_cache_ = false;
+                break;
+            }
+        }
+    }
     if (enable_expr_cache_) {
         expr_cache_key_ = BuildExprCacheKey(*filter, query_context_);
     }
@@ -148,7 +159,7 @@ PhyFilterBitsNode::GetOutput() {
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
                                     : TargetBitmap(need_process_rows_, true)));
-            return std::make_shared<RowVector>(col_res);
+            return std::make_shared<RowVector>(std::move(col_res));
         }
     }
 
@@ -212,7 +223,7 @@ PhyFilterBitsNode::GetOutput() {
         milvus::monitor::internal_core_search_latency_scalar.Observe(
             scalar_cost / 1000);
 
-        return std::make_shared<RowVector>(col_res);
+        return std::make_shared<RowVector>(std::move(col_res));
     }
 
     while (num_processed_rows_ < need_process_rows_) {
@@ -277,7 +288,7 @@ PhyFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
 
-    return std::make_shared<RowVector>(col_res);
+    return std::make_shared<RowVector>(std::move(col_res));
 }
 
 }  // namespace exec

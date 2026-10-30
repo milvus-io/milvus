@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -618,7 +620,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  public:
     PhyBinaryArithOpEvalRangeExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,
@@ -710,6 +712,11 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
     void
     PrefetchRawData() override;
 
@@ -738,15 +745,37 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForArray(OffsetVector* input = nullptr);
 
+    template <typename ArrayType, typename ValueType, bool ElementLevel>
+    VectorPtr
+    ExecArrayLength(OffsetVector* input = nullptr);
+
+    // Row-level ARRAY length on a sealed ArrayChunk column: each chunk
+    // stores (offset, length) per row, so the predicate reads that table
+    // directly instead of building an ArrayView per row.
+    bool
+    UseArrayChunkLengths() const;
+
     template <typename ValueType>
     VectorPtr
-    ExecRangeVisitorImplForVectorArray(OffsetVector* input = nullptr);
+    ExecArrayLengthFromChunks(OffsetVector* input, int64_t real_batch_size);
+
+ public:
+    // The chunk-length path reads no element data and keeps no per-batch
+    // state beyond the data cursor, so it can run in one pass like an
+    // indexed expression; otherwise this one raw-data leaf would force the
+    // whole plan back to per-batch execution.
+    bool
+    CanExecuteAllAtOnce() const override {
+        return UseArrayChunkLengths() || SegmentExpr::CanExecuteAllAtOnce();
+    }
 
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;
     SingleElement value_arg_;
     bool arg_inited_{false};
+    mutable std::optional<bool> use_array_chunk_lengths_;
+    std::shared_ptr<ChunkedColumnInterface> array_length_column_;
 };
 
 }  //namespace exec

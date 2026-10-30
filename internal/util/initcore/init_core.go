@@ -32,7 +32,9 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -148,6 +150,16 @@ func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
 	}
 	return InitRemoteArrowFileSystem(params)
+}
+
+// InitExternalIopsConfig publishes the process-local policy used only when
+// External Table filesystem properties are injected.
+func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
+	status := C.InitExternalIopsConfig(
+		C.uint32_t(params.CommonCfg.StorageIopsInitialRate.GetAsUint32()),
+		C.uint32_t(params.CommonCfg.StorageIopsMaxRate.GetAsUint32()),
+	)
+	return HandleCStatus(&status, "InitExternalIopsConfig failed")
 }
 
 func InitLocalArrowFileSystem(path string) error {
@@ -297,6 +309,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		vector_index_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorIndex.GetAsBool()),
 		vector_field_enable_mmap: C.bool(params.QueryNodeCfg.MmapVectorField.GetAsBool()),
 		mmap_populate:            C.bool(params.QueryNodeCfg.MmapPopulate.GetAsBool()),
+		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
 	}
@@ -384,6 +397,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(params.QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	backgroundEvictionEnabled := C.bool(params.QueryNodeCfg.TieredBackgroundEvictionEnabled.GetAsBool())
@@ -400,6 +414,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 
 	prefetchPoolThreads := C.uint32_t(hardware.GetCPUNum() * params.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.ConfigureTieredStorage(scalarFieldCacheWarmupPolicy,
 		vectorFieldCacheWarmupPolicy,
 		scalarIndexCacheWarmupPolicy,
@@ -421,6 +436,10 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	)
 
 	return nil
+}
+
+func getLazyColumnGroupEnabled() bool {
+	return bool(C.SegcoreGetLazyColumnGroupEnabled())
 }
 
 func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
@@ -454,8 +473,10 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
+	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
 
+	C.SegcoreSetLazyColumnGroupEnabled(lazyColumnGroupEnabled)
 	C.UpdateTieredStorageConfig(
 		loadingTimeoutMs,
 		warmupLoadingTimeoutMs,
@@ -576,6 +597,47 @@ func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")
+}
+
+// InitExternalVectorNullPolicy publishes the process-wide normalization policy
+// used by both QueryNode external reads and DataNode index builds. The setting
+// is intentionally startup-only so one task cannot observe different semantics
+// across record batches.
+func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
+	policy := strings.ToLower(strings.TrimSpace(params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue()))
+	switch policy {
+	case "error":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(false))
+	case "null":
+		C.SetExternalVectorPartialNullAsRowNull(C.bool(true))
+	default:
+		return merr.WrapErrParameterInvalidMsg(
+			"common.storage.externalVector.partialNullPolicy must be one of [error, null], got %q",
+			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
+	}
+	return nil
+}
+
+// InitExternalSparseConversionConfig applies the startup-only budget shared by
+// external load, take, index build and field-size sampling.
+func InitExternalSparseConversionConfig(params *paramtable.ComponentParam) error {
+	item := &params.CommonCfg.ExternalSparseConversionMemoryLimit
+	limit, err := strconv.ParseInt(strings.TrimSpace(item.GetValue()), 10, 64)
+	if err != nil || limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("%s must be a positive byte count, got %q", item.Key, item.GetValue())
+	}
+	if !bool(C.SetExternalSparseConversionMemoryLimit(C.int64_t(limit))) {
+		return merr.WrapErrParameterInvalidMsg("%s must be positive, got %d", item.Key, limit)
+	}
+	return nil
+}
+
+func externalSparseConversionMemoryLimit() int64 {
+	return int64(C.GetExternalSparseConversionMemoryLimit())
+}
+
+func externalVectorPartialNullAsRowNullEnabled() bool {
+	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
 
 var coreParamCallbackInitOnce sync.Once
@@ -740,6 +802,21 @@ func SetupCoreConfigChangelCallback() {
 			return nil
 		})
 
+		paramtable.Get().QueryNodeCfg.InterimIndexGrowingBuildThreadRate.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			rate, err := strconv.ParseFloat(newValue, 32)
+			if err != nil {
+				return err
+			}
+			// ParseFloat accepts "Inf" and "NaN"; reject them here so the
+			// operator gets an error instead of a silently clamped value.
+			if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+				return merr.WrapErrParameterInvalidMsg(
+					"%s must be a finite non-negative number, got %s", key, newValue)
+			}
+			C.SegcoreSetGrowingIndexBuildThreadRate(C.float(rate))
+			return nil
+		})
+
 		paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			enable, err := strconv.ParseBool(newValue)
 			if err != nil {
@@ -777,10 +854,26 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
+	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
+	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
+	sparseIPAlgo := C.CString(params.QueryNodeCfg.InterimIndexSparseIPAlgo.GetValue())
+	defer C.free(unsafe.Pointer(sparseIPAlgo))
+	sparseBM25Algo := C.CString(params.QueryNodeCfg.InterimIndexSparseBM25Algo.GetValue())
+	defer C.free(unsafe.Pointer(sparseBM25Algo))
+	status = C.SegcoreSetSparseInterimIndexAlgorithms(sparseIPAlgo, sparseBM25Algo)
+	if err := HandleCStatus(&status, "SegcoreSetSparseInterimIndexAlgorithms failed"); err != nil {
+		return err
+	}
+
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)
 
@@ -802,9 +895,12 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
 	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
 
+	growingBuildThreadRate := C.float(params.QueryNodeCfg.InterimIndexGrowingBuildThreadRate.GetAsFloat())
+	C.SegcoreSetGrowingIndexBuildThreadRate(growingBuildThreadRate)
+
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
-	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
+	status = C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
 	statErr := HandleCStatus(&status, "InitInterminIndexConfig failed")
 	if statErr != nil {
 		return statErr
@@ -882,7 +978,7 @@ func serializeHeaders(headerstr string) string {
 func InitPluginLoader() error {
 	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
-		mlog.Info(context.TODO(), "Init PluginLoader", mlog.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		mlog.Info(context.TODO(), "Init PluginLoader")
 		defer C.free(unsafe.Pointer(cSoPath))
 		status := C.InitPluginLoader(cSoPath)
 		return HandleCStatus(&status, "InitPluginLoader failed")

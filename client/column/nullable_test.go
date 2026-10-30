@@ -57,7 +57,9 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.Equal(sparseData, column.Data())
 
 		fd := column.FieldData()
+		s.Equal(validData, getFieldDataValidData(fd))
 		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, fd.GetScalars().GetValidData())
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnBool)
@@ -93,7 +95,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnInt8)
@@ -129,7 +131,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnInt16)
@@ -165,7 +167,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnInt32)
@@ -201,7 +203,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnInt64)
@@ -237,7 +239,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnFloat)
@@ -273,7 +275,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnDouble)
@@ -297,10 +299,10 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 		s.Equal(entity.FieldTypeTimestamptz, column.Type())
 		s.Equal(name, column.Name())
-		// verify time values are converted to RFC3339Nano strings
+		// verify time values are converted to normalized RFC3339Nano strings
 		expectedStrings := []string{
-			compactData[0].Format(time.RFC3339Nano),
-			compactData[1].Format(time.RFC3339Nano),
+			formatTimestamptz(compactData[0]),
+			formatTimestamptz(compactData[1]),
 		}
 		s.Equal(expectedStrings, column.Data())
 		for i := 0; i < len(validData); i++ {
@@ -312,15 +314,15 @@ func (s *NullableScalarSuite) TestBasic() {
 		// sparse mode
 		sparseData := []time.Time{now, {}, now.Add(2 * time.Hour)}
 		sparseExpected := []string{
-			sparseData[0].Format(time.RFC3339Nano),
-			sparseData[1].Format(time.RFC3339Nano),
-			sparseData[2].Format(time.RFC3339Nano),
+			formatTimestamptz(sparseData[0]),
+			formatTimestamptz(sparseData[1]),
+			formatTimestamptz(sparseData[2]),
 		}
 		column, err = NewNullableColumnTimestamptz(name, sparseData, validData, WithSparseNullableMode[string](true))
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnTimestampTzIsoString)
@@ -356,7 +358,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 
 		fd := column.FieldData()
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		result, err := FieldDataColumn(fd, 0, -1)
 		s.NoError(err)
 		parsed, ok := result.(*ColumnTimestampTzIsoString)
@@ -386,7 +388,7 @@ func (s *NullableScalarSuite) TestBasic() {
 		s.NoError(err)
 		fd := column.FieldData()
 		s.EqualValues(entity.FieldTypeText, fd.GetType())
-		s.Equal(validData, fd.GetValidData())
+		s.Equal(validData, getFieldDataValidData(fd))
 		s.Equal(sparseData, fd.GetScalars().GetStringData().GetData())
 
 		result, err := FieldDataColumn(fd, 0, -1)

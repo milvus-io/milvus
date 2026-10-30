@@ -76,6 +76,100 @@
 
 namespace milvus::index {
 
+std::optional<JsonKeyStats::ShreddingReader::Value>
+JsonKeyStats::ShreddingReader::Get(milvus::OpContext* op_ctx, int64_t row_id) {
+    AssertInfo(row_id >= 0 && row_id < column_->NumRows(),
+               "JSON stats row {} is outside column bounds {}",
+               row_id,
+               column_->NumRows());
+    const auto [chunk_id, offset] = column_->GetChunkIDByOffset(row_id);
+    auto it = pins_.find(chunk_id);
+    if (it == pins_.end()) {
+        auto pin = column_->GetChunk(op_ctx, chunk_id);
+        it = pins_.emplace(chunk_id, std::move(pin)).first;
+    }
+    auto* chunk = it->second.get();
+    AssertInfo(chunk != nullptr && offset < chunk->RowNums(),
+               "JSON stats chunk does not cover row {}",
+               row_id);
+    if (!chunk->isValid(offset)) {
+        return std::nullopt;
+    }
+    switch (type_) {
+        case JSONType::STRING: {
+            auto* strings = dynamic_cast<StringChunk*>(chunk);
+            AssertInfo(strings != nullptr,
+                       "JSON stats string column has an incompatible chunk");
+            return Value(std::string((*strings)[offset]));
+        }
+        case JSONType::BOOL: {
+            bool value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        case JSONType::INT64: {
+            int64_t value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "unsupported JSON stats scalar reader type");
+    }
+}
+
+bool
+JsonKeyStats::IsShreddingReaderSupported(const std::string& pointer,
+                                         JSONType type) {
+    if (pointer.empty() || pointer.front() != '/' ||
+        (type != JSONType::STRING && type != JSONType::BOOL &&
+         type != JSONType::INT64)) {
+        return false;
+    }
+    // A numeric component may address an array position in raw JSON. Stats
+    // store arrays whole; do not infer object-only semantics from a column.
+    for (const auto& token : ParseJsonPointerPath(pointer)) {
+        if (!token.empty() &&
+            std::all_of(token.begin(), token.end(), [](unsigned char c) {
+                return c >= '0' && c <= '9';
+            })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::unique_ptr<JsonKeyStats::ShreddingReader>
+JsonKeyStats::CreateShreddingReader(const std::string& pointer,
+                                    JSONType type,
+                                    int64_t segment_rows) const {
+    if (!IsShreddingReaderSupported(pointer, type)) {
+        return nullptr;
+    }
+    auto fields = key_field_map_.find(pointer);
+    if (fields == key_field_map_.end()) {
+        return nullptr;
+    }
+    for (const auto& field : fields->second) {
+        auto field_type = shred_field_data_type_map_.find(field);
+        if (field_type == shred_field_data_type_map_.end() ||
+            field_type->second != type) {
+            continue;
+        }
+        auto column = shredding_columns_.find(field);
+        AssertInfo(column != shredding_columns_.end() && column->second,
+                   "JSON stats field {} has no column",
+                   field);
+        AssertInfo(num_rows_ == segment_rows &&
+                       column->second->NumRows() == segment_rows,
+                   "JSON stats rows do not match segment rows {}",
+                   segment_rows);
+        return std::unique_ptr<ShreddingReader>(
+            new ShreddingReader(column->second, type));
+    }
+    return nullptr;
+}
+
 namespace {
 
 struct JsonStatsParquetMetadata {
@@ -280,9 +374,8 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
                        tokens[j].size,
                        std::string(json + tokens[j].start,
                                    tokens[j].end - tokens[j].start));
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForStats(json, tokens + j, consumed, path, infos);
@@ -330,7 +423,7 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
 
 void
 JsonKeyStats::CollectSingleJsonStatsInfo(
-    const char* json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
+    std::string_view json_str, std::map<JsonKey, KeyStatsInfo>& infos) {
     jsmn_parser parser;
     jsmn_init(&parser);
 
@@ -339,8 +432,11 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
                 // Reallocate tokens array if not enough space
@@ -364,7 +460,7 @@ JsonKeyStats::CollectSingleJsonStatsInfo(
 
     int index = 0;
     std::vector<std::string> paths;
-    TraverseJsonForStats(json_str, tokens.data(), index, paths, infos);
+    TraverseJsonForStats(json_str.data(), tokens.data(), index, paths, infos);
 }
 
 std::map<JsonKey, KeyStatsInfo>
@@ -378,9 +474,8 @@ JsonKeyStats::CollectKeyInfo(const std::vector<FieldDataPtr>& field_datas,
             if ((nullable || data->IsNullable()) && !data->is_valid(i)) {
                 continue;
             }
-            auto json_str = static_cast<const milvus::Json*>(data->RawValue(i))
-                                ->data()
-                                .data();
+            auto json_str =
+                static_cast<const milvus::Json*>(data->RawValue(i))->data();
             CollectSingleJsonStatsInfo(json_str, infos);
         }
         num_rows += n;
@@ -533,9 +628,8 @@ JsonKeyStats::TraverseJsonForBuildStats(
                        std::string(json + tokens[j].start,
                                    tokens[j].end - tokens[j].start));
 
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForBuildStats(json, tokens + j, consumed, path, values);
@@ -612,7 +706,7 @@ JsonKeyStats::BuildKeyStatsForNullRow() {
 }
 
 void
-JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
+JsonKeyStats::BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id) {
     LOG_TRACE("build key stats for row {} with json {} for segment {}",
               row_id,
               json_str,
@@ -625,8 +719,11 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
     std::vector<jsmntok_t> tokens(token_capacity);
 
     while (1) {
-        int r = jsmn_parse(
-            &parser, json_str, strlen(json_str), tokens.data(), token_capacity);
+        int r = jsmn_parse(&parser,
+                           json_str.data(),
+                           json_str.size(),
+                           tokens.data(),
+                           token_capacity);
         if (r < 0) {
             if (r == JSMN_ERROR_NOMEM) {
                 // Reallocate tokens array if not enough space
@@ -651,7 +748,8 @@ JsonKeyStats::BuildKeyStatsForRow(const char* json_str, uint32_t row_id) {
     int index = 0;
     std::vector<std::string> paths;
     std::map<JsonKey, std::string> values;
-    TraverseJsonForBuildStats(json_str, tokens.data(), index, paths, values);
+    TraverseJsonForBuildStats(
+        json_str.data(), tokens.data(), index, paths, values);
     DomNode root;
     std::set<JsonKey> hit_keys;
     for (const auto& [key, value] : values) {
@@ -716,13 +814,11 @@ JsonKeyStats::BuildKeyStats(const std::vector<FieldDataPtr>& field_datas,
                 BuildKeyStatsForNullRow();
             } else {
                 auto json_str =
-                    static_cast<const milvus::Json*>(data->RawValue(i))
-                        ->data()
-                        .data();
+                    static_cast<const milvus::Json*>(data->RawValue(i))->data();
 
                 // some situations, such as empty json string,
                 // should be handled as null row
-                if (strlen(json_str) == 0) {
+                if (json_str.empty()) {
                     BuildKeyStatsForNullRow();
                 } else {
                     BuildKeyStatsForRow(json_str, row_id);
@@ -999,7 +1095,7 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
 void
 JsonKeyStats::LoadShreddingMeta(
-    std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+    const std::vector<std::pair<int64_t, std::vector<int64_t>>>& sorted_files,
     const std::string& override_prefix) {
     if (sorted_files.empty()) {
         return;
@@ -1441,10 +1537,11 @@ JsonKeyStats::Upload(const Config& config) {
                segment_id_);
 
     // upload parquet file, parquet writer has already upload file to remote
-    auto shredding_remote_paths_to_size = parquet_writer_->GetPathsToSize();
-    auto shared_key_index_remote_paths_to_size =
+    const auto& shredding_remote_paths_to_size =
+        parquet_writer_->GetPathsToSize();
+    const auto& shared_key_index_remote_paths_to_size =
         bson_index_stats->GetSerializedIndexFileInfo();
-    auto meta_remote_paths_to_size =
+    const auto& meta_remote_paths_to_size =
         disk_file_manager_->GetRemotePathsToFileSize();
 
     // get all index files for meta

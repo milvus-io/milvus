@@ -1,0 +1,253 @@
+# Local Flush Control
+
+Flush and FlushAll operate on the receiving cluster, on either replication role.
+Proxy and the growing-source release preparer mark new ManualFlush messages
+`Unreplicable` (`_ur`). DataCoord uses
+`StartUnreplicableBroadcastWithResourceKeys` and `_ur` for FlushAll. CDC skips
+these concrete messages; historical messages without the marker retain their
+replication behavior.
+
+## Dispatch and completion in 3.0
+
+Proxy resolves the collection and sends ManualFlush by `RawAppend` to each
+collection VChannel. It preserves `BarrierTimeTick`, `FlushTs`, the extra response
+`SegmentIds` and the public Flush response. ManualFlush does not broadcast through
+CChannel or acquire collection broadcast resource keys in this branch.
+
+FlushAll retains `ExclusiveCluster` and broadcasts to all PChannels without
+`AckSyncUp`. WAL append is the durable ordering boundary, not persistence
+completion. The independent flusher seals segments and flushes channel buffers;
+`GetFlushState` and `GetFlushAllState` retain their segment and per-channel
+checkpoint checks. SDK wait semantics, including L0/delete persistence, rely on
+these existing completion APIs.
+
+The internal release preparer also writes local ManualFlush on either role.
+It preserves `BeginGrowingSourceReleaseHandoff`, rollback on failure, the union of
+release/requested segment IDs, and `GetGrowingFlushProgress`. A successful append
+alone does not mean the growing-source release handoff is prepared.
+
+FlushAll returns per-PChannel `ImmutableMessage` copies without `_ur`, so Backup
+can explicitly replicate them to align positions on a secondary. Message IDs,
+TimeTicks and LastConfirmedMessageIDs are preserved. The persisted WAL broadcast
+still carries `_ur` and is skipped by ordinary CDC replication.
+
+## Concurrent collection drop
+
+Proxy resolves an existing collection before sending ManualFlush. The internal
+release path requires a registered growing-source channel. CreateCollection
+publishes metadata only after its business-channel acknowledgements; collection
+IDs are never reused. A missing shard for these admitted local operations means
+Drop overtook the operation, including retries after WAL handoff.
+
+Only a locally originated `_ur` ManualFlush treats `ErrCollectionNotFound` as an
+empty best-effort flush. It still appends a real WAL record with empty `SegmentIds`.
+The 3.0 flusher already ignores messages for a removed data service. Other errors
+and historical/replicated flushes preserve their append-error behavior.
+Subsequent Proxy/DataCoord metadata or state requests may return collection-not-found;
+this does not promise that Drop has finished. Release progress errors still roll
+back the handoff. No success is synthesized outside WAL and no extra Drop-ACK
+waiting dependency is introduced.
+
+## Abort and replay against replication
+
+Transactions are VChannel-scoped. ManualFlush takes the existing exclusive
+VChannel WAL lock; FlushAll takes the PChannel exclusive lock. Neither waits for
+an incomplete transaction to commit. All successful exclusive operations use the
+same `TxnManager.FailTxnAtVChannel` cleanup before unlocking, regardless of
+transaction origin. It marks unfinished sessions terminal, releases segment/proof
+references, and notifies recovery and shutdown waiters. There is no replicated
+session flag, includeReplicated switch or separate Flush/ForcePromote abort API.
+
+An operation rejected or deduplicated before append is not an abort boundary.
+`DoAppend` checks the append outcome before cleaning up transactions; its deferred
+lock guard only unlocks. A failed append does not discard a session. An AlterReplicateConfig record with Ignore set likewise has no abort
+effect. Ordinary WAL-generated TimeTick/CreateSegment/Flush do not require an
+exclusive lock and therefore do not abort transactions.
+
+Unreplicable exclusive operations acquire the existing ReplicatesManager mutex
+only in the successful append's acker to clear the scoped receiving prefix. They
+do not hold that mutex across WAL append or its retries: the outer WAL lock
+already excludes appends in the affected scope. A VChannel-scoped ManualFlush
+must not additionally block other VChannels or local TimeTick messages. This covers
+local Flush and other local exclusive controls uniformly. The outer WAL lock is
+still held until session cleanup finishes, so the affected VChannel cannot start
+replay between the two cleanups. Normal replicated DDL cannot enter while a
+receiving txn is active; old DDL is deduplicated without aborting it. Non-ignored
+topology changes reset the prefix as part of the existing role transition.
+
+The consumer TxnBuffer applies the same exclusive-operation boundaries before
+forwarding messages, independent of `_ur` or replication origin. PChannel-level
+operations cover every txn; business-VChannel operations cover only that shard;
+collection DDL's CChannel copy has no business transaction to abort. An ignored
+topology record is a no-op. This replaces both expiry-based cleanup and the
+separate consumer ForcePromote cleanup loop.
+
+A WAL reopen therefore cannot recover a prefix that crosses a durable exclusive
+boundary. Only replayed bodies with newly assigned local segments can appear in
+the committed txn. Local Flush does not send a rollback to the source or advance
+the source replication checkpoint; its WAL record is the durable abort boundary.
+
+CDC retains each complete source transaction until Commit is acknowledged. A
+transaction-expired response terminates the stream; reconnect replays Begin, all
+body messages and Commit. CDC restart obtains the complete transaction again from
+the source WAL/checkpoint. No new transaction ID, term, or runtime owner is needed.
+An intact prefix resumes with deduplication. A prefix aborted by Flush starts again
+from Begin. Duplicate Begin does not replace a still-valid prefix.
+
+## Transaction body count
+
+`CommitTxnMessageHeader.body_cnt` is the expected number of logical body messages.
+It excludes Begin, Commit, physical WAL chunks and backend retry copies. A value
+of **zero skips validation everywhere**, preserving old WAL/senders and empty
+transactions without an additional presence field.
+
+The primary producer fills the count from its VChannel batch and sends Commit
+only after every body append succeeds. TxnSession increments its successful-body
+counter once per successful logical append, not per backend attempt. Commit closes
+body admission, waits for in-flight appends to finish, and compares the count.
+A mismatch terminates the session, releases references and returns
+TransactionExpired so the producer retries the whole transaction with a new TxnID.
+This catches an upper-layer retry that appended an extra body with a new TimeTick.
+Late appends cannot revive the rejected session. A backend retry retains its local
+TimeTick; the consumer's existing physical deduplication removes its extra copies.
+
+Body-count validation is a write-side contract: both primary and secondary check
+it before persisting Commit. Consumption and recovery rely on that invariant and
+assemble transactions after chunk assembly and TimeTick deduplication, without
+rechecking the count or introducing a count-mismatch panic.
+
+CDC forwards the source Commit unchanged, including a zero count. Historical
+transactions deliberately remain unchecked: CDC does not backfill a count from
+the assembled bodies. Each replay preserves the assembled source order and the
+same immutable source body IDs.
+There is no per-body predecessor property, ID manifest, replication term or owner.
+
+Under its existing mutex, held through append and acker completion, ReplicatesManager:
+
+1. Checks the source checkpoint. Already committed traffic remains idempotent.
+2. Admits Begin when there is no current transaction; duplicate active Begin is ignored.
+3. Ignores already accepted source body IDs; records new IDs only after append succeeds.
+4. Compares a nonzero Commit count to the accepted source-ID set size **before**
+   preparing the session. A mismatch returns TransactionExpired without changing
+   the session to OnCommit, allowing reconnect to replay and fill missing bodies.
+5. Clears the receiving state and advances the source checkpoint only after a
+   successful Commit append.
+
+For a fixed source transaction, the accepted distinct IDs are a subset of its
+immutable body set. Equal cardinality therefore proves completeness even when
+old and new connections overlap. A duplicate body cannot substitute for a missing
+one. A stale Commit is safe once all bodies exist; no connection needs to win.
+A zero-count Commit intentionally bypasses this proof for compatibility.
+
+Missing Begin also returns TransactionExpired. A durable local Flush clears the
+body dedup set and aborts the session, so replayed bodies receive new local segments.
+There is still one current replicated transaction per PChannel, following the
+existing sequential CDC channel stream; no concurrent-attempt map is introduced.
+
+## Failure, recovery and promotion
+
+Ordinary backend failures retry indefinitely inside the WAL adaptor with the same
+local TimeTick; physical retry copies are deduplicated by the scanner. Caller RPC
+cancellation is removed from the append context. WAL context cancellation denotes
+failure recovery, and fencing ends the old writer's authority. Neither permits a
+new attempt against the old in-memory state: WAL replay resolves the durable outcome
+before writes resume. See [Append retry and writer lifetime](../../../agent_guides/streaming-system/walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
+The retry boundary checks the outer WAL append context, not just a backend's returned
+cancel/timeout error. Append timestamp allocation and barrier advancement likewise retry in
+`AckManager.AllocateForAppend` until success or WAL-context cancellation; an individual TSO RPC failure
+cannot leave a live writer with interceptor state that has no corresponding WAL record.
+
+There is no RetryCommit state restoration or extra failure-handler callback.
+A Commit of either origin interrupted after preparation remains unresolved with its
+session references retained for teardown/recovery. A body-count mismatch is a
+definite rejection before backend append; on a replica it is checked before Commit
+preparation, allowing the missing source bodies to be supplied by replay.
+
+In 3.0, replication config/checkpoint come from `RecoverySnapshot.Checkpoint`;
+there is no `PChannelControl` or WALSummary dependency.
+Recovery reconstructs the accepted source-ID set and successful body count from the uncommitted
+TxnBuffer, and the session from the same snapshot. A replayed Flush removes the
+old builder; a durable Commit publishes the complete transaction. Recovered session
+references retain the existing RecoverDone barrier until resolved. Recovered counts
+are used for subsequent write-side Commit validation, not for rechecking a durable Commit.
+
+Flush has no wait-for-source gate, pending counter, FIFO queue or promotion lock.
+Broadcaster uses its existing resource keys and worker pool for all operations.
+ForcePromote retains ExclusiveCluster, salvage checkpoints and callback ordering;
+its transaction cleanup uses the same successful-append exclusive path. It needs no separate execution lane to rescue
+Flush from a disconnected source. Coordinator resource keys serialize local APIs;
+replicated DDL still relies on WAL ordering and consuming ACKs.
+
+## Preconditions that keep the protocol small
+
+- **Use transaction scope:** a transaction is confined to one VChannel. ManualFlush
+  needs only that scope; an unrelated VChannel's transaction is not a reason to wait.
+- **Use the complete source transaction:** CDC retains and replays Begin/body/Commit
+  in source transaction order. Source MessageIDs remain stable across attempts and
+  restarts, so the accepted-ID set plus `body_cnt` proves completeness without a
+  per-attempt term, owner key or full body-ID list in Commit. See
+  [Transaction ordering and replay identity](../../../agent_guides/streaming-system/replication/replicate.md#transaction-ordering-and-replay-identity).
+- **Use existing serialization:** ReplicatesManager serializes replica append through
+  acker completion. This permits one current receiving slot; it does not imply that
+  primary transactions or their concurrent bodies can drop their locks.
+- **Use existing resource locks:** local collection and cluster operations already
+  have their required mutual exclusion. Independent collections need no Flush FIFO;
+  replicated DDL needs the separate WAL/ACK protocol described above.
+- **Prefer abort and replay to waiting:** an incomplete receiving transaction may be
+  discarded at durable Flush and retried by CDC. The operation does not promise to
+  include that incomplete transaction or catch up to the source. This concession
+  removes the source-dependent wait and promotion rescue machinery; it does not
+  change the existing flush-state persistence checks or release-handoff progress checks.
+- **Use WAL recovery:** a cancelled writer is reconstructed from WAL. Do not add
+  live-writer retry or failure callbacks based on a cancellation that already ends
+  that writer's lifecycle.
+
+## Operational behavior
+
+Flushing the primary no longer flushes a secondary. Before a backup or other
+operation that requires local persisted data on a secondary, call Flush/FlushAll
+on that secondary explicitly. This does not wait for source replication catch-up;
+replication progress must be checked separately when that is required.
+
+## Compatibility boundary
+
+The Commit count is additive. Missing fields decode to zero, and zero explicitly
+skips all count checks even for nonempty transactions. New producers set nonzero
+counts for nonempty transactions; CDC preserves historical zero-count commits
+without adding validation. Upgrading all nodes does not retrofit counts onto old
+WAL records, so their replication also skips the completeness check. Historical
+unmarked flushes retain their replication and append-admission behavior; their
+consumers also apply the scoped abort boundary.
+
+Operators must upgrade **all participating source CDC, Proxy, StreamingNode and
+consumer processes before invoking local Flush on a secondary**. Coordinating this
+cross-cluster rollout is an operational responsibility; no version probing or
+feature gate is introduced. The new abort guarantee is not promised during a
+mixed-version deployment. Before downgrade, drain local-flush tasks and replication
+and arrange a compatible checkpoint/recovery boundary; an old consumer does not
+understand the durable local-flush abort boundary.
+
+## Scope of other control operations
+
+| Operation | Scope and entrance | Change here |
+| --- | --- | --- |
+| Flush / FlushAll | Local WAL, either role, `_ur`, existing state queries | Enabled on secondary with abort and full-txn replay |
+| Resource-group create/update/drop and node transfer | Local CChannel, either role, `_ur` | Existing behavior retained |
+| ForcePromote | Secondary-only topology transition | Existing resource keys; shared exclusive-operation abort |
+| Snapshot/manifest/external-collection controls marked `_ur` | Concrete messages stay local; ordinary producers still check primary | Role admission unchanged |
+| Collection/partition DDL, DML, load configuration and TransferReplica | Existing logical replication path | Remain replicated; no message-type blacklist |
+| WAL-generated CreateSegment/Flush/TimeTick | Self-controlled local messages | Unchanged |
+
+## Key Packages
+
+- `internal/proxy/ddl/task_flush_streaming.go` — per-VChannel local ManualFlush
+- `internal/streamingnode/server/service/release_manual_flush_preparer.go` — local release handoff
+- `internal/datacoord/` — FlushAll resource keys and persistence-state queries
+- `internal/cdc/replication/replicatestream/` — full transaction forwarding with the original Commit count
+- `pkg/streaming/util/message/` — Commit body-count format and transaction assembly
+- `internal/streamingnode/server/wal/interceptors/replicate/` — deduplicated body counting and durable-flush abort
+- `internal/streamingnode/server/wal/interceptors/txn/` — scoped session cleanup
+- `internal/streamingnode/server/wal/interceptors/timetick/` — Commit outcome handling
+- `internal/streamingnode/server/wal/adaptor/` — backend retry and writer lifecycle
+- `internal/streamingnode/server/wal/utility/` — consuming and recovering the abort boundary

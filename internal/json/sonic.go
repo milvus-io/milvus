@@ -28,12 +28,16 @@ var (
 	Marshal = json.Marshal
 	// Unmarshal is exported from bytedance/sonic package.
 	Unmarshal = json.Unmarshal
+	// UnmarshalFromString decodes JSON text without an intermediate byte slice.
+	UnmarshalFromString = json.UnmarshalFromString
 	// MarshalIndent is exported from bytedance/sonic package.
 	MarshalIndent = json.MarshalIndent
 	// NewDecoder is exported from bytedance/sonic package.
 	NewDecoder = json.NewDecoder
 	// NewEncoder is exported from bytedance/sonic package.
 	NewEncoder = json.NewEncoder
+	// Valid is exported from bytedance/sonic package.
+	Valid = json.Valid
 )
 
 type (

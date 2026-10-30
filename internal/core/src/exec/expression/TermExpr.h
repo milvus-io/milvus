@@ -33,14 +33,6 @@ namespace milvus {
 namespace exec {
 
 template <typename T>
-struct TermElementFuncSet {
-    bool
-    operator()(const std::unordered_set<T>& srcs, T val) {
-        return srcs.find(val) != srcs.end();
-    }
-};
-
-template <typename T>
 struct TermIndexFunc {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -55,7 +47,7 @@ struct TermIndexFunc {
 class PhyTermFilterExpr : public SegmentExpr {
  public:
     PhyTermFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -103,6 +95,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
+    }
+
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
     }
 
     void

@@ -112,33 +112,12 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		}
 	}
 
-	// Configure CMEK encryption if plugin context is provided
-	if storagePluginContext != nil {
-		var cKey *C.char
-		var cMeta *C.char
-
-		encKey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(encKey))
-
-		// Prepare plugin context for FFI call to retrieve encryption parameters
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = encKey
-
-		// Get encryption key and metadata from cipher plugin via FFI
-		status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			return nil, err
-		}
-
-		// Set encryption properties for the writer
-		extra[PropertyWriterEncEnable] = "true"
-		extra[PropertyWriterEncKey] = C.GoString(cKey)
-		C.free(unsafe.Pointer(cKey))
-		extra[PropertyWriterEncMeta] = C.GoString(cMeta)
-		C.free(unsafe.Pointer(cMeta))
-		extra[PropertyWriterEncAlgo] = "AES_GCM_V1"
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range encryptionProperties {
+		extra[key] = value
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
@@ -187,11 +166,14 @@ func (pw *FFIPackedWriter) AsNewColumnGroups() *FFIPackedWriter {
 	return pw
 }
 
-// Destroy releases writer resources without committing pending output.
+// Destroy releases writer resources without committing pending output. It
+// also marks the writer closed, so a later Close reports the misuse instead
+// of handing a null handle to the FFI as an "invalid arguments" error.
 func (pw *FFIPackedWriter) Destroy() {
 	if pw == nil {
 		return
 	}
+	pw.closed = true
 	if pw.cWriterHandle != 0 {
 		C.loon_writer_destroy(pw.cWriterHandle)
 		pw.cWriterHandle = 0
@@ -277,16 +259,7 @@ func (pw *FFIPackedWriter) Close() (WriterOutput, error) {
 		return nil, merr.WrapErrServiceInternalMsg("FFIPackedWriter already closed")
 	}
 	pw.closed = true
-	defer func() {
-		if pw.cWriterHandle != 0 {
-			C.loon_writer_destroy(pw.cWriterHandle)
-			pw.cWriterHandle = 0
-		}
-		if pw.cProperties != nil {
-			C.loon_properties_free(pw.cProperties)
-			pw.cProperties = nil
-		}
-	}()
+	defer pw.Destroy()
 	var cColumnGroups *C.LoonColumnGroups
 	result := C.loon_writer_close(pw.cWriterHandle, nil, nil, 0, &cColumnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {

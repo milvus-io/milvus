@@ -121,7 +121,7 @@ class DefaultColumnGroupingStrategy : public ColumnGroupingStrategy {
         for (size_t i = 0; i < table_info.schema->num_fields(); ++i) {
             group.push_back(i);
         }
-        column_groups.push_back(group);
+        column_groups.push_back(std::move(group));
         return column_groups;
     }
 };
@@ -210,7 +210,7 @@ class JsonStatsParquetWriter {
     size_t
     AddCurrentRow();
 
-    std::map<std::string, int64_t>
+    const std::map<std::string, int64_t>&
     GetPathsToSize() const {
         return path_size_map_;
     }

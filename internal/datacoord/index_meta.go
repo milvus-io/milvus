@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -652,7 +651,7 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if segIdx, ok := indexes.Get(indexID); ok {
+		if segIdx, ok := indexes.Get(indexID); ok && !segIdx.IsDeleted {
 			state.IndexName = index.IndexName
 			state.State = segIdx.IndexState
 			state.FailReason = segIdx.FailReason
@@ -698,7 +697,7 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
 		for _, index := range targetIndices {
-			if segIdx, ok := indexes.Get(index.IndexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
+			if segIdx, ok := indexes.Get(index.IndexID); ok && !segIdx.IsDeleted && segIdx.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
 		}
@@ -870,15 +869,11 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 }
 
 // GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
-// for segID, including ones whose parent field index has been marked
-// IsDeleted — that is the case dropped-segment GC needs to clean up.
+// for segID, including deleted tasks and records whose parent field index has
+// been deleted. GC needs their file keys until cleanup completes.
 //
-// Intentionally does NOT acquire fieldIndexLock: this method only reads
-// m.segmentIndexes (a ConcurrentMap, self-synchronized) and never touches
-// m.indexes (which fieldIndexLock protects). Do not add an IsDeleted
-// filter here without first taking fieldIndexLock — that change would
-// silently start requiring the lock, unlike GetSegmentIndexes above which
-// already holds it.
+// It only reads the self-synchronized segmentIndexes map and does not acquire
+// fieldIndexLock or consult field-index definitions.
 func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	if m.segmentIndexes == nil {
 		return nil
@@ -910,7 +905,7 @@ func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	}
 
 	for _, segIdx := range segIndexInfos.Values() {
-		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 			ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
 		}
 	}
@@ -1124,6 +1119,10 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 		return nil
 	}
 
+	if segIdx.IsDeleted {
+		return nil
+	}
+
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IsDeleted = true
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
@@ -1258,25 +1257,6 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 	return true, nil
 }
 
-// GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
-// the v1 index_v1 layout. v0 cleanup still walks the buildID-rooted
-// index_files prefix and does not use this metadata-driven query.
-func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
-	if m.segmentBuildInfo == nil {
-		return nil
-	}
-	var result []*model.SegmentIndex
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if !segIdx.IsDeleted {
-			continue
-		}
-		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
-			result = append(result, model.CloneSegmentIndex(segIdx))
-		}
-	}
-	return result
-}
-
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
 	m.fieldIndexLock.RLock()
@@ -1292,14 +1272,19 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	m.fieldIndexLock.RUnlock()
 
 	for _, segID := range segmentIDs {
-		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes.Get(segID)
 		if !ok || segIndexInfos.Len() == 0 {
+			// Leave the entry out rather than storing an empty map. Both
+			// callers read it as `states[indexID]`, which behaves identically
+			// on a missing key and on an empty map - and a caller that scans
+			// every flushed segment of a large collection on a timer would
+			// otherwise allocate one map per segment per pass.
 			continue
 		}
+		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
 		for _, segIdx := range segIndexInfos.Values() {
-			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 				indexVersion := segIdx.CurrentIndexVersion
 				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
 					indexVersion = segIdx.CurrentScalarIndexVersion

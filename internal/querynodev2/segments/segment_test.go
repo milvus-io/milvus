@@ -242,8 +242,16 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key, "2.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key)
 
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
@@ -254,17 +262,27 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 		}},
 	}
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    11,
-		PartitionID:  22,
-		CollectionID: 33,
-		Level:        datapb.SegmentLevel_L1,
-		BinlogPaths: []*datapb.FieldBinlog{{
-			FieldID: 101,
-			Binlogs: []*datapb.Binlog{{
-				MemorySize: 4096,
-				LogSize:    2048,
-			}},
-		}},
+		SegmentID:      11,
+		PartitionID:    22,
+		CollectionID:   33,
+		Level:          datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   "files/manifest",
+		Stats: &datapb.Statistics{
+			LoadResource: &datapb.LoadResourceStatistics{
+				ColumnGroups: []*datapb.ColumnGroupStatistics{{
+					GroupId:    101,
+					FieldIds:   []int64{101, 999}, // field 999 was dropped from the current schema
+					MemorySize: 4096,
+				}},
+			},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, MemorySize: 100},
+		},
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			101: {FieldID: 101, MemorySize: 200},
+		},
 	}
 	segment := &baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
@@ -276,11 +294,12 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	segment.compactLoadInfoForRuntime()
 
 	assert.Empty(t, segment.LoadInfo().GetBinlogPaths())
+	assert.Nil(t, segment.LoadInfo().GetStats())
 	cached := segment.resourceUsageCache.Load()
 	if assert.NotNil(t, cached) {
-		assert.EqualValues(t, 4096, cached.MemorySize)
+		assert.EqualValues(t, 4796, cached.MemorySize)
 	}
-	assert.EqualValues(t, 4096, segment.ResourceUsageEstimate().MemorySize)
+	assert.EqualValues(t, 4796, segment.ResourceUsageEstimate().MemorySize)
 }
 
 func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {

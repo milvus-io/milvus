@@ -33,7 +33,7 @@ std::map<std::string, std::string> getMap = {
 std::map<std::string, std::string> getSucMap = {
     {"persistent_data_op_type", "get"}, {"status", "success"}};
 std::map<std::string, std::string> getFailMap = {
-    {"persistent_data_op_type", "get"}};
+    {"persistent_data_op_type", "get"}, {"status", "fail"}};
 std::map<std::string, std::string> putMap = {
     {"persistent_data_op_type", "put"}};
 std::map<std::string, std::string> putSucMap = {
@@ -203,6 +203,26 @@ std::map<std::string, std::string> gisCoarseRatioLabels{
     {"type", "gis_coarse_ratio"}};
 std::map<std::string, std::string> gisRefineRatioLabels{
     {"type", "gis_refine_ratio"}};
+std::map<std::string, std::string> strictGroupPhase1CandidatesLabels{
+    {"type", "phase1_candidates"}};
+std::map<std::string, std::string> strictGroupPhase2CandidatesLabels{
+    {"type", "phase2_candidates"}};
+std::map<std::string, std::string> strictGroupBatchCountLabels{
+    {"type", "batch_count"}};
+std::map<std::string, std::string>
+    strictGroup_original_remaining_candidates_Labels{
+        {"type", "original_remaining_candidates"}};
+std::map<std::string, std::string> strictGroupMembershipBuildLatencyLabels{
+    {"type", "membership_build_latency"}};
+std::map<std::string, std::string> strictGroupBitmapBuildLatencyLabels{
+    {"type", "bitmap_build_latency"}};
+std::map<std::string, std::string> strictGroupSearchLatencyLabels{
+    {"type", "strict_group_search_latency"}};
+
+const prometheus::Histogram::BucketBoundaries strictGroupCountBuckets = {
+    1,      2,       4,       8,        16,       32,       64,
+    128,    256,     512,     1024,     4096,     16384,    65536,
+    262144, 1048576, 4194304, 16777216, 67108864, 268435456};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
@@ -253,6 +273,40 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_gis_refine_ratio,
                                          internal_core_search_latency,
                                          gisRefineRatioLabels,
                                          ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count,
+                                   "[cpp]strict group completion counts")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_phase1_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroupPhase1CandidatesLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_phase2_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroupPhase2CandidatesLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_batch_count,
+    internal_core_strict_group_phase2_count,
+    strictGroupBatchCountLabels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_strict_group_phase2_original_remaining_candidates,
+    internal_core_strict_group_phase2_count,
+    strictGroup_original_remaining_candidates_Labels,
+    strictGroupCountBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_membership_build_latency,
+    internal_core_search_latency,
+    strictGroupMembershipBuildLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(
+    internal_core_strict_group_phase2_bitmap_build_latency,
+    internal_core_search_latency,
+    strictGroupBitmapBuildLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency,
+                            internal_core_search_latency,
+                            strictGroupSearchLatencyLabels)
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
@@ -371,6 +425,8 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load,
 // storage thread pool metrics
 std::map<std::string, std::string> highPoolLabel = {{"priority", "high"}};
 std::map<std::string, std::string> middlePoolLabel = {{"priority", "middle"}};
+std::map<std::string, std::string> searchFanoutPoolLabel = {
+    {"priority", "search_fanout"}};
 std::map<std::string, std::string> lowPoolLabel = {{"priority", "low"}};
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity,
@@ -381,6 +437,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_middle,
                         internal_storage_pool_capacity,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_search_fanout,
+                        internal_storage_pool_capacity,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_low,
                         internal_storage_pool_capacity,
                         lowPoolLabel);
@@ -393,6 +452,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_middle,
                         internal_storage_pool_active_threads,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_search_fanout,
+                        internal_storage_pool_active_threads,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_low,
                         internal_storage_pool_active_threads,
                         lowPoolLabel);
@@ -405,6 +467,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_middle,
                         internal_storage_pool_idle_threads,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_search_fanout,
+                        internal_storage_pool_idle_threads,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_low,
                         internal_storage_pool_idle_threads,
                         lowPoolLabel);
@@ -417,6 +482,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_middle,
                         internal_storage_pool_queue_depth,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_search_fanout,
+                        internal_storage_pool_queue_depth,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_low,
                         internal_storage_pool_queue_depth,
                         lowPoolLabel);
@@ -429,6 +497,10 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_high,
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_middle,
                           internal_storage_pool_task_submitted_total,
                           middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(
+    internal_storage_pool_task_submitted_total_search_fanout,
+    internal_storage_pool_task_submitted_total,
+    searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_low,
                           internal_storage_pool_task_submitted_total,
                           lowPoolLabel);
@@ -441,6 +513,10 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_high,
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_middle,
                           internal_storage_pool_task_completed_total,
                           middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(
+    internal_storage_pool_task_completed_total_search_fanout,
+    internal_storage_pool_task_completed_total,
+    searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low,
                           internal_storage_pool_task_completed_total,
                           lowPoolLabel);
@@ -457,6 +533,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_queue_duration_seconds_middle,
     internal_storage_pool_queue_duration_seconds,
     middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_queue_duration_seconds_search_fanout,
+    internal_storage_pool_queue_duration_seconds,
+    searchFanoutPoolLabel,
     secondsBuckets);
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_queue_duration_seconds_low,
@@ -476,6 +557,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_execute_duration_seconds_middle,
     internal_storage_pool_execute_duration_seconds,
     middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_execute_duration_seconds_search_fanout,
+    internal_storage_pool_execute_duration_seconds,
+    searchFanoutPoolLabel,
     secondsBuckets);
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_execute_duration_seconds_low,

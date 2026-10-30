@@ -290,10 +290,6 @@ TEST_P(TaskTest, RegisterFunction) {
     milvus::exec::expression::FunctionFactory& factory =
         milvus::exec::expression::FunctionFactory::Instance();
     ASSERT_EQ(factory.GetFilterFunctionNum(), 2);
-    auto all_functions = factory.ListAllFilterFunctions();
-    // for (auto& f : all_functions) {
-    //     std::cout << f.toString() << std::endl;
-    // }
 
     auto func_ptr = factory.GetFilterFunction(
         milvus::exec::expression::FilterFunctionRegisterKey{

@@ -20,16 +20,23 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
+	"slices"
+	"strconv"
 	"testing"
+	"time"
+	"weak"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type oneShotRecordReader struct {
@@ -47,6 +54,72 @@ func (r *oneShotRecordReader) Next() (Record, error) {
 
 func (r *oneShotRecordReader) Close() error {
 	return nil
+}
+
+// mergeSortTestRec builds a record with one column per given field. int64Cols
+// and strCols are keyed by FieldID; all columns must have the same length.
+func mergeSortTestRec(t *testing.T, int64Cols map[FieldID][]int64, strCols map[FieldID][]string) Record {
+	t.Helper()
+	fids := make([]FieldID, 0, len(int64Cols)+len(strCols))
+	for fid := range int64Cols {
+		fids = append(fids, fid)
+	}
+	for fid := range strCols {
+		fids = append(fids, fid)
+	}
+	slices.Sort(fids)
+
+	fields := make([]arrow.Field, 0, len(fids))
+	arrs := make([]arrow.Array, 0, len(fids))
+	f2c := make(map[FieldID]int, len(fids))
+	n := 0
+	for _, fid := range fids {
+		if vals, ok := int64Cols[fid]; ok {
+			b := array.NewInt64Builder(memory.DefaultAllocator)
+			b.AppendValues(vals, nil)
+			arrs = append(arrs, b.NewArray())
+			b.Release()
+			fields = append(fields, arrow.Field{Name: strconv.FormatInt(fid, 10), Type: arrow.PrimitiveTypes.Int64})
+			n = len(vals)
+		} else {
+			vals := strCols[fid]
+			b := array.NewStringBuilder(memory.DefaultAllocator)
+			b.AppendValues(vals, nil)
+			arrs = append(arrs, b.NewArray())
+			b.Release()
+			fields = append(fields, arrow.Field{Name: strconv.FormatInt(fid, 10), Type: arrow.BinaryTypes.String})
+			n = len(vals)
+		}
+		f2c[fid] = len(arrs) - 1
+	}
+	return NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrs, int64(n)), f2c)
+}
+
+// sliceRecordReader yields the given records in order.
+type sliceRecordReader struct {
+	recs []Record
+	pos  int
+}
+
+func (r *sliceRecordReader) Next() (Record, error) {
+	if r.pos >= len(r.recs) {
+		return nil, io.EOF
+	}
+	rec := r.recs[r.pos]
+	r.pos++
+	return rec, nil
+}
+
+func (r *sliceRecordReader) Close() error { return nil }
+
+type columnCountingRecord struct {
+	Record
+	columnCalls map[FieldID]int
+}
+
+func (r *columnCountingRecord) Column(fieldID FieldID) arrow.Array {
+	r.columnCalls[fieldID]++
+	return r.Record.Column(fieldID)
 }
 
 func TestRadixSortByInt64(t *testing.T) {
@@ -215,6 +288,82 @@ func TestSort(t *testing.T) {
 	})
 }
 
+func TestSortCachesNullableGeometryDefaultWKB(t *testing.T) {
+	const defaultWKT = "POINT (1 2)"
+	defaultWKB, err := common.ConvertWKTToWKB(defaultWKT)
+	require.NoError(t, err)
+
+	convertCalls := 0
+	patch := mockey.Mock(common.ConvertWKTToWKB).To(func(wkt string) ([]byte, error) {
+		convertCalls++
+		require.Equal(t, defaultWKT, wkt)
+		return defaultWKB, nil
+	}).Build()
+	defer patch.UnPatch()
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+	}
+	geomField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "geom",
+		DataType: schemapb.DataType_Geometry,
+		Nullable: true,
+		DefaultValue: &schemapb.ValueField{
+			Data: &schemapb.ValueField_StringData{StringData: defaultWKT},
+		},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, geomField}}
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{3, 1, 2}, nil)
+	pkColumn := pkBuilder.NewArray()
+	defer pkColumn.Release()
+
+	geomBuilder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+	defer geomBuilder.Release()
+	geomBuilder.AppendNulls(3)
+	geomColumn := geomBuilder.NewArray()
+	defer geomColumn.Release()
+
+	rec := NewSimpleArrowRecord(array.NewRecord(
+		arrow.NewSchema([]arrow.Field{
+			{Name: pkField.Name, Type: arrow.PrimitiveTypes.Int64},
+			{Name: geomField.Name, Type: arrow.BinaryTypes.Binary, Nullable: true},
+		}, nil),
+		[]arrow.Array{pkColumn, geomColumn},
+		3,
+	), map[FieldID]int{pkField.FieldID: 0, geomField.FieldID: 1})
+	defer rec.Release()
+
+	writer := &MockRecordWriter{
+		writefn: func(r Record) error {
+			out := r.Column(geomField.FieldID).(*array.Binary)
+			require.Equal(t, 3, out.Len())
+			for i := 0; i < out.Len(); i++ {
+				require.True(t, out.IsValid(i))
+				require.Equal(t, defaultWKB, out.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error {
+			return nil
+		},
+	}
+
+	gotNumRows, timings, err := Sort(64*1024*1024, schema, []RecordReader{&oneShotRecordReader{rec: rec}}, writer, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{pkField.FieldID})
+	require.NoError(t, err)
+	require.Equal(t, 3, gotNumRows)
+	require.NotNil(t, timings)
+	require.Equal(t, 1, convertCalls)
+}
+
 func TestMergeSort(t *testing.T) {
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(1000, 5000)
@@ -230,9 +379,15 @@ func TestMergeSort(t *testing.T) {
 	lastPK := int64(-1)
 	rw := &MockRecordWriter{
 		writefn: func(r Record) error {
-			pk := r.Column(common.RowIDField).(*array.Int64).Value(0)
-			assert.Greater(t, pk, lastPK)
-			lastPK = pk
+			// check every row, not just the first of each batch. The two
+			// readers overlap on pk, so the merged order is non-decreasing
+			// rather than strictly increasing.
+			col := r.Column(common.RowIDField).(*array.Int64)
+			for i := 0; i < col.Len(); i++ {
+				pk := col.Value(i)
+				assert.GreaterOrEqual(t, pk, lastPK)
+				lastPK = pk
+			}
 			return nil
 		},
 
@@ -242,7 +397,8 @@ func TestMergeSort(t *testing.T) {
 		},
 	}
 
-	const batchSize = 64 * 1024 * 1024
+	// small enough to force multiple output batches
+	const batchSize = 4096
 
 	t.Run("merge sort", func(t *testing.T) {
 		gotNumRows, err := MergeSort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
@@ -268,9 +424,233 @@ func TestMergeSort(t *testing.T) {
 	})
 }
 
+func TestMergeSortResolvesOutputColumnsOncePerRecord(t *testing.T) {
+	const (
+		pkField      = FieldID(100)
+		payloadField = FieldID(101)
+	)
+
+	base := mergeSortTestRec(t, map[FieldID][]int64{
+		pkField:      {1, 2, 3},
+		payloadField: {10, 20, 30},
+	}, nil)
+	defer base.Release()
+	record := &columnCountingRecord{Record: base, columnCalls: make(map[FieldID]int)}
+
+	writer := &MockRecordWriter{
+		writefn: func(Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+
+	rows, err := MergeSort(1024, schema, []RecordReader{&sliceRecordReader{recs: []Record{record}}}, writer,
+		func(Record, int, int) bool { return true }, []int64{pkField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, 2, record.columnCalls[pkField], "merge key and output binding should each resolve the PK once")
+	require.Equal(t, 1, record.columnCalls[payloadField], "output binding should resolve the payload once")
+}
+
+func TestMergeSortClearsOutputColumnsOnReaderError(t *testing.T) {
+	const pkField, payloadField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+	makeRecord := func(keys, payload []int64) *countedRecord {
+		columns := make([]arrow.Array, 0, 2)
+		for _, values := range [][]int64{keys, payload} {
+			builder := array.NewInt64Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns = append(columns, builder.NewArray())
+			builder.Release()
+		}
+		return &countedRecord{Record: &compositeRecord{
+			index: map[FieldID]int16{pkField: 0, payloadField: 1}, recs: columns,
+		}, live: 1}
+	}
+	for _, terminalErr := range []error{io.EOF, io.ErrUnexpectedEOF} {
+		t.Run(terminalErr.Error(), func(t *testing.T) {
+			first := makeRecord([]int64{1}, []int64{10})
+			reader := &IterativeRecordReader{
+				cur:     &borrowingRecordReader{recs: []Record{first}},
+				iterate: func() (RecordReader, error) { return nil, terminalErr },
+			}
+			defer reader.Close()
+			other := &borrowingRecordReader{recs: []Record{makeRecord([]int64{2, 3}, []int64{20, 30})}}
+			defer other.Close()
+
+			// Observe the cache's backing slice without depending on GC timing.
+			var finishedColumns []arrow.Array
+			assertCleared := func() {
+				require.Zero(t, first.live, "the reader must release its finished record")
+				require.Len(t, finishedColumns, 2)
+				for _, column := range finishedColumns {
+					require.Nil(t, column, "finished reader must not keep borrowed output columns")
+				}
+			}
+			var appendColumns func(*RecordBuilder, []arrow.Array, int, int) error
+			mock := mockey.Mock((*RecordBuilder).appendColumns).To(func(b *RecordBuilder, columns []arrow.Array, start, end int) error {
+				if finishedColumns == nil {
+					finishedColumns = columns
+				} else {
+					// Reader 0 is already at EOF while reader 1 still has rows.
+					assertCleared()
+				}
+				return appendColumns(b, columns, start, end)
+			}).Origin(&appendColumns).Build()
+			defer mock.UnPatch()
+
+			var gotKeys, gotPayload []int64
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				gotKeys = append(gotKeys, rec.Column(pkField).(*array.Int64).Int64Values()...)
+				gotPayload = append(gotPayload, rec.Column(payloadField).(*array.Int64).Int64Values()...)
+				return nil
+			}}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{reader, other}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			assertCleared()
+			if terminalErr == io.EOF {
+				require.NoError(t, err)
+				require.Equal(t, 3, rows)
+				require.Equal(t, []int64{1, 2, 3}, gotKeys)
+				require.Equal(t, []int64{10, 20, 30}, gotPayload)
+			} else {
+				require.ErrorIs(t, err, terminalErr)
+				require.Empty(t, gotKeys)
+			}
+		})
+	}
+}
+
+func TestMergeSortReleasesExhaustedReaderKeys(t *testing.T) {
+	const intField, stringField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: intField, Name: "int_key", DataType: schemapb.DataType_Int64},
+		{FieldID: stringField, Name: "string_key", DataType: schemapb.DataType_VarChar},
+	}}
+	makeReader := func(ints []int64, strings []string) (RecordReader, weak.Pointer[int64], weak.Pointer[array.String]) {
+		builder := array.NewRecordBuilder(memory.NewGoAllocator(), arrow.NewSchema([]arrow.Field{
+			{Name: "int_key", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "string_key", Type: arrow.BinaryTypes.String},
+		}, nil))
+		// Keep the tracked buffer out of Go's tiny-allocation batches, whose
+		// unrelated live objects can delay clearing a weak pointer.
+		builder.Field(0).Reserve(128)
+		builder.Field(0).(*array.Int64Builder).AppendValues(ints, nil)
+		builder.Field(1).(*array.StringBuilder).AppendValues(strings, nil)
+		record := builder.NewRecord()
+		builder.Release()
+		intBuffer := weak.Make(&record.Column(0).(*array.Int64).Int64Values()[0])
+		stringColumn := weak.Make(record.Column(1).(*array.String))
+		reader := &IterativeRecordReader{
+			cur: &borrowingRecordReader{recs: []Record{NewSimpleArrowRecord(record,
+				map[FieldID]int{intField: 0, stringField: 1})}},
+			iterate: func() (RecordReader, error) { return nil, io.EOF },
+		}
+		return reader, intBuffer, stringColumn
+	}
+	first, intBuffer, stringColumn := makeReader([]int64{1}, []string{"first"})
+	defer first.Close()
+	other, _, _ := makeReader([]int64{2, 3}, []string{"second", "third"})
+	defer other.Close()
+
+	var gotInts []int64
+	var gotStrings []string
+	writer := &MockRecordWriter{writefn: func(record Record) error {
+		gotInts = append(gotInts, record.Column(intField).(*array.Int64).Int64Values()...)
+		strings := record.Column(stringField).(*array.String)
+		for i := 0; i < strings.Len(); i++ {
+			gotStrings = append(gotStrings, strings.Value(i))
+		}
+		if len(gotInts) == 2 {
+			// Reader 0 reached EOF and released its record; reader 1 still has
+			// another row. Neither cache may keep reader 0's keys reachable.
+			runtime.GC()
+			assert.Nil(t, intBuffer.Value(), "exhausted reader retains its int64 buffer")
+			assert.Nil(t, stringColumn.Value(), "exhausted reader retains its string column")
+		}
+		return nil
+	}}
+	rows, err := MergeSort(1, schema, []RecordReader{first, other}, writer,
+		func(Record, int, int) bool { return true }, []int64{intField, stringField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, []int64{1, 2, 3}, gotInts)
+	require.Equal(t, []string{"first", "second", "third"}, gotStrings)
+}
+
+func TestMergeSortCachedColumnsPreserveTextAcrossRecords(t *testing.T) {
+	const pkField, textField = FieldID(100), FieldID(101)
+	makeRecord := func(pkValue int64, missingText bool) Record {
+		pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+		pkBuilder.Append(pkValue)
+		pkColumn := pkBuilder.NewArray()
+		pkBuilder.Release()
+		defer pkColumn.Release()
+		var textColumn arrow.Array
+		if missingText {
+			textColumn = array.MakeArrayOfNull(memory.DefaultAllocator, arrow.BinaryTypes.Binary, 1)
+		} else {
+			textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+			textBuilder.Append("decoded text")
+			textColumn = textBuilder.NewArray()
+			textBuilder.Release()
+		}
+		defer textColumn.Release()
+		return NewSimpleArrowRecord(array.NewRecord(
+			arrow.NewSchema([]arrow.Field{
+				{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "text", Type: textColumn.DataType(), Nullable: true},
+			}, nil), []arrow.Array{pkColumn, textColumn}, 1,
+		), map[FieldID]int{pkField: 0, textField: 1})
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: textField, Name: "text", DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	for _, tc := range []struct {
+		name         string
+		missingFirst bool
+	}{
+		{name: "null before text", missingFirst: true},
+		{name: "null after text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, second := makeRecord(1, tc.missingFirst), makeRecord(2, !tc.missingFirst)
+			defer first.Release()
+			defer second.Release()
+			writes := 0
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				writes++
+				require.Equal(t, 2, rec.Len())
+				text, ok := rec.Column(textField).(*array.String)
+				require.True(t, ok, "decoded TEXT must keep its UTF8 representation")
+				nullRow, textRow := 1, 0
+				if tc.missingFirst {
+					nullRow, textRow = 0, 1
+				}
+				require.True(t, text.IsNull(nullRow))
+				require.Equal(t, "decoded text", text.Value(textRow))
+				return nil
+			}, closefn: func() error { return nil }}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{&sliceRecordReader{recs: []Record{first, second}}}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			require.NoError(t, err)
+			require.Equal(t, 2, rows)
+			require.Equal(t, 1, writes)
+		})
+	}
+}
+
 func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
-	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
-	textBuilder.Append("not-a-lob-ref")
+	// UTF8 is valid decoded TEXT. An integer column violates both supported
+	// TEXT representations and must still propagate the Append error.
+	textBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	textBuilder.Append(42)
 	textColumn := textBuilder.NewArray()
 	defer textColumn.Release()
 	textBuilder.Release()
@@ -284,7 +664,7 @@ func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
 	rec := NewSimpleArrowRecord(array.NewRecord(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "text", Type: arrow.BinaryTypes.String},
+			{Name: "text", Type: arrow.PrimitiveTypes.Int64},
 		}, nil),
 		[]arrow.Array{pkColumn, textColumn},
 		1,
@@ -344,6 +724,93 @@ func BenchmarkSort(b *testing.B) {
 	})
 }
 
+// Benchmark merge sort
+func BenchmarkMergeSort(b *testing.B) {
+	batch := 100000
+	const batchSize = 64 * 1024 * 1024
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	// Generate the payload once: it dwarfs the merge itself, and ReportAllocs
+	// counts allocations made inside StopTimer too.
+	blobs10, err := generateTestDataWithSeed(batch, batch)
+	assert.NoError(b, err)
+	blobs20, err := generateTestDataWithSeed(batch*2+1, batch)
+	assert.NoError(b, err)
+	schema := generateTestSchema()
+
+	b.Run("merge_sort", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			// readers are single-use, so only they are rebuilt per iteration
+			reader10 := newIterativeCompositeBinlogRecordReader(schema, nil, MakeBlobsReader(blobs10))
+			reader20 := newIterativeCompositeBinlogRecordReader(schema, nil, MakeBlobsReader(blobs20))
+
+			_, err := MergeSort(batchSize, schema, []RecordReader{reader20, reader10}, rw,
+				func(r Record, ri, i int) bool { return true }, []int64{common.RowIDField})
+			assert.NoError(b, err)
+		}
+	})
+}
+
+// Benchmark merge sort on a varchar key, which takes the string comparison path
+// and the reusable key buffer in the ordering check.
+func BenchmarkMergeSortVarcharKey(b *testing.B) {
+	const strField = FieldID(16)
+	const rowsPerRec = 4096
+	const recsPerReader = 8
+	const batchSize = 64 * 1024 * 1024
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: strField, Name: "vc", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+	}}
+
+	// two interleaved ascending key spaces, 32-byte keys
+	build := func(t *testing.B, offset int) []Record {
+		recs := make([]Record, recsPerReader)
+		k := offset
+		for j := range recs {
+			vals := make([]string, rowsPerRec)
+			for i := range vals {
+				vals[i] = fmt.Sprintf("%024d%08d", k, k)
+				k += 2
+			}
+			bld := array.NewStringBuilder(memory.DefaultAllocator)
+			bld.AppendValues(vals, nil)
+			arr := bld.NewArray()
+			bld.Release()
+			recs[j] = NewSimpleArrowRecord(
+				array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "16", Type: arrow.BinaryTypes.String}}, nil),
+					[]arrow.Array{arr}, int64(rowsPerRec)),
+				map[FieldID]int{strField: 0})
+		}
+		return recs
+	}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	// records are read-only here, so build them once and only rewrap per iteration
+	recs0, recs1 := build(b, 0), build(b, 1)
+
+	b.Run("merge_sort_varchar", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			r0 := &sliceRecordReader{recs: recs0}
+			r1 := &sliceRecordReader{recs: recs1}
+
+			_, err := MergeSort(batchSize, schema, []RecordReader{r0, r1}, rw,
+				func(r Record, ri, i int) bool { return true }, []int64{strField})
+			assert.NoError(b, err)
+		}
+	})
+}
+
 func TestSortByMoreThanOneField(t *testing.T) {
 	const batchSize = 10000
 	sortByFieldIDs := []int64{common.RowIDField, common.TimeStampField}
@@ -378,4 +845,277 @@ func TestSortByMoreThanOneField(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, batchSize*2, gotNumRows)
 	assert.NoError(t, rw.Close())
+}
+
+func TestMergeSortVarcharKey(t *testing.T) {
+	const strField = FieldID(16)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: strField, Name: "vc", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, nil, map[FieldID][]string{strField: {"a", "c", "e"}}),
+		mergeSortTestRec(t, nil, map[FieldID][]string{strField: {"g", "i"}}),
+	}}
+	r1 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, nil, map[FieldID][]string{strField: {"b", "d", "f", "h"}}),
+	}}
+
+	var got []string
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			col := r.Column(strField).(*array.String)
+			for i := 0; i < col.Len(); i++ {
+				got = append(got, col.Value(i))
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	n, err := MergeSort(16, schema, []RecordReader{r0, r1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{strField})
+	assert.NoError(t, err)
+	assert.Equal(t, 9, n)
+	assert.NoError(t, rw.Close())
+	assert.Equal(t, []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}, got)
+}
+
+func TestMergeSortByMoreThanOneField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
+	}}
+
+	// each record is ascending by (rowid, ts)
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{
+			common.RowIDField:     {1, 1, 3},
+			common.TimeStampField: {10, 20, 10},
+		}, nil),
+	}}
+	r1 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{
+			common.RowIDField:     {1, 2, 3},
+			common.TimeStampField: {15, 5, 5},
+		}, nil),
+	}}
+
+	type pair struct{ pk, ts int64 }
+	var got []pair
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error {
+			pk := r.Column(common.RowIDField).(*array.Int64)
+			ts := r.Column(common.TimeStampField).(*array.Int64)
+			for i := 0; i < pk.Len(); i++ {
+				got = append(got, pair{pk.Value(i), ts.Value(i)})
+			}
+			return nil
+		},
+		closefn: func() error { return nil },
+	}
+
+	n, err := MergeSort(16, schema, []RecordReader{r0, r1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField, common.TimeStampField})
+	assert.NoError(t, err)
+	assert.Equal(t, 6, n)
+	assert.NoError(t, rw.Close())
+	assert.Equal(t, []pair{{1, 10}, {1, 15}, {1, 20}, {2, 5}, {3, 5}, {3, 10}}, got)
+}
+
+// The predicate carries a side effect in production (segmentTotalRows[ri]++ in
+// merge_sort.go), so every row must be evaluated exactly once.
+func TestMergeSortPredicateCalledOncePerRow(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {1, 3, 5}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {7, 9}}, nil),
+	}}
+	r1 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {2, 4, 6, 8}}, nil),
+	}}
+
+	// pk is unique across all records here, so it identifies a row globally.
+	counts := map[int64]int{}
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(16, schema, []RecordReader{r0, r1}, rw, func(r Record, ri, i int) bool {
+		pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
+		counts[pk]++
+		return pk%3 != 0 // also exercise skipping filtered rows
+	}, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.NoError(t, rw.Close())
+
+	assert.Equal(t, 9, len(counts), "every row must be visited exactly once")
+	for pk, n := range counts {
+		assert.Equalf(t, 1, n, "predicate called %d times for pk %d", n, pk)
+	}
+}
+
+func TestRowHeap(t *testing.T) {
+	h := &rowHeap{less: func(x, y rowIndex) bool {
+		if x.ri != y.ri {
+			return x.ri < y.ri
+		}
+		return x.i < y.i
+	}}
+	assert.Equal(t, 0, h.len())
+
+	in := []rowIndex{{3, 1}, {1, 2}, {2, 0}, {1, 0}, {3, 0}, {2, 1}}
+	for _, v := range in {
+		h.push(v)
+	}
+	assert.Equal(t, len(in), h.len())
+
+	var got []rowIndex
+	for h.len() > 0 {
+		got = append(got, h.pop())
+	}
+	assert.Equal(t, []rowIndex{{1, 0}, {1, 2}, {2, 0}, {2, 1}, {3, 0}, {3, 1}}, got)
+}
+
+func TestRowHeapSingleElement(t *testing.T) {
+	h := &rowHeap{less: func(x, y rowIndex) bool { return x.i < y.i }}
+	h.push(rowIndex{0, 7})
+	assert.Equal(t, 1, h.len())
+	assert.Equal(t, rowIndex{0, 7}, h.pop())
+	assert.Equal(t, 0, h.len())
+}
+
+// A k-way merge relies on each input record being sorted by the merge key.
+// When that does not hold, fail explicitly rather than emitting rows out of
+// order. This is the shape reported in #48322: the last row of a record carries
+// the smallest key, and the next record is shorter.
+func TestMergeSortUnsortedInputReturnsError(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {50, 60, 1}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {70}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 0 record 0 row 2 out of order")
+}
+
+// The disorder in TestMergeSortUnsortedInputReturnsError falls in the reader's
+// first record, so a reported record number of 0 does not prove that number
+// was actually computed rather than hardcoded. This variant keeps the first
+// record in order and puts the offending row in the second record, so the
+// reported record number must be non-zero to be correct.
+func TestMergeSortUnsortedInputReportsLaterRecord(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {10, 20, 30}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {5, 40}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 0 record 1 row 0 out of order")
+}
+
+// Both preceding tests drive a single reader, so idx.ri is always 0 in the
+// error -- a hardcoded 0 in place of idx.ri would pass them too. This variant
+// uses two readers, keeps reader 0 in order throughout, and puts the disorder
+// in reader 1's second record, so the reported reader index and per-reader
+// record number are both load-bearing.
+func TestMergeSortUnsortedInputReportsOffendingReader(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: "rowid", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+
+	r0 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {10, 20, 30}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {40}}, nil),
+	}}
+	r1 := &sliceRecordReader{recs: []Record{
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {15, 25}}, nil),
+		mergeSortTestRec(t, map[FieldID][]int64{common.RowIDField: {35, 5}}, nil),
+	}}
+
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, err := MergeSort(1024, schema, []RecordReader{r0, r1}, rw, func(r Record, ri, i int) bool {
+		return true
+	}, []int64{common.RowIDField})
+	assert.ErrorContains(t, err, "not sorted by the merge key")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.ErrorContains(t, err, "reader 1 record 1 row 1 out of order")
+}
+
+// slowRecordReader delays every Next(), standing in for a reader waiting on
+// object storage.
+type slowRecordReader struct {
+	inner RecordReader
+	delay time.Duration
+}
+
+func (r *slowRecordReader) Next() (Record, error) {
+	time.Sleep(r.delay)
+	return r.inner.Next()
+}
+
+func (r *slowRecordReader) Close() error { return r.inner.Close() }
+
+// TestSortTimingsSplitsFetchFromFilter pins that the read phase reports how
+// much of itself was spent waiting for input. A read that is slow because of
+// object storage and one that is slow because of the per-row predicate look
+// identical in ReadCost alone, and only the first is worth more read
+// concurrency.
+func TestSortTimingsSplitsFetchFromFilter(t *testing.T) {
+	const delay = 20 * time.Millisecond
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	inner := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, timings, err := Sort(64*1024*1024, generateTestSchema(),
+		[]RecordReader{&slowRecordReader{inner: inner, delay: delay}}, rw,
+		func(r Record, ri, i int) bool { return true }, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.NotNil(t, timings)
+
+	// Each record costs one delayed Next(), plus one more to report EOF.
+	assert.GreaterOrEqual(t, timings.FetchCost, time.Duration(timings.NumBatches+1)*delay,
+		"time spent inside Next() must be reported as fetch cost")
+	assert.LessOrEqual(t, timings.FetchCost, timings.ReadCost,
+		"fetch cost is part of read cost, never more")
 }

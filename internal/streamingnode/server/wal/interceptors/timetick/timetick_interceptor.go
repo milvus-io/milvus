@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
@@ -13,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const interceptorName = "timetick"
@@ -48,14 +47,9 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
-		if msg.BarrierTimeTick() == 0 {
-			if acker, err = ackManager.Allocate(ctx); err != nil {
-				return nil, errors.Wrap(err, "allocate timestamp failed")
-			}
-		} else {
-			if acker, err = ackManager.AllocateWithBarrier(ctx, msg.BarrierTimeTick()); err != nil {
-				return nil, errors.Wrap(err, "allocate timestamp with barrier failed")
-			}
+		acker, err = ackManager.AllocateForAppend(ctx, msg.BarrierTimeTick())
+		if err != nil {
+			return nil, merr.Wrap(err, "allocate timestamp failed")
 		}
 
 		// Assign timestamp to message and call the append method.
@@ -84,7 +78,15 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		if txnSession, err = impl.handleCommit(ctx, msg); err != nil {
 			return nil, err
 		}
-		defer txnSession.CommitDone()
+		defer func() {
+			if txn.IsCommitAdmissionRejected(err) {
+				txnSession.RejectCommit()
+			} else if err == nil {
+				txnSession.CommitDone()
+			}
+			// Cancellation/fencing ends this writer. For either transaction origin,
+			// WAL recovery determines the outcome; a failed append is not a Commit.
+		}()
 	case message.MessageTypeRollbackTxn:
 		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
 			return nil, err
@@ -166,7 +168,7 @@ func (impl *timeTickAppendInterceptor) handleCommit(ctx context.Context, msg mes
 	}
 
 	// Start commit the message.
-	if err = session.RequestCommitAndWait(ctx, msg.TimeTick()); err != nil {
+	if err = session.RequestCommitAndWait(ctx, msg.TimeTick(), commitTxnMsg.Header().BodyCnt); err != nil {
 		return nil, err
 	}
 	return session, nil

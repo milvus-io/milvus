@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -30,7 +31,6 @@ import (
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -61,6 +61,25 @@ type indexBuildTask struct {
 var _ globalTask.Task = (*indexBuildTask)(nil)
 
 var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
+
+func fieldSchemaForIndexBuild(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) *schemapb.FieldSchema {
+	if field == nil || field.GetNullable() {
+		return field
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if !structField.GetNullable() {
+			continue
+		}
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == field.GetFieldID() {
+				buildField := proto.Clone(field).(*schemapb.FieldSchema)
+				buildField.Nullable = true
+				return buildField
+			}
+		}
+	}
+	return field
+}
 
 func newIndexBuildTask(segIndex *model.SegmentIndex,
 	taskSlot int64,
@@ -163,9 +182,9 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	// Check segment health and index existence
 	segment := it.meta.GetSegment(ctx, segIndex.SegmentID)
-	if !isSegmentHealthy(segment) || !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
-		log.Info(ctx, "task is no need to build index, removing it")
-		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
+	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
+		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
+		it.abortForDroppedTarget(ctx, reason)
 		return
 	}
 
@@ -176,12 +195,26 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	estimatedVectorArrayVectors := int64(0)
 	isVectorArrayIndex := false
 	isEmbeddingListIndex := false
+	skipVectorArrayThreshold := false
 	if fieldID := it.meta.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 {
 		if collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID); err == nil {
 			for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
 				if f.FieldID == fieldID {
 					if f.GetNullable() && typeutil.IsVectorType(f.GetDataType()) {
-						effectiveRows = segmentutil.CalcValidRowCountFromFieldBinLog(segment.SegmentInfo, fieldID)
+						// Derive valid rows from the persisted Statistics NullCounts
+						// instead of iterating field binlogs.
+						nullCount, ok := segment.EnsureStats().GetNullCounts()[fieldID]
+						if !ok {
+							// NullCounts carries an entry for every field present
+							// in the segment's data (zero included). A missing key
+							// means the field was added to the schema after this
+							// segment was flushed: every row reads as null, so
+							// there is nothing to index.
+							log.Info(ctx, "field has no NullCounts entry, treating all rows as null",
+								mlog.Int64("fieldID", fieldID))
+							nullCount = segIndex.NumRows
+						}
+						effectiveRows = segIndex.NumRows - nullCount
 					}
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
@@ -210,6 +243,17 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 								mlog.Int32("segmentSchemaVersion", segment.GetSchemaVersion()),
 								mlog.Int32("collectionSchemaVersion", collectionInfo.Schema.GetVersion()))
 						}
+						if estimate.manifestBacked {
+							// Recovered StorageV3 segment: the element count can't be derived
+							// from the empty in-memory binlog arrays. Skip the element-count
+							// threshold so DataCoord doesn't fake-finish/block a build that the
+							// manifest-aware worker can complete.
+							skipVectorArrayThreshold = true
+							log.Info(ctx, "vector array element count unknown for manifest-backed segment, skipping element-count threshold",
+								mlog.Int64("fieldID", f.GetFieldID()),
+								mlog.String("fieldName", f.GetName()),
+								mlog.String("manifestPath", segment.GetManifestPath()))
+						}
 					}
 					break
 				}
@@ -224,7 +268,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		// Element-level ArrayOfVector indexes are built from flattened inner vectors,
 		// so row count alone should not block index building. MaxSim metrics build
 		// EmbList indexes and additionally require enough logical rows.
-		vectorArrayVectorCountBelowThreshold = estimatedVectorArrayVectors < minRowsToBuildIndex
+		vectorArrayVectorCountBelowThreshold = !skipVectorArrayThreshold && estimatedVectorArrayVectors < minRowsToBuildIndex
 		indexDataBelowThreshold = vectorArrayVectorCountBelowThreshold ||
 			(isEmbeddingListIndex && rowCountBelowThreshold)
 	}
@@ -303,6 +347,11 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 type vectorArrayElementCountEstimate struct {
 	vectorCount        int64
 	emptyOnStaleSchema bool
+	// manifestBacked is set for a recovered StorageV3 segment whose in-memory
+	// binlog arrays are empty: the element count can't be derived here, but the
+	// manifest-aware worker build can, so the pre-check must not fail or
+	// fake-finish — it lets the build proceed.
+	manifestBacked bool
 }
 
 func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) (vectorArrayElementCountEstimate, error) {
@@ -315,6 +364,13 @@ func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, s
 		// stale segment. For index build purposes it contributes zero vectors and
 		// should be fake-finished by the threshold check below.
 		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
+	}
+	if errors.Is(err, errVectorArrayFieldBinlogNotFound) && segment.GetManifestPath() != "" {
+		// A recovered StorageV3 segment reloads with empty in-memory binlog arrays
+		// (per-field KVs are not persisted), so the element count is unknowable
+		// here — but the manifest is authoritative and the worker build reads it.
+		// Don't fail the pre-check; let the manifest-aware build proceed.
+		return vectorArrayElementCountEstimate{manifestBacked: true}, nil
 	}
 	return vectorArrayElementCountEstimate{}, err
 }
@@ -459,6 +515,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	if field == nil {
 		return nil, merr.WrapErrFieldNotFound(fieldID)
 	}
+	buildField := fieldSchemaForIndexBuild(schema, field)
 
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1
@@ -514,7 +571,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		Dim:                       int64(dim),
 		DataIds:                   binlogIDs,
 		OptionalScalarFields:      optionalFields,
-		Field:                     field,
+		Field:                     buildField,
 		PartitionKeyIsolation:     partitionKeyIsolation,
 		StorageVersion:            segment.GetStorageVersion(),
 		TaskSlot:                  it.taskSlot,
@@ -577,6 +634,14 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	// The index or the segment may have been dropped while the task is in
+	// flight. Abort it now instead of letting the worker finish useless work.
+	if reason, dropped := it.droppedTargetReason(it.meta.GetSegment(ctx, segIndex.SegmentID), segIndex); dropped {
+		log.Info(ctx, "index task target dropped while in progress, aborting", mlog.String("reason", reason))
+		it.abortInflightTask(ctx, cluster, reason)
+		return
+	}
+
 	results, err := cluster.QueryIndex(it.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.BuildID},
@@ -608,6 +673,53 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
 	// Task not found in results will be return error
+}
+
+const (
+	indexTaskAbortReasonSegmentDropped = "segment is dropped, index task aborted"
+	indexTaskAbortReasonIndexDropped   = "index is dropped, index task aborted"
+)
+
+// droppedTargetReason reports whether the task's build target is gone: the
+// segment is no longer healthy or the field index has been dropped. Both are
+// irreversible, so the task can never be needed again.
+func (it *indexBuildTask) droppedTargetReason(segment *SegmentInfo, segIndex *model.SegmentIndex) (string, bool) {
+	if !isSegmentHealthy(segment) {
+		return indexTaskAbortReasonSegmentDropped, true
+	}
+	if !it.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
+		return indexTaskAbortReasonIndexDropped, true
+	}
+	return "", false
+}
+
+// abortInflightTask cancels a dispatched task whose target is gone. The job is
+// dropped on the worker before the terminal state is persisted: a failed drop
+// RPC returns without touching meta, so the task stays InProgress and the next
+// check round retries, and a DataCoord restart in between reloads it as
+// InProgress and repeats the same idempotent steps. A missing node counts as
+// dropped. Files the worker already uploaded, or uploads still in flight that
+// the cgo code cannot interrupt, are reclaimed by the orphan index file scans
+// once GC removes the record.
+func (it *indexBuildTask) abortInflightTask(ctx context.Context, cluster session.Cluster, reason string) {
+	if err := it.tryDropTaskOnWorker(cluster); err != nil {
+		mlog.Warn(ctx, "failed to cancel index task on worker, keeping it for the next round",
+			mlog.Int64("taskID", it.BuildID), mlog.Int64("nodeID", it.NodeID), mlog.Err(err))
+		return
+	}
+	it.abortForDroppedTarget(ctx, reason)
+}
+
+// abortForDroppedTarget persists a terminal state for a task whose target is
+// gone. Writing only the in-memory state would leave the SegmentIndex
+// non-terminal in meta: GC skips non-terminal tasks, and every restart would
+// re-enqueue it. On a meta write failure the state is left untouched so the
+// next round retries.
+func (it *indexBuildTask) abortForDroppedTarget(ctx context.Context, reason string) {
+	if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, reason); err != nil {
+		mlog.Warn(ctx, "failed to persist aborted index task state, will retry",
+			mlog.Int64("taskID", it.BuildID), mlog.String("reason", reason), mlog.Err(err))
+	}
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {

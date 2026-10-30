@@ -277,21 +277,6 @@ class DeletedRecord {
         }
     }
 
-    size_t
-    GetSnapshotBitsSize() const {
-        auto all_dump_bits = 0;
-        auto next_dump_ts = 0;
-        std::shared_lock<std::shared_mutex> lock(snap_lock_);
-        int loc = snapshots_.size() - 1;
-        while (loc >= 0) {
-            if (next_dump_ts != snapshots_[loc].first) {
-                all_dump_bits += snapshots_[loc].second.size();
-            }
-            loc--;
-        }
-        return all_dump_bits;
-    }
-
     void
     DumpSnapshot() {
         SortedDeleteList::Accessor accessor(deleted_lists_);

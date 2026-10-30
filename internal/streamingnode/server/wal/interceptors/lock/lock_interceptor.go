@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 )
 
@@ -16,43 +17,79 @@ type lockAppendInterceptor struct {
 	glock          sync.RWMutex // glock is a wal level lock, it will acquire a highest level lock for wal.
 	vchannelLocker *lock.KeyLock[string]
 	txnManager     *txn.TxnManager
+	// Builders run in chain order; a later builder can install the row-lock hook.
+	buildParam *interceptors.InterceptorBuildParam
 }
 
 func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	g := r.acquireLockGuard(ctx, msg)
-	defer g()
+	unlock := r.acquireLockGuard(msg)
+	defer unlock()
 
-	return append(ctx, msg)
+	// Row locks are taken under the shard lifecycle lock and before TimeTick
+	// allocates the write timestamp, so a later lock holder always receives a
+	// later timestamp. They are released after the downstream append returns,
+	// which is after transaction completion, acknowledgement and MVCC update.
+	// Replicated messages are already serialized by the replicate interceptor
+	// and must reach it before any partial-update admission check.
+	if rowLock := r.rowLock(); rowLock != nil && msg.ReplicateHeader() == nil {
+		var release func()
+		var err error
+		if ctx, release, err = rowLock.Acquire(ctx, msg); err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+
+	msgID, err := append(ctx, msg)
+	if err != nil || !msg.MessageType().IsExclusiveRequired() {
+		return msgID, err
+	}
+	if msg.MessageType() == message.MessageTypeAlterReplicateConfig &&
+		message.MustAsMutableAlterReplicateConfigMessageV2(msg).Header().Ignore {
+		return msgID, nil
+	}
+
+	// Only a durable exclusive operation ends transactions, while still holding
+	// the WAL lock. Failed, deduplicated and explicitly ignored operations do not.
+	vchannel := msg.VChannel()
+	if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
+		r.txnManager.FailTxnAtVChannel("")
+	} else if !funcutil.IsControlChannel(vchannel) {
+		r.txnManager.FailTxnAtVChannel(vchannel)
+	}
+	return msgID, nil
 }
 
-// acquireLockGuard acquires the lock for the vchannel and return a function as a guard.
-func (r *lockAppendInterceptor) acquireLockGuard(_ context.Context, msg message.MutableMessage) func() {
-	// Acquire the write lock for the vchannel.
+func (r *lockAppendInterceptor) rowLock() interceptors.MessageRowLock {
+	if r.buildParam == nil {
+		return nil
+	}
+	return r.buildParam.RowLock
+}
+
+// acquireLockGuard acquires the required WAL locks and returns only their unlock function.
+func (r *lockAppendInterceptor) acquireLockGuard(msg message.MutableMessage) func() {
 	vchannel := msg.VChannel()
 	if msg.MessageType().IsExclusiveRequired() {
 		if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
 			r.glock.Lock()
-			return func() {
-				// fail all transactions at all vchannels.
-				r.txnManager.FailTxnAtVChannel("")
-				r.glock.Unlock()
-			}
-		} else {
+			return r.glock.Unlock
+		} else if !funcutil.IsControlChannel(vchannel) {
+			r.glock.RLock()
 			r.vchannelLocker.Lock(vchannel)
 			return func() {
-				// For exclusive messages, we need to fail all transactions at the vchannel.
-				// Otherwise, the transaction message may cross the exclusive message.
-				// e.g. an exclusive message like `ManualFlush` happens, it will flush all the growing segment.
-				// But the transaction insert message that use those segments may not be committed,
-				// if we allow it to be committed, a insert message can be seen after the manual flush message, lead to the wrong wal message order.
-				// So we need to fail all transactions at the vchannel, it will be retried at client side with new txn.
-				//
-				// the append operation of exclusive message should be low rate, so it's acceptable to fail all transactions at the vchannel.
-				r.txnManager.FailTxnAtVChannel(vchannel)
 				r.vchannelLocker.Unlock(vchannel)
+				r.glock.RUnlock()
 			}
 		}
+		// Collection-scoped DDL is exclusive on its data VChannels. Its
+		// control-channel copy uses the shared path below so DDL with
+		// non-conflicting resource keys can append concurrently. Conflicting
+		// DDL is serialized by the broadcaster resource-key lock. PChannel-level
+		// messages already acquire the global write lock above.
 	}
+	// DML, including CAS commits, keeps the shard lifecycle stable with a
+	// shared lock. Row-level exclusion is taken by PK in DoAppend.
 	r.glock.RLock()
 	r.vchannelLocker.RLock(vchannel)
 	return func() {

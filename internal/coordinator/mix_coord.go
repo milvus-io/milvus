@@ -18,12 +18,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -61,15 +63,21 @@ type mixCoordImpl struct {
 	tikvCli *txnkv.Client
 	address string
 
-	proxyCreator       proxyutil.ProxyCreator
-	proxyWatcher       *proxyutil.ProxyWatcher
-	proxyClientManager proxyutil.ProxyClientManagerInterface
+	proxyCreator proxyutil.ProxyCreator
+	proxyWatcher *proxyutil.ProxyWatcher
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 	stateCode           atomic.Int32
-	initOnce            sync.Once
-	startOnce           sync.Once
-	session             *sessionutil.Session
+
+	// onActive holds callbacks to run once this replica becomes ACTIVE -
+	// after initInternal has built the sub-coordinators and the state moved
+	// to Healthy. A standby replica never fires them; see OnActive.
+	onActiveMu sync.Mutex
+	onActive   []func()
+	activated  bool
+	initOnce   sync.Once
+	startOnce  sync.Once
+	session    *sessionutil.Session
 
 	factory dependency.Factory
 
@@ -77,6 +85,10 @@ type mixCoordImpl struct {
 
 	metaKVCreator  func() kv.MetaKv
 	mixCoordClient types.MixCoordClient
+
+	// rootCredentialVerifier backs the management-plane HTTP basic-auth gate.
+	// Set in initInternal, unregistered in Stop.
+	rootCredentialVerifier *adminauth.CachedRootVerifier
 
 	// POSIX directory cleanup task
 	posixCleanupCancel    context.CancelFunc
@@ -89,7 +101,7 @@ type mixCoordImpl struct {
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
-	ctx, cancel := context.WithCancel(c)
+	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
@@ -180,6 +192,18 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	// Register a password verifier for /management/* HTTP basic auth: a mix
+	// coord process does not host the proxy package, where the verifier is
+	// otherwise registered, so without this the gate answers 503 to root as
+	// well as to attackers once adminAuthEnabled is on.
+	//
+	// It goes through the shared cache rather than straight to rootcoord's
+	// credential RPC, which reads the metastore on every call: the gated
+	// endpoints answer unauthenticated callers, so binding directly would let
+	// anyone who can reach port 9091 drive etcd load into the coordinator.
+	s.rootCredentialVerifier = adminauth.NewCachedRootVerifier(s.fetchRootHash)
+	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, s.rootCredentialVerifier.Verify)
+
 	// DataCoord and QueryCoord are independent of each other;
 	// both only depend on RootCoord being ready. Initialize and start them in parallel.
 	g, _ := errgroup.WithContext(s.ctx)
@@ -243,12 +267,56 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
+
+	s.onActiveMu.Lock()
+	s.activated = true
+	fns := s.onActive
+	s.onActive = nil
+	s.onActiveMu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// OnActive runs fn once this replica is ACTIVE: sub-coordinators initialized,
+// state Healthy. A callback registered after activation runs immediately; one
+// registered on a replica that stays standby never runs, which is the point -
+// work hung off this hook (a coordinator engine doing resource-group
+// accounting, say) must run on exactly one replica, and before activation the
+// sub-coordinators it would read are not initialized at all.
+func (s *mixCoordImpl) OnActive(fn func()) {
+	s.onActiveMu.Lock()
+	if s.activated {
+		s.onActiveMu.Unlock()
+		fn()
+		return
+	}
+	s.onActive = append(s.onActive, fn)
+	s.onActiveMu.Unlock()
 }
 
 func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 	return s.queryCoordServer.ServerExist(serverID) ||
 		s.datacoordServer.ServerExist(serverID) ||
 		s.rootcoordServer.ServerExist(serverID)
+}
+
+// fetchRootHash reads root's stored bcrypt hash from the rootcoord embedded in
+// this mix coord.
+//
+// This is not a cheap in-process getter: Catalog.GetCredential does an
+// unconditional Txn.Load against the metastore and bumps the DDL request
+// counters, so it must never run once per request. adminauth.CachedRootVerifier
+// is what keeps that from happening.
+func (s *mixCoordImpl) fetchRootHash(ctx context.Context) (string, error) {
+	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+		Username: util.UserRoot,
+	})
+	if err != nil {
+		mlog.Warn(ctx, "fetch root credential failed", mlog.Err(err))
+		return "", merr.Wrap(err, "GetCredential failed")
+	}
+	return adminauth.RootHashFromResponse(resp)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -339,6 +407,15 @@ func (s *mixCoordImpl) posixCleanupLoop(ctx context.Context) {
 
 func (s *mixCoordImpl) Stop() error {
 	mlog.Info(s.ctx, "graceful stop")
+	// Deferred, not done first: /management/* is how an operator drives a
+	// drain, and unregistering up front would make this coordinator answer 503
+	// to the very requests that are shutting it down.
+	defer func() {
+		internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, nil)
+		if s.rootCredentialVerifier != nil {
+			s.rootCredentialVerifier.Forget()
+		}
+	}()
 
 	s.stopPosixCleanupTask()
 
@@ -459,6 +536,10 @@ func (s *mixCoordImpl) ShowCollections(ctx context.Context, req *milvuspb.ShowCo
 
 func (s *mixCoordImpl) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	return s.rootcoordServer.ShowCollectionIDs(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.rootcoordServer.GetRLSMetadata(ctx, req)
 }
 
 func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -683,6 +764,38 @@ func (s *mixCoordImpl) ListPrivilegeGroups(ctx context.Context, req *milvuspb.Li
 
 func (s *mixCoordImpl) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.OperatePrivilegeGroupRequest) (*commonpb.Status, error) {
 	return s.rootcoordServer.OperatePrivilegeGroup(ctx, req)
+}
+
+func (s *mixCoordImpl) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.CreateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.UpdateRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DropRowPolicy(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.rootcoordServer.ListRowPolicies(ctx, req)
+}
+
+func (s *mixCoordImpl) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.rootcoordServer.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.rootcoordServer.ListRLSPrincipals(ctx, req)
+}
+
+func (s *mixCoordImpl) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.rootcoordServer.DeleteRLSPrincipalTags(ctx, req)
 }
 
 // GetComponentStates get states of components
@@ -910,6 +1023,10 @@ func (s *mixCoordImpl) GetQcMetrics(ctx context.Context, in *milvuspb.GetMetrics
 
 func (s *mixCoordImpl) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
 	return s.datacoordServer.GetDataCoordTopology(ctx, req)
+}
+
+func (s *mixCoordImpl) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
+	return s.datacoordServer.GetConnectedDataNodeMetrics(ctx, req)
 }
 
 func (s *mixCoordImpl) GetQueryCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.QueryCoordTopology, error) {
@@ -1325,6 +1442,11 @@ func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.Rem
 // ListFileResources list file resources
 func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	return s.rootcoordServer.ListFileResources(ctx, req)
+}
+
+// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
+func (s *mixCoordImpl) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	return s.rootcoordServer.GetFileResources(ctx, resourceIDs...)
 }
 
 // TruncateCollection truncate collection

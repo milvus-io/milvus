@@ -17,6 +17,7 @@
 #include <string>
 
 #include "cachinglayer/Manager.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
@@ -51,6 +52,30 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
+extern "C" CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version) {
+    try {
+        const int64_t current_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber();
+        if (target_version != -1 &&
+            !knowhere::Version::VersionSupport(
+                knowhere::Version(static_cast<int32_t>(target_version)))) {
+            ThrowInfo(ConfigInvalid,
+                      "interim index target version {} is not supported by "
+                      "Knowhere (current {}, maximum {})",
+                      target_version,
+                      current_version,
+                      knowhere::Version::GetMaximumVersion().VersionNumber());
+        }
+
+        SegcoreConfig::default_config().set_interim_index_target_version(
+            static_cast<int32_t>(target_version));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
 extern "C" void
 SegcoreSetStorageV3Enabled(const bool value) {
     milvus::segcore::SegcoreConfig& config =
@@ -81,9 +106,11 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 
 extern "C" void
 SegcoreSetVisibilityFilterEnabled(const bool value) {
-    milvus::segcore::SegcoreConfig& config =
-        milvus::segcore::SegcoreConfig::default_config();
-    config.set_visibility_filter_enabled(value);
+    // Deprecated compatibility shim: row visibility filtering is always
+    // enforced and this value is ignored. The symbol survives so callers
+    // built against the v3.0.0 interface keep linking; the Go side rejects
+    // `false` at querynode startup before this could ever matter.
+    (void)value;
 }
 
 extern "C" void
@@ -91,6 +118,18 @@ SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_prefer_field_data_when_index_has_raw_data(value);
+}
+
+extern "C" void
+SegcoreSetLazyColumnGroupEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig::default_config()
+        .set_lazy_column_group_enabled(value);
+}
+
+extern "C" bool
+SegcoreGetLazyColumnGroupEnabled() {
+    return milvus::segcore::SegcoreConfig::default_config()
+        .get_lazy_column_group_enabled();
 }
 
 extern "C" void
@@ -120,6 +159,17 @@ SegcoreSetDenseVectorInterminIndexType(const char* value) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+extern "C" CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo) {
+    try {
+        SegcoreConfig::default_config().set_sparse_interim_index_algos(
+            ip_algo, bm25_algo);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 extern "C" CStatus
@@ -177,6 +227,13 @@ SegcoreSetIndexBuildRatio(const float value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_build_ratio(value);
+}
+
+extern "C" void
+SegcoreSetGrowingIndexBuildThreadRate(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_growing_index_build_thread_rate(value);
 }
 
 extern "C" void

@@ -25,7 +25,9 @@ static const char* DEFAULT_ANALYZER_PARAMS = "{}";
 static constexpr uintptr_t DEFAULT_NUM_THREADS =
     1;  // Every field with index writer will generate a thread, make huge thread amount, wait for refactoring.
 static constexpr uintptr_t DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES =
-    DEFAULT_NUM_THREADS * 15 * 1024 * 1024;
+    500 * 1024 * 1024;
+static constexpr uintptr_t GROWING_TEXT_MEMORY_BUDGET_IN_BYTES =
+    15 * 1024 * 1024;
 
 template <typename T>
 inline TantivyDataType
@@ -92,7 +94,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         RustResultWrapper res;
         if (inverted_single_semgnent) {
             AssertInfo(tantivy_index_version == 5,
@@ -115,14 +118,13 @@ struct TantivyIndexWrapper {
                    "failed to create index: {}",
                    res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // load index. create index reader.
     explicit TantivyIndexWrapper(const char* path,
                                  bool load_in_mmap,
                                  SetBitsetFn set_bitset)
-        : load_in_mmap_(load_in_mmap) {
+        : path_(path), load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
         auto res = RustResultWrapper(
             tantivy_load_index(path, load_in_mmap_, set_bitset));
@@ -130,14 +132,13 @@ struct TantivyIndexWrapper {
                    "failed to load index: {}",
                    res.result_->error);
         reader_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for text type with tokenizer.
     // enable_background_merge: growing segments must keep tantivy's default
     // merge policy (periodic commits would otherwise grow the segment count
-    // unbounded); sealed index builds pass false since finish() ends with an
-    // explicit merge-all.
+    // unbounded); sealed index builds pass false to avoid merge write
+    // amplification during their bounded build.
     TantivyIndexWrapper(const char* field_name,
                         bool in_ram,
                         const char* path,
@@ -148,7 +149,8 @@ struct TantivyIndexWrapper {
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
                             DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-                        bool enable_background_merge = false) {
+                        bool enable_background_merge = false)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_text_writer(field_name,
                                        path,
@@ -164,7 +166,6 @@ struct TantivyIndexWrapper {
                    "failed to create text writer: {}",
                    res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for json key stats
@@ -174,7 +175,8 @@ struct TantivyIndexWrapper {
                         bool in_ram = false,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_json_key_stats_writer(field_name,
                                                  path,
@@ -186,7 +188,6 @@ struct TantivyIndexWrapper {
                    "failed to create text writer: {}",
                    res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create index writer for ngram
@@ -196,7 +197,8 @@ struct TantivyIndexWrapper {
                         uintptr_t max_gram,
                         uintptr_t num_threads = DEFAULT_NUM_THREADS,
                         uintptr_t overall_memory_budget_in_bytes =
-                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES)
+        : path_(path) {
         auto res = RustResultWrapper(
             tantivy_create_ngram_writer(field_name,
                                         path,
@@ -209,7 +211,6 @@ struct TantivyIndexWrapper {
                    "failed to create ngram writer: {}",
                    res.result_->error);
         writer_ = res.result_->value.ptr._0;
-        path_ = std::string(path);
     }
 
     // create reader.
@@ -1071,8 +1072,12 @@ struct TantivyIndexWrapper {
                       uintptr_t min_gram,
                       uintptr_t max_gram,
                       void* bitset) {
-        auto array = tantivy_ngram_match_query(
-            reader_, literal.c_str(), min_gram, max_gram, bitset);
+        auto array = tantivy_ngram_match_query(reader_,
+                                               literal.data(),
+                                               literal.size(),
+                                               min_gram,
+                                               max_gram,
+                                               bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_match_query: {}",
@@ -1090,13 +1095,20 @@ struct TantivyIndexWrapper {
                    uintptr_t min_gram,
                    uintptr_t max_gram) {
         std::vector<const char*> c_literals;
+        std::vector<uintptr_t> c_literal_lens;
         c_literals.reserve(literals.size());
+        c_literal_lens.reserve(literals.size());
         for (const auto& lit : literals) {
-            c_literals.push_back(lit.c_str());
+            c_literals.push_back(lit.data());
+            c_literal_lens.push_back(lit.size());
         }
 
-        auto array = tantivy_ngram_tokenize(
-            reader_, c_literals.data(), c_literals.size(), min_gram, max_gram);
+        auto array = tantivy_ngram_tokenize(reader_,
+                                            c_literals.data(),
+                                            c_literal_lens.data(),
+                                            c_literals.size(),
+                                            min_gram,
+                                            max_gram);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_tokenize: {}",
@@ -1104,12 +1116,13 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->value.tag == Value::Tag::RustStringArray,
                    "TantivyIndexWrapper.ngram_tokenize: invalid result type");
 
-        // Convert RustStringArray to std::vector<std::string>
+        // Convert RustStringArray (byte strings with explicit lengths, not
+        // NUL-terminated) to std::vector<std::string>
         auto& rust_array = res.result_->value.rust_string_array._0;
         std::vector<std::string> result;
         result.reserve(rust_array.len);
         for (size_t i = 0; i < rust_array.len; i++) {
-            result.emplace_back(rust_array.array[i]);
+            result.emplace_back(rust_array.array[i], rust_array.lens[i]);
         }
         return result;
     }
@@ -1117,8 +1130,8 @@ struct TantivyIndexWrapper {
     // Get the posting list for a single ngram term.
     void
     ngram_term_posting_list(const std::string& term, void* bitset) {
-        auto array =
-            tantivy_ngram_term_posting_list(reader_, term.c_str(), bitset);
+        auto array = tantivy_ngram_term_posting_list(
+            reader_, term.data(), term.size(), bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_term_posting_list: {}",

@@ -117,7 +117,7 @@ func (fc *FuncChain) addWithError(op Operator, err error) *FuncChain {
 func (fc *FuncChain) Validate() error {
 	// Check for errors accumulated during fluent API calls
 	if fc.buildError != nil {
-		return merr.WrapErrServiceInternalMsg("chain build error: %v", fc.buildError)
+		return merr.Wrap(fc.buildError, "chain build error")
 	}
 
 	// Stage is required
@@ -323,11 +323,6 @@ func (fc *FuncChain) MapWithError(fn types.FunctionExpr, inputCols, outputCols [
 func (fc *FuncChain) Filter(fn types.FunctionExpr, inputCols []string) *FuncChain {
 	op, err := NewFilterOp(fn, inputCols)
 	return fc.addWithError(op, err)
-}
-
-// Select selects specific columns from the DataFrame.
-func (fc *FuncChain) Select(columns ...string) *FuncChain {
-	return fc.Add(NewSelectOp(columns))
 }
 
 // Sort sorts the DataFrame by a column, breaking ties by tieBreakCol ascending.

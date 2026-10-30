@@ -29,6 +29,8 @@
 #include "expr/ITypeExpr.h"
 #include "index/ScalarIndexSort.h"
 #include "knowhere/comp/index_param.h"
+#include "plan/PlanNode.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
@@ -42,57 +44,6 @@ using namespace milvus::exec;
 using namespace milvus::segcore;
 
 namespace {
-
-std::unique_ptr<SegmentSealed>
-CreateTwoChunkSealed(const SchemaPtr& schema,
-                     const GeneratedData& first,
-                     const GeneratedData& second) {
-    std::unordered_map<int64_t, std::vector<FieldDataPtr>> field_chunks;
-
-    auto append_dataset = [&](const GeneratedData& dataset) {
-        const auto row_count = dataset.row_ids_.size();
-
-        auto row_ids =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
-        row_ids->FillFieldData(dataset.row_ids_.data(), row_count);
-        field_chunks[RowFieldID.get()].push_back(std::move(row_ids));
-
-        auto timestamps =
-            std::make_shared<FieldData<int64_t>>(DataType::INT64, false);
-        timestamps->FillFieldData(dataset.timestamps_.data(), row_count);
-        field_chunks[TimestampFieldID.get()].push_back(std::move(timestamps));
-
-        const auto fields = schema->get_fields();
-        for (const auto& data : dataset.raw_->fields_data()) {
-            const auto field_id = data.field_id();
-            field_chunks[field_id].push_back(CreateFieldDataFromDataArray(
-                row_count, &data, fields.at(FieldId(field_id))));
-        }
-    };
-
-    append_dataset(first);
-    append_dataset(second);
-
-    LoadFieldDataInfo combined_load_info;
-    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    for (auto& [field_id, chunks] : field_chunks) {
-        auto field_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
-                                                              kPartitionID,
-                                                              kSegmentID,
-                                                              field_id,
-                                                              std::move(chunks),
-                                                              cm);
-        combined_load_info.field_infos.merge(field_load_info.field_infos);
-    }
-
-    auto segment = CreateSealedSegment(schema, empty_index_meta);
-    const auto status = LoadFieldData(segment.get(), &combined_load_info);
-    AssertInfo(status.error_code == Success,
-               "Failed to load two-chunk sealed data: {}",
-               status.error_msg);
-    return segment;
-}
 
 void
 SetInt64FieldData(GeneratedData& dataset,
@@ -153,7 +104,7 @@ VerifySkipCursorContract(SegmentExpr& segment_expr,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const T* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -209,7 +160,7 @@ VerifyElementFullScanSkipCursor(SegmentExpr& segment_expr,
     int64_t null_elements = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -257,32 +208,32 @@ VerifyNullableElementFullScanLogicalCount(
     int64_t expected_live_elements) {
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment, row_count, MAX_TIMESTAMP);
-    auto array_offsets = segment->GetArrayOffsets(array_fid);
-    ASSERT_NE(array_offsets, nullptr);
-    ASSERT_EQ(array_offsets->GetTotalElementCount(),
+    auto struct_element_offsets = segment->GetStructElementOffsets(array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(),
               expected_skipped_elements + expected_live_elements);
 
     // DataGen keeps a physical payload for nullable ARRAY rows in growing
     // storage even when the row validity bit is false. Sealed binlog
-    // serialization may discard that payload, but ArrayOffsets maps the NULL
+    // serialization may discard that payload, but StructElementOffsets maps the NULL
     // row to zero logical elements in either layout.
     if (segment->type() == SegmentType::Sealed) {
         auto pw = segment->get_batch_views<ArrayView>(
             query_context->get_op_context(), array_fid, 0, 0, 2);
         const auto& [data, valid] = pw.get();
         ASSERT_EQ(data.size(), 2);
-        ASSERT_EQ(valid.size(), 2);
+        ASSERT_TRUE(valid);
         EXPECT_FALSE(valid[1]);
     } else {
         auto pw = segment->chunk_data<Array>(
             query_context->get_op_context(), array_fid, 0);
         auto chunk = pw.get();
         ASSERT_EQ(chunk.row_count(), 2);
-        ASSERT_NE(chunk.valid_data(), nullptr);
-        EXPECT_FALSE(chunk.valid_data()[1]);
+        ASSERT_TRUE(chunk.validity());
+        EXPECT_FALSE(chunk.is_valid(1));
         EXPECT_EQ(chunk.data()[1].length(), 2);
     }
-    const auto null_row_range = array_offsets->ElementIDRangeOfRow(1);
+    const auto null_row_range = struct_element_offsets->ElementIDRangeOfRow(1);
     EXPECT_EQ(null_row_range.first, null_row_range.second);
 
     SegmentExpr segment_expr(std::vector<ExprPtr>{},
@@ -305,7 +256,7 @@ VerifyNullableElementFullScanLogicalCount(
     int64_t live_elements = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -319,7 +270,8 @@ VerifyNullableElementFullScanLogicalCount(
         res.set(0, size, true);
     };
 
-    const auto logical_elements = array_offsets->GetTotalElementCount();
+    const auto logical_elements =
+        struct_element_offsets->GetTotalElementCount();
     TargetBitmap res(logical_elements, false);
     TargetBitmap valid(logical_elements, true);
     const auto processed =
@@ -386,12 +338,12 @@ class OffsetsEvalCorrectnessTest : public ::testing::Test {
                          dataset.row_ids_.data(),
                          dataset.timestamps_.data(),
                          dataset.raw_);
-        ASSERT_NE(growing_->GetArrayOffsets(array_fid_), nullptr);
+        ASSERT_NE(growing_->GetStructElementOffsets(array_fid_), nullptr);
 
         auto sealed_first = DataGen(schema_, N / 2, 43, 0, 1, 1);
         auto sealed_second = DataGen(schema_, N / 2, 44, 0, 1, 1);
         sealed_ = CreateTwoChunkSealed(schema_, sealed_first, sealed_second);
-        ASSERT_NE(sealed_->GetArrayOffsets(array_fid_), nullptr);
+        ASSERT_NE(sealed_->GetStructElementOffsets(array_fid_), nullptr);
     }
 
     std::shared_ptr<SegmentExpr>
@@ -444,7 +396,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchDrivesCallbackPerCandidate) {
     int64_t data_rows = 0;
     auto probe = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -504,7 +456,7 @@ TEST_F(OffsetsEvalCorrectnessTest, SkipBranchKeepsBitmapCursorAligned) {
     int64_t processed_cursor = 0;
     auto probe = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -566,7 +518,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     int64_t null_batches = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -787,7 +739,7 @@ TEST_F(OffsetsEvalCorrectnessTest,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -1002,7 +954,7 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     int64_t null_rows = 0;
     auto evaluate_batch = [&]<FilterType filter_type = FilterType::sequential>(
         const int64_t* data,
-        const bool* valid_data,
+        ValidityView valid_data,
         const int32_t* offsets,
         const int size,
         TargetBitmapView res,
@@ -1041,6 +993,199 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     EXPECT_FALSE(valid[1]);
     EXPECT_TRUE(valid[2]);
     EXPECT_TRUE(valid[3]);
+}
+
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     SealedReadSnapshotMirrorsSegmentReadinessSemantics) {
+    constexpr int64_t kRowCount = 8;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kRowCount / 2, 100, 0, 1, 1);
+    auto second = DataGen(schema, kRowCount / 2, 101, 0, 1, 1);
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    // Index-only field: raw data dropped, ready bit clear in steady state.
+    std::vector<int64_t> index_values(kRowCount);
+    std::iota(index_values.begin(), index_values.end(), int64_t{0});
+    auto index_valid = std::make_unique<bool[]>(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        index_valid[i] = true;
+    }
+    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = value_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("snapshot-index-only", std::move(scalar_index));
+    segment->LoadIndex(load_index_info);
+    segment->DropFieldData(value_fid);
+    ASSERT_FALSE(segment->HasFieldData(value_fid));
+
+    // The snapshot must replicate the segment's per-method readiness
+    // semantics: a clear ready bit yields 0 for chunk_size / num_chunk_data,
+    // and get_chunk_by_offset / num_rows_until_chunk do not gate on readiness.
+    auto snapshot = segment->CaptureReadSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(segment->num_chunk_data(value_fid), 0);
+    EXPECT_EQ(snapshot->num_chunk_data(value_fid),
+              segment->num_chunk_data(value_fid));
+    ASSERT_EQ(segment->chunk_size(value_fid, 0), 0);
+    EXPECT_EQ(snapshot->chunk_size(value_fid, 0),
+              segment->chunk_size(value_fid, 0));
+
+    // Field with raw data loaded: full parity on every accessor.
+    EXPECT_EQ(snapshot->num_chunk_data(pk_fid),
+              segment->num_chunk_data(pk_fid));
+    EXPECT_EQ(snapshot->chunk_size(pk_fid, 1), segment->chunk_size(pk_fid, 1));
+    EXPECT_EQ(snapshot->num_rows_until_chunk(pk_fid, 1),
+              segment->num_rows_until_chunk(pk_fid, 1));
+    EXPECT_EQ(snapshot->get_chunk_by_offset(pk_fid, 5),
+              segment->get_chunk_by_offset(pk_fid, 5));
+    EXPECT_EQ(snapshot->get_row_count(), segment->get_row_count());
+}
+
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     SealedReadSnapshotRejectsClearedState) {
+    constexpr int64_t kRowCount = 8;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kRowCount / 2, 100, 0, 1, 1);
+    auto second = DataGen(schema, kRowCount / 2, 101, 0, 1, 1);
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    // A cleared state publishes runtime == nullptr; capturing a snapshot must
+    // fail loudly instead of dereferencing the null runtime.
+    segment->ClearData();
+    EXPECT_THROW({ auto snapshot = segment->CaptureReadSnapshot(); },
+                 milvus::SegcoreError);
+}
+
+// The production visit() path pins the sealed snapshot once and runs the whole
+// expression tree against it (Expr.cpp binds SetSnapshot to every compiled
+// expression). The ExecuteQueryExpr test helper used to skip that step, so the
+// pinned path never executed under CI. Run the same expression both ways and
+// require the bitsets to be bit-identical.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedOnSealed) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 300, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 301, 0, 1, 1);
+    // Deterministic values spanning both chunks so the filter crosses the
+    // chunk boundary through every hot accessor on the snapshot.
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+    ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    ASSERT_EQ(unpinned.count(), 2);
+    EXPECT_TRUE(unpinned[2]);
+    EXPECT_TRUE(unpinned[6]);
+}
+
+// The ready-bit divergence (comment 1 in the PR review) surfaced only on the
+// pinned path. Repeat it end-to-end: with index-only raw data (ready bit
+// cleared), a pinned ExecuteQueryExpr run must not read chunk data for the
+// dropped field and must match the unpinned run exactly.
+TEST(OffsetsEvalIndexOnlyCorrectnessTest,
+     PinnedExecuteQueryExprMatchesUnpinnedWithIndexOnlyField) {
+    constexpr int64_t kChunkRows = 4;
+    constexpr int64_t kRowCount = kChunkRows * 2;
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto value_fid = schema->AddDebugField("value", DataType::INT64, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto first = DataGen(schema, kChunkRows, 400, 0, 1, 1);
+    auto second = DataGen(schema, kChunkRows, 401, 0, 1, 1);
+    SetInt64FieldData(first, value_fid, {1, 2, 999, 4});
+    SetInt64FieldData(second, value_fid, {5, 6, 999, 8});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+
+    std::vector<int64_t> index_values(kRowCount);
+    std::iota(index_values.begin(), index_values.end(), int64_t{0});
+    auto index_valid = std::make_unique<bool[]>(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        index_valid[i] = true;
+    }
+    auto scalar_index = index::CreateScalarIndexSort<int64_t>();
+    scalar_index->Build(kRowCount, index_values.data(), index_valid.get());
+    LoadIndexInfo load_index_info;
+    load_index_info.field_id = value_fid.get();
+    load_index_info.field_type = DataType::INT64;
+    load_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    load_index_info.index_params = GenIndexParams(scalar_index.get());
+    load_index_info.cache_index =
+        CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
+    segment->LoadIndex(load_index_info);
+    segment->DropFieldData(value_fid);
+    ASSERT_FALSE(segment->HasFieldData(value_fid));
+
+    proto::plan::GenericValue gate_value;
+    gate_value.set_int64_val(999);
+    auto gate_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(value_fid, DataType::INT64),
+        proto::plan::OpType::Equal,
+        gate_value,
+        std::vector<proto::plan::GenericValue>{});
+    auto filter_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, gate_expr);
+
+    auto unpinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP);
+    auto pinned = query::ExecuteQueryExpr(
+        filter_node, segment.get(), kRowCount, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
 }
 
 TEST(OffsetsEvalIndexOnlyCorrectnessTest,

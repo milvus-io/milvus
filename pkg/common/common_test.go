@@ -1,11 +1,16 @@
 package common
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -282,6 +287,37 @@ func TestAllocAutoID(t *testing.T) {
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0b0100, start>>60)
 	assert.EqualValues(t, 0b0100, end>>60)
+}
+
+func TestAllocAutoIDN(t *testing.T) {
+	// clusterID bits are applied to the high bits, same as AllocAutoID.
+	start, end, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		return 100, 100 + n, nil
+	}, 10, 1)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0b0100, start>>60)
+	assert.EqualValues(t, 0b0100, end>>60)
+
+	// A count exceeding math.MaxUint32 is passed through in one allocation
+	// (the uint32 limitation of AllocAutoID does not apply here).
+	bigN := int64(1)<<32 + 1000
+	var got int64
+	s, e, err := AllocAutoIDN(func(n int64) (int64, int64, error) {
+		got = n
+		return 0, n, nil
+	}, bigN, 0) // clusterID 0 => no high bits set
+	assert.NoError(t, err)
+	assert.Equal(t, bigN, got)
+	assert.Equal(t, bigN, e-s)
+
+	// Non-positive count is a no-op and never calls allocFunc.
+	s, e, err = AllocAutoIDN(func(n int64) (int64, int64, error) {
+		t.Fatal("allocFunc must not be called for n<=0")
+		return 0, 0, nil
+	}, 0, 1)
+	assert.NoError(t, err)
+	assert.Zero(t, s)
+	assert.Zero(t, e)
 }
 
 func TestFunctionProperty(t *testing.T) {
@@ -686,4 +722,116 @@ func TestWKTWKBConversion(t *testing.T) {
 			assert.Equal(t, tc.wkt, wktResult)
 		})
 	}
+}
+
+// TestInternalStorageRootSegmentsIsExhaustive fails when a storage path
+// constant is added to common.go without being classified as either a
+// top-level directory under the storage root (-> InternalStorageRootSegments)
+// or explicitly not one (-> nonTopLevelSegments below).
+//
+// InternalStorageRootSegments is consumed by import path validation in
+// datacoord: anything listed there is refused as an ordinary import target.
+// A missing entry silently reopens a path that import must not read, so the
+// classification is enforced here rather than left to review.
+func TestInternalStorageRootSegmentsIsExhaustive(t *testing.T) {
+	// Constants in the same const block that are deliberately NOT top-level
+	// directories under the storage root. Value is the reason, for readers.
+	nonTopLevelSegments := map[string]string{
+		"OffsetMapping":            "leaf file name under analyze_stats/, already covered by AnalyzeStatsPath",
+		"Centroids":                "leaf file name under analyze_stats/, already covered by AnalyzeStatsPath",
+		"DefaultResourceGroupName": "not a storage path at all",
+	}
+
+	// Both registries count as classified: the split between them is about WHEN
+	// a segment is denied (every storage type vs local only), not about whether
+	// it is a top-level internal directory.
+	registered := make(map[string]struct{},
+		len(InternalStorageRootSegments)+len(LocalOnlyStorageRootSegments))
+	for _, seg := range InternalStorageRootSegments {
+		registered[seg] = struct{}{}
+	}
+	for _, seg := range LocalOnlyStorageRootSegments {
+		if _, dup := registered[seg]; dup {
+			assert.Fail(t, "segment listed in both registries", seg)
+		}
+		registered[seg] = struct{}{}
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "common.go", nil, 0)
+	require.NoError(t, err)
+
+	checked := 0
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.CONST {
+			continue
+		}
+		if !constBlockDeclares(genDecl, "SegmentInsertLogPath") {
+			continue
+		}
+		for _, spec := range genDecl.Specs {
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, ident := range valueSpec.Names {
+				// Fail rather than skip on anything this guard cannot read. A
+				// silently skipped constant is never classified, yet leaves
+				// checked/registered/nonTopLevelSegments balanced, so the
+				// assertion below still passes -- exactly the outcome the guard
+				// exists to prevent.
+				if !assert.Less(t, i, len(valueSpec.Values),
+					"%s has no value of its own (implicit repetition); this guard cannot classify it. "+
+						"Give it an explicit string literal.", ident.Name) {
+					continue
+				}
+				lit, ok := valueSpec.Values[i].(*ast.BasicLit)
+				if !assert.True(t, ok && lit.Kind == token.STRING,
+					"%s is not a plain string literal; this guard cannot classify it. "+
+						"Use a literal, or move it out of this const block and classify it by hand.",
+					ident.Name) {
+					continue
+				}
+				value, err := strconv.Unquote(lit.Value)
+				require.NoError(t, err)
+
+				checked++
+				if _, excluded := nonTopLevelSegments[ident.Name]; excluded {
+					_, alsoRegistered := registered[value]
+					assert.False(t, alsoRegistered,
+						"%s is marked as not top-level but is also in InternalStorageRootSegments", ident.Name)
+					continue
+				}
+				_, ok = registered[value]
+				assert.True(t, ok,
+					"storage path constant %s (%q) is neither in InternalStorageRootSegments "+
+						"nor in nonTopLevelSegments. Classify it: if it is a top-level directory "+
+						"under the storage root, add it to InternalStorageRootSegments so import "+
+						"path validation refuses it; otherwise add it to nonTopLevelSegments here "+
+						"with the reason.", ident.Name, value)
+			}
+		}
+	}
+
+	require.NotZero(t, checked, "found no string constants in the storage path const block; "+
+		"the block was probably renamed or split, and this guard is no longer checking anything")
+	assert.Equal(t, len(registered)+len(nonTopLevelSegments), checked,
+		"const block size and classification lists disagree")
+}
+
+// constBlockDeclares reports whether genDecl declares a constant with the given name.
+func constBlockDeclares(genDecl *ast.GenDecl, name string) bool {
+	for _, spec := range genDecl.Specs {
+		valueSpec, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for _, ident := range valueSpec.Names {
+			if ident.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }

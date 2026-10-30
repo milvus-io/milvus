@@ -259,3 +259,67 @@ func TestHandleAlterWALFlushingStagePassesRateLimitComponent(t *testing.T) {
 	assert.Same(t, snapshot, capturedParam.RecoverySnapshot)
 	assert.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, snapshot.Checkpoint.AlterWalState.Stage)
 }
+
+func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testing.T) {
+	channel := types.PChannelInfo{
+		Name:       "alter-wal-replicate-checkpoint-test",
+		Term:       1,
+		AccessMode: types.AccessModeRW,
+	}
+	// The position this cluster has reached in the source cluster's WAL. The source
+	// cluster runs a different backend than the one this cluster migrates to.
+	sourceMessageID := rmq.NewRmqID(42)
+
+	var persisted *streamingpb.WALCheckpoint
+	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	catalog.EXPECT().ListVChannel(mock.Anything, channel.Name).Return(nil, nil)
+	catalog.EXPECT().
+		SaveConsumeCheckpoint(mock.Anything, channel.Name, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, checkpoint *streamingpb.WALCheckpoint) error {
+			persisted = checkpoint
+			return nil
+		})
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+
+	previousDefaultWALName := message.GetDefaultWALName()
+	defer message.RegisterDefaultWALName(previousDefaultWALName)
+
+	snapshot := &recovery.RecoverySnapshot{
+		Checkpoint: &recovery.WALCheckpoint{
+			MessageID: rmq.NewRmqID(1),
+			TimeTick:  100,
+			AlterWalState: &streamingpb.AlterWALState{
+				TargetWalName: commonpb.WALName_Kafka,
+				TimeTick:      100,
+				Stage:         streamingpb.AlterWALStage_ADVANCE_CHECKPOINT,
+			},
+			ReplicateCheckpoint: &utility.ReplicateCheckpoint{
+				ClusterID: "source-cluster",
+				PChannel:  "source-pchannel",
+				MessageID: sourceMessageID,
+				TimeTick:  50,
+			},
+		},
+	}
+
+	err := (&openerAdaptorImpl{}).handleAlterWALAdvanceCheckpointsStage(
+		context.Background(),
+		&wal.OpenOption{Channel: channel},
+		snapshot,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+
+	// The local checkpoint moves to the initial position of the new backend.
+	assert.Equal(t, commonpb.WALName_Kafka, persisted.GetMessageId().GetWALName())
+
+	// The replicate checkpoint still points at the source cluster, whose WAL the
+	// local migration did not touch.
+	replicateCheckpoint := persisted.GetReplicateCheckpoint()
+	require.NotNil(t, replicateCheckpoint)
+	assert.Equal(t, "source-cluster", replicateCheckpoint.GetClusterId())
+	assert.Equal(t, "source-pchannel", replicateCheckpoint.GetPchannel())
+	assert.Equal(t, uint64(50), replicateCheckpoint.GetTimeTick())
+	assert.Equal(t, sourceMessageID.IntoProto().GetWALName(), replicateCheckpoint.GetMessageId().GetWALName())
+	assert.Equal(t, sourceMessageID.Marshal(), replicateCheckpoint.GetMessageId().GetId())
+}

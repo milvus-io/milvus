@@ -91,10 +91,16 @@ func resolveMilvusTableSnapshotMetadataPath(externalSource, externalSpec string)
 	if _, err := externalspec.ParseExternalSpec(externalSpec); err != nil {
 		return "", err
 	}
-	if strings.HasSuffix(strings.ToLower(externalSource), ".json") {
+	sourceURL, err := url.Parse(externalSource)
+	if err == nil &&
+		sourceURL.RawQuery == "" &&
+		!sourceURL.ForceQuery &&
+		sourceURL.Fragment == "" &&
+		!strings.Contains(externalSource, "#") &&
+		strings.HasSuffix(strings.ToLower(sourceURL.Path), ".json") {
 		return externalSource, nil
 	}
-	return "", merr.WrapErrServiceInternalMsg("milvus-table requires external_source to be a snapshot metadata JSON path")
+	return "", merr.WrapErrParameterInvalidMsg("milvus-table requires external_source to be a snapshot metadata JSON path without query or fragment components")
 }
 
 // buildMilvusTableFileInfosFromSnapshotMetadata converts snapshot metadata into
@@ -105,7 +111,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	getSegmentDescription func(string, int32) (*datapb.SegmentDescription, error),
 	resolveManifestPath func(string) (string, error),
 ) ([]FileInfo, error) {
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
+	metadata, err := snapshotio.ParseSnapshotMetadata(metadataBytes)
 	if err != nil {
 		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}
@@ -232,7 +238,7 @@ func ReadMilvusTableSnapshotMetadata(
 	if err != nil {
 		return nil, err
 	}
-	metadataBytes, err := ReadFileWithExternalSpec(
+	metadataBytes, err := readExternalSourceFile(
 		storageConfig,
 		metadataPath,
 		milvusTableReadFileExtfs(externalSource, extfs),
@@ -240,7 +246,7 @@ func ReadMilvusTableSnapshotMetadata(
 	if err != nil {
 		return nil, merr.Wrap(err, "read milvus snapshot metadata")
 	}
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
+	metadata, err := snapshotio.ParseSnapshotMetadata(metadataBytes)
 	if err != nil {
 		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}

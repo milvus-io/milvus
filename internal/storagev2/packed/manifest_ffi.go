@@ -65,6 +65,7 @@ type Fragment struct {
 	EndRow     int64                 // End row index within the file (exclusive)
 	RowCount   int64                 // Number of rows (EndRow - StartRow)
 	Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table fragments
+	Properties map[string]string     // Immutable file properties shared by splits of the same file
 }
 
 type manifestColumnGroup struct {
@@ -73,6 +74,9 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
+// External-table refresh assumes existing file ranges are immutable; overwrite
+// is unsupported. Properties are preserved for reads, but are deliberately not
+// hashed into fragment identity.
 func fragmentIdentity(f Fragment) string {
 	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
 }
@@ -307,8 +311,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 	return manifestPath, nil
 }
 
-// createColumnGroups creates a LoonColumnGroups structure from fragments.
-// This is an internal function used by CreateManifestForSegment.
+// createColumnGroups creates storage-owned column groups, including all file properties.
 func createColumnGroups(
 	columns []string,
 	format string,
@@ -333,6 +336,12 @@ func createColumnGroups(
 	cPaths := make([]*C.char, len(fragments))
 	cStartIndices := make([]C.int64_t, len(fragments))
 	cEndIndices := make([]C.int64_t, len(fragments))
+	cFileProperties := make([]C.LoonProperties, len(fragments))
+	defer func() {
+		for i := range cFileProperties {
+			C.loon_properties_free(&cFileProperties[i])
+		}
+	}()
 
 	for i, f := range fragments {
 		cPaths[i] = C.CString(f.FilePath)
@@ -345,11 +354,33 @@ func createColumnGroups(
 		}
 	}()
 
+	// Storage copies the per-file properties and owns the resulting column groups.
+	for i, fragment := range fragments {
+		if len(fragment.Properties) == 0 {
+			continue
+		}
+		cKeys := make([]*C.char, 0, len(fragment.Properties))
+		cValues := make([]*C.char, 0, len(fragment.Properties))
+		for key, value := range fragment.Properties {
+			cKeys = append(cKeys, C.CString(key))
+			cValues = append(cValues, C.CString(value))
+		}
+		result := C.loon_properties_create(&cKeys[0], &cValues[0], C.size_t(len(cKeys)), &cFileProperties[i])
+		for j := range cKeys {
+			C.free(unsafe.Pointer(cKeys[j]))
+			C.free(unsafe.Pointer(cValues[j]))
+		}
+		if err := HandleLoonFFIResult(result); err != nil {
+			return nil, merr.Wrap(err, "loon_properties_create for fragment failed")
+		}
+	}
+
 	var outColumnGroups *C.LoonColumnGroups
 	var cColumnsPtr **C.char
 	var cPathsPtr **C.char
 	var cStartIndicesPtr *C.int64_t
 	var cEndIndicesPtr *C.int64_t
+	var cFilePropertiesPtr *C.LoonProperties
 
 	if len(cColumns) > 0 {
 		cColumnsPtr = &cColumns[0]
@@ -360,6 +391,7 @@ func createColumnGroups(
 	if len(fragments) > 0 {
 		cStartIndicesPtr = &cStartIndices[0]
 		cEndIndicesPtr = &cEndIndices[0]
+		cFilePropertiesPtr = &cFileProperties[0]
 	}
 
 	result := C.loon_column_groups_create(
@@ -369,12 +401,13 @@ func createColumnGroups(
 		cPathsPtr,
 		cStartIndicesPtr,
 		cEndIndicesPtr,
+		cFilePropertiesPtr,
 		C.size_t(len(fragments)),
 		&outColumnGroups,
 	)
 
 	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "loon_column_groups_create failed")
+		return nil, merr.Wrap(err, "loon_column_groups_create failed")
 	}
 
 	return outColumnGroups, nil
@@ -388,9 +421,11 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 		return nil, err
 	}
 	defer C.loon_manifest_destroy(manifest)
+	return manifestFieldIDsFromColumnGroups(manifestPath, &manifest.column_groups)
+}
 
+func manifestFieldIDsFromColumnGroups(manifestPath string, cgroups *C.LoonColumnGroups) (map[int64]struct{}, error) {
 	fields := make(map[int64]struct{})
-	cgroups := &manifest.column_groups
 	if cgroups.column_group_array == nil && cgroups.num_of_column_groups > 0 {
 		return nil, merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", cgroups.num_of_column_groups)
 	}
@@ -398,13 +433,21 @@ func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConf
 	cgArray := unsafe.Slice(cgroups.column_group_array, int(cgroups.num_of_column_groups))
 	for i := range cgArray {
 		cg := &cgArray[i]
-		if cg.columns == nil {
+		if cg.num_of_columns == 0 {
+			mlog.RatedWarn(context.TODO(), 1, "manifest contains an empty column group",
+				mlog.String("manifestPath", manifestPath),
+				mlog.Int("columnGroupIndex", i))
 			continue
 		}
+		if cg.columns == nil {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"columns array is nil but num_of_columns is %d in column group %d", cg.num_of_columns, i)
+		}
 		columns := unsafe.Slice(cg.columns, int(cg.num_of_columns))
-		for _, column := range columns {
+		for j, column := range columns {
 			if column == nil {
-				continue
+				return nil, merr.WrapErrServiceInternalMsg(
+					"nil column name in column group %d at index %d", i, j)
 			}
 			columnName := C.GoString(column)
 			fieldID, err := strconv.ParseInt(columnName, 10, 64)
@@ -571,7 +614,7 @@ func readColumnGroupsFromManifest(
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
-	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
+	manifestDeltalogs, err := deltaLogsFromManifest(manifestPath, manifest)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read delta logs from manifest %s", manifestPath)
 	}
@@ -652,12 +695,17 @@ func readColumnGroupsFromManifest(
 					continue
 				}
 
+				properties, err := columnGroupFileProperties(file)
+				if err != nil {
+					return nil, merr.Wrapf(err, "column group %d file %d", i, j)
+				}
 				group.Fragments = append(group.Fragments, Fragment{
 					FragmentID: int64(len(group.Fragments)),
 					FilePath:   filePath,
 					StartRow:   startRow,
 					EndRow:     endRow,
 					RowCount:   endRow - startRow,
+					Properties: properties,
 				})
 			}
 		}
@@ -668,7 +716,7 @@ func readColumnGroupsFromManifest(
 	return groups, nil
 }
 
-func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
+func deltaLogsFromManifest(manifestPath string, manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
 	if manifest == nil {
 		return nil, nil
 	}
@@ -677,24 +725,56 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, err
 		return nil, nil
 	}
 	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
-		return nil, merr.WrapErrServiceInternalMsg("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s has %d delta logs but is missing delta log paths or entry counts",
+			manifestPath,
+			numDeltaLogs,
+		)
 	}
 	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)
 	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
 	for i, cPath := range cPaths {
-		if cPath == nil {
+		entriesNum := int64(cNumEntries[i])
+		path := ""
+		if cPath != nil {
+			path = C.GoString(cPath)
+		}
+		if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
 			continue
 		}
 		binlogs = append(binlogs, &datapb.Binlog{
-			LogPath:    C.GoString(cPath),
-			EntriesNum: int64(cNumEntries[i]),
+			LogPath:    path,
+			EntriesNum: entriesNum,
 		})
 	}
 	if len(binlogs) == 0 {
 		return nil, nil
 	}
 	return []*datapb.FieldBinlog{{Binlogs: binlogs}}, nil
+}
+
+// columnGroupFileProperties copies properties before the native manifest is freed.
+func columnGroupFileProperties(file *C.LoonColumnGroupFile) (map[string]string, error) {
+	if file.num_properties == 0 {
+		return nil, nil
+	}
+	if file.property_keys == nil || file.property_values == nil {
+		return nil, merr.WrapErrServiceInternalMsg("file has %d properties but nil keys/values", file.num_properties)
+	}
+	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+	values := unsafe.Slice(file.property_values, int(file.num_properties))
+	properties := make(map[string]string, len(keys))
+	for i := range keys {
+		if keys[i] == nil || values[i] == nil {
+			continue
+		}
+		properties[C.GoString(keys[i])] = C.GoString(values[i])
+	}
+	return properties, nil
 }
 
 func columnGroupFileProperty(file *C.LoonColumnGroupFile, key string) string {

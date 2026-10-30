@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -67,18 +68,17 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -164,7 +164,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		distDeltaTracker: newDataDistributionDeltaTracker(),
 	}
 
-	expr.Register("querynode", node)
 	return node
 }
 
@@ -343,8 +342,12 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			// auto index cannot work if hook init failed
-			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+			// A hook configured both ways is a contradiction in the
+			// deployment, not an optional plug-in that is absent: refuse to
+			// start whatever autoIndex.enable says. Any other failure keeps
+			// the old rule - auto index cannot work without a hook, so it is
+			// fatal only when auto index is on.
+			if hookInitIsFatal(err) {
 				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
@@ -472,18 +475,13 @@ func (node *QueryNode) Start() error {
 }
 
 // hasOtherActiveQueryNode checks via session whether there is any other
-// non-stopping query node that can accept migrated data.
+// non-stopping query node, including one embedded in a streaming node. While one
+// exists the cluster is still serving, and the data can be migrated to it or to
+// a replacement node. An error means the answer is unknown.
 func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
-	var sessions map[string]*sessionutil.Session
-	err := retry.Do(node.ctx, func() error {
-		var err error
-		sessions, _, err = node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
-		return err
-	},
-		retry.AttemptAlways(),
-		retry.Sleep(time.Second),
-		retry.RetryErr(func(error) bool { return true }),
-	)
+	ctx, cancel := context.WithTimeout(node.ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	sessions, _, err := node.session.GetSessions(ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return false, err
 	}
@@ -508,9 +506,8 @@ func (node *QueryNode) Stop() error {
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
-			isStandalone := paramtable.GetRole() == typeutil.StandaloneRole
-			standaloneMigrateTimeout := paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.GetAsDurationByParse()
-			standaloneMigrateDeadline := time.Now().Add(standaloneMigrateTimeout)
+			migrateTimeout := paramtable.Get().QueryNodeCfg.MigrateDataTimeout.GetAsDurationByParse()
+			migrateDeadline := time.Now().Add(migrateTimeout)
 
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
@@ -531,17 +528,18 @@ func (node *QueryNode) Stop() error {
 					break outer
 				}
 
-				// In standalone mode, after the migrate timeout, check if there is any other
-				// active query node (e.g. a new standalone starting up for rolling upgrade).
-				if isStandalone && time.Now().After(standaloneMigrateDeadline) {
+				// After the migrate timeout, stop waiting once every other query node is
+				// stopping too, e.g. the whole cluster is stopping, since no node is left
+				// to take the data. A failed lookup keeps waiting, so a transient etcd
+				// error never skips migration.
+				if time.Now().After(migrateDeadline) {
 					hasOther, err := node.hasOtherActiveQueryNode()
 					if err != nil {
-						break outer
-					}
-					if !hasOther {
-						mlog.Warn(node.ctx, "standalone migrate data stopped due to no active query node available to accept data",
+						mlog.Warn(node.ctx, "failed to check other active query node, keep migrating data", mlog.Err(err))
+					} else if !hasOther {
+						mlog.Warn(node.ctx, "migrate data stopped due to no active query node available to accept data",
 							mlog.FieldNodeID(node.GetNodeID()),
-							mlog.Duration("standaloneMigrateTimeout", standaloneMigrateTimeout),
+							mlog.Duration("migrateTimeout", migrateTimeout),
 							mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 								return s.ID()
 							})),
@@ -636,9 +634,43 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// initHook initializes parameter tuning hook.
+// errQueryHookConflict is returned when a compiled-in query hook and
+// queryNode.soPath are both configured. A hook that fails to load is an
+// optional plug-in that may be absent, but this is a contradiction in the
+// deployment, so Init refuses to start on it whatever autoIndex.enable says.
+var errQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
+
+// hookInitIsFatal reports whether an initHook error must stop the QueryNode.
+// A queryNode.soPath configured beside a compiled-in hook is a contradiction
+// and is always fatal; any other failure - no path at all, a plug-in that
+// does not load - is fatal only when auto index is on, because that is the
+// only feature that needs a hook.
+func hookInitIsFatal(err error) bool {
+	return errors.Is(err, errQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
+}
+
+// initHook installs the parameter tuning hook: the one compiled into this
+// binary if a distribution installed one, otherwise the plug-in at
+// queryNode.soPath.
+//
+// A compiled-in hook is used in preference to the plug-in, and a deployment
+// that configures both is refused (errQueryHookConflict): both would tune
+// every search, and picking silently would make which one wins depend on
+// start-up order rather than on the deployment. It is otherwise treated
+// exactly as the plug-in is: the same two Init calls with the autoIndex
+// configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
+
+	if compiled := extension.InstalledQueryHook(); compiled != nil {
+		if path != "" {
+			return merr.Wrapf(errQueryHookConflict,
+				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
+					"both tune every search, and only one can", path)
+		}
+		return node.useQueryHook(compiled)
+	}
+
 	if path == "" {
 		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
@@ -647,17 +679,23 @@ func (node *QueryNode) initHook() error {
 	if err != nil {
 		return err
 	}
+	return node.useQueryHook(hoo)
+}
 
-	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
+// useQueryHook initializes a query hook with the autoIndex configuration,
+// installs it and watches that configuration on its behalf. It is the same
+// for a plug-in and a compiled-in hook, which is the point: a hook a
+// distribution compiled in must not be a second-class one.
+func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
+	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
-	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
+	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo
 	node.handleQueryHookEvent()
-
 	return nil
 }
 

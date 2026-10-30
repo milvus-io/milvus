@@ -109,7 +109,7 @@ func (s *SyncManagerSuite) getSuiteSyncTask() *SyncTask {
 func (s *SyncManagerSuite) TestSubmit() {
 	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -143,7 +143,7 @@ func (s *SyncManagerSuite) TestCompacted() {
 		segmentID.Store(req.GetSegmentID())
 	}).Return(nil)
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -254,7 +254,7 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 	syncMgr.taskStats.Add("12345-1000", task1)
 	syncMgr.taskStats.Add("67890-3000", task2)
 
-	expectedTasks := []SyncTask{*task1, *task2}
+	expectedTasks := []*SyncTask{task1, task2}
 	expectedJSON, err := json.Marshal(expectedTasks)
 	s.NoError(err)
 

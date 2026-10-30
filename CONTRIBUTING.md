@@ -87,7 +87,7 @@ In your local repo:
 4.  Once getting approved, your code can be merged to `master`, yay!
 
 Here is the process illustrated in details:
-![](docs/developer_guides/figs/fork-and-pull.png)
+![](docs/dev/assets/fork-and-pull.png)
 
 Remember to [sync your forked repository](https://docs.github.com/en/github/getting-started-with-github/fork-a-repo#keep-your-fork-synced) _before_ submitting proposed changes upstream. If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
 
@@ -97,7 +97,7 @@ git fetch upstream
 git checkout upstream/master -b my-topic-branch
 ```
 
-![](docs/developer_guides/figs/local-develop-steps.png)
+![](docs/dev/assets/local-develop-steps.png)
 
 ### Design documents
 

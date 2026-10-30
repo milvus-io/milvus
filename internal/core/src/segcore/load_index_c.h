@@ -18,7 +18,6 @@ extern "C" {
 #include <stdlib.h>
 
 #include "common/resource_c.h"
-#include "common/binary_set_c.h"
 #include "common/type_c.h"
 #include "segcore/collection_c.h"
 
@@ -36,6 +35,12 @@ DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info);
 
+CStatus
+EstimateLoadIndexResourceFromSerializedInfo(
+    const uint8_t* serialized_load_index_info,
+    const uint64_t len,
+    LoadResourceRequest* load_resource_request);
+
 bool
 TryReserveLoadingResourceWithTimeout(CResourceUsage size,
                                      int64_t millisecond_timeout);
@@ -48,9 +53,6 @@ ChargeLoadedResource(CResourceUsage size);
 
 void
 RefundLoadedResource(CResourceUsage size);
-
-CStatus
-AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);
 
 CStatus
 AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info);

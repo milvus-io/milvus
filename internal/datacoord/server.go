@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -121,6 +120,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importCheckerV3  ImportChecker
 	importJobLock    *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
@@ -172,6 +172,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -221,7 +222,6 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 	for _, opt := range opts {
 		opt(s)
 	}
-	expr.Register("datacoord", s)
 	return s
 }
 
@@ -342,12 +342,17 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
-
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
-		commitImport:         s.broadcastCommitImportMessage,
-		rollbackImport:       s.broadcastRollbackImportMessage,
-		isReplicatingCluster: s.isReplicatingClusterNow,
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, s.globalScheduler, importCheckerHooks{
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
+	})
+	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
 	})
 
 	// init file resource observer
@@ -360,6 +365,8 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+
+	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
 		s.ctx,
 		s.meta,
@@ -420,6 +427,11 @@ func (s *Server) Start() error {
 
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
+	// Reconcile orphan import segments and re-enqueue in-flight import tasks
+	// before the checkers start and before the state turns Healthy: the scan
+	// must not race producers that persist a segment before its owner record
+	// (snapshot restore pre-registration, V2 import segment allocation).
+	s.importInspector.Reload()
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -494,6 +506,9 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		importJobAlive: func(ctx context.Context, jobID int64) bool {
+			return s.importMeta.GetJob(ctx, jobID) != nil
+		},
 	})
 }
 
@@ -642,7 +657,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
-
 		// Load collection information asynchronously
 		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
 		go func() {
@@ -728,6 +742,7 @@ func (s *Server) startServerLoop() {
 	s.globalScheduler.Start()
 	go s.importInspector.Start()
 	go s.importChecker.Start()
+	go s.importCheckerV3.Start()
 
 	// Start copy segment inspector and checker
 	go s.copySegmentInspector.Start()
@@ -879,7 +894,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			if s.fileResourceObserver != nil {
+			if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 				s.fileResourceObserver.Notify()
 			}
 		case sessionutil.SessionDelEvent:
@@ -978,23 +993,17 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		}
 	}
 
-	insertFileNum := 0
-	for _, fieldBinlog := range segment.GetBinlogs() {
-		insertFileNum += len(fieldBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
-
+	// Insert / delta counts come from Statistics. Stats array is iterated
+	// because Statistics doesn't carry a per-segment stat-file count — V3
+	// reports 0, matching the manifest-driven layout.
+	stats := segment.EnsureStats()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
 	statFileNum := 0
 	for _, fieldBinlog := range segment.GetStatslogs() {
 		statFileNum += len(fieldBinlog.GetBinlogs())
 	}
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
-
-	deleteFileNum := 0
-	for _, filedBinlog := range segment.GetDeltalogs() {
-		deleteFileNum += len(filedBinlog.GetBinlogs())
-	}
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 
 	mlog.Info(ctx, "flush segment complete", mlog.Int64("id", segmentID))
 	return nil
@@ -1078,6 +1087,7 @@ func (s *Server) Stop() error {
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
+	s.importCheckerV3.Close()
 
 	// Stop copy segment components
 	s.copySegmentInspector.Close()

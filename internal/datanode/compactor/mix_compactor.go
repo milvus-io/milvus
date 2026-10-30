@@ -21,7 +21,6 @@ import (
 	"fmt"
 	sio "io"
 	"math"
-	"path"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -132,15 +130,15 @@ func (t *mixCompactionTask) preCompact() error {
 	for _, segmentBinlog := range t.plan.GetSegmentBinlogs() {
 		for i, fieldBinlog := range segmentBinlog.GetFieldBinlogs() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
-				// numRows just need to add entries num of ONE field.
 				if i == 0 {
 					t.maxRows += binlog.GetEntriesNum()
 				}
-
-				// MemorySize might be incorrectly
 				currSize += binlog.GetMemorySize()
 			}
 		}
+	}
+	if t.maxRows == 0 {
+		t.maxRows = t.plan.GetTotalRows()
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
@@ -174,9 +172,10 @@ func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.Rw
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
-		// LOB base path at partition level: {root}/insert_log/{coll}/{part}
-		lobBasePath := path.Join(t.compactionParams.StorageConfig.GetRootPath(),
-			common.SegmentInsertLogPath, metautil.JoinIDPath(t.collectionID, t.partitionID))
+		// LOB base path at partition level, sharing the manifest root rule so
+		// the reader (which reconstructs lobs/ from the manifest base) resolves
+		// the same files (see #53051).
+		lobBasePath := storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
 		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
 			lobBasePath,
 			t.compactionParams.TextInlineThreshold,
@@ -255,6 +254,10 @@ func (t *mixCompactionTask) mergeSplit(
 		if err != nil {
 			return nil, err
 		}
+		// Stats stays nil for the empty placeholder. The receiver's
+		// NewSegmentInfo path tolerates nil Stats and populates it
+		// from the (empty) arrays on first read; an empty CompactionSegment
+		// has no aggregate footprint to report.
 		res = append(res, &datapb.CompactionSegment{
 			SegmentID: id,
 			NumOfRows: 0,
@@ -285,7 +288,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
-	reader, existingFields, err := newCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(seg.GetManifest())
+	if err != nil {
+		return 0, 0, err
+	}
+	reader, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithCollectionID(t.collectionID),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
@@ -444,8 +451,13 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer span.End()
 	compactStart := time.Now()
 
-	mlog.Info(context.TODO(), "compact start", mlog.Any("compactionParams", t.compactionParams),
-		mlog.Any("plan", t.plan))
+	mlog.Info(ctx, "compact start",
+		mlog.Int64("planID", t.plan.GetPlanID()),
+		mlog.String("type", t.plan.GetType().String()),
+		mlog.String("channel", t.plan.GetChannel()),
+		mlog.Int("segmentNum", len(t.plan.GetSegmentBinlogs())),
+		mlog.Int64("totalRows", t.plan.GetTotalRows()),
+		mlog.Any("compactionParams", t.compactionParams))
 
 	if err := t.preCompact(); err != nil {
 		mlog.Warn(context.TODO(), "compact wrong, failed to preCompact", mlog.Err(err))
@@ -461,47 +473,29 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		mlog.Warn(context.TODO(), "compact wrong, fail to decompress compaction binlogs", mlog.Err(err))
 		return nil, err
 	}
-	// Unable to deal with all empty segments cases, so return error
-	isEmpty := lo.EveryBy(lo.FlatMap(t.plan.GetSegmentBinlogs(), func(seg *datapb.CompactionSegmentBinlogs, _ int) []*datapb.FieldBinlog {
-		return seg.GetFieldBinlogs()
-	}), func(field *datapb.FieldBinlog) bool {
-		return len(field.GetBinlogs()) == 0
-	})
-
-	if isEmpty {
-		mlog.Warn(context.TODO(), "compact wrong, all segments' binlogs are empty")
-		return nil, merr.WrapErrServiceInternalMsg("illegal compaction plan")
-	}
-
 	if err := t.ensureLOBCompactionContext(ctx); err != nil {
 		return nil, err
 	}
 
-	sortMergeAppicable := t.compactionParams.UseMergeSort
-	if sortMergeAppicable {
-		for _, segment := range t.plan.GetSegmentBinlogs() {
-			if !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
-				sortMergeAppicable = false
-				break
-			}
-		}
-
-		if len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
-			// sort merge is not applicable if there is only one segment or too many segments
-			sortMergeAppicable = false
-		}
-	}
+	useMergeSort := canMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
-	if sortMergeAppicable {
+	if useMergeSort {
 		mlog.Info(context.TODO(), "compact by merge sort")
 		writerOpts := t.buildWriterOptions(ctx)
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams,
 			writerOpts, t.lobContext, t.sortByFieldIDs)
 		if err != nil {
-			mlog.Warn(context.TODO(), "compact wrong, fail to merge sort segments", mlog.Err(err))
+			// Compactor-boundary catch-all: mergeSortMultipleSegments can fail
+			// before it ever reaches the merge sort step (reader/writer
+			// construction, deltalog composition, ...), and those paths don't
+			// log on their own, so this line is their only record.
+			mlog.Warn(ctx, "compact wrong, merge sort compaction failed (compactor boundary)",
+				mlog.Int64("planID", t.GetPlanID()),
+				mlog.Int64("collectionID", t.collectionID),
+				mlog.Err(err))
 			return nil, err
 		}
 	} else {
@@ -581,6 +575,37 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
+}
+
+// canMergeSort reports whether this plan is eligible for storage.MergeSort,
+// which merges without sorting and so requires every input to already be
+// ordered by the plan's merge key. A plan that is not eligible falls back to
+// mergeSplit, which does not assume ordering.
+func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
+	if !params.UseMergeSort {
+		return false
+	}
+	// The two sorted flags record which order the compactors that write sorted
+	// output used. datanode/services.go derives this plan's merge key from the
+	// same EnableNamespace setting -- [pk], or [partitionKey, pk] -- so the flag
+	// that must be set is the matching one, not either one. It also rejects the
+	// plan outright when a namespace-enabled collection has no partition key
+	// (namespace.mode=partition), which is why reading the setting is enough
+	// here rather than inspecting the merge key itself.
+	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
+	for _, segment := range plan.GetSegmentBinlogs() {
+		sortedByMergeKey := segment.GetIsSorted()
+		if namespaceEnabled {
+			sortedByMergeKey = segment.GetIsSortedByNamespace()
+		}
+		if !sortedByMergeKey {
+			return false
+		}
+	}
+	// Each reader holds a live record, so memory grows with the reader count. A
+	// single segment is allowed: merge sort keeps the output flagged sorted,
+	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
+	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {
@@ -754,6 +779,19 @@ func (t *mixCompactionTask) initLOBCompactionContext(ctx context.Context) error 
 	t.lobContext.SetCompactionType(datapb.CompactionType_MixCompaction, sourceSegmentCount, targetSegmentCount)
 
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		mlog.Info(ctx, "forcing TEXT LOB rewrite across partition namespaces",
+			mlog.Int64("planID", t.GetPlanID()),
+			mlog.String("outputPartitionBase", outputPartitionBase),
+			mlog.Int64s("textFieldIDs", textFieldIDs))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {

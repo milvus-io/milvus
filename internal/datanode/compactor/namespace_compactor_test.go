@@ -47,6 +47,10 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 	s.binlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.schema = &schemapb.CollectionSchema{
+		// NamespaceCompactor is only constructed inside the namespaceEnabled
+		// branch of datanode/services.go, and the merge key below is
+		// [partitionKey, pk] accordingly.
+		EnableNamespace: true,
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:  common.RowIDField,
@@ -65,9 +69,10 @@ func (s *NamespaceCompactorTestSuite) SetupSuite() {
 				IsPrimaryKey: true,
 			},
 			{
-				FieldID:  101,
-				Name:     "namespace",
-				DataType: schemapb.DataType_Int64,
+				FieldID:        101,
+				Name:           "namespace",
+				DataType:       schemapb.DataType_Int64,
+				IsPartitionKey: true,
 			},
 		},
 	}
@@ -103,7 +108,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 		rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 		cm := storage.NewLocalChunkManager(objectstorage.RootPath(rootPath))
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil, metacache.NewEmptySegmentStats())
 		metacache.UpdateNumOfRows(int64(rows))(seg)
 		mc := metacache.NewMockMetaCache(s.T())
 		mc.EXPECT().Collection().Return(collectionID).Maybe()
@@ -119,7 +124,7 @@ func (s *NamespaceCompactorTestSuite) setupSortedSegments() {
 			StorageType: "local",
 			RootPath:    rootPath,
 		}, columnGroups)
-		inserts, _, _, _, _, _, err := bw.Write(context.Background(), pack)
+		inserts, _, _, _, _, _, _, err := bw.Write(context.Background(), pack)
 		s.Require().NoError(err)
 		s.sortedSegments = append(s.sortedSegments, &datapb.CompactionSegmentBinlogs{
 			SegmentID:           int64(i),

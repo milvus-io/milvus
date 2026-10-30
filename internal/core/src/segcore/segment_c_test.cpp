@@ -56,7 +56,6 @@
 #include "query/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -624,6 +623,75 @@ TEST(CApiTest, SearchTestWhenNullable) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, RetrieveWritesRowValidityToBothLocations) {
+    auto c_collection = NewCollection(get_default_schema_config_nullable());
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
+    ASSERT_EQ(status.error_code, Success);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    // DataGen marks the odd rows of the nullable INT64 field as null.
+    int N = 100;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    std::vector<proto::plan::GenericValue> retrieve_pks;
+    for (int64_t pk = 0; pk < N; ++pk) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(pk);
+        retrieve_pks.push_back(value);
+    }
+    auto schema = col->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
+            FieldId(101), DataType::INT64, std::vector<std::string>()),
+        retrieve_pks);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
+    plan->field_ids_ = {FieldId(101), FieldId(102)};
+
+    CRetrieveResult* retrieve_result = nullptr;
+    auto res = CRetrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1] + 10, &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    ASSERT_TRUE(query_result->ParseFromArray(retrieve_result->proto_blob,
+                                             retrieve_result->proto_size));
+    DeleteRetrieveResult(retrieve_result);
+
+    const proto::schema::FieldData* nullable_field = nullptr;
+    for (const auto& field_data : query_result->fields_data()) {
+        if (field_data.field_id() == 102) {
+            nullable_field = &field_data;
+        }
+    }
+    ASSERT_NE(nullable_field, nullptr);
+    ASSERT_EQ(nullable_field->scalars().valid_data_size(), N);
+    ASSERT_EQ(nullable_field->valid_data_size(), N);
+    int64_t null_count = 0;
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(nullable_field->valid_data(i),
+                  nullable_field->scalars().valid_data(i));
+        null_count += nullable_field->valid_data(i) ? 0 : 1;
+    }
+    EXPECT_GT(null_count, 0);
+    EXPECT_LT(null_count, N);
+
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}
+
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
@@ -725,40 +793,6 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
-}
-
-TEST(CApiTest, TestMultiElement) {
-    std::vector<std::string> params;
-    for (int i = 0; i < 100; i++) {
-        params.push_back(std::to_string(i));
-    }
-    auto multi_element =
-        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
-    std::string target = "50";
-    auto res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "30";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "40";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "100";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-    target = "1000";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-
-    std::string_view target_view = "30";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "40";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "50";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {

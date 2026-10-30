@@ -46,7 +46,7 @@
 namespace milvus {
 namespace index {
 
-constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+constexpr size_t BITMAP_INDEX_ALIGNMENT = 32;  // 32-byte alignment
 constexpr const char* BITMAP_INDEX_IS_NESTED = "is_nested_index";
 constexpr const char* BITMAP_INDEX_IS_NESTED_META = "is_nested";
 
@@ -202,7 +202,7 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
-                    auto val = array->get_data<T>(j);
+                    auto val = array->get_data_unchecked<T>(j);
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -231,7 +231,7 @@ BitmapIndex<T>::BuildArrayFieldNested(
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
-                auto val = array->get_data<T>(j);
+                auto val = array->get_data_unchecked<T>(j);
                 data_[val].add(offset++);
             }
         }
@@ -381,7 +381,8 @@ BitmapIndex<T>::Upload(const Config& config) {
 
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_path_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_path_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_path_to_size);
 }
@@ -591,8 +592,9 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
 
             // convert roaring vaule to frozen mode
             int32_t frozen_size = value.getFrozenSizeInBytes();
-            auto aligned_size =
-                ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            auto aligned_size = ((frozen_size + BITMAP_INDEX_ALIGNMENT - 1) /
+                                 BITMAP_INDEX_ALIGNMENT) *
+                                BITMAP_INDEX_ALIGNMENT;
             std::vector<uint8_t> buf(aligned_size, 0);
             value.writeFrozen(reinterpret_cast<char*>(buf.data()));
 
@@ -765,9 +767,10 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
     tracer::AutoSpan span("BitmapIndex::NotIn", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
+    // NotIn must keep null rows false, so start from the validity bitmap.
+    auto res = valid_bitset_.clone();
 
     if (is_mmap_) {
-        TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
             auto it = bitmap_info_map_.find(val);
@@ -777,12 +780,9 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
         return res;
     }
     if (build_mode_ == BitmapIndexBuildMode::ROARING) {
-        TargetBitmap res(total_num_rows_, true);
         for (int i = 0; i < n; ++i) {
             const auto& val = values[i];
             auto it = data_.find(val);
@@ -792,23 +792,16 @@ BitmapIndex<T>::NotIn(const size_t n, const T* values) {
                 }
             }
         }
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
-        return res;
-    } else {
-        TargetBitmap res(total_num_rows_, false);
-        for (size_t i = 0; i < n; ++i) {
-            const auto& val = values[i];
-            auto it = bitsets_.find(val);
-            if (it != bitsets_.end()) {
-                res |= it->second;
-            }
-        }
-        res.flip();
-        // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-        res &= valid_bitset_;
         return res;
     }
+    for (size_t i = 0; i < n; ++i) {
+        const auto& val = values[i];
+        auto it = bitsets_.find(val);
+        if (it != bitsets_.end()) {
+            res -= it->second;
+        }
+    }
+    return res;
 }
 
 template <typename T>
@@ -817,8 +810,7 @@ BitmapIndex<T>::IsNull() {
     tracer::AutoSpan span("BitmapIndex::IsNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
+    auto res = valid_bitset_.clone();
     res.flip();
     return res;
 }
@@ -829,9 +821,7 @@ BitmapIndex<T>::IsNotNull() {
     tracer::AutoSpan span("BitmapIndex::IsNotNull", tracer::GetRootSpan());
 
     AssertInfo(is_built_, "index has not been built");
-    TargetBitmap res(total_num_rows_, true);
-    res &= valid_bitset_;
-    return res;
+    return valid_bitset_.clone();
 }
 
 template <typename T>

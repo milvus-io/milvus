@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_producer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_handler"
+	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -204,6 +206,92 @@ func TestWALAccesserPrepareReleaseManualFlushIfLocal(t *testing.T) {
 	prepared, err := w.Local().PrepareReleaseManualFlushIfLocal(ctx, 100, vChannel1, []int64{1001})
 	assert.NoError(t, err)
 	assert.True(t, prepared)
+}
+
+type resolvePChannelInfoTestClient struct {
+	streamingcoordclient.Client
+}
+
+type resolvePChannelInfoAssignment struct {
+	streamingcoordclient.AssignmentService
+}
+
+func newResolvePChannelInfoTestClient(
+	t *testing.T,
+	assignments *types.VersionedStreamingNodeAssignments,
+	err error,
+) streamingcoordclient.Client {
+	t.Helper()
+
+	assignment := &resolvePChannelInfoAssignment{}
+	client := &resolvePChannelInfoTestClient{}
+	getAssignmentsMock := mockey.Mock((*resolvePChannelInfoAssignment).GetLatestAssignments).Return(assignments, err).Build()
+	t.Cleanup(func() { getAssignmentsMock.UnPatch() })
+	assignmentMock := mockey.Mock((*resolvePChannelInfoTestClient).Assignment).Return(assignment).Build()
+	t.Cleanup(func() { assignmentMock.UnPatch() })
+	closeMock := mockey.Mock((*resolvePChannelInfoTestClient).Close).Return().Build()
+	t.Cleanup(func() { closeMock.UnPatch() })
+	return client
+}
+
+func TestResolvePChannelInfoByVChannel(t *testing.T) {
+	const (
+		pchannel = "by-dev-rootcoord-dml_0"
+		vchannel = "by-dev-rootcoord-dml_0_100v0"
+	)
+
+	t.Run("matched assignment", func(t *testing.T) {
+		w := &walAccesserImpl{
+			lifetime: typeutil.NewLifetime(),
+			streamingCoordClient: newResolvePChannelInfoTestClient(t, &types.VersionedStreamingNodeAssignments{
+				Assignments: map[int64]types.StreamingNodeAssignment{
+					100: {
+						Channels: map[string]types.PChannelInfo{
+							pchannel: {
+								Name:       pchannel,
+								Term:       88,
+								AccessMode: types.AccessModeRW,
+							},
+						},
+					},
+				},
+			}, nil),
+		}
+		defer w.Close()
+
+		pchannelInfo, err := w.ResolvePChannelInfo(context.Background(), vchannel)
+		assert.NoError(t, err)
+		assert.Equal(t, pchannel, pchannelInfo.Name)
+		assert.Equal(t, int64(88), pchannelInfo.Term)
+	})
+
+	t.Run("missing assignment", func(t *testing.T) {
+		w := &walAccesserImpl{
+			lifetime: typeutil.NewLifetime(),
+			streamingCoordClient: newResolvePChannelInfoTestClient(t, &types.VersionedStreamingNodeAssignments{
+				Assignments: map[int64]types.StreamingNodeAssignment{
+					100: {
+						Channels: map[string]types.PChannelInfo{},
+					},
+				},
+			}, nil),
+		}
+		defer w.Close()
+
+		pchannelInfo, err := w.ResolvePChannelInfo(context.Background(), vchannel)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), pchannel)
+		assert.Zero(t, pchannelInfo)
+	})
+
+	t.Run("closed accesser", func(t *testing.T) {
+		w, _, _, _ := createMockWAL(t)
+		w.Close()
+
+		pchannelInfo, err := w.ResolvePChannelInfo(context.Background(), vchannel)
+		assert.ErrorIs(t, err, ErrWALAccesserClosed)
+		assert.Zero(t, pchannelInfo)
+	})
 }
 
 func newInsertMessage(vChannel string) message.MutableMessage {

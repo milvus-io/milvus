@@ -20,6 +20,7 @@
 #include <parquet/arrow/reader.h>
 #include <stdint.h>
 #include <memory>
+#include <optional>
 
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
@@ -32,16 +33,21 @@ class PayloadReader {
  public:
     explicit PayloadReader(const FieldDataPtr& fieldData);
 
-    explicit PayloadReader(const uint8_t* data,
-                           int length,
-                           DataType data_type,
-                           bool nullable,
-                           bool is_field_data = true);
+    explicit PayloadReader(
+        const uint8_t* data,
+        int length,
+        DataType data_type,
+        bool nullable,
+        bool is_field_data = true,
+        std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
     ~PayloadReader() = default;
 
     void
-    init(const uint8_t* data, int length, bool is_field_data);
+    init(const uint8_t* data,
+         int length,
+         bool is_field_data,
+         std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
     const FieldDataPtr
     get_field_data() const {

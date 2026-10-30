@@ -210,7 +210,8 @@ func (s *ReadSuite) TestParseEmptyNullableStructArrayFromWire() {
 	decoded := &schemapb.FieldData{}
 	s.Require().NoError(proto.Unmarshal(wire, decoded))
 	for _, subField := range decoded.GetStructArrays().GetFields() {
-		s.Nil(subField.ValidData)
+		s.Empty(subField.GetScalars().GetValidData())
+		s.Empty(subField.GetVectors().GetValidData())
 	}
 
 	columns, err := s.client.parseSearchResult(schema, []string{"clips"}, []*schemapb.FieldData{decoded}, 0, 0, 0)
@@ -272,7 +273,7 @@ func (s *ReadSuite) TestHandleSearchResultSlicesCompactNullableFields() {
 		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64).WithNullable(true))
 	age := s.getInt64FieldData("age", []int64{10, 40})
-	age.ValidData = []bool{true, false, false, true}
+	age.GetScalars().ValidData = []bool{true, false, false, true}
 	resp := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
 			NumQueries: 2,
@@ -315,7 +316,7 @@ func (s *ReadSuite) TestHandleSearchResultPreservesNullableGeometryRows() {
 		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 		WithField(entity.NewField().WithName("location").WithDataType(entity.FieldTypeGeometry).WithNullable(true))
 	location := s.getGeometryWktFieldData("location", []string{"POINT (1 2)"})
-	location.ValidData = []bool{false, true}
+	location.GetScalars().ValidData = []bool{false, true}
 	resp := &milvuspb.SearchResults{
 		Results: &schemapb.SearchResultData{
 			NumQueries: 1,

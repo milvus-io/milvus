@@ -11,14 +11,18 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "common/FieldDataInterface.h"
+#include "common/Json.h"
 #include "common/jsmn.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
+#include "pb/schema.pb.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -47,7 +51,7 @@ class CollectSingleJsonStatsInfoAccessor {
  public:
     static void
     Call(JsonKeyStats& s,
-         const char* json,
+         std::string_view json,
          std::map<JsonKey, milvus::index::KeyStatsInfo>& infos) {
         s.CollectSingleJsonStatsInfo(json, infos);
     }
@@ -146,4 +150,102 @@ TEST(CollectSingleJsonStatsInfoTest, EmptyJsonStringThrows) {
     std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
     EXPECT_NO_THROW(
         { CollectSingleJsonStatsInfoAccessor::Call(stats, json, infos); });
+}
+
+TEST(CollectSingleJsonStatsInfoTest, ParsesJsonWithoutNulTerminator) {
+    // The JSON views stored in field data are string_views that are not
+    // guaranteed to be NUL-terminated. The parse must rely on the view
+    // length instead of strlen, otherwise trailing bytes leak into jsmn.
+    std::string json = R"({"a": 1, "b": "x"})";
+    std::string buffer = json;
+    buffer.append(64, '\xAB');
+
+    milvus::storage::FieldDataMeta field_meta{1, 2, 3, 100, {}};
+    milvus::storage::IndexMeta index_meta{3, 100, 1, 1};
+    milvus::storage::StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = TestLocalPath;
+    auto cm = milvus::storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    milvus::storage::FileManagerContext ctx(field_meta, index_meta, cm, fs);
+    JsonKeyStats stats(ctx, true);
+
+    std::map<JsonKey, milvus::index::KeyStatsInfo> infos;
+    EXPECT_NO_THROW(CollectSingleJsonStatsInfoAccessor::Call(
+        stats, std::string_view(buffer.data(), json.size()), infos));
+    EXPECT_NE(infos.find(JsonKey{"/a", JSONType::INT64}), infos.end());
+    EXPECT_NE(infos.find(JsonKey{"/b", JSONType::STRING}), infos.end());
+}
+
+namespace {
+
+// Overwrite the stack and recycle same-sized heap allocations so that a
+// Json view danging into a destroyed local shows up as corrupted content.
+__attribute__((noinline)) void
+ClobberStackAndHeap(const std::string& value) {
+    volatile uint8_t stack_buf[4096];
+    for (size_t i = 0; i < sizeof(stack_buf); i++) {
+        stack_buf[i] = 0xAB;
+    }
+    for (int i = 0; i < 64; i++) {
+        std::string chunk(value.size(), '\xAB');
+        (void)chunk;
+    }
+}
+
+}  // namespace
+
+TEST(JsonFieldDataTest, DefaultValueRowsSharePreinitializedBuffer) {
+    // Regression test for #52843: the default value used to be stored as a
+    // non-owning Json view onto a local std::string that dies with
+    // FillFieldData, leaving every filled row dangling.
+    std::string default_json =
+        R"({"default_key": 12345, "another_key": "value"})";
+    milvus::proto::schema::ValueField default_value;
+    default_value.set_bytes_data(default_json);
+
+    auto field_data = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::JSON,
+        true,
+        5,
+        milvus::DefaultValueType{default_value});
+
+    ClobberStackAndHeap(default_json);
+
+    const char* shared_buffer = nullptr;
+    for (int i = 0; i < 5; i++) {
+        auto* json = static_cast<const milvus::Json*>(field_data->RawValue(i));
+        EXPECT_EQ(std::string_view(json->data()),
+                  std::string_view(default_json));
+        if (i == 0) {
+            shared_buffer = json->data().data();
+        } else {
+            EXPECT_EQ(json->data().data(), shared_buffer);
+        }
+    }
+}
+
+TEST(FieldDataDefaultConstructionTest, InitializesScalarAndNullRows) {
+    milvus::proto::schema::ValueField default_value;
+    default_value.set_int_data(42);
+    auto default_rows = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::INT32,
+        true,
+        3,
+        milvus::DefaultValueType{default_value});
+
+    ASSERT_EQ(default_rows->Length(), 3);
+    ASSERT_EQ(default_rows->get_null_count(), 0);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_TRUE(default_rows->is_valid(i));
+        EXPECT_EQ(*static_cast<const int32_t*>(default_rows->RawValue(i)), 42);
+    }
+
+    auto null_rows = milvus::storage::CreateFieldDataFromDefaultValue(
+        milvus::DataType::INT32, true, 3, std::nullopt);
+    ASSERT_EQ(null_rows->Length(), 3);
+    ASSERT_EQ(null_rows->get_null_count(), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FALSE(null_rows->is_valid(i));
+    }
 }

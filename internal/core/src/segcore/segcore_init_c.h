@@ -29,6 +29,9 @@ SegcoreSetChunkRows(const int64_t);
 void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
+CStatus
+SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
+
 void
 SegcoreSetStorageV3Enabled(const bool);
 
@@ -50,6 +53,10 @@ SegcoreSetNprobe(const int64_t);
 CStatus
 SegcoreSetDenseVectorInterminIndexType(const char*);
 
+CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo);
+
 void
 SegcoreSetSubDim(const int64_t);
 
@@ -60,7 +67,7 @@ void
 SegcoreSetIndexBuildRatio(const float);
 
 void
-SegcoreInterminDenseIndexType(const char*);
+SegcoreSetGrowingIndexBuildThreadRate(const float);
 
 CStatus
 SegcoreSetDenseVectorInterminIndexRefineQuantType(const char*);
@@ -97,11 +104,19 @@ void
 SegcoreSetKnowhereGpuMemoryPoolSize(const uint32_t init_size,
                                     const uint32_t max_size);
 
+// Deprecated: row visibility filtering is always enforced; the value is
+// ignored. Kept so callers built against the v3.0.0 interface keep linking.
 void
 SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
+SegcoreSetLazyColumnGroupEnabled(const bool value);
+
+bool
+SegcoreGetLazyColumnGroupEnabled();
 
 void
 SegcoreCloseGlog();

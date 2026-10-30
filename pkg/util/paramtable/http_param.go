@@ -18,11 +18,16 @@ package paramtable
 
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
+	EnableV1              ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
+	CompatibilityMode     ParamItem `refreshable:"true"`
+	MaxExprParamsDepth    ParamItem `refreshable:"true"`
+	NativeJSONResponse    ParamItem `refreshable:"true"`
 	EnablePprof           ParamItem `refreshable:"false"`
 	RequestTimeoutMs      ParamItem `refreshable:"true"`
+	DQLAdmissionEnabled   ParamItem `refreshable:"true"`
 	ReadHeaderTimeout     ParamItem `refreshable:"false"`
 	ReadTimeout           ParamItem `refreshable:"false"`
 	WriteTimeout          ParamItem `refreshable:"false"`
@@ -43,6 +48,18 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.Enabled.Init(base.mgr)
+
+	p.EnableV1 = ParamItem{
+		Key:          "proxy.http.enableV1",
+		DefaultValue: "true",
+		Version:      "3.0.3",
+		Doc: `Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+Disabling requires a restart and leaves the HTTP listeners, /v2/vectordb/*, probes, and metrics available.
+The non-underscore /api/v1/* REST API has been removed regardless of this setting.
+WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.`,
+		Export: true,
+	}
+	p.EnableV1.Init(base.mgr)
 
 	p.DebugMode = ParamItem{
 		Key:          "proxy.http.debug_mode",
@@ -72,6 +89,45 @@ func (p *httpConfig) init(base *BaseTable) {
 	}
 	p.AcceptTypeAllowInt64.Init(base.mgr)
 
+	p.CompatibilityMode = ParamItem{
+		Key:          "proxy.http.compatibilityMode",
+		DefaultValue: "false",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, restore the value handling of releases that predate the REST insert
+validation work. When true the server keeps the previous lenient behavior: a missing or null non-nullable field is
+stored as an empty value, out-of-range integers wrap instead of being rejected, numbers reach VarChar and JSON fields
+through their float64 rendering, and integers too large for the JSON engine become 0. This is a temporary escape hatch
+for clients that have not been corrected yet: every one of those behaviors silently changes what is stored.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.CompatibilityMode.Init(base.mgr)
+	p.MaxExprParamsDepth = ParamItem{
+		Key:          "proxy.http.maxExprParamsDepth",
+		DefaultValue: "100",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, the deepest nesting an expression template parameter may use. Converting a
+parameter walks its arrays and objects recursively, so the depth a caller may send has to be bounded; requests past the
+bound are rejected as invalid rather than served. Values above 1024 are read as 1024, since past that the recursion
+itself is the risk the setting exists to remove; values below 1 are read as 1.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxExprParamsDepth.Init(base.mgr)
+	p.NativeJSONResponse = ParamItem{
+		Key:          "proxy.http.nativeJSONResponse",
+		DefaultValue: "false",
+		Version:      "2.7.0",
+		Doc: `high-level restful api, return a JSON field as the document it holds rather than as a string.
+A JSON field reads back as "{\"a\":1}" by default, while the same value in the dynamic field reads back as {"a":1}.
+Turning this on removes that difference. Rows written before the insert path stopped storing non-JSON bytes may not
+hold a document; if any row in a response is such a row, every JSON field in that response falls back to the string
+form and a warning is logged, so a caller always sees one shape or the other and never a mixture.`,
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.NativeJSONResponse.Init(base.mgr)
+
 	p.EnablePprof = ParamItem{
 		Key:          "proxy.http.enablePprof",
 		DefaultValue: "true",
@@ -89,6 +145,18 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.DQLAdmissionEnabled = ParamItem{
+		Key:          "proxy.http.dqlAdmissionEnabled",
+		DefaultValue: "true",
+		Version:      "3.0.1",
+		Doc: `high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
+queue is full, before the request body is decoded. The scheduler rejects such a request with the same
+TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
+cost. Disabling restores the old always-decode behavior.`,
+		Export: true,
+	}
+	p.DQLAdmissionEnabled.Init(base.mgr)
 
 	p.ReadHeaderTimeout = ParamItem{
 		Key:          "proxy.http.readHeaderTimeout",
@@ -141,6 +209,7 @@ func (p *httpConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		Doc:          "Strict-Transport-Security max-age in seconds",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSMaxAge.Init(base.mgr)
 
@@ -150,6 +219,7 @@ func (p *httpConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		Doc:          "Include subdomains in Strict-Transport-Security",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.HSTSIncludeSubDomains.Init(base.mgr)
 
@@ -159,6 +229,7 @@ func (p *httpConfig) init(base *BaseTable) {
 		Version:      "2.6.0",
 		Doc:          "Whether to enable setting the Strict-Transport-Security header",
 		Export:       true,
+		Sensitivity:  Sensitive,
 	}
 	p.EnableHSTS.Init(base.mgr)
 

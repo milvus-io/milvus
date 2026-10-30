@@ -19,12 +19,13 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | — |
+| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
-| ManualFlush | Single VChannel | Yes (VChannel) | — |
+| ManualFlush | Single VChannel, Unreplicable (`_ur`) | Yes (VChannel) | — |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
@@ -40,6 +41,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection.
+- **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (flusher no-op).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
@@ -47,6 +49,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+
+The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
+but have no ACK callbacks and do not maintain metadata during replay.
 
 ## Replication Compatibility
 
@@ -78,6 +83,14 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 - **CreateSegment** must precede any Insert referencing that segment.
 - Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
 
+### Import Lifecycle
+
+```
+Import → UpdateImport → (CommitImport | RollbackImport)
+```
+
+- For the same job, **Import** must precede **UpdateImport**, which must precede **CommitImport** or **RollbackImport**. All are broadcast to the job's data VChannels plus the CChannel, so per-PChannel WAL order enforces the sequence and the CChannel copy gives their ack callbacks a single cluster-wide order.
+
 ### Exclusive Lock Rule
 
 DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
@@ -102,3 +115,7 @@ CreateCollection(p0)@tt=1                    (creates collection with default pa
   → ManualFlush@tt=18                        (exclusive, seals remaining segments)
 → DropCollection@tt=20                       (exclusive, flushes all segments, collection terminated)
 ```
+
+ManualFlush is produced by Proxy and the growing-source release preparer on either
+replication role. It stays local and preserves the existing FlushTs/SegmentIds and
+flush-state or release-progress completion checks. See [Local Flush](../wal/local-flush.md).

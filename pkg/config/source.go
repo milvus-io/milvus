@@ -27,6 +27,26 @@ type ConfigManager interface {
 	EvictCacheValueByFormat(keys ...string)
 }
 
+// publishSourceSnapshot lets built-in sources publish policy and values
+// together without expanding the exported ConfigManager interface. Existing
+// third-party managers still receive the historical publish/eviction behavior.
+func publishSourceSnapshot(manager ConfigManager, source string, configs map[string]string, publish func() error) error {
+	if publisher, ok := manager.(interface {
+		publishSourceSnapshot(string, map[string]string, func() error) error
+	}); ok {
+		return publisher.publishSourceSnapshot(source, configs, publish)
+	}
+	return publish()
+}
+
+func (m *Manager) publishSourceSnapshot(source string, configs map[string]string, publish func() error) error {
+	m.snapshotMutex.Lock()
+	defer m.snapshotMutex.Unlock()
+	// Record the entire generation before exposing any of its values or events.
+	m.rememberSourceSnapshot(configs, source)
+	return publish()
+}
+
 type Source interface {
 	GetConfigurations() (map[string]string, error)
 	GetConfigurationByKey(string) (string, error)

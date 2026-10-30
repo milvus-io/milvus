@@ -33,10 +33,11 @@
 namespace milvus::segcore {
 namespace {
 std::pair<const index::IndexBase*, int64_t>
-GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
+GetIndexAndBaseOffset(const SegmentChunkReader& reader,
                       FieldId field_id,
                       int chunk_id,
                       PinnedIndexView pinned_index) {
+    const auto* segment = reader.segment_;
     if (pinned_index.empty()) {
         return {nullptr, 0};
     }
@@ -44,8 +45,7 @@ GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
     if (chunk_id >= 0 && segment->type() == SegmentType::Sealed &&
         segment->is_chunked() && pinned_index.size() == 1) {
         auto base_offset =
-            chunk_id == 0 ? 0
-                          : segment->num_rows_until_chunk(field_id, chunk_id);
+            chunk_id == 0 ? 0 : reader.NumRowsUntilChunk(field_id, chunk_id);
         return {pinned_index[0].get(), base_offset};
     }
 
@@ -85,7 +85,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                 };
         }
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = NumChunkData(field_id);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
                field_id.get(),
@@ -93,11 +93,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                num_chunks);
     // pw is captured by value, each time we need to access a new chunk, we need to
     // pin a new Chunk.
-    auto pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
+    auto pw = ChunkData<T>(field_id, current_chunk_id);
     auto chunk_info = pw.get();
     auto chunk_data = chunk_info.data();
-    auto chunk_valid_data = chunk_info.valid_data();
-    auto current_chunk_size = segment_->chunk_size(field_id, current_chunk_id);
+    auto chunk_validity = chunk_info.validity();
+    auto current_chunk_size = ChunkSize(field_id, current_chunk_id);
     return [=,
             this,
             pw = std::move(pw),
@@ -112,13 +112,12 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
                        current_chunk_id,
                        num_chunks);
             // the old chunk will be unpinned, pw will now pin the new chunk.
-            pw = segment_->chunk_data<T>(op_ctx_, field_id, current_chunk_id);
+            pw = ChunkData<T>(field_id, current_chunk_id);
             chunk_data = pw.get().data();
-            chunk_valid_data = pw.get().valid_data();
-            current_chunk_size =
-                segment_->chunk_size(field_id, current_chunk_id);
+            chunk_validity = pw.get().validity();
+            current_chunk_size = ChunkSize(field_id, current_chunk_id);
         }
-        if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+        if (chunk_validity && !chunk_validity[current_chunk_pos]) {
             current_chunk_pos++;
             return std::nullopt;
         }
@@ -150,11 +149,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
-                return raw.value();
+                return std::move(raw.value());
             };
         }
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = NumChunkData(field_id);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
                field_id.get(),
@@ -164,18 +163,16 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto pw = segment_->chunk_data<std::string>(
-            op_ctx_, field_id, current_chunk_id);
+        auto pw = ChunkData<std::string>(field_id, current_chunk_id);
         auto chunk_info = pw.get();
         auto chunk_data = chunk_info.data();
-        auto chunk_valid_data = chunk_info.valid_data();
-        auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
+        auto chunk_validity = chunk_info.validity();
+        auto current_chunk_size = ChunkSize(field_id, current_chunk_id);
         return [pw = std::move(pw),
                 this,
                 field_id,
                 chunk_data,
-                chunk_valid_data,
+                chunk_validity,
                 current_chunk_size,
                 num_chunks,
                 // pw = std::move(pw),
@@ -189,14 +186,12 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                            field_id.get(),
                            current_chunk_id,
                            num_chunks);
-                pw = segment_->chunk_data<std::string>(
-                    op_ctx_, field_id, current_chunk_id);
+                pw = ChunkData<std::string>(field_id, current_chunk_id);
                 chunk_data = pw.get().data();
-                chunk_valid_data = pw.get().valid_data();
-                current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
+                chunk_validity = pw.get().validity();
+                current_chunk_size = ChunkSize(field_id, current_chunk_id);
             }
-            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
+            if (chunk_validity && !chunk_validity[current_chunk_pos]) {
                 current_chunk_pos++;
                 return std::nullopt;
             }
@@ -204,10 +199,8 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                 std::string_view(chunk_data[current_chunk_pos++]));
         };
     } else {
-        auto pw = segment_->chunk_view<std::string_view>(
-            op_ctx_, field_id, current_chunk_id);
-        auto current_chunk_size =
-            segment_->chunk_size(field_id, current_chunk_id);
+        auto pw = ChunkStringView(field_id, current_chunk_id);
+        auto current_chunk_size = ChunkSize(field_id, current_chunk_id);
         return [=,
                 this,
                 pw = std::move(pw),
@@ -221,15 +214,12 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
                            field_id.get(),
                            current_chunk_id,
                            num_chunks);
-                pw = segment_->chunk_view<std::string_view>(
-                    op_ctx_, field_id, current_chunk_id);
-                current_chunk_size =
-                    segment_->chunk_size(field_id, current_chunk_id);
+                pw = ChunkStringView(field_id, current_chunk_id);
+                current_chunk_size = ChunkSize(field_id, current_chunk_id);
             }
             auto& chunk_data = pw.get().first;
             auto& chunk_valid_data = pw.get().second;
-            if (current_chunk_pos < chunk_valid_data.size() &&
-                !chunk_valid_data[current_chunk_pos]) {
+            if (chunk_valid_data && !chunk_valid_data[current_chunk_pos]) {
                 current_chunk_pos++;
                 return std::nullopt;
             }
@@ -285,7 +275,7 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                                          int chunk_id,
                                          PinnedIndexView pinned_index) const {
     auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+        GetIndexAndBaseOffset(*this, field_id, chunk_id, pinned_index);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
@@ -299,18 +289,18 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
                 return raw.value();
             };
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
                field_id.get(),
                chunk_id,
                num_chunks);
-    auto pw = segment_->chunk_data<T>(op_ctx_, field_id, chunk_id);
+    auto pw = ChunkData<T>(field_id, chunk_id);
     return [pw = std::move(pw)](int i) mutable -> const data_access_type {
         auto chunk_info = pw.get();
         auto chunk_data = chunk_info.data();
-        auto chunk_valid_data = chunk_info.valid_data();
-        if (chunk_valid_data && !chunk_valid_data[i]) {
+        auto chunk_validity = chunk_info.validity();
+        if (chunk_validity && !chunk_validity[i]) {
             return std::nullopt;
         }
         return chunk_data[i];
@@ -322,7 +312,7 @@ ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor<std::string>(
     FieldId field_id, int chunk_id, PinnedIndexView pinned_index) const {
     auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
+        GetIndexAndBaseOffset(*this, field_id, chunk_id, pinned_index);
     auto index = index_and_base_offset.first;
     auto base_offset = index_and_base_offset.second;
     auto index_ptr =
@@ -334,10 +324,10 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
-                return raw.value();
+                return std::move(raw.value());
             };
     }
-    auto num_chunks = segment_->num_chunk_data(field_id);
+    auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
                field_id.get(),
@@ -347,23 +337,21 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
         !storage::MmapManager::GetInstance()
              .GetMmapConfig()
              .growing_enable_mmap) {
-        auto pw =
-            segment_->chunk_data<std::string>(op_ctx_, field_id, chunk_id);
+        auto pw = ChunkData<std::string>(field_id, chunk_id);
         return [pw = std::move(pw)](int i) mutable -> const data_access_type {
             auto chunk_data = pw.get().data();
-            auto chunk_valid_data = pw.get().valid_data();
-            if (chunk_valid_data && !chunk_valid_data[i]) {
+            auto chunk_validity = pw.get().validity();
+            if (chunk_validity && !chunk_validity[i]) {
                 return std::nullopt;
             }
             return data_access_type(std::string_view(chunk_data[i]));
         };
     } else {
-        auto pw =
-            segment_->chunk_view<std::string_view>(op_ctx_, field_id, chunk_id);
+        auto pw = ChunkStringView(field_id, chunk_id);
         return [pw = std::move(pw)](int i) mutable -> const data_access_type {
             auto& chunk_data = pw.get().first;
             auto& chunk_valid_data = pw.get().second;
-            if (i < chunk_valid_data.size() && !chunk_valid_data[i]) {
+            if (chunk_valid_data && !chunk_valid_data[i]) {
                 return std::nullopt;
             }
             return data_access_type(chunk_data[i]);

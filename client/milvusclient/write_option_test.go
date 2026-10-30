@@ -44,7 +44,41 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	s.Require().Len(req.GetFieldsData(), 1)
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
-	s.ElementsMatch([]bool{true, true, true}, fd.GetValidData())
+	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithRLSContext() {
+	const principal = "alice"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	columnOpt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true)
+	insertReq, err := columnOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err := columnOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		WithPartialUpdate(true)
+	insertReq, err = rowOpt.InsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, insertReq.GetRlsPrincipal())
+	s.True(insertReq.GetSkipRls())
+
+	upsertReq, err = rowOpt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	s.Equal(principal, upsertReq.GetRlsPrincipal())
+	s.True(upsertReq.GetSkipRls())
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -159,7 +193,11 @@ func (s *ColumnBasedDataOptionSuite) TestWithNullableStructArrayColumn() {
 	subs := clipsFD.GetStructArrays().GetFields()
 	s.Require().Len(subs, 2)
 	for _, sub := range subs {
-		s.Equal([]bool{true, false, true}, sub.GetValidData())
+		if sub.GetScalars() != nil {
+			s.Equal([]bool{true, false, true}, sub.GetScalars().GetValidData())
+		} else {
+			s.Equal([]bool{true, false, true}, sub.GetVectors().GetValidData())
+		}
 	}
 	s.Len(subs[0].GetScalars().GetArrayData().GetData(), 2)
 	s.Len(subs[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -219,51 +257,6 @@ func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnNilSchema() {
 	coll := &entity.Collection{Schema: entity.NewSchema().WithName("c")}
 	_, err := opt.InsertRequest(coll)
 	s.Error(err)
-}
-
-func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnAllSupportedTypes() {
-	// All scalar and vector sub-field types supported by newStructSubColumn; each must produce
-	// a non-nil sub-column without error. Vector types also require a valid dim.
-	dim := 8
-	cases := []*entity.Field{
-		entity.NewField().WithName("b").WithDataType(entity.FieldTypeBool),
-		entity.NewField().WithName("i8").WithDataType(entity.FieldTypeInt8),
-		entity.NewField().WithName("i16").WithDataType(entity.FieldTypeInt16),
-		entity.NewField().WithName("i32").WithDataType(entity.FieldTypeInt32),
-		entity.NewField().WithName("i64").WithDataType(entity.FieldTypeInt64),
-		entity.NewField().WithName("f").WithDataType(entity.FieldTypeFloat),
-		entity.NewField().WithName("d").WithDataType(entity.FieldTypeDouble),
-		entity.NewField().WithName("s").WithDataType(entity.FieldTypeVarChar).WithMaxLength(16),
-		entity.NewField().WithName("str").WithDataType(entity.FieldTypeString),
-		entity.NewField().WithName("fv").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dim)),
-		entity.NewField().WithName("fp16").WithDataType(entity.FieldTypeFloat16Vector).WithDim(int64(dim)),
-		entity.NewField().WithName("bf16").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(int64(dim)),
-		entity.NewField().WithName("bv").WithDataType(entity.FieldTypeBinaryVector).WithDim(int64(dim)),
-		entity.NewField().WithName("i8v").WithDataType(entity.FieldTypeInt8Vector).WithDim(int64(dim)),
-	}
-	for _, f := range cases {
-		c, err := newStructSubColumn(f)
-		s.Require().NoError(err, "type %v", f.DataType)
-		s.NotNil(c)
-	}
-}
-
-func (s *ColumnBasedDataOptionSuite) TestNewStructSubColumnErrors() {
-	// Unsupported data type in a struct sub-field must error.
-	_, err := newStructSubColumn(entity.NewField().WithName("bad").WithDataType(entity.FieldTypeJSON))
-	s.Error(err)
-
-	// Vector sub-fields without dim must surface GetDim's error.
-	for _, dt := range []entity.FieldType{
-		entity.FieldTypeFloatVector,
-		entity.FieldTypeFloat16Vector,
-		entity.FieldTypeBFloat16Vector,
-		entity.FieldTypeBinaryVector,
-		entity.FieldTypeInt8Vector,
-	} {
-		_, err := newStructSubColumn(entity.NewField().WithName("no_dim").WithDataType(dt))
-		s.Error(err, "type %v", dt)
-	}
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
@@ -354,6 +347,38 @@ func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	s.Len(upsertReq.GetFieldsData(), 2)
 }
 
+func (s *ColumnBasedDataOptionSuite) TestRowBasedAutoIDUpsertKeepsLookupPrimaryKey() {
+	collName := "auto_id_row_upsert"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2)),
+	}
+	rows := []any{map[string]any{
+		"id":     int64(7),
+		"vector": []float32{0.1, 0.2},
+	}}
+	opt := NewRowBasedInsertOption(collName, rows...)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	for _, field := range insertReq.GetFieldsData() {
+		s.NotEqual("id", field.GetFieldName())
+	}
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	var primaryKey *schemapb.FieldData
+	for _, field := range upsertReq.GetFieldsData() {
+		if field.GetFieldName() == "id" {
+			primaryKey = field
+			break
+		}
+	}
+	s.Require().NotNil(primaryKey)
+	s.Equal([]int64{7}, primaryKey.GetScalars().GetLongData().GetData())
+}
+
 func TestRowBasedDataOption(t *testing.T) {
 	suite.Run(t, new(ColumnBasedDataOptionSuite))
 }
@@ -366,15 +391,57 @@ func (s *DeleteOptionSuite) TestBasic() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	opt := NewDeleteOption(collectionName)
 
-	s.Equal(collectionName, opt.Request().GetCollectionName())
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Equal(collectionName, req.GetCollectionName())
 }
 
 func (s *DeleteOptionSuite) TestWithNamespace() {
 	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 	namespace := "tenant_a"
 
-	req := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	req, err := NewDeleteOption(collectionName).WithNamespace(namespace).Request()
+	s.Require().NoError(err)
 	s.Equal(namespace, req.GetNamespace())
+}
+
+func (s *DeleteOptionSuite) TestWithRLSContext() {
+	req, err := NewDeleteOption("collection").
+		WithRLSPrincipal("alice").
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal("alice", req.GetRlsPrincipal())
+	s.True(req.GetSkipRls())
+}
+
+func (s *DeleteOptionSuite) TestWithTemplateParam() {
+	blob, err := NewRoaringBitmapBlob([]int64{-1, 0, 42})
+	s.Require().NoError(err)
+
+	req, err := NewDeleteOption("collection").
+		WithExpr("membership_match(id, {ids}, type=roaring)").
+		WithTemplateParam("ids", blob).
+		Request()
+	s.Require().NoError(err)
+	value := req.GetExprTemplateValues()["ids"]
+	s.Require().NotNil(value)
+	bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
+	s.Require().True(ok)
+	s.Equal([]byte(blob), bytesValue.BytesVal)
+}
+
+func (s *DeleteOptionSuite) TestTemplateParamConversionError() {
+	// Request() surfaces the conversion failure instead of returning a request
+	// that silently lacks the template value. Before DeleteOption gained the
+	// error return this was dropped, and a caller building the protobuf
+	// directly would send an expression whose placeholder was never bound.
+	_, err := NewDeleteOption("collection").
+		WithExpr("membership_match(id, {ids}, type=roaring)").
+		WithTemplateParam("ids", struct{ Unsupported bool }{}).
+		Request()
+	s.Require().Error(err)
+	s.Contains(err.Error(), "ids")
 }
 
 func TestDeleteOption(t *testing.T) {

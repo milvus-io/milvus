@@ -188,3 +188,25 @@ TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
     delete[] p_id;
     delete[] p_dist;
 }
+
+TEST(RangeSearchResultOwnershipTest, TransfersBothOutputArrays) {
+    auto ids = std::make_unique<int64_t[]>(2);
+    auto distances = std::make_unique<float[]>(2);
+    ids[0] = 10;
+    ids[1] = 20;
+    distances[0] = 0.25F;
+    distances[1] = 0.5F;
+    auto* original_ids = ids.get();
+    auto* original_distances = distances.get();
+
+    auto result =
+        milvus::GenResultDataset(1, 2, std::move(ids), std::move(distances));
+    EXPECT_EQ(ids, nullptr);
+    EXPECT_EQ(distances, nullptr);
+    EXPECT_EQ(result->GetRows(), 1);
+    EXPECT_EQ(result->GetDim(), 2);
+    EXPECT_EQ(result->GetIds(), original_ids);
+    EXPECT_EQ(result->GetDistance(), original_distances);
+    EXPECT_EQ(result->GetIds()[1], 20);
+    EXPECT_FLOAT_EQ(result->GetDistance()[1], 0.5F);
+}

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -358,18 +359,29 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 	return readyCh, <-notifier
 }
 
-func (ob *TargetObserver) UpdatePartition(collectionID int64, partitionID int64) (chan struct{}, error) {
-	notifier := make(chan error)
+func (ob *TargetObserver) UpdatePartition(ctx context.Context, collectionID int64, partitionID int64) (chan struct{}, error) {
+	// Buffered and never closed: the schedule loop can reply after this
+	// function returned on ctx, and that reply must not block or panic.
+	notifier := make(chan error, 1)
 	readyCh := make(chan struct{})
-	defer close(notifier)
-	ob.updateChan <- targetUpdateRequest{
+	req := targetUpdateRequest{
 		CollectionID:  collectionID,
 		PartitionIDs:  []int64{partitionID},
 		opType:        UpdatePartition,
 		Notifier:      notifier,
 		ReadyNotifier: readyCh,
 	}
-	return readyCh, <-notifier
+	select {
+	case ob.updateChan <- req:
+	case <-ctx.Done():
+		return nil, merr.Wrap(ctx.Err(), "send update partition request")
+	}
+	select {
+	case err := <-notifier:
+		return readyCh, err
+	case <-ctx.Done():
+		return nil, merr.Wrap(ctx.Err(), "wait update partition reply")
+	}
 }
 
 func (ob *TargetObserver) ReleaseCollection(collectionID int64) {

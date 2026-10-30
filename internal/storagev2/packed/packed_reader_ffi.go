@@ -352,7 +352,7 @@ func resolveFFIReaderFragments(
 	resolvedFragments := make([]Fragment, len(fragments))
 	copy(resolvedFragments, fragments)
 	for i := range resolvedFragments {
-		resolvedPath, err := resolveExternalSourceRelativePath(resolvedFragments[i].FilePath, cProperties, extfs)
+		resolvedPath, err := resolveExternalResolvedPath(resolvedFragments[i].FilePath, cProperties, extfs)
 		if err != nil {
 			return nil, err
 		}
@@ -427,7 +427,7 @@ func GetManifestHandleWithExtfs(
 	if err != nil {
 		return cManifestHandle, err
 	}
-	mlog.Info(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
+	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {

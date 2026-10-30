@@ -299,8 +299,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringWithoutDefaultValue) {
 
     EXPECT_GT(views.size(), 0);
     // All should be marked as invalid (null)
-    for (const auto& v : valid) {
-        EXPECT_FALSE(v);
+    for (size_t i = 0; i < views.size(); ++i) {
+        EXPECT_FALSE(valid[i]);
     }
 }
 
@@ -486,6 +486,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestArrayType) {
                          FieldId(902),
                          DataType::ARRAY,
                          DataType::INT32,
+                         false,
                          false,
                          std::nullopt);
 
@@ -977,7 +978,7 @@ TEST_P(DefaultValueChunkTranslatorTest,
         total_rows += views.size();
 
         // All values should be null (invalid)
-        for (size_t i = 0; i < valid.size(); ++i) {
+        for (size_t i = 0; i < views.size(); ++i) {
             EXPECT_FALSE(valid[i])
                 << "Expected null at cell " << cid << " row " << i;
         }
@@ -1102,7 +1103,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt,  // metric_type
-                         true);         // nullable
+                         true,          // nullable
+                         false);        // element_nullable
 
     FieldDataInfo field_data_info(1302, row_count, getMmapDirPath());
 

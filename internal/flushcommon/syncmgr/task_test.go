@@ -107,6 +107,19 @@ func (s *SyncTaskSuite) SetupTest() {
 	s.chunkManager = mocks.NewChunkManager(s.T())
 	s.chunkManager.EXPECT().RootPath().Return("/tmp").Maybe()
 	s.chunkManager.EXPECT().Write(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	// StorageV3 flush rebuilds the merged bloom blob from prior per-batch blobs,
+	// read back via chunkManager.MultiRead. The blobs themselves are written by
+	// the loon FFI to local storage, which the mock chunkManager does not back,
+	// so return a valid serialized PK-stats blob for each requested path.
+	s.chunkManager.EXPECT().MultiRead(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, paths []string) ([][]byte, error) {
+			blob := s.pkStatsBlobBytes()
+			values := make([][]byte, len(paths))
+			for i := range values {
+				values[i] = blob
+			}
+			return values, nil
+		}).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
@@ -114,6 +127,20 @@ func (s *SyncTaskSuite) SetupTest() {
 	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	initcore.InitLocalArrowFileSystem("/tmp")
+}
+
+// pkStatsBlobBytes builds a valid serialized PK-stats blob for the test PK
+// field (id 100, Int64), used as the chunkManager.MultiRead payload when the
+// StorageV3 flush merges prior per-batch bloom blobs.
+func (s *SyncTaskSuite) pkStatsBlobBytes() []byte {
+	stats, err := storage.NewPrimaryKeyStats(100, int64(schemapb.DataType_Int64), 10)
+	s.Require().NoError(err)
+	for i := int64(1); i <= 10; i++ {
+		stats.Update(storage.NewInt64PrimaryKey(i))
+	}
+	blob, err := storage.NewInsertCodec().SerializePkStats(stats, 10)
+	s.Require().NoError(err)
+	return blob.Value
 }
 
 func (s *SyncTaskSuite) getEmptyInsertBuffer() *storage.InsertData {
@@ -193,12 +220,13 @@ func (s *SyncTaskSuite) createSegment(storageVersion int64) *metacache.SegmentIn
 	// For StorageV3, set up a manifest path
 	if storageVersion == storage.StorageV3 {
 		k := fmt.Sprintf("%d/%d/%d", s.collectionID, s.partitionID, s.segmentID)
-		basePath := fmt.Sprintf("insert_log/%s", k)
+		// Complete key under the suite's local storage root ("/tmp").
+		basePath := fmt.Sprintf("/tmp/insert_log/%s", k)
 		// Use JSON format for manifest path: {"ver": 0, "base_path": "..."}
 		segInfo.ManifestPath = packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 	}
 
-	seg := metacache.NewSegmentInfo(segInfo, bfs, nil)
+	seg := metacache.NewSegmentInfo(segInfo, bfs, nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	seg.GetBloomFilterSet().Roll()
 
@@ -380,7 +408,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 
 	s.Run("pure_delete_l0_flush", func() {
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -401,7 +429,7 @@ func (s *SyncTaskSuite) TestRunL0Segment() {
 	s.Run("pure_delete_l0_no_flush_storage_v2", func() {
 		// should not affect l0 segment with storage v2
 		bfs := pkoracle.NewBloomFilterSet()
-		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, bfs, nil)
+		seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV2}, bfs, nil, metacache.NewEmptySegmentStats())
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
@@ -437,7 +465,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	})
 
 	s.metacache.ExpectedCalls = nil
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, pkoracle.NewBloomFilterSet(), nil, metacache.NewEmptySegmentStats())
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
@@ -504,6 +532,70 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 	data, err := t.MarshalJSON()
 	s.NoError(err)
 	s.JSONEq(expectedJSON, string(data))
+}
+
+// TestSyncTask_MarshalJSONConcurrentWithRun serializes the task stats while
+// Run writes flushedSize/execTime and releases the pack's delta data, the
+// overlap a DataNode SyncTaskKey metrics request can hit. The race detector
+// reports any unsynchronized access between the two.
+func (s *SyncTaskSuite) TestSyncTask_MarshalJSONConcurrentWithRun() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+	deleteData := s.getDeleteBuffer()
+	task := s.getSuiteSyncTask(new(SyncPack).
+		WithDeleteData(deleteData).
+		WithFlush().
+		WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
+
+	before := &metricsinfo.SyncTask{}
+	data, err := task.MarshalJSON()
+	s.Require().NoError(err)
+	s.Require().NoError(json.Unmarshal(data, before))
+	s.Equal(deleteData.RowCount, before.DeltaRowCount)
+
+	done := make(chan struct{})
+	readerDone := make(chan struct{})
+	stopReader := func() {
+		close(done)
+		<-readerDone
+	}
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			_, err := task.MarshalJSON()
+			s.NoError(err)
+		}
+	}()
+
+	func() {
+		defer stopReader()
+		err = task.Run(ctx)
+	}()
+	s.NoError(err)
+
+	after := &metricsinfo.SyncTask{}
+	data, err = task.MarshalJSON()
+	s.Require().NoError(err)
+	s.Require().NoError(json.Unmarshal(data, after))
+	s.Zero(after.DeltaRowCount)
+	s.Positive(after.FlushSize)
 }
 
 func TestSyncTask(t *testing.T) {

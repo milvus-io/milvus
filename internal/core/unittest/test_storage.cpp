@@ -18,6 +18,7 @@
 #include <thread>
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iosfwd>
 #include <memory>
@@ -35,6 +36,9 @@
 #include "common/common_type_c.h"
 #include "common/type_c.h"
 #include "gtest/gtest.h"
+#include "storage/BinlogReader.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 #include "segcore/segment_c.h"
@@ -122,6 +126,33 @@ class StorageTest : public testing::Test {
 TEST_F(StorageTest, InitLocalChunkManagerSingleton) {
     auto status = InitLocalChunkManagerSingleton("tmp");
     EXPECT_EQ(status.error_code, Success);
+}
+
+// A binlog whose first four bytes are not the magic number is not the format this
+// reader parses, and no attempt will change the bytes. It must surface as
+// DataFormatBroken so the index scheduler stops re-dispatching the task.
+// BinlogReader::Read copies the four header bytes verbatim with no byte-order
+// conversion, so a parquet object ("P" "A" "R" "1" = 50 41 52 31) reads back on a
+// little-endian host as 0x31524150 = 827474256 -- the exact value seen in
+// production when a v2 parquet object sits behind v1 meta.
+TEST_F(StorageTest, ReadMediumTypeRejectsForeignMagicNumber) {
+    auto make_reader = [](int32_t magic) {
+        std::shared_ptr<uint8_t[]> buf(new uint8_t[sizeof(int32_t)]);
+        std::memcpy(buf.get(), &magic, sizeof(int32_t));
+        return std::make_shared<milvus::storage::BinlogReader>(
+            buf, static_cast<int64_t>(sizeof(int32_t)));
+    };
+
+    try {
+        milvus::storage::ReadMediumType(make_reader(0x31524150));
+        FAIL() << "expected ReadMediumType to reject a foreign magic number";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::DataFormatBroken);
+    }
+
+    // The valid magic number still parses.
+    EXPECT_NO_THROW(milvus::storage::ReadMediumType(
+        make_reader(milvus::storage::MAGIC_NUM)));
 }
 
 TEST_F(StorageTest, S3ErrorClassification) {
@@ -902,6 +933,25 @@ TEST_F(StorageTest, CleanRemoteChunkManagerSingleton) {
     CleanRemoteChunkManagerSingleton();
 }
 
+TEST_F(StorageTest, InitExternalIopsConfig) {
+    auto& singleton = LoonFFIPropertiesSingleton::GetInstance();
+    const auto old_config = singleton.GetExternalIopsConfig();
+
+    auto status = InitExternalIopsConfig(0, old_config.max_rate);
+    EXPECT_EQ(status.error_code, ConfigInvalid);
+    FreeErrorStatus(status);
+
+    status = InitExternalIopsConfig(3000, 0);
+    EXPECT_EQ(status.error_code, Success) << status.error_msg;
+    const auto config = singleton.GetExternalIopsConfig();
+    EXPECT_EQ(config.initial_rate, 3000);
+    EXPECT_EQ(config.max_rate, 0);
+
+    status =
+        InitExternalIopsConfig(old_config.initial_rate, old_config.max_rate);
+    EXPECT_EQ(status.error_code, Success) << status.error_msg;
+}
+
 TEST_F(StorageTest, InitArrowReaderConfig) {
     auto default_cache_options =
         parquet::default_arrow_reader_properties().cache_options();
@@ -1348,8 +1398,16 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
     // (logger / http client factory) set up by Aws::InitAPI; without it the
     // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
     // share init_count_ with any production code paths in the same binary.
-    TestableMinioChunkManager init_guard;
-    init_guard.InitSDKAPIDefault("info");
+    // Balance this test's initialization after config is destroyed. Leaving
+    // CRT worker threads alive lets them log during shared-library teardown.
+    struct SdkGuard : TestableMinioChunkManager {
+        SdkGuard() {
+            InitSDKAPIDefault("info");
+        }
+        ~SdkGuard() override {
+            ShutdownSDKAPI();
+        }
+    } init_guard;
 
     Aws::Client::ClientConfiguration config;
     // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.

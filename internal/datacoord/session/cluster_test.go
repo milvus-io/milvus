@@ -17,18 +17,15 @@
 package session
 
 import (
-	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -39,19 +36,6 @@ import (
 
 func init() {
 	paramtable.Init()
-}
-
-type querySlotDataNodeClient struct {
-	types.DataNodeClient
-	response *datapb.QuerySlotResponse
-}
-
-func (c *querySlotDataNodeClient) QuerySlot(
-	context.Context,
-	*datapb.QuerySlotRequest,
-	...grpc.CallOption,
-) (*datapb.QuerySlotResponse, error) {
-	return c.response, nil
 }
 
 func TestCluster_createTask(t *testing.T) {
@@ -85,6 +69,53 @@ func TestCluster_createTask(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 		err := c.(*cluster).createTask(1, &workerpb.CreateTaskRequest{}, nil)
 		assert.NoError(t, err)
+	})
+}
+
+func TestNormalizeExternalCopyCreateError(t *testing.T) {
+	t.Run("current unsupported error passes through", func(t *testing.T) {
+		err := merr.Wrapf(merr.ErrServiceUnimplemented,
+			"unrecognized task type '%s'", taskcommon.ExternalCopySegment)
+
+		normalized := normalizeExternalCopyCreateError(err)
+
+		assert.ErrorIs(t, normalized, merr.ErrServiceUnimplemented)
+		assert.Equal(t, err.Error(), normalized.Error())
+	})
+
+	t.Run("legacy unsupported error is normalized", func(t *testing.T) {
+		status := merr.Status(merr.WrapErrServiceInternalMsg(
+			"unrecognized task type '%s', taskID=1001", taskcommon.ExternalCopySegment))
+		err := merr.CheckRPCCall(status, nil)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+		normalized := normalizeExternalCopyCreateError(err)
+
+		assert.ErrorIs(t, normalized, merr.ErrServiceUnimplemented)
+		assert.NotErrorIs(t, normalized, merr.ErrServiceInternal)
+		assert.Contains(t, normalized.Error(), "unrecognized task type 'ExternalCopySegment'")
+	})
+
+	t.Run("unrelated service internal error is preserved", func(t *testing.T) {
+		err := merr.WrapErrServiceInternalMsg("STS refresh in cooldown")
+
+		normalized := normalizeExternalCopyCreateError(err)
+
+		assert.ErrorIs(t, normalized, merr.ErrServiceInternal)
+		assert.NotErrorIs(t, normalized, merr.ErrServiceUnimplemented)
+	})
+
+	t.Run("other unknown task type is preserved", func(t *testing.T) {
+		err := merr.WrapErrServiceInternalMsg("unrecognized task type 'FutureTask', taskID=1001")
+
+		normalized := normalizeExternalCopyCreateError(err)
+
+		assert.ErrorIs(t, normalized, merr.ErrServiceInternal)
+		assert.NotErrorIs(t, normalized, merr.ErrServiceUnimplemented)
+	})
+
+	t.Run("nil passes through", func(t *testing.T) {
+		assert.NoError(t, normalizeExternalCopyCreateError(nil))
 	})
 }
 
@@ -203,23 +234,6 @@ func TestCluster_QuerySlot(t *testing.T) {
 	})
 }
 
-func TestCluster_QuerySlotReportsVersion(t *testing.T) {
-	client := &querySlotDataNodeClient{
-		response: &datapb.QuerySlotResponse{
-			Status:         merr.Success(),
-			AvailableSlots: 5,
-			Version:        "3.0.1",
-		},
-	}
-
-	manager := &nodeManager{
-		nodeClients: map[int64]types.DataNodeClient{1: client},
-	}
-	result := NewCluster(manager).QuerySlot()
-
-	assert.Equal(t, "3.0.1", result[1].Version)
-}
-
 func TestCluster_Compaction(t *testing.T) {
 	t.Run("create compaction", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
@@ -275,6 +289,50 @@ func TestCluster_Compaction(t *testing.T) {
 		assert.Equal(t, int64(1), result.PlanID)
 		assert.Equal(t, "files/insert_log/1/2/3/_delta/not-log-id-suffix", result.GetSegments()[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	})
+
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "nil", payload: nil},
+		{name: "empty slice", payload: []byte{}},
+	} {
+		t.Run("query finished compaction without payload/"+tc.name, func(t *testing.T) {
+			mockNodeManager := NewMockNodeManager(t)
+			cluster := NewCluster(mockNodeManager)
+			mockClient := mocks.NewMockDataNodeClient(t)
+			mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+			properties := taskcommon.NewProperties(nil)
+			properties.AppendTaskState(taskcommon.Finished)
+			mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: properties,
+				Payload:    tc.payload,
+			}, nil)
+			result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+			assert.Nil(t, result)
+			assert.ErrorIs(t, err, merr.ErrCompactionResultNotFound)
+			assert.ErrorContains(t, err, "task 10")
+		})
+
+		t.Run("query failed compaction without payload/"+tc.name, func(t *testing.T) {
+			mockNodeManager := NewMockNodeManager(t)
+			cluster := NewCluster(mockNodeManager)
+			mockClient := mocks.NewMockDataNodeClient(t)
+			mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+			properties := taskcommon.NewProperties(nil)
+			properties.AppendTaskState(taskcommon.Failed)
+			mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: properties,
+				Payload:    tc.payload,
+			}, nil)
+			result, err := cluster.QueryCompaction(1, &datapb.CompactionStateRequest{PlanID: 10})
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.Equal(t, datapb.CompactionTaskState_failed, result.GetState())
+		})
+	}
 
 	t.Run("drop compaction", func(t *testing.T) {
 		mockNodeManager := NewMockNodeManager(t)
@@ -382,6 +440,147 @@ func TestCluster_Import(t *testing.T) {
 		// Test
 		err := cluster.DropImport(1, 1)
 		assert.NoError(t, err)
+	})
+}
+
+func TestCluster_QueryReshard(t *testing.T) {
+	t.Run("retry verdict overrides stale in-progress payload", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("state code: Abnormal: service not ready")
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry, result.GetState())
+		assert.Equal(t, "state code: Abnormal: service not ready", result.GetReason())
+	})
+
+	t.Run("in-progress payload wins over in-progress verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
+	})
+
+	t.Run("finished payload wins over finished verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Finished)
+		payload, err := proto.Marshal(&datapb.QueryReshardTaskResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Completed, result.GetState())
+	})
+
+	t.Run("verdict used when payload state is none", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryReshard(1, &datapb.QueryReshardTaskRequest{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
+	})
+}
+
+func TestCluster_QueryImportV3(t *testing.T) {
+	t.Run("retry verdict overrides stale in-progress payload", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Retry)
+		properties.AppendReason("worker is not exist")
+		payload, err := proto.Marshal(&datapb.QueryImportTaskV3Response{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryImportV3(1, &datapb.QueryImportTaskV3Request{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_Retry, result.GetState())
+		assert.Equal(t, "worker is not exist", result.GetReason())
+	})
+
+	t.Run("in-progress payload wins over in-progress verdict", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.InProgress)
+		payload, err := proto.Marshal(&datapb.QueryImportTaskV3Response{
+			State: datapb.ImportTaskStateV2_InProgress,
+		})
+		assert.NoError(t, err)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, err := cluster.QueryImportV3(1, &datapb.QueryImportTaskV3Request{TaskId: 1, RunId: 1})
+		assert.NoError(t, err)
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, result.GetState())
 	})
 }
 
@@ -869,7 +1068,7 @@ func TestCluster_CreateProperties_CollectionID(t *testing.T) {
 		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
 			TaskID:   1,
 			TaskSlot: 1,
-		}, expectedCollectionID)
+		}, expectedCollectionID, false)
 		assert.NoError(t, err)
 	})
 
@@ -1052,14 +1251,34 @@ func TestCluster_CopySegment(t *testing.T) {
 		// Mock client
 		mockClient := mocks.NewMockDataNodeClient(t)
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
-		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+			return req.GetProperties()[taskcommon.TypeKey] == taskcommon.CopySegment
+		})).Return(merr.Success(), nil)
 
 		// Test
 		req := &datapb.CopySegmentRequest{
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100)
+		err := cluster.CreateCopySegment(1, req, 100, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create external copy segment", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+			return req.GetProperties()[taskcommon.TypeKey] == taskcommon.ExternalCopySegment
+		})).Return(merr.Success(), nil)
+
+		req := &datapb.CopySegmentRequest{
+			TaskID:   123,
+			TaskSlot: 1,
+		}
+		err := cluster.CreateCopySegment(1, req, 100, true)
 		assert.NoError(t, err)
 	})
 
@@ -1075,7 +1294,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100)
+		err := cluster.CreateCopySegment(1, req, 100, false)
 		assert.Error(t, err)
 	})
 

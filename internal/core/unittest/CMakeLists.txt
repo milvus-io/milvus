@@ -37,6 +37,8 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
+        test_bloom_filter_expr.cpp
+        test_roaring_filter_expr.cpp
         test_loading.cpp
         test_exec.cpp
         test_timestamptz_arith_compare.cpp
@@ -52,6 +54,9 @@ set(MILVUS_TEST_FILES
         test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_aws_runtime.cpp
+        test_plugin_loader.cpp
+        test_gcp_chunk_manager.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
@@ -59,7 +64,6 @@ set(MILVUS_TEST_FILES
         test_element_filter.cpp
         test_query_group_by.cpp
         test_minhash.cpp
-        test_async_warmup.cpp
         test_boost_score_c.cpp
         test_sort_buffer.cpp
         test_row_container.cpp
@@ -150,6 +154,7 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
+        AWS::aws-crt-cpp
         )
 
 # Link plan parser library using full path and set RPATH
@@ -159,6 +164,19 @@ set_target_properties(all_tests PROPERTIES
         BUILD_RPATH "${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
         )
+
+milvus_check_aws_runtime(all_tests)
+
+if (LINUX)
+    add_test(NAME aws_runtime_link_check
+        COMMAND ${CMAKE_COMMAND}
+            -DCHECK_SCRIPT=${MILVUS_SOURCE_DIR}/cmake/CheckAwsRuntime.cmake
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DNM=${CMAKE_NM}
+            -DSTRIP=${CMAKE_STRIP}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/aws-runtime-link-check
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_aws_runtime_test.cmake)
+endif()
 
 install(TARGETS all_tests DESTINATION unittest)
 

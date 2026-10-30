@@ -39,6 +39,7 @@
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/MatchExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/TimestamptzArithCompareExpr.h"
@@ -102,13 +103,13 @@ ExprSet::Eval(int32_t begin,
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
     auto segment = query_context->get_segment();
-    auto& schema = segment->get_schema();
-    if (!schema.get_ttl_field_id().has_value()) {
+    auto schema = segment->get_schema_snapshot();
+    if (!schema->get_ttl_field_id().has_value()) {
         return nullptr;
     }
 
-    auto ttl_field_id = schema.get_ttl_field_id().value();
-    auto& ttl_field_meta = schema[ttl_field_id];
+    auto ttl_field_id = schema->get_ttl_field_id().value();
+    auto& ttl_field_meta = (*schema)[ttl_field_id];
 
     // Use entity_ttl_physical_time_us (already converted to physical microseconds in Go layer)
     // instead of query_timestamp (MVCC time) to ensure correct expiration judgment
@@ -266,7 +267,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
 
     if (auto call = std::dynamic_pointer_cast<const expr::CallExpr>(expr)) {
         result = std::make_shared<PhyCallExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             call,
             "PhyCallExpr",
             op_ctx,
@@ -276,7 +277,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::UnaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyUnaryRangeFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyUnaryRangeFilterExpr",
             op_ctx,
@@ -288,12 +289,15 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_enable_sub_expr_cache_write());
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
-        result = std::make_shared<PhyLogicalUnaryExpr>(
-            compiled_inputs, casted_expr, "PhyLogicalUnaryExpr", op_ctx);
+        result =
+            std::make_shared<PhyLogicalUnaryExpr>(std::move(compiled_inputs),
+                                                  casted_expr,
+                                                  "PhyLogicalUnaryExpr",
+                                                  op_ctx);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TermFilterExpr>(expr)) {
         result = std::make_shared<PhyTermFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyTermFilterExpr",
             op_ctx,
@@ -316,12 +320,15 @@ CompileExpression(const expr::TypedExprPtr& expr,
                 op_ctx);
         } else {
             result = std::make_shared<PhyLogicalBinaryExpr>(
-                compiled_inputs, casted_expr, "PhyLogicalBinaryExpr", op_ctx);
+                std::move(compiled_inputs),
+                casted_expr,
+                "PhyLogicalBinaryExpr",
+                op_ctx);
         }
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyBinaryRangeFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyBinaryRangeFilterExpr",
             op_ctx,
@@ -333,7 +340,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::AlwaysTrueExpr>(expr)) {
         result = std::make_shared<PhyAlwaysTrueExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyAlwaysTrueExpr",
             op_ctx,
@@ -343,7 +350,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryArithOpEvalRangeExpr>(expr)) {
         result = std::make_shared<PhyBinaryArithOpEvalRangeExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyBinaryArithOpEvalRangeExpr",
             op_ctx,
@@ -354,7 +361,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
         result = std::make_shared<PhyTimestamptzArithCompareExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyTimestamptzArithCompareExpr",
             op_ctx,
@@ -366,7 +373,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::CompareExpr>(
                        expr)) {
         result = std::make_shared<PhyCompareFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyCompareFilterExpr",
             op_ctx,
@@ -377,7 +384,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::ExistsExpr>(
                        expr)) {
         result = std::make_shared<PhyExistsFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyExistsFilterExpr",
             op_ctx,
@@ -389,7 +396,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::JsonContainsExpr>(expr)) {
         result = std::make_shared<PhyJsonContainsFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyJsonContainsFilterExpr",
             op_ctx,
@@ -403,7 +410,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                        expr)) {
         // used for function call arguments, may emit any type
         result = std::make_shared<PhyValueExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             value_expr,
             "PhyValueExpr",
             op_ctx,
@@ -414,7 +421,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::ColumnExpr>(
                        expr)) {
         result = std::make_shared<PhyColumnExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             column_expr,
             "PhyColumnExpr",
             op_ctx,
@@ -425,7 +432,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::NullExpr>(
                        expr)) {
         result = std::make_shared<PhyNullExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             column_expr,
             "PhyNullExpr",
             op_ctx,
@@ -436,7 +443,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::GISFunctionFilterExpr>(expr)) {
         result = std::make_shared<PhyGISFunctionFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             casted_expr,
             "PhyGISFunctionFilterExpr",
             op_ctx,
@@ -448,16 +455,42 @@ CompileExpression(const expr::TypedExprPtr& expr,
                    std::dynamic_pointer_cast<const milvus::expr::MatchExpr>(
                        expr)) {
         result = std::make_shared<PhyMatchFilterExpr>(
-            compiled_inputs,
+            std::move(compiled_inputs),
             match_expr,
             "PhyMatchFilterExpr",
             op_ctx,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+    } else if (auto bloom_filter_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::BloomFilterExpr>(expr)) {
+        result = std::make_shared<PhyBloomFilterExpr>(
+            std::move(compiled_inputs),
+            bloom_filter_expr,
+            "PhyBloomFilterExpr",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
+    } else if (auto roaring_filter_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::RoaringFilterExpr>(expr)) {
+        result = std::make_shared<PhyRoaringFilterExpr>(
+            std::move(compiled_inputs),
+            roaring_filter_expr,
+            "PhyRoaringFilterExpr",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_consistency_level());
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
+    // Bind the request-scoped sealed read snapshot (nullptr for growing /
+    // non-pinned paths) to this expression. Runs for the whole compiled tree
+    // because CompileExpression is recursive over inputs.
+    result->SetSnapshot(context->get_read_snapshot().get());
     return result;
 }
 
@@ -492,7 +525,7 @@ IsLikeExpr(std::shared_ptr<Expr> input) {
 // Coarse(R-Tree) node (bucketed early, prunes others) and an expensive Refine
 // node (bucketed last, consumes bitmap_input + fuses per-row construction).
 // Gated by queryNode.segcore.enableGISSplitFusion. See
-// docs/design_docs/gis_filter_coarse_refine_split_fusion.md.
+// docs/design-docs/design_docs/20260727-gis-filter-coarse-refine-split-fusion.md.
 static void
 SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                      ExecContext* context) {
@@ -687,8 +720,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // Rewrite same-column geometry predicates into Coarse + Refine nodes before
     // bucketing, so the buckets below schedule coarse early / refine last.
     SplitFuseGISConjunct(expr, context);
-    auto schema = segment->get_schema();
-    auto namespace_field_id = schema.get_namespace_field_id();
+    auto schema = segment->get_schema_snapshot();
+    auto namespace_field_id = schema->get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;
     std::vector<size_t> indexed_expr;
@@ -700,6 +733,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     std::vector<size_t> array_like_expr;
     std::vector<size_t> compare_expr;
     std::vector<size_t> other_expr;
+    // Index-less membership probes (bloom_match, roaring_match).
+    std::vector<size_t> membership_expr;
     std::vector<size_t> heavy_conjunct_expr;
     std::vector<size_t> light_conjunct_expr;
     // Record all LIKE expression indices for potential batch ngram optimization
@@ -734,6 +769,35 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                 namespace_expr_idx = i;
                 continue;
             }
+        }
+
+        // bloom_match's per-row cost is ~one hash + one 256-bit block probe —
+        // about a normal string compare, NOT a heavy LIKE/regex/JSON op. But it
+        // never uses an index (the index-only fallback still reverse-looks-up per
+        // row), so it must not be bucketed as a cheap numeric_expr (INT) or an
+        // index-accelerated indexed_expr (indexed VARCHAR) and run FIRST. Place it
+        // in the string-compare tier so it runs after numeric + indexed
+        // predicates, whose result already prunes the rows it has to probe.
+        //
+        // roaring_match sits in the same tier for the same reasons: its per-row
+        // cost is a binary search over the bitmap's containers rather than a
+        // hash, but it is likewise index-less (its index-only fallback also
+        // reverse-looks-up per row), so it must run after the numeric and
+        // indexed predicates that can prune what it has to probe.
+        if (input->name() == "PhyBloomFilterExpr" ||
+            input->name() == "PhyRoaringFilterExpr") {
+            // A JSON-path membership probe parses JSON and resolves a pointer
+            // per evaluated row, which is a heavy operation; bucket it with
+            // the other JSON predicates instead of the string-compare tier so
+            // it runs after cheaper predicates that can prune its rows.
+            if (input->IsSource() && input->GetColumnInfo().has_value() &&
+                IsJsonDataType(input->GetColumnInfo()->data_type_)) {
+                json_expr.push_back(i);
+                has_heavy_operation = true;
+            } else {
+                membership_expr.push_back(i);
+            }
+            continue;
         }
 
         if (input->IsSource() && input->GetColumnInfo().has_value()) {
@@ -825,18 +889,23 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // 2. Numeric column expressions (fastest to evaluate)
     // 3. Indexed column expressions (can use index for efficient filtering)
     // 4. String column expressions
-    // 5. Light conjunct expressions (conjunctions without heavy operations)
-    // 6. Other expressions
-    // 7. Array column expression
-    // 8. String like expression
-    // 9. Array like expression
-    // 10. JSON column expressions (expensive to evaluate)
-    // 11. JSON like expression (more expensive than common json compare)
-    // 12. Heavy conjunct expressions (conjunctions with heavy operations)
-    // 13. Compare filter expressions (most expensive, comparing two columns)
+    // 5. Membership probe expressions, bloom_match and roaring_match
+    //    (index-less; ~string-compare cost, run after numeric + indexed so
+    //    their result already prunes the probe)
+    // 6. Light conjunct expressions (conjunctions without heavy operations)
+    // 7. Other expressions
+    // 8. Array column expression
+    // 9. String like expression
+    // 10. Array like expression
+    // 11. JSON column expressions (expensive to evaluate)
+    // 12. JSON like expression (more expensive than common json compare)
+    // 13. Heavy conjunct expressions (conjunctions with heavy operations)
+    // 14. Compare filter expressions (most expensive, comparing two columns)
     reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
     reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
     reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());
+    reorder.insert(
+        reorder.end(), membership_expr.begin(), membership_expr.end());
     reorder.insert(
         reorder.end(), light_conjunct_expr.begin(), light_conjunct_expr.end());
     reorder.insert(reorder.end(), other_expr.begin(), other_expr.end());

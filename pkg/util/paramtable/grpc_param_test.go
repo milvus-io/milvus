@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -68,6 +69,21 @@ func TestGrpcServerParams(t *testing.T) {
 	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxSendSize)
 
 	assert.Equal(t, serverConfig.GracefulStopTimeout.GetAsInt(), 3)
+}
+
+func TestProxyGrpcRecvLimitCoversMembershipFilter(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	grpcConfig := GrpcServerConfig{}
+	grpcConfig.Init(typeutil.ProxyRole, base)
+
+	const membershipEnvelopeHeaderSize = 32
+	recvLimit := grpcConfig.ServerMaxRecvSize.GetAsInt64()
+	filterLimit := params.MaxMembershipFilterSize.GetAsInt64()
+
+	assert.Equal(t, int64(128*1024*1024), recvLimit)
+	assert.Greater(t, recvLimit, filterLimit+membershipEnvelopeHeaderSize)
 }
 
 func TestGrpcClientParams(t *testing.T) {
@@ -149,6 +165,38 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
 	base.Save(clientConfig.CompressionEnabled.Key, "true")
 	assert.Equal(t, true, clientConfig.CompressionEnabled.GetAsBool())
+
+	assert.Equal(t, clientConfig.CompressionLevel.GetValue(), DefaultCompressionLevel)
+	base.Save(clientConfig.CompressionLevel.Key, "invalid")
+	assert.Equal(t, clientConfig.CompressionLevel.GetValue(), DefaultCompressionLevel)
+	base.Save(clientConfig.CompressionLevel.Key, "BEST")
+	assert.Equal(t, "best", clientConfig.CompressionLevel.GetValue())
+
+	assert.Equal(t, clientConfig.CompressionAlgorithm.GetValue(), DefaultCompressionAlgorithm)
+	base.Save(clientConfig.CompressionAlgorithm.Key, "invalid")
+	assert.Equal(t, clientConfig.CompressionAlgorithm.GetValue(), DefaultCompressionAlgorithm)
+	base.Save(clientConfig.CompressionAlgorithm.Key, "gzip")
+	assert.Equal(t, clientConfig.CompressionAlgorithm.GetValue(), DefaultCompressionAlgorithm)
+	base.Save(clientConfig.CompressionAlgorithm.Key, "snappy")
+	assert.Equal(t, "snappy", clientConfig.CompressionAlgorithm.GetValue())
+	base.Save(clientConfig.CompressionAlgorithm.Key, "S2")
+	assert.Equal(t, "s2", clientConfig.CompressionAlgorithm.GetValue())
+
+	assert.Equal(t, clientConfig.CompressionCRC.GetAsBool(), DefaultCompressionCRC)
+	base.Save(clientConfig.CompressionCRC.Key, "invalid")
+	assert.Equal(t, clientConfig.CompressionCRC.GetAsBool(), DefaultCompressionCRC)
+	base.Save(clientConfig.CompressionCRC.Key, "false")
+	assert.Equal(t, false, clientConfig.CompressionCRC.GetAsBool())
+
+	assert.Equal(t, DefaultCompressionConcurrency, clientConfig.CompressionConcurrency.GetAsInt())
+	base.Save(clientConfig.CompressionConcurrency.Key, "invalid")
+	assert.Equal(t, DefaultCompressionConcurrency, clientConfig.CompressionConcurrency.GetAsInt())
+	base.Save(clientConfig.CompressionConcurrency.Key, "0")
+	assert.Equal(t, DefaultCompressionConcurrency, clientConfig.CompressionConcurrency.GetAsInt())
+	base.Save(clientConfig.CompressionConcurrency.Key, strconv.Itoa(MaxCompressionConcurrency+1))
+	assert.Equal(t, DefaultCompressionConcurrency, clientConfig.CompressionConcurrency.GetAsInt())
+	base.Save(clientConfig.CompressionConcurrency.Key, strconv.Itoa(MaxCompressionConcurrency))
+	assert.Equal(t, MaxCompressionConcurrency, clientConfig.CompressionConcurrency.GetAsInt())
 
 	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
 	base.Save("grpc.client.minResetInterval", "abc")

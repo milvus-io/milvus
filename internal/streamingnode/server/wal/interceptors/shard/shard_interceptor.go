@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "shard"
@@ -187,17 +188,25 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	if header.SchemaVersion == nil {
 		schemaVersion = function.LatestFunctionRunnerVersion
 	}
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
-			mlog.Int64("collectionID", header.GetCollectionId()),
-			mlog.Int32("schemaVersion", schemaVersion),
-			mlog.Err(err))
-		return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+	// Write-before function materialization is version-gated: it only runs once
+	// the whole cluster has confirmed version >= GateVersion (config default
+	// "auto"); before that the write path keeps the legacy format. The gate is
+	// applied at the config-item read layer, so GetAsBool already returns the
+	// effective value.
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
+		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
+			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+		}
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
-			// Proxy does not estimate binary size today. Use payload size after
-			// write-before materialization when the estimate is absent.
+			// Proxy does not estimate binary size today. Use the payload size;
+			// note this excludes materialized function output fields while the
+			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
 		req := &shards.AssignSegmentRequest{
@@ -260,11 +269,20 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// Proxy resolves an existing collection before flushing; release handoff
+		// requires an existing growing-source channel. Collection IDs are never
+		// reused, so a missing shard means Drop overtook this local flush. Append
+		// an empty best-effort WAL record. The caller's metadata/progress checks
+		// still decide completion (and release handoff rollback on failure).
+		// Historical/replicated flushes and other errors retain their behavior.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -272,7 +290,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }

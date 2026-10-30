@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,14 +42,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -57,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -86,8 +87,8 @@ const moduleName = "Proxy"
 
 // checkExternalCollectionBlockedForWrite checks if the collection is external and returns error if so.
 // External collections do not support write operations (insert, delete, upsert, flush, etc).
-func checkExternalCollectionBlockedForWrite(ctx context.Context, dbName, collName, operation string) error {
-	collSchema, _ := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
+func checkExternalCollectionBlockedForWrite(ctx context.Context, metaCache Cache, dbName, collName, operation string) error {
+	collSchema, _ := metaCache.GetCollectionSchema(ctx, dbName, collName)
 	if collSchema != nil && typeutil.IsExternalCollection(collSchema.CollectionSchema) {
 		return merr.WrapErrParameterInvalidMsg(
 			"%s operation is not supported for external collection %s", operation, collName)
@@ -147,6 +148,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if request == nil {
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalidate collection meta cache request is nil")), nil
+	}
 	ctx = logutil.WithModule(ctx, moduleName)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
@@ -170,12 +174,12 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	if globalMetaCache != nil {
+	if node.GetMetaCache() != nil {
 		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
 			aliasOperation := msgType == commonpb.MsgType_CreateAlias ||
 				msgType == commonpb.MsgType_AlterAlias || msgType == commonpb.MsgType_DropAlias
-			aliasName = globalMetaCache.InvalidateCollectionMeta(
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(
 				ctx, request.GetDbName(), collectionName, collectionID, aliasOperation)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			if aliasOperation && collectionName != "" {
@@ -194,14 +198,14 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					// resolution is race-free -- nothing re-points an alias
 					// concurrently with its drop), so scanning there would
 					// reintroduce a permanent O(N) stall on the normal path.
-					globalMetaCache.RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
+					node.GetMetaCache().RemoveAliasHolders(ctx, request.GetDbName(), collectionName)
 				}
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache with collection name", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_LoadCollection, commonpb.MsgType_ReleaseCollection:
 			// All the request from query use collectionID
 			if request.CollectionID != UniqueID(0) {
-				aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
+				aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), "", collectionID, false)
 				deprecateShardCaches(aliasName...)
 			}
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
@@ -214,28 +218,25 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 					mlog.FieldCollectionID(collectionID))
 				return merr.Status(err), nil
 			}
-			globalMetaCache.RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
+			node.GetMetaCache().RemovePartition(ctx, request.GetDbName(), collectionID, collectionName, request.GetPartitionName())
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
+			node.GetMetaCache().RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterDatabase:
-			globalMetaCache.RemoveDatabaseInfo(ctx, request.GetDbName())
+			node.GetMetaCache().RemoveDatabaseInfo(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 			mlog.Info(ctx, "complete to invalidate collection meta cache", mlog.String("type", request.GetBase().GetMsgType().String()))
 		default:
 			mlog.Warn(ctx, "receive unexpected msgType of invalidate collection meta cache", mlog.String("msgType", request.GetBase().GetMsgType().String()))
-			aliasName = globalMetaCache.InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
+			aliasName = node.GetMetaCache().InvalidateCollectionMeta(ctx, request.GetDbName(), collectionName, collectionID, false)
 			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
-
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
-		// no need to handle error, since this Proxy may not create dml stream for the collection.
-		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
@@ -282,18 +283,18 @@ func (node *Proxy) ClearReadTaskQueue(ctx context.Context, request *internalpb.C
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ClearReadTaskQueue")
 	defer sp.End()
 
-	result := node.sched.clearDQLQueue(request.GetTaskType(), request.GetReason())
-	resp.ProxyQueuedCleared = result.queuedCleared
+	result := node.sched.ClearDQLQueue(request.GetTaskType(), request.GetReason())
+	resp.ProxyQueuedCleared = result.QueuedCleared
 	resp.Results = append(resp.Results, &internalpb.ClearReadTaskQueueComponentResult{
 		Status:        merr.Success(),
 		Role:          typeutil.ProxyRole,
 		NodeID:        paramtable.GetNodeID(),
-		QueuedCleared: result.queuedCleared,
+		QueuedCleared: result.QueuedCleared,
 	})
 	mlog.Info(ctx, "cleared proxy read task queue",
 		mlog.String("taskType", request.GetTaskType()),
 		mlog.String("reason", request.GetReason()),
-		mlog.Int64("queuedCleared", result.queuedCleared))
+		mlog.Int64("queuedCleared", result.QueuedCleared))
 	return resp, nil
 }
 
@@ -308,15 +309,10 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 	method := "CreateDatabase"
 	tr := timerecord.NewTimeRecorder(method)
 
-	cct := &createDatabaseTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		CreateDatabaseRequest: request,
-		mixCoord:              node.mixCoord,
-	}
+	cct := NewCreateDatabaseTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
-	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 
 		return merr.Status(err), nil
@@ -336,7 +332,7 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return cct.result, nil
+	return cct.Result(), nil
 }
 
 func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
@@ -350,15 +346,10 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	method := "DropDatabase"
 	tr := timerecord.NewTimeRecorder(method)
 
-	dct := &dropDatabaseTask{
-		ctx:                 ctx,
-		Condition:           NewTaskCondition(ctx),
-		DropDatabaseRequest: request,
-		mixCoord:            node.mixCoord,
-	}
+	dct := NewDropDatabaseTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -376,7 +367,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dct.result, nil
+	return dct.Result(), nil
 }
 
 func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
@@ -392,16 +383,11 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 	method := "ListDatabases"
 	tr := timerecord.NewTimeRecorder(method)
 
-	dct := &listDatabaseTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		ListDatabasesRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	dct := NewListDatabaseTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -414,14 +400,14 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 		return resp, nil
 	}
 
-	mlog.Info(ctx, rpcDone(method), mlog.Int("num of db", len(dct.result.DbNames)))
+	mlog.Info(ctx, rpcDone(method), mlog.Int("num of db", len(dct.Result().DbNames)))
 
 	metrics.ProxyReqLatency.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return dct.result, nil
+	return dct.Result(), nil
 }
 
 func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
@@ -434,16 +420,11 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 	method := "AlterDatabase"
 	tr := timerecord.NewTimeRecorder(method)
 
-	act := &alterDatabaseTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		AlterDatabaseRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	act := NewAlterDatabaseTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -470,7 +451,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		mlog.Uint64("EndTs", act.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return act.result, nil
+	return act.Result(), nil
 }
 
 func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
@@ -485,16 +466,11 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 	method := "DescribeDatabase"
 	tr := timerecord.NewTimeRecorder(method)
 
-	act := &describeDatabaseTask{
-		ctx:                     ctx,
-		Condition:               NewTaskCondition(ctx),
-		DescribeDatabaseRequest: request,
-		mixCoord:                node.mixCoord,
-	}
+	act := NewDescribeDatabaseTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 
 		resp.Status = merr.Status(err)
@@ -521,7 +497,7 @@ func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.Descr
 		mlog.Uint64("EndTs", act.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return act.result, nil
+	return act.Result(), nil
 }
 
 // CreateCollection create a collection by the schema.
@@ -536,16 +512,11 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	method := "CreateCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	cct := &createCollectionTask{
-		ctx:                     ctx,
-		Condition:               NewTaskCondition(ctx),
-		CreateCollectionRequest: request,
-		mixCoord:                node.mixCoord,
-	}
+	cct := NewCreateCollectionTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cct); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -581,7 +552,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return cct.result, nil
+	return cct.Result(), nil
 }
 
 // DropCollection drop a collection.
@@ -595,17 +566,11 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	method := "DropCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	dct := &dropCollectionTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		DropCollectionRequest: request,
-		mixCoord:              node.mixCoord,
-		chMgr:                 node.chMgr,
-	}
+	dct := NewDropCollectionTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "DropCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(context.TODO(), "DropCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -637,7 +602,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return dct.result, nil
+	return dct.Result(), nil
 }
 
 // TruncateCollection truncate a collection.
@@ -653,17 +618,11 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 	method := "TruncateCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	dct := &truncateCollectionTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		TruncateCollectionRequest: request,
-		mixCoord:                  node.mixCoord,
-		chMgr:                     node.chMgr,
-	}
+	dct := NewTruncateCollectionTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "TruncateCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dct); err != nil {
 		mlog.Warn(context.TODO(), "TruncateCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -700,7 +659,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return &milvuspb.TruncateCollectionResponse{
-		Status: dct.result.GetStatus(),
+		Status: dct.Result().GetStatus(),
 	}, nil
 }
 
@@ -719,14 +678,9 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 
 	mlog.Debug(context.TODO(), "HasCollection received")
 
-	hct := &hasCollectionTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		HasCollectionRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	hct := NewHasCollectionTask(ctx, node, request)
 
-	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(hct); err != nil {
 		mlog.Warn(context.TODO(), "HasCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -761,7 +715,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return hct.result, nil
+	return hct.Result(), nil
 }
 
 // LoadCollection load a collection into query nodes.
@@ -775,16 +729,11 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	method := "LoadCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	lct := &loadCollectionTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		LoadCollectionRequest: request,
-		mixCoord:              node.mixCoord,
-	}
+	lct := NewLoadCollectionTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "LoadCollection received")
 
-	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lct); err != nil {
 		mlog.Warn(context.TODO(), "LoadCollection failed to enqueue",
 			mlog.Err(err))
 
@@ -814,7 +763,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return lct.result, nil
+	return lct.Result(), nil
 }
 
 // ReleaseCollection remove the loaded collection from query nodes.
@@ -827,16 +776,11 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 	defer sp.End()
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
-	rct := &releaseCollectionTask{
-		ctx:                      ctx,
-		Condition:                NewTaskCondition(ctx),
-		ReleaseCollectionRequest: request,
-		mixCoord:                 node.mixCoord,
-	}
+	rct := NewReleaseCollectionTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
+	if err := node.sched.DdQueue.Enqueue(rct); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -865,11 +809,16 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		mlog.Uint64("EndTS", rct.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return rct.result, nil
+	return rct.Result(), nil
 }
 
 // DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
 func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	// This is the user-facing boundary. Internal metadata lookups use MetaCache
+	// or the coordinator directly and do not need a user identity.
+	if err := checkDescribeCollectionUser(ctx); err != nil {
+		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}, nil
+	}
 	interceptor, err := NewInterceptor[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse](node, "DescribeCollection")
 	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
@@ -928,20 +877,14 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		return merr.Status(err), nil
 	}
 
-	task := &addCollectionFieldTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		AddCollectionFieldRequest: request,
-		mixCoord:                  node.mixCoord,
-		oldSchema:                 dresp.GetSchema(),
-	}
+	task := NewAddCollectionFieldTask(ctx, node, request, dresp.GetSchema())
 
 	method := "AddCollectionField"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -970,7 +913,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 		mlog.Uint64("EndTs", task.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return task.Result(), nil
 }
 
 // AddCollectionStructField add a struct field to collection
@@ -992,20 +935,14 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
 
-	task := &addCollectionStructFieldTask{
-		ctx:                             ctx,
-		Condition:                       NewTaskCondition(ctx),
-		AddCollectionStructFieldRequest: request,
-		mixCoord:                        node.mixCoord,
-		oldSchema:                       dresp.GetSchema(),
-	}
+	task := NewAddCollectionStructFieldTask(ctx, node, request, dresp.GetSchema())
 
 	method := "AddCollectionStructField"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1034,7 +971,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		mlog.Uint64("EndTs", task.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return task.Result(), nil
 }
 
 func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error) {
@@ -1061,20 +998,13 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	task := &alterCollectionSchemaTask{
-		ctx:                          ctx,
-		Condition:                    NewTaskCondition(ctx),
-		AlterCollectionSchemaRequest: request,
-		mixCoord:                     node.mixCoord,
-		oldSchema:                    dresp.GetSchema(),
-		collectionProperties:         dresp.GetProperties(),
-	}
+	task := NewAlterCollectionSchemaTask(ctx, node, request, dresp.GetSchema(), dresp.GetProperties(), CheckVecIndexWithDataTypeExist)
 	method := "AlterCollectionSchema"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1121,20 +1051,13 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 	defer sp.End()
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
-	g := &getStatisticsTask{
-		request:   request,
-		Condition: NewTaskCondition(ctx),
-		ctx:       ctx,
-		tr:        tr,
-		mixc:      node.mixCoord,
-		lb:        node.lbPolicy,
-	}
+	g := NewGetStatisticsTask(ctx, node, request, tr)
 
 	mlog.Debug(ctx,
 		rpcReceived(method),
 		mlog.Strings("partitions", request.PartitionNames))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -1170,7 +1093,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // GetCollectionStatistics get the collection statistics, such as `num_rows`.
@@ -1185,16 +1108,11 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 	defer sp.End()
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
-	g := &getCollectionStatisticsTask{
-		ctx:                            ctx,
-		Condition:                      NewTaskCondition(ctx),
-		GetCollectionStatisticsRequest: request,
-		mixCoord:                       node.mixCoord,
-	}
+	g := NewGetCollectionStatisticsTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1227,7 +1145,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // ShowCollections list all collections in Milvus.
@@ -1242,17 +1160,12 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 	method := "ShowCollections"
 	tr := timerecord.NewTimeRecorder(method)
 
-	sct := &showCollectionsTask{
-		ctx:                    ctx,
-		Condition:              NewTaskCondition(ctx),
-		ShowCollectionsRequest: request,
-		mixCoord:               node.mixCoord,
-	}
+	sct := NewShowCollectionsTask(ctx, node, request)
 
 	mlog.Debug(context.TODO(), "ShowCollections received",
 		mlog.Any("CollectionNames", request.CollectionNames))
 
-	err := node.sched.ddQueue.Enqueue(sct)
+	err := node.sched.DdQueue.Enqueue(sct)
 	if err != nil {
 		mlog.Warn(context.TODO(), "ShowCollections failed to enqueue",
 			mlog.Err(err),
@@ -1279,10 +1192,10 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	mlog.Debug(context.TODO(), "ShowCollections Done",
 		mlog.Int("len(CollectionNames)", len(request.CollectionNames)),
-		mlog.Int("num_collections", len(sct.result.CollectionNames)))
+		mlog.Int("num_collections", len(sct.Result().CollectionNames)))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return sct.result, nil
+	return sct.Result(), nil
 }
 
 func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -1296,17 +1209,12 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
-	act := &alterCollectionTask{
-		ctx:                    ctx,
-		Condition:              NewTaskCondition(ctx),
-		AlterCollectionRequest: request,
-		mixCoord:               node.mixCoord,
-	}
+	act := NewAlterCollectionTask(ctx, node, request)
 
 	mlog.Info(ctx,
 		rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1336,7 +1244,7 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		mlog.Uint64("EndTs", act.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return act.result, nil
+	return act.Result(), nil
 }
 
 // AddCollectionFunction is the deprecated legacy attach RPC. A function is coupled
@@ -1361,15 +1269,10 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	defer sp.End()
 	method := "AlterCollectionFunction"
 	tr := timerecord.NewTimeRecorder(method)
-	task := &alterCollectionFunctionTask{
-		ctx:                            ctx,
-		Condition:                      NewTaskCondition(ctx),
-		AlterCollectionFunctionRequest: request,
-		mixCoord:                       node.mixCoord,
-	}
+	task := NewAlterCollectionFunctionTask(ctx, node, request)
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1398,7 +1301,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 		mlog.Uint64("EndTs", task.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return task.Result(), nil
 }
 
 // DropCollectionFunction is the deprecated legacy detach RPC. pymilvus
@@ -1424,20 +1327,15 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 	tr := timerecord.NewTimeRecorder(method)
 
 	// Check for external collection - alter field is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "alter field"); err != nil {
 		return merr.Status(err), nil
 	}
 
-	act := &alterCollectionFieldTask{
-		ctx:                         ctx,
-		Condition:                   NewTaskCondition(ctx),
-		AlterCollectionFieldRequest: request,
-		mixCoord:                    node.mixCoord,
-	}
+	act := NewAlterCollectionFieldTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+	if err := node.sched.DdQueue.Enqueue(act); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1467,7 +1365,7 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		mlog.Uint64("EndTs", act.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return act.result, nil
+	return act.Result(), nil
 }
 
 // CreatePartition create a partition in specific collection.
@@ -1477,7 +1375,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	}
 
 	// Check for external collection - create partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "create partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1486,17 +1384,11 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 	method := "CreatePartition"
 	tr := timerecord.NewTimeRecorder(method)
 
-	cpt := &createPartitionTask{
-		ctx:                    ctx,
-		Condition:              NewTaskCondition(ctx),
-		CreatePartitionRequest: request,
-		mixCoord:               node.mixCoord,
-		result:                 nil,
-	}
+	cpt := NewCreatePartitionTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1525,7 +1417,7 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		mlog.Uint64("EndTS", cpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return cpt.result, nil
+	return cpt.Result(), nil
 }
 
 // DropPartition drop a partition in specific collection.
@@ -1535,7 +1427,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	}
 
 	// Check for external collection - drop partition is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "drop partition"); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -1544,17 +1436,11 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 	method := "DropPartition"
 	tr := timerecord.NewTimeRecorder(method)
 
-	dpt := &dropPartitionTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		DropPartitionRequest: request,
-		mixCoord:             node.mixCoord,
-		result:               nil,
-	}
+	dpt := NewDropPartitionTask(ctx, node, request)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1583,7 +1469,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		mlog.Uint64("EndTS", dpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dpt.result, nil
+	return dpt.Result(), nil
 }
 
 // HasPartition check if partition exist.
@@ -1599,17 +1485,11 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
 
-	hpt := &hasPartitionTask{
-		ctx:                 ctx,
-		Condition:           NewTaskCondition(ctx),
-		HasPartitionRequest: request,
-		mixCoord:            node.mixCoord,
-		result:              nil,
-	}
+	hpt := NewHasPartitionTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(hpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(hpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1644,7 +1524,7 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		mlog.Uint64("EndTS", hpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return hpt.result, nil
+	return hpt.Result(), nil
 }
 
 // LoadPartitions load specific partitions into query nodes.
@@ -1657,16 +1537,11 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 	defer sp.End()
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
-	lpt := &loadPartitionsTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		LoadPartitionsRequest: request,
-		mixCoord:              node.mixCoord,
-	}
+	lpt := NewLoadPartitionsTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(lpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1695,7 +1570,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		mlog.Uint64("EndTS", lpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return lpt.result, nil
+	return lpt.Result(), nil
 }
 
 // ReleasePartitions release specific partitions from query nodes.
@@ -1707,19 +1582,14 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ReleasePartitions")
 	defer sp.End()
 
-	rpt := &releasePartitionsTask{
-		ctx:                      ctx,
-		Condition:                NewTaskCondition(ctx),
-		ReleasePartitionsRequest: request,
-		mixCoord:                 node.mixCoord,
-	}
+	rpt := NewReleasePartitionsTask(ctx, node, request)
 
 	method := "ReleasePartitions"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(rpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(rpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1748,7 +1618,7 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		mlog.Uint64("EndTS", rpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return rpt.result, nil
+	return rpt.Result(), nil
 }
 
 // GetPartitionStatistics get the statistics of partition, such as num_rows.
@@ -1764,16 +1634,11 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	method := "GetPartitionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 
-	g := &getPartitionStatisticsTask{
-		ctx:                           ctx,
-		Condition:                     NewTaskCondition(ctx),
-		GetPartitionStatisticsRequest: request,
-		mixCoord:                      node.mixCoord,
-	}
+	g := NewGetPartitionStatisticsTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+	if err := node.sched.DdQueue.Enqueue(g); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -1806,7 +1671,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // ShowPartitions list all partitions in the specific collection.
@@ -1820,13 +1685,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ShowPartitions")
 	defer sp.End()
 
-	spt := &showPartitionsTask{
-		ctx:                   ctx,
-		Condition:             NewTaskCondition(ctx),
-		ShowPartitionsRequest: request,
-		mixCoord:              node.mixCoord,
-		result:                nil,
-	}
+	spt := NewShowPartitionsTask(ctx, node, request)
 
 	method := "ShowPartitions"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1835,7 +1694,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		rpcReceived(method),
 		mlog.Any("request", request))
 
-	if err := node.sched.ddQueue.Enqueue(spt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(spt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -1878,7 +1737,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		mlog.Any("partitions", spt.PartitionNames))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return spt.result, nil
+	return spt.Result(), nil
 }
 
 func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
@@ -1910,7 +1769,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err := validateCollectionName(request.CollectionName); err != nil {
 		return getErrResponse(err), nil
 	}
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		return getErrResponse(err), nil
 	}
@@ -1936,7 +1795,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 			return getErrResponse(err), nil
 		}
 	} else {
-		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if loadProgress, refreshProgress, err = getPartitionProgress(ctx, node.GetMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			return getErrResponse(err), nil
 		}
@@ -1994,7 +1853,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, request.GetDbName(), request.CollectionName)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("dbName", request.GetDbName()),
@@ -2028,7 +1887,7 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 			}, nil
 		}
 	} else {
-		if progress, _, err = getPartitionProgress(ctx, node.mixCoord, request.GetBase(),
+		if progress, _, err = getPartitionProgress(ctx, node.GetMetaCache(), node.mixCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
 			if errors.IsAny(err,
 				merr.ErrCollectionNotLoaded,
@@ -2058,19 +1917,14 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateIndex")
 	defer sp.End()
 
-	cit := &createIndexTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       request,
-		mixCoord:  node.mixCoord,
-	}
+	cit := NewCreateIndexTask(ctx, node, request, CheckVecIndexWithDataTypeExist)
 
 	method := "CreateIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2099,7 +1953,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		mlog.Uint64("EndTs", cit.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return cit.result, nil
+	return cit.Result(), nil
 }
 
 func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
@@ -2110,19 +1964,14 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterIndex")
 	defer sp.End()
 
-	task := &alterIndexTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       request,
-		mixCoord:  node.mixCoord,
-	}
+	task := NewAlterIndexTask(ctx, node, request)
 
 	method := "AlterIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(task); err != nil {
+	if err := node.sched.DdQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2151,7 +2000,7 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 		mlog.Uint64("EndTs", task.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return task.result, nil
+	return task.Result(), nil
 }
 
 // DescribeIndex get the meta information of index, such as index state, index id and etc.
@@ -2165,12 +2014,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeIndex")
 	defer sp.End()
 
-	dit := &describeIndexTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		DescribeIndexRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	dit := NewDescribeIndexTask(ctx, node, request)
 
 	method := "DescribeIndex"
 	// avoid data race
@@ -2178,7 +2022,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2211,7 +2055,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		mlog.Uint64("EndTs", dit.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dit.result, nil
+	return dit.Result(), nil
 }
 
 // GetIndexStatistics get the information of index.
@@ -2225,12 +2069,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexStatistics")
 	defer sp.End()
 
-	dit := &getIndexStatisticsTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		GetIndexStatisticsRequest: request,
-		mixCoord:                  node.mixCoord,
-	}
+	dit := NewGetIndexStatisticsTask(ctx, node, request)
 
 	method := "GetIndexStatistics"
 	// avoid data race
@@ -2238,7 +2077,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2267,7 +2106,7 @@ func (node *Proxy) GetIndexStatistics(ctx context.Context, request *milvuspb.Get
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	return dit.result, nil
+	return dit.Result(), nil
 }
 
 // DropIndex drop the index of collection.
@@ -2279,19 +2118,14 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropIndex")
 	defer sp.End()
 
-	dit := &dropIndexTask{
-		ctx:              ctx,
-		Condition:        NewTaskCondition(ctx),
-		DropIndexRequest: request,
-		mixCoord:         node.mixCoord,
-	}
+	dit := NewDropIndexTask(ctx, node, request)
 
 	method := "DropIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dit); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2320,7 +2154,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		mlog.Uint64("EndTs", dit.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dit.result, nil
+	return dit.Result(), nil
 }
 
 // GetIndexBuildProgress gets index build progress with field_name and index_name.
@@ -2336,19 +2170,14 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexBuildProgress")
 	defer sp.End()
 
-	gibpt := &getIndexBuildProgressTask{
-		ctx:                          ctx,
-		Condition:                    NewTaskCondition(ctx),
-		GetIndexBuildProgressRequest: request,
-		mixCoord:                     node.mixCoord,
-	}
+	gibpt := NewGetIndexBuildProgressTask(ctx, node, request)
 
 	method := "GetIndexBuildProgress"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(gibpt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(gibpt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2381,7 +2210,7 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		mlog.Uint64("EndTs", gibpt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return gibpt.result, nil
+	return gibpt.Result(), nil
 }
 
 // GetIndexState get the build-state of index.
@@ -2396,19 +2225,14 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexState")
 	defer sp.End()
 
-	dipt := &getIndexStateTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		GetIndexStateRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	dipt := NewGetIndexStateTask(ctx, node, request)
 
 	method := "GetIndexState"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dipt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dipt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -2441,7 +2265,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		mlog.Uint64("EndTs", dipt.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dipt.result, nil
+	return dipt.Result(), nil
 }
 
 // Insert insert records into collection.
@@ -2456,7 +2280,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	// Check for external collection - insert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "insert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2470,31 +2294,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
-	it := &insertTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		insertMsg: &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: request.HashKeys,
-			},
-			InsertRequest: &msgpb.InsertRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				DbName:         request.GetDbName(),
-				CollectionName: request.CollectionName,
-				PartitionName:  request.PartitionName,
-				FieldsData:     request.FieldsData,
-				NumRows:        uint64(request.NumRows),
-				Version:        msgpb.InsertDataVersion_ColumnBased,
-				Namespace:      request.Namespace,
-			},
-		},
-		idAllocator:     node.rowIDAllocator,
-		chMgr:           node.chMgr,
-		schemaTimestamp: request.SchemaTimestamp,
-	}
+	it := NewInsertTask(ctx, node, request, node.rowIDAllocator)
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2511,7 +2311,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	mlog.Debug(context.TODO(), "Enqueue insert request in Proxy")
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Warn(context.TODO(), "Failed to enqueue insert task: "+err.Error())
 		return constructFailedResponse(err), nil
 	}
@@ -2523,26 +2323,26 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
 			for i := uint32(0); i < numRows; i++ {
 				errIndex[i] = i
 			}
-			it.result.ErrIndex = errIndex
+			it.Result().ErrIndex = errIndex
 		}
 
 		setErrorIndex()
-		mlog.Warn(context.TODO(), "fail to insert data", mlog.Uint32s("err_index", it.result.ErrIndex))
+		mlog.Warn(context.TODO(), "fail to insert data", mlog.Uint32s("err_index", it.Result().ErrIndex))
 	}
 
 	// InsertCnt always equals to the number of entities in the request
-	it.result.InsertCnt = int64(request.NumRows)
+	it.Result().InsertCnt = int64(request.NumRows)
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.insertMsg.Size()))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
-	successCnt := it.result.InsertCnt - int64(len(it.result.ErrIndex))
+	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
@@ -2554,10 +2354,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		hookutil.UsernameKey:        username,
 		hookutil.RequestDataSizeKey: proto.Size(request),
 		hookutil.SuccessCntKey:      successCnt,
-		hookutil.FailCntKey:         len(it.result.ErrIndex),
+		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
-	SetReportValue(it.result.GetStatus(), v)
-	if merr.Ok(it.result.GetStatus()) {
+	SetReportValue(it.Result().GetStatus(), v)
+	if merr.Ok(it.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeInsert, request.DbName, username).Add(float64(v))
 	}
 	metrics.ProxyInsertVectors.
@@ -2569,7 +2369,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyCollectionMutationLatency.
 		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return it.result, nil
+	return it.Result(), nil
 }
 
 // Delete delete records from collection, then these records cannot be searched.
@@ -2593,7 +2393,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 
 	// Check for external collection - delete is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "delete"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2606,15 +2406,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		limiter, _ = node.GetRateLimiter()
 	}
 
-	dr := &deleteRunner{
-		req:             request,
-		idAllocator:     node.rowIDAllocator,
-		tsoAllocatorIns: node.tsoAllocator,
-		chMgr:           node.chMgr,
-		queue:           node.sched.dmQueue,
-		lb:              node.lbPolicy,
-		limiter:         limiter,
-	}
+	dr := NewDeleteRunner(request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.chMgr, node.sched.DmQueue, node.lbPolicy, limiter)
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2635,10 +2427,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	receiveSize := proto.Size(dr.req)
+	receiveSize := proto.Size(dr.Request())
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
-	successCnt := dr.result.GetDeleteCnt()
+	successCnt := dr.Result().GetDeleteCnt()
 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
@@ -2650,21 +2442,21 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		hookutil.DatabaseKey:   dbName,
 		hookutil.UsernameKey:   username,
 		hookutil.SuccessCntKey: successCnt,
-		hookutil.RelatedCntKey: dr.allQueryCnt.Load(),
+		hookutil.RelatedCntKey: dr.AllQueryCnt(),
 	})
-	SetReportValue(dr.result.GetStatus(), v)
+	SetReportValue(dr.Result().GetStatus(), v)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()) / 1024 / 1024)
-		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()) / 1024 / 1024)
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedRemoteBytes()) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedTotalBytes()) / 1024 / 1024)
 	}
 
-	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
-		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
-		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
+	SetStorageCost(dr.Result().GetStatus(), segcore.StorageCost{
+		ScannedRemoteBytes: dr.ScannedRemoteBytes(),
+		ScannedTotalBytes:  dr.ScannedTotalBytes(),
 	})
 
-	if merr.Ok(dr.result.GetStatus()) {
+	if merr.Ok(dr.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
 	}
 
@@ -2672,7 +2464,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dr.result, nil
+	return dr.Result(), nil
 }
 
 // Upsert upsert records into collection.
@@ -2689,7 +2481,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	// Check for external collection - upsert is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "upsert"); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
@@ -2709,31 +2501,13 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 
-	it := &upsertTask{
-		baseMsg: msgstream.BaseMsg{
-			HashValues: request.HashKeys,
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       request,
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-			IDs: &schemapb.IDs{
-				IdField: nil,
-			},
-		},
-
-		idAllocator:     node.rowIDAllocator,
-		chMgr:           node.chMgr,
-		schemaTimestamp: request.SchemaTimestamp,
-		node:            node,
-	}
+	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
 		mlog.Int("len(HashKeys)", len(request.HashKeys)))
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Info(context.TODO(), "Failed to enqueue upsert task",
 			mlog.Err(err))
 		return &milvuspb.MutationResult{
@@ -2750,8 +2524,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			mlog.Err(err))
 		// Not every error case changes the status internally
 		// change status there to handle it
-		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
-			it.result.Status = merr.Status(err)
+		if it.Result().GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
+			it.Result().Status = merr.Status(err)
 		}
 
 		numRows := request.NumRows
@@ -2766,20 +2540,20 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		}, nil
 	}
 
-	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
 			for i := uint32(0); i < numRows; i++ {
 				errIndex[i] = i
 			}
-			it.result.ErrIndex = errIndex
+			it.Result().ErrIndex = errIndex
 		}
 		setErrorIndex()
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
-	it.result.UpsertCnt = int64(request.NumRows)
+	it.Result().UpsertCnt = int64(request.NumRows)
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
@@ -2789,25 +2563,22 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.req),
-		hookutil.SuccessCntKey:      it.result.UpsertCnt,
-		hookutil.FailCntKey:         len(it.result.ErrIndex),
+		hookutil.RequestDataSizeKey: proto.Size(it.Request()),
+		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
+		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
-	SetReportValue(it.result.GetStatus(), v)
-	SetStorageCost(it.result.GetStatus(), it.storageCost)
+	SetReportValue(it.Result().GetStatus(), v)
+	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes) / 1024 / 1024)
-		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
-	if merr.Ok(it.result.GetStatus()) {
+	if merr.Ok(it.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
-	if merr.Ok(it.result.GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
-	}
-	successCnt := it.result.UpsertCnt - int64(len(it.result.ErrIndex))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
+	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))
@@ -2817,7 +2588,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	mlog.Debug(context.TODO(), "Finish processing upsert request in Proxy")
-	return it.result, nil
+	return it.Result(), nil
 }
 
 func GetCollectionRateSubLabel(req any) string {
@@ -2925,14 +2696,17 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	// Handle search by primary keys: transform IDs to vectors
-	validData, err := node.handleIfSearchByPK(ctx, request)
+	request, searchByPK, err := node.prepareSearchByPKAttempt(ctx, request)
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
 		}, false, false, false, nil
 	}
 
+	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
+	if err != nil {
+		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
+	}
 	// If all IDs have null vectors (Nq == 0), return empty results without executing search
 	if len(validData) > 0 && request.GetNq() == 0 {
 		return &milvuspb.SearchResults{
@@ -2948,28 +2722,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, nil
 	}
 
-	qt := &searchTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Search),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:              paramtable.GetNodeID(),
-			IsTopkReduce:       optimizedSearch,
-			IsRecallEvaluation: isRecallEvaluation,
-		},
-		request:                request,
-		tr:                     timerecord.NewTimeRecorder("search"),
-		mixCoord:               node.mixCoord,
-		node:                   node,
-		lb:                     node.lbPolicy,
-		shardClientMgr:         node.shardMgr,
-		enableMaterializedView: node.enableMaterializedView,
-		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:                  node.chMgr,
-	}
+	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
 
 	succeeded := false
 	defer func() {
@@ -2983,7 +2736,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("nq", qt.GetNq()), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3001,7 +2755,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3018,7 +2772,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	err = qt.WaitToFinish()
+	if err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
 			mlog.Int64("nq", qt.GetNq()),
@@ -3044,7 +2799,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(qt.result.GetResults().GetNumQueries()))
+		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3061,46 +2816,48 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
+	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
+
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.result != nil {
+	if qt.Result() != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
-		sentSize := proto.Size(qt.result)
+		sentSize := proto.Size(qt.Result())
 		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.relatedDataSize,
-			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
+			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
-		SetReportValue(qt.result.GetStatus(), v)
-		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
-		if merr.Ok(qt.result.GetStatus()) {
+		SetReportValue(qt.Result().GetStatus(), v)
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
 
-	if qt.result != nil && qt.result.Results != nil && len(validData) > 0 {
-		adjustSearchResultsForNullVectors(qt.result, validData)
+	if qt.Result() != nil && qt.Result().Results != nil && len(validData) > 0 {
+		adjustSearchResultsForNullVectors(qt.Result(), validData)
 	}
 
 	succeeded = true
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
+	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), qt.IsRecallEvaluation(), nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -3177,27 +2934,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
-	newSearchReq := convertHybridSearchToSearch(request)
-	qt := &searchTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Search),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:        paramtable.GetNodeID(),
-			IsTopkReduce: optimizedSearch,
-		},
-		request:             newSearchReq,
-		tr:                  timerecord.NewTimeRecorder(method),
-		mixCoord:            node.mixCoord,
-		node:                node,
-		lb:                  node.lbPolicy,
-		shardClientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:               node.chMgr,
-	}
+	newSearchReq := ConvertHybridSearchToSearch(request)
+	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
 
 	succeeded := false
 	defer func() {
@@ -3215,7 +2953,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 		if spanPerNq >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			mlog.Info(ctx, rpcSlow(method), mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq))
+				mlog.Int64("totalNq", totalNq), mlog.Duration("duration", span), mlog.Duration("durationPerNq", spanPerNq),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, newSearchReq)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3233,7 +2972,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3250,14 +2989,15 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	waitErr := qt.WaitToFinish()
+	if waitErr != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
+			mlog.Err(waitErr),
 		)
 
 		return &milvuspb.SearchResults{
-			Status: merr.Status(err),
+			Status: merr.Status(waitErr),
 		}, false, false, nil
 	}
 
@@ -3292,41 +3032,43 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
+	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
+
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.result != nil {
-		sentSize := proto.Size(qt.result)
+	if qt.Result() != nil {
+		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.relatedDataSize,
-			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
+			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
-		SetReportValue(qt.result.GetStatus(), v)
-		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
-		if merr.Ok(qt.result.GetStatus()) {
+		SetReportValue(qt.Result().GetStatus(), v)
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
 	succeeded = true
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
+	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), nil
 }
 
 func adjustSearchResultsForNullVectors(results *milvuspb.SearchResults, validData []bool) {
@@ -3373,16 +3115,116 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 	return nil
 }
 
-// After this function, the request will have PlaceholderGroup set, ready for normal search pipeline.
-// If the request is not search-by-IDs, this function does nothing.
-//
-// Returns validData ([]bool) indicating which IDs have valid vectors, and error if the transformation fails.
-func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) ([]bool, error) {
-	// Check if this is a search by PK request
+type searchByPKPreflight struct {
+	collectionInfo *collectionInfo
+}
+
+// copySearchRequestForAttempt isolates the fields mutated while preparing a
+// search attempt without copying immutable vector payloads.
+func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	if request == nil {
+		return nil
+	}
+	copied := &milvuspb.SearchRequest{
+		Base:                  request.GetBase(),
+		DbName:                request.GetDbName(),
+		CollectionName:        request.GetCollectionName(),
+		PartitionNames:        request.GetPartitionNames(),
+		Dsl:                   request.GetDsl(),
+		SearchInput:           request.GetSearchInput(),
+		DslType:               request.GetDslType(),
+		OutputFields:          request.GetOutputFields(),
+		SearchParams:          slices.Clone(request.GetSearchParams()),
+		TravelTimestamp:       request.GetTravelTimestamp(),
+		GuaranteeTimestamp:    request.GetGuaranteeTimestamp(),
+		Nq:                    request.GetNq(),
+		NotReturnAllMeta:      request.GetNotReturnAllMeta(),
+		ConsistencyLevel:      request.GetConsistencyLevel(),
+		UseDefaultConsistency: request.GetUseDefaultConsistency(),
+		SearchByPrimaryKeys:   request.GetSearchByPrimaryKeys(),
+		ExprTemplateValues:    request.GetExprTemplateValues(),
+		FunctionScore:         request.GetFunctionScore(),
+		Namespace:             request.Namespace,
+		Highlighter:           request.GetHighlighter(),
+		SearchAggregation:     request.GetSearchAggregation(),
+		FunctionChains:        request.GetFunctionChains(),
+	}
+	for _, subRequest := range request.GetSubReqs() {
+		if subRequest == nil {
+			copied.SubReqs = append(copied.SubReqs, nil)
+			continue
+		}
+		copied.SubReqs = append(copied.SubReqs, &milvuspb.SubSearchRequest{
+			Dsl:                subRequest.GetDsl(),
+			PlaceholderGroup:   subRequest.GetPlaceholderGroup(),
+			DslType:            subRequest.GetDslType(),
+			SearchParams:       slices.Clone(subRequest.GetSearchParams()),
+			Nq:                 subRequest.GetNq(),
+			ExprTemplateValues: subRequest.GetExprTemplateValues(),
+			Namespace:          subRequest.Namespace,
+			FunctionChains:     subRequest.GetFunctionChains(),
+		})
+	}
+	return copied
+}
+
+func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
 	ids := request.GetIds()
 	if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
-		return nil, nil // Not search by PK, do nothing
+		return nil, nil
 	}
+	if len(request.GetSubReqs()) > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("search by IDs is not supported for hybrid search")
+	}
+
+	// Pin collection identity before validating request-sized ID input.
+	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx,
+		request.GetDbName(), request.GetCollectionName(), 0)
+	if err != nil {
+		return nil, err
+	}
+	if requestedCollectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.SearchParams); ok {
+		requestedID, err := strconv.ParseInt(requestedCollectionID, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int value for collection_id", requestedCollectionID,
+				"value for collection id is invalid")
+		}
+		if requestedID != collectionInfo.CollID {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"collection id %d is not consistent with resolved collection %d", requestedID, collectionInfo.CollID)
+		}
+	}
+	return &searchByPKPreflight{
+		collectionInfo: collectionInfo,
+	}, nil
+}
+
+func (node *Proxy) prepareSearchByPKAttempt(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchRequest, *searchByPKPreflight, error) {
+	preflight, err := node.preflightSearchByPK(ctx, request)
+	if err != nil || preflight == nil {
+		return request, preflight, err
+	}
+	return copySearchRequestForAttempt(request), preflight, nil
+}
+
+// transformSearchByPK rewrites an ID search after its non-mutating preflight.
+func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.SearchRequest, preflight *searchByPKPreflight) ([]bool, error) {
+	if preflight == nil {
+		return nil, nil
+	}
+	ids := request.GetIds()
+	collectionInfo := preflight.collectionInfo
+
+	// Keep the internal Query and final Search on the collection resolved during
+	// preflight, even if the input alias is repointed.
+	collectionID := strconv.FormatInt(collectionInfo.CollID, 10)
+	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.SearchParams); !ok {
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
+	}
+	if collectionInfo.DBName != "" {
+		request.DbName = collectionInfo.DBName
+	}
+	request.CollectionName = collectionInfo.Schema.GetName()
 
 	// Check for duplicate IDs (fail fast before query)
 	inputIDsCount := typeutil.GetSizeOfIDs(ids)
@@ -3394,17 +3236,10 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		return nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
 	}
 
-	// Get collection schema for validation and plan building
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx,
-		request.GetDbName(), request.GetCollectionName(), 0)
-	if err != nil {
-		return nil, err
-	}
-
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
 	if err != nil || annsFieldName == "" {
-		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.schema.CollectionSchema)
+		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
@@ -3416,7 +3251,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		annsFieldName = vecFields[0].Name
 	}
 
-	annField := typeutil.GetFieldByName(collectionInfo.schema.CollectionSchema, annsFieldName)
+	annField := typeutil.GetFieldByName(collectionInfo.Schema.CollectionSchema, annsFieldName)
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
@@ -3428,7 +3263,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Check if this is a BM25 function-based search
-	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.schema.Functions)
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.Schema.Functions)
 
 	// For BM25 search, we need to fetch text field; for vector search, we need vector field
 	var fieldToFetch string
@@ -3447,7 +3282,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Get primary key field
-	pkField, err := collectionInfo.schema.GetPkField()
+	pkField, err := collectionInfo.Schema.GetPkField()
 	if err != nil {
 		return nil, err
 	}
@@ -3460,12 +3295,15 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
+	// Search by primary keys uses an internal Query to fetch the input vectors.
+
 	// Build query request to fetch data by IDs
 	// For BM25: fetch text field; for vector search: fetch vector field
 	queryReq := &milvuspb.QueryRequest{
 		Base:                  request.Base,
 		DbName:                request.DbName,
 		CollectionName:        request.CollectionName,
+		QueryParams:           []*commonpb.KeyValuePair{{Key: CollectionID, Value: collectionID}},
 		OutputFields:          []string{pkField.GetName(), fieldToFetch},
 		PartitionNames:        request.PartitionNames,
 		TravelTimestamp:       request.TravelTimestamp,
@@ -3476,28 +3314,15 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Create queryTask to execute the retrieval
-	qt := &queryTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:            paramtable.GetNodeID(),
-			ConsistencyLevel: request.ConsistencyLevel,
-			QueryLabel:       metrics.QueryLabel,
-		},
-		request:             queryReq,
-		plan:                plan,
-		mixCoord:            node.mixCoord,
-		lb:                  node.lbPolicy,
-		shardclientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		// reQuery defaults to false - we need full query processing:
-		// partition conversion, struct field reconstruction, timestamp handling etc
-		chMgr: node.chMgr,
-	}
+	qt := NewQueryTask(ctx, node, queryReq, plan, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		ConsistencyLevel: request.ConsistencyLevel,
+		QueryLabel:       metrics.QueryLabel,
+	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
@@ -3554,14 +3379,62 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
+	// The query pipeline merges per-segment results by primary key ascending
+	// (queryutil.NewSortAndCheckPKOperator), while search treats the Nq
+	// dimension positionally: result block N belongs to ids[N]. Reorder the
+	// rows into the requested ID order first, so both the vectors packed into
+	// the placeholder group and the validData returned below follow it.
+	pkOffset := make(map[any]int, returnedPKCount)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
+	for i := 0; i < returnedPKCount; i++ {
+		pkOffset[pkItr(i)] = i
+	}
+	orderedFieldsData, err := PickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
+		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract the field data from query result
 	// For BM25: extract text field; for vector search: extract vector field
-	fieldData := lo.FindOrElse(queryResult.GetFieldsData(), nil, func(f *schemapb.FieldData) bool {
+	fieldData := lo.FindOrElse(orderedFieldsData, nil, func(f *schemapb.FieldData) bool {
 		return f.GetFieldName() == fieldToFetch || f.GetType() == schemapb.DataType_ArrayOfStruct
 	})
 
 	if fieldData == nil {
 		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+	}
+
+	// validData is per requested ID: one entry per row, in request order.
+	validData := typeutil.GetFieldDataValidData(fieldData)
+
+	// The placeholder group must hold only the rows that can be searched, one
+	// per true entry of validData, since adjustSearchResultsForNullVectors
+	// re-expands the result blocks from that count. A nullable vector column
+	// already carries no payload for a null row, but a nullable scalar column
+	// keeps a zero-value slot for it, so the BM25 text has to be compacted here
+	// or a null row would be searched as an empty string and shift every
+	// following result block by one.
+	if isBM25Search && len(validData) > 0 {
+		strs := fieldData.GetScalars().GetStringData().GetData()
+		compact := make([]string, 0, len(strs))
+		for i, str := range strs {
+			if validData[i] {
+				compact = append(compact, str)
+			}
+		}
+		fieldData = &schemapb.FieldData{
+			FieldName: fieldData.GetFieldName(),
+			FieldId:   fieldData.GetFieldId(),
+			Type:      fieldData.GetType(),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{Data: compact},
+					},
+				},
+			},
+		}
 	}
 
 	// For BM25: converts VarChar to VarChar placeholder (text input for BM25 function)
@@ -3579,7 +3452,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return fieldData.GetValidData(), nil
+	return validData, nil
 }
 
 // Flush notify data nodes to persist the data of collection.
@@ -3594,7 +3467,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	// Check for external collection - flush is not supported
 	for _, collName := range request.GetCollectionNames() {
-		if err := checkExternalCollectionBlockedForWrite(ctx, request.GetDbName(), collName, "flush"); err != nil {
+		if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), collName, "flush"); err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
@@ -3603,19 +3476,13 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Flush")
 	defer sp.End()
 
-	ft := &flushTask{
-		ctx:          ctx,
-		Condition:    NewTaskCondition(ctx),
-		FlushRequest: request,
-		mixCoord:     node.mixCoord,
-		chMgr:        node.chMgr,
-	}
+	ft := NewFlushTask(ctx, node, request)
 
 	method := "Flush"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
-	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
+	if err := node.sched.DcQueue.Enqueue(ft); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3646,14 +3513,26 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		mlog.Uint64("EndTs", ft.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return ft.result, nil
+	return ft.Result(), nil
+}
+
+// ExecuteQuery implements taskmodel.QueryRunner. It is the single seam through
+// which requery operators in the extracted task packages execute a query task
+// on the composition root; the concrete task type is asserted here because
+// root imports the concrete packages, not the reverse.
+func (node *Proxy) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	queryTask, ok := qt.(*queryTask)
+	if !ok {
+		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("query task of unexpected type: %T", qt)
+	}
+	return node.query(ctx, queryTask, sp)
 }
 
 // Query get the records by primary keys.
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-	request := qt.request
+	request := qt.Request()
 	method := "Query"
-	queryLabel := qt.getQueryLabel()
+	queryLabel := qt.GetMetricLabel()
 	if sp != nil {
 		sp.SetAttributes(attribute.String("queryLabel", queryLabel))
 	}
@@ -3686,7 +3565,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 				mlog.Strings("OutputFields", request.OutputFields),
 				mlog.Uint64("travel_timestamp", request.TravelTimestamp),
 				mlog.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				mlog.Duration("duration", span))
+				mlog.Duration("duration", span),
+				mlog.Stringer("consistency_level", accesslog.NewConsistencyLevelHelper(ctx, request)))
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
 			if sp != nil {
@@ -3704,7 +3584,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}
 	}()
 
-	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+	if err := node.sched.DqQueue.Enqueue(qt); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -3728,7 +3608,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}, segcore.StorageCost{}, nil
 	}
 
-	if !qt.reQuery {
+	if !qt.ReQuery() {
 		span := tr.CtxRecord(ctx, "wait query result")
 		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3748,33 +3628,26 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
+			tr.ElapseSpan().Milliseconds())
 	}
 
 	succeeded = true
-	return qt.result, qt.storageCost, nil
+	return qt.Result(), qt.StorageCost(), nil
 }
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	qt := &queryTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:            paramtable.GetNodeID(),
-			ConsistencyLevel: request.ConsistencyLevel,
-			QueryLabel:       metrics.QueryLabel,
-		},
-		request:             request,
-		mixCoord:            node.mixCoord,
-		lb:                  node.lbPolicy,
-		shardclientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:               node.chMgr,
-	}
+	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		ConsistencyLevel: request.ConsistencyLevel,
+		QueryLabel:       metrics.QueryLabel,
+	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
@@ -3809,14 +3682,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
 	if err != nil || !merr.Ok(res.Status) {
@@ -3832,14 +3705,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
 		hookutil.ResultDataSizeKey:  proto.Size(res),
-		hookutil.RelatedDataSizeKey: qt.totalRelatedDataSize,
-		hookutil.RelatedCntKey:      qt.allQueryCnt,
+		hookutil.RelatedDataSizeKey: qt.TotalRelatedDataSize(),
+		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
 	})
 	SetReportValue(res.Status, v)
 	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
-	if mlog.LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
+	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)
 		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
 	}
@@ -3855,19 +3728,14 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateAlias")
 	defer sp.End()
 
-	cat := &CreateAliasTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		CreateAliasRequest: request,
-		mixCoord:           node.mixCoord,
-	}
+	cat := NewCreateAliasTask(ctx, node, request)
 
 	method := "CreateAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(cat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(cat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3896,7 +3764,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		mlog.Uint64("EndTs", cat.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return cat.result, nil
+	return cat.Result(), nil
 }
 
 // DescribeAlias describe alias of collection.
@@ -3910,20 +3778,14 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeAlias")
 	defer sp.End()
 
-	dat := &DescribeAliasTask{
-		ctx:                  ctx,
-		Condition:            NewTaskCondition(ctx),
-		nodeID:               node.session.ServerID,
-		DescribeAliasRequest: request,
-		mixCoord:             node.mixCoord,
-	}
+	dat := NewDescribeAliasTask(ctx, node, node.session.ServerID, request)
 
 	method := "DescribeAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -3951,7 +3813,7 @@ func (node *Proxy) DescribeAlias(ctx context.Context, request *milvuspb.Describe
 		mlog.Uint64("EndTs", dat.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dat.result, nil
+	return dat.Result(), nil
 }
 
 // ListAliases show all aliases of db.
@@ -3965,20 +3827,14 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListAliases")
 	defer sp.End()
 
-	lat := &ListAliasesTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		nodeID:             node.session.ServerID,
-		ListAliasesRequest: request,
-		mixCoord:           node.mixCoord,
-	}
+	lat := NewListAliasesTask(ctx, node, node.session.ServerID, request)
 
 	method := "ListAliases"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(lat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(lat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4006,7 +3862,7 @@ func (node *Proxy) ListAliases(ctx context.Context, request *milvuspb.ListAliase
 		mlog.Uint64("EndTs", lat.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return lat.result, nil
+	return lat.Result(), nil
 }
 
 // DropAlias alter the alias of collection.
@@ -4018,19 +3874,14 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropAlias")
 	defer sp.End()
 
-	dat := &DropAliasTask{
-		ctx:              ctx,
-		Condition:        NewTaskCondition(ctx),
-		DropAliasRequest: request,
-		mixCoord:         node.mixCoord,
-	}
+	dat := NewDropAliasTask(ctx, node, request)
 
 	method := "DropAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(dat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4059,7 +3910,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		mlog.Uint64("EndTs", dat.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dat.result, nil
+	return dat.Result(), nil
 }
 
 // AlterAlias alter alias of collection.
@@ -4071,19 +3922,14 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterAlias")
 	defer sp.End()
 
-	aat := &AlterAliasTask{
-		ctx:               ctx,
-		Condition:         NewTaskCondition(ctx),
-		AlterAliasRequest: request,
-		mixCoord:          node.mixCoord,
-	}
+	aat := NewAlterAliasTask(ctx, node, request)
 
 	method := "AlterAlias"
 	tr := timerecord.NewTimeRecorder(method)
 
 	mlog.Info(ctx, rpcReceived(method))
 
-	if err := node.sched.ddQueue.Enqueue(aat); err != nil {
+	if err := node.sched.DdQueue.Enqueue(aat); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -4112,7 +3958,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		mlog.Uint64("EndTs", aat.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return aat.result, nil
+	return aat.Result(), nil
 }
 
 // CalcDistance calculates the distances between vectors.
@@ -4135,12 +3981,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-FlushAll")
 	defer sp.End()
 
-	ft := &flushAllTask{
-		ctx:             ctx,
-		Condition:       NewTaskCondition(ctx),
-		FlushAllRequest: request,
-		mixCoord:        node.mixCoord,
-	}
+	ft := NewFlushAllTask(ctx, node, request)
 
 	method := "FlushAll"
 	tr := timerecord.NewTimeRecorder(method)
@@ -4149,7 +3990,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	logger.Debug(ctx, rpcReceived(method))
 
-	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
+	if err := node.sched.DcQueue.Enqueue(ft); err != nil {
 		logger.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4166,10 +4007,10 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 		return resp, nil
 	}
 
-	logger.Debug(ctx, rpcDone(method), mlog.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.result.GetFlushAllMsgs()))))
+	logger.Debug(ctx, rpcDone(method), mlog.FieldMessages(message.MilvusMessagesToImmutableMessages(lo.Values(ft.Result().GetFlushAllMsgs()))))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return ft.result, nil
+	return ft.Result(), nil
 }
 
 // GetDdChannel returns the used channel for dd operations.
@@ -4184,7 +4025,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetPersistentSegmentInfo")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.String("db", req.DbName),
 		mlog.Any("collection", req.CollectionName))
@@ -4198,19 +4039,33 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 	method := "GetPersistentSegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
-
-	// list segments
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
+	// list segments
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	states := req.GetStates()
+	if len(states) == 0 {
+		states = []commonpb.SegmentState{
+			commonpb.SegmentState_Flushing,
+			commonpb.SegmentState_Flushed,
+			commonpb.SegmentState_Sealed,
+		}
+	}
 	getSegmentsByStatesResponse, err := node.mixCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 		CollectionID: collectionID,
 		// -1 means list all partition segemnts
 		PartitionID: -1,
-		States:      []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed},
+		States:      states,
 	})
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4223,10 +4078,11 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		SegmentIDs: getSegmentsByStatesResponse.Segments,
+		SegmentIDs:       getSegmentsByStatesResponse.Segments,
+		IncludeUnHealthy: lo.Contains(states, commonpb.SegmentState_Dropped),
 	})
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetPersistentSegmentInfo fail",
+		mlog.Warn(ctx, "GetPersistentSegmentInfo fail",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4236,12 +4092,16 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		mlog.Int("len(infos)", len(infoResp.Infos)),
 		mlog.Any("status", infoResp.Status))
-	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
-	for i, info := range infoResp.Infos {
-		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
+	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, 0, len(infoResp.Infos))
+	for _, info := range infoResp.Infos {
+		// Segment state may have changed since GetSegmentsByStates selected its ID.
+		if !lo.Contains(states, info.GetState()) {
+			continue
+		}
+		persistentInfos = append(persistentInfos, &milvuspb.PersistentSegmentInfo{
 			SegmentID:      info.ID,
 			CollectionID:   info.CollectionID,
 			PartitionID:    info.PartitionID,
@@ -4250,7 +4110,9 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			Level:          commonpb.SegmentLevel(info.Level),
 			IsSorted:       info.GetIsSorted(),
 			StorageVersion: info.GetStorageVersion(),
-		}
+			InsertChannel:  info.GetInsertChannel(),
+			CompactionFrom: info.GetCompactionFrom(),
+		})
 	}
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
@@ -4326,9 +4188,11 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 			State:        info.GetState(),
 			Level:        commonpb.SegmentLevel(info.GetLevel()),
 			IsSorted:     info.GetIsSorted(),
-			InsertLogs:   getLogIDs(info.GetBinlogs()),
-			DeltaLogs:    getLogIDs(info.GetDeltalogs()),
-			StatsLogs:    getLogIDs(info.GetStatslogs()),
+			// V3 segments return empty: insert data is referenced via
+			// manifest, not per-field binlog KVs.
+			InsertLogs: getLogIDs(info.GetBinlogs()),
+			DeltaLogs:  getLogIDs(info.GetDeltalogs()),
+			StatsLogs:  getLogIDs(info.GetStatslogs()),
 		})
 	}
 
@@ -4341,7 +4205,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuerySegmentInfo")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.String("db", req.DbName),
 		mlog.Any("collection", req.CollectionName))
@@ -4356,8 +4220,14 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 
 	method := "GetQuerySegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
+	collID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4373,12 +4243,12 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		err = merr.Error(infoResp.GetStatus())
 	}
 	if err != nil {
-		mlog.Error(context.TODO(), "Failed to get segment info from QueryCoord",
+		mlog.Error(ctx, "Failed to get segment info from QueryCoord",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		mlog.Any("infos", infoResp.Infos),
 		mlog.Any("status", infoResp.Status))
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
@@ -4610,7 +4480,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	status := merr.Success()
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection id",
 			mlog.String("collectionName", req.GetCollectionName()),
@@ -4653,11 +4523,17 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicas")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "received get replicas request",
+	mlog.Debug(ctx, "received get replicas request",
 		mlog.Int64("collection", req.GetCollectionID()),
 		mlog.Bool("with shard nodes", req.GetWithShardNodes()))
 	resp := &milvuspb.GetReplicasResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
+	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -4669,7 +4545,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4678,12 +4554,12 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	r, err := node.mixCoord.GetReplicas(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "Failed to get replicas from Query Coordinator",
+		mlog.Warn(ctx, "Failed to get replicas from Query Coordinator",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "received get replicas response", mlog.String("resp", r.String()))
+	mlog.Debug(ctx, "received get replicas response", mlog.String("resp", r.String()))
 	return r, nil
 }
 
@@ -4721,7 +4597,7 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// before v2.4.18, manual compact request only pass collectionID, should correct sdk's behavior to pass collectionName
 	if req.GetCollectionName() != "" {
 		var err error
-		req.CollectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		req.CollectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -4731,12 +4607,12 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	// Check for external collection - manual compaction is not supported
 	// Only check if we have collection identifier (collectionID > 0 or collectionName not empty)
 	if req.GetCollectionID() > 0 || req.GetCollectionName() != "" {
-		collInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
+		collInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), req.GetCollectionID())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if typeutil.IsExternalCollection(collInfo.schema.CollectionSchema) {
+		if typeutil.IsExternalCollection(collInfo.Schema.CollectionSchema) {
 			var collIdentifier string
 			if req.GetCollectionName() != "" {
 				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
@@ -4767,6 +4643,25 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
+	}
+
+	if req == nil {
+		req = &milvuspb.GetCompactionPlansRequest{}
+	} else {
+		req = proto.Clone(req).(*milvuspb.GetCompactionPlansRequest)
+	}
+	req.CollectionId = 0
+	if req.GetCollectionName() != "" {
+		if err := validateCollectionName(req.GetCollectionName()); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		req.CollectionId = collectionID
 	}
 
 	resp, err := node.mixCoord.GetCompactionStateWithPlans(ctx, req)
@@ -4801,7 +4696,7 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 			failResp.Status = merr.Status(err)
 			return failResp, nil
 		}
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			failResp.Status = merr.Status(err)
 			return failResp, nil
@@ -4920,7 +4815,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	var createTs int64
-	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetCreateTime())
+	createTime, err := time.Parse(time.RFC3339, rsp.GetCreateTime())
 	if err == nil {
 		createTs = createTime.Unix()
 	}
@@ -5013,6 +4908,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
+	if username == util.UserRoot && node.managementRootVerifier != nil {
+		node.managementRootVerifier.Forget()
+	}
 	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
@@ -5036,7 +4934,12 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if priCache != nil {
 		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	mlog.Debug(context.TODO(), "complete to update credential cache")
+	if request.Username == util.UserRoot && node.managementRootVerifier != nil {
+		// The notification carries SHA256, not the bcrypt hash this verifier
+		// needs. Revoke the old credential and fetch the current hash on demand.
+		node.managementRootVerifier.Forget()
+	}
+	mlog.Debug(ctx, "complete to update credential cache")
 
 	return merr.Success(), nil
 }
@@ -5500,7 +5403,7 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 	// Resolve alias to actual collection name so grants are stored under the real name
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.CollectionName != util.AnyWord && req.CollectionName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.DbName, req.CollectionName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("collectionName", req.CollectionName), mlog.String("dbName", req.DbName), mlog.Err(resolveErr))
@@ -5572,7 +5475,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for privilege operation",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -5655,7 +5558,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() &&
 		req.Entity != nil && req.Entity.Object != nil && req.Entity.Object.Name == commonpb.ObjectType_Collection.String() &&
 		req.Entity.ObjectName != util.AnyWord && req.Entity.ObjectName != "" {
-		resolved, resolveErr := globalMetaCache.ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
+		resolved, resolveErr := node.GetMetaCache().ResolveCollectionAlias(ctx, req.Entity.DbName, req.Entity.ObjectName)
 		if resolveErr != nil {
 			mlog.Warn(context.TODO(), "failed to resolve collection alias for select grant",
 				mlog.String("objectName", req.Entity.ObjectName), mlog.String("dbName", req.Entity.DbName), mlog.Err(resolveErr))
@@ -5699,7 +5602,7 @@ func (node *Proxy) RestoreRBAC(ctx context.Context, req *milvuspb.RestoreRBACMet
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RestoreRBAC")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "RestoreRBAC", mlog.Any("req", req))
+	mlog.Debug(ctx, "RestoreRBAC", mlog.Any("req", redactRestoreRBACRequestForLog(req)))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
@@ -5864,16 +5767,11 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateResourceGroup")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &CreateResourceGroupTask{
-		ctx:                        ctx,
-		Condition:                  NewTaskCondition(ctx),
-		CreateResourceGroupRequest: request,
-		mixCoord:                   node.mixCoord,
-	}
+	t := NewCreateResourceGroupTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "CreateResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "CreateResourceGroup failed to enqueue",
 			mlog.Err(err))
 		return getErrResponse(err, method, "", ""), nil
@@ -5896,7 +5794,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
@@ -5917,16 +5815,11 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateResourceGroups")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &UpdateResourceGroupsTask{
-		ctx:                         ctx,
-		Condition:                   NewTaskCondition(ctx),
-		UpdateResourceGroupsRequest: request,
-		mixCoord:                    node.mixCoord,
-	}
+	t := NewUpdateResourceGroupsTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "UpdateResourceGroups received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "UpdateResourceGroups failed to enqueue",
 			mlog.Err(err))
 		return getErrResponse(err, method, "", ""), nil
@@ -5949,7 +5842,7 @@ func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.U
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func getErrResponse(err error, method string, dbName string, collectionName string) *commonpb.Status {
@@ -5965,16 +5858,11 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropResourceGroup")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &DropResourceGroupTask{
-		ctx:                      ctx,
-		Condition:                NewTaskCondition(ctx),
-		DropResourceGroupRequest: request,
-		mixCoord:                 node.mixCoord,
-	}
+	t := NewDropResourceGroupTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "DropResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DropResourceGroup failed to enqueue",
 			mlog.Err(err))
 
@@ -5998,7 +5886,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
@@ -6024,16 +5912,11 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TransferNode")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &TransferNodeTask{
-		ctx:                 ctx,
-		Condition:           NewTaskCondition(ctx),
-		TransferNodeRequest: request,
-		mixCoord:            node.mixCoord,
-	}
+	t := NewTransferNodeTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "TransferNode received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "TransferNode failed to enqueue",
 			mlog.Err(err))
 
@@ -6057,7 +5940,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
@@ -6083,16 +5966,11 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TransferReplica")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &TransferReplicaTask{
-		ctx:                    ctx,
-		Condition:              NewTaskCondition(ctx),
-		TransferReplicaRequest: request,
-		mixCoord:               node.mixCoord,
-	}
+	t := NewTransferReplicaTask(ctx, node, request)
 
 	mlog.Info(context.TODO(), "TransferReplica received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "TransferReplica failed to enqueue",
 			mlog.Err(err))
 
@@ -6116,7 +5994,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
@@ -6130,16 +6008,11 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 	defer sp.End()
 	method := "ListResourceGroups"
 	tr := timerecord.NewTimeRecorder(method)
-	t := &ListResourceGroupsTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		ListResourceGroupsRequest: request,
-		mixCoord:                  node.mixCoord,
-	}
+	t := NewListResourceGroupsTask(ctx, node, request)
 
 	mlog.Debug(context.TODO(), "ListResourceGroups received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "ListResourceGroups failed to enqueue",
 			mlog.Err(err))
 
@@ -6167,7 +6040,7 @@ func (node *Proxy) ListResourceGroups(ctx context.Context, request *milvuspb.Lis
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
@@ -6187,16 +6060,11 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeResourceGroup")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)
-	t := &DescribeResourceGroupTask{
-		ctx:                          ctx,
-		Condition:                    NewTaskCondition(ctx),
-		DescribeResourceGroupRequest: request,
-		mixCoord:                     node.mixCoord,
-	}
+	t := NewDescribeResourceGroupTask(ctx, node, request)
 
 	mlog.Debug(context.TODO(), "DescribeResourceGroup received")
 
-	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+	if err := node.sched.DdQueue.Enqueue(t); err != nil {
 		mlog.Warn(context.TODO(), "DescribeResourceGroup failed to enqueue",
 			mlog.Err(err))
 
@@ -6220,7 +6088,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		mlog.Uint64("EndTS", t.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return t.result, nil
+	return t.Result(), nil
 }
 
 func (node *Proxy) ListIndexedSegment(ctx context.Context, request *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
@@ -6350,7 +6218,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 
 	// Check for external collection - import is not supported
-	if err := checkExternalCollectionBlockedForWrite(ctx, req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), req.GetDbName(), req.GetCollectionName(), "import"); err != nil {
 		return &internalpb.ImportResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -6363,16 +6231,9 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	mlog.Info(ctx, rpcReceived(method))
 	nodeID := paramtable.GetStringNodeID()
 
-	it := &importTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       req,
-		node:      node,
-		mixCoord:  node.mixCoord,
-		resp:      resp,
-	}
+	it := NewImportTask(ctx, node, req, resp)
 
-	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+	if err := node.sched.DmQueue.Enqueue(it); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err))
@@ -6415,7 +6276,32 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 		mlog.Warn(context.TODO(), "get import progress failed", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, err
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.CheckRPCCall(resp, nil); err != nil {
+		// DataCoord uses ImportSysFailed for an absent job. Hide its existence
+		// exactly as for an existing job outside the caller's grants.
+		if !authorizationDisabled() && errors.Is(err, merr.ErrImportSysFailed) {
+			err = importPrivilegeDenied()
+		}
+		return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+	}
+	if !authorizationDisabled() {
+		subject, err := importSubject(ctx)
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resource, err := node.resolveImportResource(ctx, resp.GetCollectionId())
+		if err == nil {
+			err = node.authorizeImportResource(ctx, resp.GetCollectionId(), resource, subject)
+		}
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resp.CollectionName = resource.collectionName
+	}
+	return resp, nil
 }
 
 func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
@@ -6438,8 +6324,9 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		err          error
 		collectionID UniqueID
 	)
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 	if req.GetCollectionName() != "" {
-		collectionID, err = globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, dbName, req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -6452,6 +6339,13 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		mlog.Warn(context.TODO(), "list imports", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
+	resp, err = node.filterImportJobs(ctx, dbName, collectionID, resp)
+	if err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
 	return resp, nil
 }
 
@@ -6479,12 +6373,12 @@ func DeregisterSubLabel(subLabel string) {
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	router.GET(http.ClusterConfigsPath, getProjectedConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getProjectedConfigs(paramtable.GetHookParams().GetAll))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
@@ -6644,6 +6538,38 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
+func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
+}
+
+func (node *Proxy) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
+}
+
+func (node *Proxy) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
+}
+
+func (node *Proxy) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return &milvuspb.ListRowPoliciesResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
+}
+
+func (node *Proxy) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
+}
+
+func (node *Proxy) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return &milvuspb.GetRLSPrincipalTagsResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
+}
+
+func (node *Proxy) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return &milvuspb.ListRLSPrincipalsResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
+}
+
+func (node *Proxy) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
+}
+
 func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RunAnalyzer")
 	defer sp.End()
@@ -6681,14 +6607,9 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	}
 
 	method := "RunAnalyzer"
-	task := &RunAnalyzerTask{
-		ctx:                ctx,
-		lb:                 node.lbPolicy,
-		Condition:          NewTaskCondition(ctx),
-		RunAnalyzerRequest: req,
-	}
+	task := NewRunAnalyzerTask(ctx, node, req)
 
-	if err := node.sched.dqQueue.Enqueue(task); err != nil {
+	if err := node.sched.DqQueue.Enqueue(task); err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToEnqueue(method),
 			mlog.Err(err),
@@ -6709,7 +6630,7 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			Status: merr.Status(err),
 		}, nil
 	}
-	return task.result, nil
+	return task.Result(), nil
 }
 
 func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
@@ -6936,9 +6857,41 @@ func (node *Proxy) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplic
 }
 
 // CreateReplicateStream establishes a replication stream on the target Milvus cluster.
-func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+func (node *Proxy) CreateReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) error {
+	// The hook is consulted by hand here, and in DumpMessages - the service's
+	// two streams - because the interceptor that consults it for every other
+	// RPC is a UNARY one and this is a stream: an interceptor chain binds to
+	// one of gRPC's two call kinds.
+	// It is consulted the same way even so, through HookInterceptor, so a hook
+	// sees Mock, Before and After in the order every other RPC gives it, and
+	// sees a typed, non-nil request: a stream has no request message of its
+	// own, and hook.Hook has no "req may be nil" contract, so the request is
+	// the empty message of the type this stream carries. The handler runs
+	// under the context Before returned, which is how a hook hands the stream
+	// what it put there. A Mock answer has no stream to be sent down, so a
+	// mocked stream simply ends with the hook's verdict. The default hook
+	// answers nothing, so a stock binary is unchanged.
 	ctx := stream.Context()
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateReplicateStream")
+	_, err := HookInterceptor(ctx, &milvuspb.ReplicateRequest{}, GetCurUserFromContextOrDefault(ctx),
+		milvuspb.MilvusService_CreateReplicateStream_FullMethodName,
+		func(ctx context.Context, _ any) (any, error) {
+			return nil, node.createReplicateStream(replicateStreamWithContext{stream, ctx})
+		})
+	return err
+}
+
+// replicateStreamWithContext is the replicate stream under the context the
+// hook's Before returned, so everything the stream server reads off its
+// context - the cluster id, the trace - sees what the hook put there.
+type replicateStreamWithContext struct {
+	milvuspb.MilvusService_CreateReplicateStreamServer
+	ctx context.Context
+}
+
+func (s replicateStreamWithContext) Context() context.Context { return s.ctx }
+
+func (node *Proxy) createReplicateStream(stream milvuspb.MilvusService_CreateReplicateStreamServer) (err error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(stream.Context(), "Proxy-CreateReplicateStream")
 	defer sp.End()
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -7091,6 +7044,36 @@ func dumpOneMessage(
 // gaps or duplicates are possible if that point is filtered, inside a
 // transaction, or no longer retained by the underlying WAL.
 func (node *Proxy) DumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
+	// The hook is consulted by hand here for the reason CreateReplicateStream
+	// gives: this is a stream, and the interceptor that consults it for every
+	// other RPC is a unary one. It is consulted the same way - Mock, Before
+	// and After in order, through HookInterceptor - with the request this
+	// stream does carry, and the dump runs under the context Before returned.
+	// Without it the dump would be the one RPC on the proxy a hook never sees,
+	// so a policy a hook enforces from Before - refusing a username and
+	// password on the external listener, say - would not reach a raw WAL
+	// read. A Mock answer has no stream to be sent down, so a mocked dump
+	// ends with the hook's verdict. The default hook answers nothing, so a
+	// stock binary is unchanged.
+	ctx := stream.Context()
+	_, err := HookInterceptor(ctx, req, GetCurUserFromContextOrDefault(ctx),
+		milvuspb.MilvusService_DumpMessages_FullMethodName,
+		func(ctx context.Context, _ any) (any, error) {
+			return nil, node.dumpMessages(req, dumpMessagesStreamWithContext{stream, ctx})
+		})
+	return err
+}
+
+// dumpMessagesStreamWithContext is the dump stream, answering the context the
+// hook's Before returned in place of the stream's own.
+type dumpMessagesStreamWithContext struct {
+	milvuspb.MilvusService_DumpMessagesServer
+	ctx context.Context
+}
+
+func (s dumpMessagesStreamWithContext) Context() context.Context { return s.ctx }
+
+func (node *Proxy) dumpMessages(req *milvuspb.DumpMessagesRequest, stream milvuspb.MilvusService_DumpMessagesServer) error {
 	ctx := stream.Context()
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DumpMessages")
 	defer sp.End()
@@ -7235,6 +7218,27 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // Client Telemetry RPC Handlers
 // =============================================================================
 
+// checkTelemetryAdmin restricts telemetry administration to root when auth is enabled.
+func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if username, ok := http.AuthenticatedAdminFromContext(ctx); ok {
+		if username == util.UserRoot {
+			return nil
+		}
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return merr.WrapErrPrivilegeNotAuthenticated("telemetry %s requires authenticated root user", method)
+	}
+	if username != util.UserRoot {
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
+	return nil
+}
+
 // ClientHeartbeat handles client telemetry heartbeat requests.
 // Forwards the heartbeat to rootcoord for storage and command management.
 func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHeartbeatRequest) (*milvuspb.ClientHeartbeatResponse, error) {
@@ -7249,6 +7253,9 @@ func (node *Proxy) ClientHeartbeat(ctx context.Context, req *milvuspb.ClientHear
 // GetClientTelemetry retrieves client telemetry data from rootcoord.
 func (node *Proxy) GetClientTelemetry(ctx context.Context, req *milvuspb.GetClientTelemetryRequest) (*milvuspb.GetClientTelemetryResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "GetClientTelemetry"); err != nil {
 		return &milvuspb.GetClientTelemetryResponse{Status: merr.Status(err)}, nil
 	}
 
@@ -7266,6 +7273,9 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
 	}
+	if err := checkTelemetryAdmin(ctx, "PushClientCommand"); err != nil {
+		return &milvuspb.PushClientCommandResponse{Status: merr.Status(err)}, nil
+	}
 
 	// Forward to rootcoord
 	return node.mixCoord.PushClientCommand(ctx, req)
@@ -7274,6 +7284,9 @@ func (node *Proxy) PushClientCommand(ctx context.Context, req *milvuspb.PushClie
 // DeleteClientCommand deletes a client command at rootcoord.
 func (node *Proxy) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
+	}
+	if err := checkTelemetryAdmin(ctx, "DeleteClientCommand"); err != nil {
 		return &milvuspb.DeleteClientCommandResponse{Status: merr.Status(err)}, nil
 	}
 	// Forward to rootcoord
@@ -7290,14 +7303,9 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	mlog.Info(ctx, rpcReceived(method))
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 
-	bt := &batchUpdateManifestTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       req,
-		mixCoord:  node.mixCoord,
-	}
+	bt := NewBatchUpdateManifestTask(ctx, node, req)
 
-	if err := node.sched.ddQueue.Enqueue(bt); err != nil {
+	if err := node.sched.DdQueue.Enqueue(bt); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
 		return merr.Status(err), nil
 	}
@@ -7317,7 +7325,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	}
 
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return bt.result, nil
+	return bt.Result(), nil
 }
 
 // RefreshExternalCollection manually triggers a refresh job for an external collection
@@ -7351,8 +7359,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	if srcSet != specSet {
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg(
-				"external_source and external_spec must be both provided or both omitted on refresh (got source=%q, spec=%q)",
-				req.GetExternalSource(), req.GetExternalSpec())),
+				"external_source and external_spec must be both provided or both omitted on refresh (source_set=%t, spec_set=%t)",
+				srcSet, specSet)),
 		}, nil
 	}
 
@@ -7369,7 +7377,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Get collection info from cache (includes schema for validation)
-	collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 		return &milvuspb.RefreshExternalCollectionResponse{
@@ -7378,7 +7386,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Validate it's an external collection
-	if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+	if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 		mlog.Warn(context.TODO(), "collection is not an external collection")
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
@@ -7393,8 +7401,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// checked to defensively reassert the atomic-tuple invariant in case
 	// any legacy collection holds a half-initialized pair.
 	if !srcSet {
-		persistedSrc := collectionInfo.schema.GetExternalSource()
-		persistedSpec := collectionInfo.schema.GetExternalSpec()
+		persistedSrc := collectionInfo.Schema.GetExternalSource()
+		persistedSpec := collectionInfo.Schema.GetExternalSpec()
 		if persistedSrc == "" || persistedSpec == "" {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
@@ -7404,7 +7412,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 		}
 	}
 
-	collectionID := collectionInfo.collID
+	collectionID := collectionInfo.CollID
 
 	// Call DataCoord to refresh the external collection
 	resp, err := node.mixCoord.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7503,7 +7511,7 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 		}
 
 		// Get collection info from cache and validate it's an external collection
-		collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
@@ -7511,14 +7519,14 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 			}, nil
 		}
 
-		if !typeutil.IsExternalCollection(collectionInfo.schema.CollectionSchema) {
+		if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
 			mlog.Warn(context.TODO(), "collection is not an external collection")
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
 			}, nil
 		}
 
-		collectionID = collectionInfo.collID
+		collectionID = collectionInfo.CollID
 	}
 
 	// Call DataCoord to list jobs

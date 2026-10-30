@@ -18,11 +18,8 @@ package task
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -39,6 +36,17 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
+	// Finalize releases scheduler ownership and runs cleanup after in-flight
+	// callbacks finish. Cleanup must leave the task terminal before removing its
+	// metadata, so a previously submitted Create callback cannot dispatch it.
+	Finalize(taskID int64, cleanup func())
+	// GetPendingTaskCount returns the number of queued tasks of the given type.
+	// The queue is shared by every task type, so callers that gate admission for
+	// one kind of work must scope the count to that kind, otherwise an unrelated
+	// backlog starves them. Tasks waiting on a retry backoff deadline ARE counted:
+	// they still occupy queue depth, and excluding them would let a worker-side
+	// failure storm silently disable the caller's admission gate.
+	GetPendingTaskCount(taskType taskcommon.Type) int
 
 	Start()
 	Stop()
@@ -109,6 +117,9 @@ func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
 }
 
 func (s *globalTaskScheduler) Enqueue(task Task) {
+	s.mu.RLock(task.GetTaskID())
+	defer s.mu.RUnlock(task.GetTaskID())
+
 	if s.pendingTasks.Get(task.GetTaskID()) != nil {
 		return
 	}
@@ -126,6 +137,12 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
 }
 
+func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int {
+	return s.pendingTasks.TaskCountBy(func(task Task) bool {
+		return task.GetTaskType() == taskType
+	})
+}
+
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 	s.mu.Lock(taskID)
 	defer s.mu.Unlock(taskID)
@@ -137,6 +154,16 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		s.pendingTasks.Remove(taskID)
 	}
 	s.backoffs.Remove(taskID)
+}
+
+func (s *globalTaskScheduler) Finalize(taskID int64, cleanup func()) {
+	s.mu.Lock(taskID)
+	defer s.mu.Unlock(taskID)
+
+	s.pendingTasks.Remove(taskID)
+	s.runningTasks.Remove(taskID)
+	s.backoffs.Remove(taskID)
+	cleanup()
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -224,90 +251,34 @@ func newNodeSlotHeap(workerSlots map[int64]*session.WorkerSlots) typeutil.Heap[*
 // across all tasks in a scheduling round so later picks observe the decremented
 // slots.
 func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], taskSlot int64) int64 {
-	return s.pickNodeWithMinimumVersion(slotHeap, taskSlot, semver.Version{})
-}
-
-func (s *globalTaskScheduler) pickNodeWithMinimumVersion(
-	slotHeap typeutil.Heap[*nodeSlotEntry],
-	taskSlot int64,
-	minimumVersion semver.Version,
-) int64 {
 	if slotHeap.Len() == 0 {
 		return NullNodeID
 	}
-
-	skipped := make([]*nodeSlotEntry, 0)
-	defer func() {
-		for _, entry := range skipped {
-			slotHeap.Push(entry)
-		}
-	}()
-
-	for slotHeap.Len() > 0 {
-		entry := slotHeap.Pop()
-		if !workerSupportsMinimumVersion(entry.slots.Version, minimumVersion) {
-			skipped = append(skipped, entry)
-			continue
-		}
-		// Pop the most-available node, mutate its slots, then push it back. An element
-		// must not be mutated while it stays in the heap, or the heap order breaks.
-		if taskSlot <= 0 {
-			slotHeap.Push(entry)
-			return entry.nodeID
-		}
-		if entry.slots.AvailableSlots <= 0 {
-			// The most-available compatible node has no slot, so neither does any
-			// other compatible node.
-			slotHeap.Push(entry)
-			return NullNodeID
-		}
-		if entry.slots.AvailableSlots >= taskSlot {
-			entry.slots.AvailableSlots -= taskSlot
-		} else {
-			// No compatible node can fully satisfy the request; assign to the
-			// most-available compatible node on a best-effort basis.
-			entry.slots.AvailableSlots = 0
-		}
+	// Pop the most-available node, mutate its slots, then push it back. An element
+	// must not be mutated while it stays in the heap, or the heap order breaks.
+	entry := slotHeap.Pop()
+	if taskSlot <= 0 {
 		slotHeap.Push(entry)
 		return entry.nodeID
 	}
-	return NullNodeID
-}
-
-func workerSupportsMinimumVersion(workerVersion string, minimumVersion semver.Version) bool {
-	if minimumVersion.Equals(semver.Version{}) {
-		return true
+	if entry.slots.AvailableSlots <= 0 {
+		// The most-available node has no slot, so neither does any other node.
+		slotHeap.Push(entry)
+		return NullNodeID
 	}
-	workerVersion = strings.TrimSpace(workerVersion)
-	if workerVersion == "" {
-		return false
+	if entry.slots.AvailableSlots >= taskSlot {
+		entry.slots.AvailableSlots -= taskSlot
+	} else {
+		// No node can fully satisfy the request; assign to the most-available
+		// node on a best-effort basis and drain its slots.
+		entry.slots.AvailableSlots = 0
 	}
-
-	version, err := semver.ParseTolerant(workerVersion)
-	if err != nil {
-		// Development builds report branch-date-commit strings. A non-empty
-		// version still proves the worker understands the version response field;
-		// old DataNodes decode this new field as empty.
-		return true
-	}
-	version.Pre = nil
-	version.Build = nil
-	minimumVersion.Pre = nil
-	minimumVersion.Build = nil
-	return version.GTE(minimumVersion)
-}
-
-func minimumWorkerVersion(task Task) (semver.Version, bool) {
-	constraint, ok := task.(WorkerVersionConstraint)
-	if !ok {
-		return semver.Version{}, false
-	}
-	minimumVersion := constraint.MinimumWorkerVersion()
-	return minimumVersion, !minimumVersion.Equals(semver.Version{})
+	slotHeap.Push(entry)
+	return entry.nodeID
 }
 
 func (s *globalTaskScheduler) schedule() {
-	pendingNum := len(s.pendingTasks.TaskIDs())
+	pendingNum := s.pendingTasks.TaskCount()
 	if pendingNum == 0 {
 		return
 	}
@@ -324,24 +295,33 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
+		// Pop removes the task from the queue before it acquires this lock.
+		// Finalize may have completed in that window, so check the state before
+		// GetTaskSlot reads metadata that cleanup may already have removed.
+		taskID := task.GetTaskID()
+		s.mu.RLock(taskID)
+		switch task.GetTaskState() {
+		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+			s.backoffs.Remove(taskID)
+			s.mu.RUnlock(taskID)
+			continue
+		}
 		// A task in failure backoff gives way: it re-enters the queue after
 		// this round and is dispatched once its delay elapses, so one
 		// persistently failing task cannot occupy the scheduler.
 		if s.taskInBackoff(task) {
 			delayed = append(delayed, task)
+			s.mu.RUnlock(taskID)
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
-		minimumVersion, versionConstrained := minimumWorkerVersion(task)
-		nodeID := s.pickNodeWithMinimumVersion(slotHeap, taskSlot, minimumVersion)
+		nodeID := s.pickNode(slotHeap, taskSlot)
 		if nodeID == NullNodeID {
-			if versionConstrained {
-				delayed = append(delayed, task)
-				continue
-			}
 			s.pendingTasks.Push(task)
+			s.mu.RUnlock(taskID)
 			break
 		}
+		s.mu.RUnlock(taskID)
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
@@ -378,7 +358,17 @@ func (s *globalTaskScheduler) schedule() {
 		futures = append(futures, future)
 	}
 	for _, task := range delayed {
-		s.pendingTasks.Push(task)
+		// Finalize can run while this task waits in delayed. Re-check under
+		// the same lock before putting it back, just like the no-slot path.
+		taskID := task.GetTaskID()
+		s.mu.RLock(taskID)
+		switch task.GetTaskState() {
+		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+			s.backoffs.Remove(taskID)
+		default:
+			s.pendingTasks.Push(task)
+		}
+		s.mu.RUnlock(taskID)
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -395,6 +385,12 @@ func (s *globalTaskScheduler) check() {
 		future := s.checkPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			// A captured task may have been finalized while this callback was
+			// waiting for a worker or the task lock. Its late query must not
+			// overwrite terminal metadata or put it back in the pending queue.
+			if current, ok := s.runningTasks.Get(task.GetTaskID()); !ok || current != task {
+				return struct{}{}, nil
+			}
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:

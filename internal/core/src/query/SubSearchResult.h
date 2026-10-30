@@ -18,7 +18,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "knowhere/index/index_node.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "query/Utils.h"
 
 namespace milvus::query {
@@ -67,16 +67,6 @@ class SubSearchResult {
     }
 
  public:
-    int64_t
-    get_num_queries() const {
-        return num_queries_;
-    }
-
-    int64_t
-    get_topk() const {
-        return topk_;
-    }
-
     const int64_t*
     get_ids() const {
         return offsets_.data();
@@ -119,8 +109,10 @@ class SubSearchResult {
     }
 
     std::pair<std::vector<int64_t>, std::vector<int32_t>>
-    convert_to_element_offsets(const IArrayOffsets* array_offsets) {
-        return milvus::query::ApplyElementIDMapping(offsets_, *array_offsets);
+    convert_to_element_offsets(
+        const IStructElementOffsets* struct_element_offsets) {
+        return milvus::query::ApplyElementIDMapping(offsets_,
+                                                    *struct_element_offsets);
     }
 
  private:

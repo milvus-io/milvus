@@ -124,8 +124,8 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 	}, nil
 }
 
-// FailTxnAtVChannel fails all transactions at the specified vchannel.
-// If the vchannel is empty, it will fail all transactions.
+// FailTxnAtVChannel aborts all transactions in the specified VChannel.
+// An empty VChannel covers the whole PChannel, regardless of transaction origin.
 func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
@@ -133,7 +133,7 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
 		if vchannel == "" || session.VChannel() == vchannel {
-			session.Cleanup()
+			session.abort()
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
@@ -141,6 +141,9 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 	}
 	if len(ids) > 0 {
 		m.Logger().Info(context.TODO(), "transaction interrupted", mlog.FieldVChannel(vchannel), mlog.Int64s("txnIDs", ids))
+	}
+	if len(m.sessions) == 0 && m.closed != nil {
+		m.closed.Close()
 	}
 	m.notifyRecoverDone()
 }
@@ -184,37 +187,6 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 		return nil, status.NewTransactionExpired("txn %d not found in manager", id)
 	}
 	return session, nil
-}
-
-// RollbackAllInFlightTransactions rolls back all active transaction sessions.
-// Called ONLY in the failover scenario.
-func (m *TxnManager) RollbackAllInFlightTransactions() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.sessions) == 0 {
-		m.Logger().Info(context.TODO(), "No in-flight transactions to rollback")
-		return
-	}
-
-	m.Logger().Info(context.TODO(), "Rolling back all in-flight transactions", mlog.Int("sessionCount", len(m.sessions)))
-
-	ids := make([]int64, 0, len(m.sessions))
-	for txnID, session := range m.sessions {
-		ids = append(ids, int64(txnID))
-		session.Cleanup()
-		delete(m.sessions, txnID)
-		delete(m.recoveredSessions, txnID)
-	}
-
-	m.Logger().Info(context.TODO(), "Rolled back in-flight transactions", mlog.Int64s("txnIDs", ids))
-
-	// Signal GracefulClose if it's already waiting and all sessions are now cleared.
-	if len(m.sessions) == 0 && m.closed != nil {
-		m.closed.Close()
-	}
-
-	m.notifyRecoverDone()
 }
 
 // GracefulClose waits for all transactions to be cleaned up.

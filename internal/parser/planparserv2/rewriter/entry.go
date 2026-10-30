@@ -39,6 +39,13 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 		return v.visitTermExpr(real.TermExpr)
 	case *planpb.Expr_ValueExpr:
 		return v.visitValueExpr(real.ValueExpr, expr)
+	case *planpb.Expr_RandomSampleExpr:
+		real.RandomSampleExpr.Predicate = v.visitExpr(real.RandomSampleExpr.GetPredicate()).(*planpb.Expr)
+		return expr
+	case *planpb.Expr_ElementFilterExpr:
+		real.ElementFilterExpr.ElementExpr = v.visitExpr(real.ElementFilterExpr.GetElementExpr()).(*planpb.Expr)
+		real.ElementFilterExpr.Predicate = v.visitExpr(real.ElementFilterExpr.GetPredicate()).(*planpb.Expr)
+		return expr
 	// no optimization for other types
 	default:
 		return expr
@@ -62,6 +69,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	switch expr.GetOp() {
 	case planpb.BinaryExpr_LogicalOr:
 		parts := flattenOr(left, right)
+		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
 		parts = v.combineOrEqualsToIn(parts)
 		parts = v.combineOrTextMatchToMerged(parts)
 		parts = v.combineOrRangePredicates(parts)
@@ -71,15 +79,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		parts = v.combineOrInWithEqual(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
-		parts := flattenAnd(left, right)
-		parts = v.combineAndRangePredicates(parts)
-		parts = v.combineAndBinaryRanges(parts)
-		parts = v.combineAndInWithIn(parts)
-		parts = v.combineAndInWithNotEqual(parts)
-		parts = v.combineAndInWithRange(parts)
-		parts = v.combineAndInWithEqual(parts)
-		parts = v.combineAndNotEqualsToNotIn(parts)
-		return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
+		return v.mergeAnd(left, right)
 	default:
 		return &planpb.Expr{
 			Expr: &planpb.Expr_BinaryExpr{
@@ -91,6 +91,19 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 			},
 		}
 	}
+}
+
+func (v *visitor) mergeAnd(left, right *planpb.Expr) *planpb.Expr {
+	parts := flattenAnd(left, right)
+	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
+	parts = v.combineAndRangePredicates(parts)
+	parts = v.combineAndBinaryRanges(parts)
+	parts = v.combineAndInWithIn(parts)
+	parts = v.combineAndInWithNotEqual(parts)
+	parts = v.combineAndInWithRange(parts)
+	parts = v.combineAndInWithEqual(parts)
+	parts = v.combineAndNotEqualsToNotIn(parts)
+	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
 }
 
 func (v *visitor) visitUnaryExpr(expr *planpb.UnaryExpr) interface{} {

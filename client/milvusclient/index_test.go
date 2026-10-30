@@ -151,15 +151,17 @@ func (s *IndexSuite) TestDescribeIndex() {
 				Status: merr.Success(),
 				IndexDescriptions: []*milvuspb.IndexDescription{
 					{IndexName: indexName, Params: []*commonpb.KeyValuePair{
-						{Key: index.IndexTypeKey, Value: string(index.HNSW)},
+						{Key: index.IndexTypeKey, Value: string(index.FMINDEX)},
 					}},
 				},
 			}, nil
 		}).Once()
 
-		index, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
+		indexDesc, err := s.client.DescribeIndex(ctx, NewDescribeIndexOption(collectionName, indexName))
 		s.NoError(err)
-		s.Equal(indexName, index.Name())
+		s.Equal(indexName, indexDesc.Name())
+		s.EqualValues(index.FMINDEX, indexDesc.IndexType())
+		s.EqualValues(index.FMINDEX, indexDesc.Params()[index.IndexTypeKey])
 	})
 
 	s.Run("no_index_found", func() {

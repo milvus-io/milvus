@@ -712,71 +712,6 @@ class StringFieldChunkMetrics : public FieldChunkMetrics {
     BloomFilterPtr ngram_bloom_filter_{nullptr};
 };
 
-template <typename T>
-inline std::unique_ptr<FieldChunkMetrics>
-NewFieldMetrics(const nlohmann::json& data) {
-    std::unique_ptr<FieldChunkMetrics> none_metrics =
-        std::make_unique<NoneFieldChunkMetrics>();
-    if (!data.contains("type")) {
-        return none_metrics;
-    }
-    auto type = StringToFieldChunkMetricsType(data["type"].get<std::string>());
-    switch (type) {
-        case FieldChunkMetricsType::BOOLEAN: {
-            if (!data.contains("has_true") || !data.contains("has_false")) {
-                return none_metrics;
-            }
-            bool has_true = data["has_true"].get<bool>();
-            bool has_false = data["has_false"].get<bool>();
-            return std::make_unique<BooleanFieldChunkMetrics>(has_true,
-                                                              has_false);
-        }
-
-        case FieldChunkMetricsType::FLOAT: {
-            if (!data.contains("min") || !data.contains("max")) {
-                return none_metrics;
-            }
-            T min = data["min"].get<T>();
-            T max = data["max"].get<T>();
-            return std::make_unique<FloatFieldChunkMetrics<T>>(min, max);
-        }
-        case FieldChunkMetricsType::INT: {
-            if (!data.contains("min") || !data.contains("max")) {
-                return none_metrics;
-            }
-            T min = data["min"].get<T>();
-            T max = data["max"].get<T>();
-            BloomFilterPtr bloom_filter = nullptr;
-            if (data.contains("bloom_filter")) {
-                bloom_filter = BloomFilterFromJson(data["bloom_filter"]);
-            }
-            return std::make_unique<IntFieldChunkMetrics<T>>(
-                min, max, bloom_filter);
-        }
-
-        case FieldChunkMetricsType::STRING: {
-            if (!data.contains("min") || !data.contains("max")) {
-                return none_metrics;
-            }
-            std::string min = data["min"].get<std::string>();
-            std::string max = data["max"].get<std::string>();
-            BloomFilterPtr bloom_filter = nullptr;
-            if (data.contains("bloom_filter")) {
-                bloom_filter = BloomFilterFromJson(data["bloom_filter"]);
-            }
-            BloomFilterPtr ngram_filter = nullptr;
-            if (data.contains("ngram_bloom_filter")) {
-                ngram_filter = BloomFilterFromJson(data["ngram_bloom_filter"]);
-            }
-            return std::make_unique<StringFieldChunkMetrics>(
-                min, max, bloom_filter, ngram_filter);
-        }
-        default:
-            return none_metrics;
-    }
-    return none_metrics;
-}
-
 class SkipIndexStatsBuilder {
  public:
     SkipIndexStatsBuilder() = default;
@@ -957,7 +892,7 @@ class SkipIndexStatsBuilder {
     template <typename T>
     metricsInfo<T>
     ProcessFieldMetrics(const T* data,
-                        const bool* valid_data,
+                        ValidityView validity,
                         int64_t count) const {
         bool has_first_valid = false;
         T min{}, max{};
@@ -969,7 +904,7 @@ class SkipIndexStatsBuilder {
 
         for (int64_t i = 0; i < count; i++) {
             T value = data[i];
-            if (valid_data != nullptr && !valid_data[i]) {
+            if (validity && !validity[i]) {
                 null_count++;
                 continue;
             }

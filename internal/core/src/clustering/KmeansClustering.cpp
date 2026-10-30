@@ -18,10 +18,8 @@
 #include <algorithm>
 
 #include "common/FastMem.h"
-#include <atomic>
 #include <cstdint>
 #include <ctime>
-#include <iosfwd>
 #include <numeric>
 #include <random>
 #include <utility>
@@ -30,7 +28,6 @@
 #include "clustering/file_utils.h"
 #include "common/Common.h"
 #include "common/Consts.h"
-#include "common/FieldDataInterface.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
@@ -40,7 +37,6 @@
 #include "knowhere/cluster/cluster_node.h"
 #include "knowhere/comp/time_recorder.h"
 #include "knowhere/config.h"
-#include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -57,6 +53,30 @@ KmeansClustering::KmeansClustering(
     int64_t partition_id = file_manager_context.fieldDataMeta.partition_id;
     msg_header_ = fmt::format(
         "collection: {}, partition: {} ", collection_id, partition_id);
+}
+
+// Copy field-data byte payloads into buf up to the train-size budget,
+// advancing offset and releasing each source as it is consumed. Shared by
+// FetchDataFiles (V1) and FetchSegmentViaManifest (V3); returns bytes copied,
+// stopping once the budget is reached.
+static int64_t
+CopyFieldDatasToBuf(uint8_t* buf,
+                    const int64_t expected_train_size,
+                    std::vector<FieldDataPtr>& field_datas,
+                    int64_t& offset) {
+    int64_t fetched = 0;
+    for (auto& data : field_datas) {
+        int64_t size =
+            std::min(expected_train_size - offset, int64_t(data->Size()));
+        if (size <= 0) {
+            break;
+        }
+        fetched += size;
+        milvus::fastmem::FastMemcpy(buf + offset, data->Data(), size);
+        offset += size;
+        data.reset();
+    }
+    return fetched;
 }
 
 template <typename T>
@@ -82,17 +102,8 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
         Config config;
         config[INSERT_FILES_KEY] = group_files;
         auto field_datas = file_manager_->CacheRawDataToMemory(config);
-
-        for (auto& data : field_datas) {
-            size_t size = std::min(expected_train_size - offset, data->Size());
-            if (size <= 0) {
-                break;
-            }
-            fetched_file_size += size;
-            milvus::fastmem::FastMemcpy(buf + offset, data->Data(), size);
-            offset += size;
-            data.reset();
-        }
+        fetched_file_size +=
+            CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
     }
     AssertInfo(fetched_file_size == expected_remote_file_size,
                "file size inconsistent, expected: {}, actual: {}",
@@ -102,51 +113,86 @@ KmeansClustering::FetchDataFiles(uint8_t* buf,
 
 template <typename T>
 void
+KmeansClustering::FetchSegmentViaManifest(
+    uint8_t* buf,
+    const int64_t expected_train_size,
+    const int64_t expected_remote_file_size,
+    const std::string& manifest_path,
+    const Config& base_config,
+    int64_t& offset) {
+    // base_config already carries STORAGE_VERSION/DATA_TYPE/ELEMENT_TYPE/DIM
+    // (built once in Run, mirroring index_c.cpp get_config). Only the manifest
+    // varies per segment.
+    Config config = base_config;
+    config[SEGMENT_MANIFEST_KEY] = manifest_path;
+    auto field_datas = file_manager_->CacheRawDataToMemory(config);
+    int64_t fetched =
+        CopyFieldDatasToBuf(buf, expected_train_size, field_datas, offset);
+    AssertInfo(fetched == expected_remote_file_size,
+               "file size inconsistent, expected: {}, actual: {}",
+               expected_remote_file_size,
+               fetched);
+}
+
+template <typename T>
+void
 KmeansClustering::SampleTrainData(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
     const std::map<int64_t, int64_t>& segment_num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
     const int64_t expected_train_size,
     const int64_t dim,
     const bool random_sample,
     uint8_t* buf) {
     int64_t offset = 0;
-    std::vector<std::string> files;
 
+    // One segment-level sampling loop covers both cases:
+    //   random_sample == false -> read every segment fully, in declaration
+    //     order, so the training id-mapping maps back to segments in order
+    //     (Run sets trained_segments_num = all; no re-read in the assign stage).
+    //   random_sample == true  -> shuffle segments and read whole segments
+    //     until the train-size budget is hit (the last one is truncated). The
+    //     training id-mapping is discarded (trained_segments_num = 0) and
+    //     StreamingAssignandUpload re-reads every segment to assign.
+    // Per segment, a V3 segment (non-empty manifest) is read via
+    // FetchSegmentViaManifest, a V1 segment via FetchDataFiles. `expected` is
+    // min(full_segment, remaining_budget) so the size assert inside those
+    // readers holds for BOTH a whole read and a truncated last read, and still
+    // fires on an empty/short read (fetched = 0 != expected).
+    std::vector<int64_t> order(segment_ids.begin(), segment_ids.end());
     if (random_sample) {
-        for (auto& [segment_id, segment_files] : segment_file_paths) {
-            for (auto& segment_file : segment_files) {
-                files.emplace_back(segment_file);
-            }
-        }
-        // shuffle files
         std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
-        std::shuffle(files.begin(), files.end(), rng);
-        FetchDataFiles<T>(
-            buf, expected_train_size, expected_train_size, files, dim, offset);
-        return;
+        std::shuffle(order.begin(), order.end(), rng);
     }
 
-    // pick all segment_ids, no shuffle
-    // and pull data once each segment to reuse the id mapping for assign stage
-    for (auto i = 0; i < segment_ids.size(); i++) {
-        if (offset == expected_train_size) {
+    for (auto cur_segment_id : order) {
+        if (offset >= expected_train_size) {
             break;
         }
-        int64_t cur_segment_id = segment_ids[i];
-        files = segment_file_paths.at(cur_segment_id);
+        int64_t full = segment_num_rows.at(cur_segment_id) * dim * sizeof(T);
+        int64_t expected = std::min(full, expected_train_size - offset);
+
+        auto mit = manifest_paths.find(cur_segment_id);
+        if (mit != manifest_paths.end() && !mit->second.empty()) {
+            FetchSegmentViaManifest<T>(buf,
+                                       expected_train_size,
+                                       expected,
+                                       mit->second,
+                                       base_config,
+                                       offset);
+            continue;
+        }
+        std::vector<std::string> files = segment_file_paths.at(cur_segment_id);
         std::sort(files.begin(),
                   files.end(),
                   [](const std::string& a, const std::string& b) {
                       return std::stol(a.substr(a.find_last_of("/") + 1)) <
                              std::stol(b.substr(b.find_last_of("/") + 1));
                   });
-        FetchDataFiles<T>(buf,
-                          expected_train_size,
-                          segment_num_rows.at(cur_segment_id) * dim * sizeof(T),
-                          files,
-                          dim,
-                          offset);
+        FetchDataFiles<T>(
+            buf, expected_train_size, expected, files, dim, offset);
     }
 }
 
@@ -252,6 +298,8 @@ KmeansClustering::StreamingAssignandUpload(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
     const std::map<int64_t, int64_t>& num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
     const int64_t dim,
     const int64_t trained_segments_num,
     const int64_t num_clusters) {
@@ -311,12 +359,24 @@ KmeansClustering::StreamingAssignandUpload(
             int64_t num_row = num_rows.at(segment_id);
             std::unique_ptr<T[]> buf = std::make_unique<T[]>(num_row * dim);
             int64_t offset = 0;
-            FetchDataFiles<T>(reinterpret_cast<uint8_t*>(buf.get()),
-                              INT64_MAX,
-                              num_row * dim * sizeof(T),
-                              insert_files.at(segment_id),
-                              dim,
-                              offset);
+            int64_t expected = num_row * dim * sizeof(T);
+            auto mit = manifest_paths.find(segment_id);
+            if (mit != manifest_paths.end() && !mit->second.empty()) {
+                FetchSegmentViaManifest<T>(
+                    reinterpret_cast<uint8_t*>(buf.get()),
+                    INT64_MAX,
+                    expected,
+                    mit->second,
+                    base_config,
+                    offset);
+            } else {
+                FetchDataFiles<T>(reinterpret_cast<uint8_t*>(buf.get()),
+                                  INT64_MAX,
+                                  expected,
+                                  insert_files.at(segment_id),
+                                  dim,
+                                  offset);
+            }
             auto dataset = GenDataset(num_row, dim, buf.release());
             dataset->SetIsOwner(true);
             auto res = cluster_node.Assign(*dataset);
@@ -361,6 +421,22 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         insert_files[pair.first] = std::move(segment_files);
     }
 
+    std::map<int64_t, std::string> manifest_paths(
+        config.manifest_paths().begin(), config.manifest_paths().end());
+
+    // Prepared once, mirroring indexbuilder's get_config(). SEGMENT_MANIFEST_KEY
+    // is stamped per segment by FetchSegmentViaManifest, because analyze is
+    // multi-segment while an index build job covers a single segment.
+    // element_type is DataType::NONE for FloatVector; the manifest reader only
+    // consults it for array/vector-array types, so NONE is correct here.
+    Config base_config;
+    base_config[STORAGE_VERSION_KEY] = int64_t(STORAGE_V3);
+    base_config[DATA_TYPE_KEY] =
+        static_cast<DataType>(config.field_schema().data_type());
+    base_config[ELEMENT_TYPE_KEY] =
+        static_cast<DataType>(config.field_schema().element_type());
+    base_config[DIM_KEY] = config.dim();
+
     std::map<int64_t, int64_t> num_rows(config.num_rows().begin(),
                                         config.num_rows().end());
     auto num_clusters = config.num_clusters();
@@ -394,8 +470,9 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     for (auto& [segment_id, num_row_each_segment] : num_rows) {
         data_num += num_row_each_segment;
         segment_ids.emplace_back(segment_id);
-        AssertInfo(insert_files.find(segment_id) != insert_files.end(),
-                   "segment id {} not exist in insert files",
+        AssertInfo(insert_files.find(segment_id) != insert_files.end() ||
+                       manifest_paths.find(segment_id) != manifest_paths.end(),
+                   "segment id {} has neither insert files nor manifest",
                    segment_id);
     }
     size_t trained_segments_num = 0;
@@ -432,6 +509,8 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
     SampleTrainData<T>(segment_ids,
                        insert_files,
                        num_rows,
+                       manifest_paths,
+                       base_config,
                        train_size_final,
                        dim,
                        random_sample,
@@ -489,6 +568,8 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                                 segment_ids,
                                 insert_files,
                                 num_rows,
+                                manifest_paths,
+                                base_config,
                                 dim,
                                 trained_segments_num,
                                 num_clusters);
@@ -507,6 +588,8 @@ KmeansClustering::StreamingAssignandUpload<float>(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
     const std::map<int64_t, int64_t>& num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
     const int64_t dim,
     const int64_t trained_segments_num,
     const int64_t num_clusters);
@@ -518,11 +601,23 @@ KmeansClustering::FetchDataFiles<float>(uint8_t* buf,
                                         const std::vector<std::string>& files,
                                         const int64_t dim,
                                         int64_t& offset);
+
+template void
+KmeansClustering::FetchSegmentViaManifest<float>(
+    uint8_t* buf,
+    const int64_t expected_train_size,
+    const int64_t expected_remote_file_size,
+    const std::string& manifest_path,
+    const Config& base_config,
+    int64_t& offset);
+
 template void
 KmeansClustering::SampleTrainData<float>(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
     const std::map<int64_t, int64_t>& segment_num_rows,
+    const std::map<int64_t, std::string>& manifest_paths,
+    const Config& base_config,
     const int64_t expected_train_size,
     const int64_t dim,
     const bool random_sample,
