@@ -134,6 +134,50 @@ func TestSegmentChangeCleanerUsesCopyTaskIdentity(t *testing.T) {
 	require.True(t, cleaner.producerFinished(t.Context(), g, nil))
 }
 
+func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
+	ctx := t.Context()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	compaction := &model.SegmentChangeGroup{
+		GroupID: 5000, Source: model.SegmentChangeSourceMixCompaction, SourceJobID: 5000,
+		CollectionID: 10, State: model.SegmentChangeStateCommitted,
+		InitialSegmentIDs: []int64{1001}, NewSegmentIDs: []int64{1002},
+		SortJobs: map[int64]model.SegmentChangeSortJob{6000: {InputSegmentID: 1001, OutputSegmentID: 1002}},
+	}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, compaction))
+	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+		PlanID: 5000, CollectionID: 10, State: datapb.CompactionTaskState_completed,
+	}))
+	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+		PlanID: 6000, CollectionID: 10, State: datapb.CompactionTaskState_executing,
+	}))
+	importGroup := &model.SegmentChangeGroup{
+		GroupID: 7000, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, State: model.SegmentChangeStateCommitted,
+	}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, importGroup))
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, State: internalpb.ImportJobState_Importing}}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(8000)).Return(job).Maybe()
+	inspector := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	server := &Server{meta: m, importMeta: importMeta, segmentChangeInspector: inspector}
+	server.initSegmentChangeCleaner()
+	require.Same(t, m, inspector.cleaner.mt)
+	require.Same(t, importMeta, inspector.cleaner.importMeta)
+	require.Same(t, m.externalCollectionRefreshMeta, inspector.cleaner.refreshMeta)
+	inspector.checkAllGroups(ctx)
+	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 5000), "unfinished sort task retains the compaction group")
+	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 7000), "unfinished import job retains the import group")
+
+	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+		PlanID: 6000, CollectionID: 10, State: datapb.CompactionTaskState_completed,
+	}))
+	job.State = internalpb.ImportJobState_Completed
+	inspector.checkAllGroups(ctx)
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 5000))
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 7000))
+}
+
 func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing.T) {
 	ctx := t.Context()
 	m, err := newMemoryMeta(t)
@@ -211,4 +255,31 @@ func TestSegmentChangeGroupCompositeWriteCannotOrphanNewSuccessor(t *testing.T) 
 		require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 1001))
 		require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 1002))
 	}
+}
+
+func TestSegmentChangeGroupCreationRequiresPersistedPredecessor(t *testing.T) {
+	ctx := t.Context()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	first := &model.SegmentChangeGroup{
+		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateCommitted,
+	}
+	successor := &model.SegmentChangeGroup{
+		GroupID: 1002, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateStaged,
+		PreviousGroupID: 1001, SubgroupOrdinal: 1,
+	}
+	require.ErrorIs(t, m.AddSegmentChangeGroup(ctx, successor), merr.ErrDataIntegrity)
+	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(successor)}), merr.ErrDataIntegrity)
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 1002))
+
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, first))
+	wrongJob := successor.Clone()
+	wrongJob.SourceJobID++
+	require.ErrorIs(t, m.AddSegmentChangeGroup(ctx, wrongJob), merr.ErrDataIntegrity)
+	require.NoError(t, m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(successor)}))
+	require.NotNil(t, reloadSegmentChangeMeta(t, m).GetSegmentChangeGroup(ctx, 10, 1002))
 }

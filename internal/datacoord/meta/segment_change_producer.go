@@ -122,3 +122,36 @@ func (m *Meta) AbortProducerChange(ctx context.Context, g *model.SegmentChangeGr
 	}
 	return m.ReclaimSegmentChangeGroup(ctx, g)
 }
+
+// Failed import jobs must release staged groups before their task and job
+// metadata can be collected. Both V2 and V3 use this idempotent path.
+func (m *Meta) AbortFailedImportGroups(ctx context.Context, jobID int64) error {
+	if m == nil {
+		return nil
+	}
+	if m.FailedImportGroupsHaveCommitFence(jobID) {
+		return merr.WrapErrServiceUnavailableMsg("cannot reclaim import job %d after its WAL commit fence", jobID)
+	}
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+		for _, group := range m.ProducerChangeGroups(source, jobID, "") {
+			if err := m.AbortProducerChange(ctx, group, "import job failed before WAL commit"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Meta) FailedImportGroupsHaveCommitFence(jobID int64) bool {
+	if m == nil {
+		return false
+	}
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+		for _, group := range m.ProducerChangeGroups(source, jobID, "") {
+			if groupHasCommittedImportFence(group) {
+				return true
+			}
+		}
+	}
+	return false
+}

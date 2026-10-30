@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
@@ -862,19 +861,9 @@ func (c *Checker) CheckCommittingJob(job ImportJob) {
 }
 
 func (c *Checker) CheckFailedJob(job ImportJob) {
-	if c.Meta != nil {
-		for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
-			for _, g := range c.Meta.ProducerChangeGroups(source, job.GetJobID(), "") {
-				if meta.GroupHasCommittedImportFence(g) {
-					mlog.Warn(c.Ctx, "refusing failed-job cleanup after an import WAL commit", mlog.FieldJobID(job.GetJobID()))
-					return
-				}
-				if err := c.Meta.AbortProducerChange(c.Ctx, g, "import job failed before WAL commit"); err != nil {
-					mlog.Warn(c.Ctx, "cannot reclaim failed import group", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
-					return
-				}
-			}
-		}
+	if err := c.Meta.AbortFailedImportGroups(c.Ctx, job.GetJobID()); err != nil {
+		mlog.Warn(c.Ctx, "cannot reclaim failed import group", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+		return
 	}
 	c.tryFailingTasks(job)
 }
