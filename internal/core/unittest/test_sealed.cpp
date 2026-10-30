@@ -14,6 +14,7 @@
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
 #include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -6545,7 +6546,8 @@ TEST(SealedSegmentCowState,
                                               &warmup_started,
                                               warmup_dlist.get());
     auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    published_cache_index->Warmup(nullptr, warmup_pool);
+    folly::coro::blockingWait(
+        published_cache_index->Warmup(nullptr, warmup_pool));
     ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
               std::future_status::ready);
     ASSERT_FALSE(published_warmup_token.isCancellationRequested());
