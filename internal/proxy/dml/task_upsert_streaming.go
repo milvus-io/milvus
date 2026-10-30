@@ -53,7 +53,7 @@ func (ut *UpsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *
 	defer func() { ut.req.NumRows = ut.partialState.originalCount }()
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
-			delay := partialUpdateCASRetryBackoff * time.Duration(1<<min(attempt-1, 2))
+			delay := partialUpdateCASRetryBackoff * (1 << min(attempt-1, 2))
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
