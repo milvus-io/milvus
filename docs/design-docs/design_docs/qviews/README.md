@@ -31,6 +31,8 @@ per-worker/subquery selection, and empty-shard MVCC/result normalization.
 
 For the detailed query-path flow, service boundary, client orchestration, and
 shard discovery design, see [Query Client Design](query/query_client.md).
+For VChannel replica discovery from StreamingNode, see
+[Replica Discovery](query/replica_discovery.md).
 For node-side Phase 1 planning and Phase 2 execution, see
 [Query Plan Node-Side Design](query/query_plan.md) and
 [Query Execution Node-Side Design](query/query_execution.md).
@@ -534,3 +536,10 @@ for its serving views. Full mixed-version upgrade validation is a separate check
 
 [DDL visibility](ddl_visibility.md) specifies the DataVersion and configuration
 fences and the operations still deferred.
+
+## Partition statistics and pruning
+
+[Global segment pruning](query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

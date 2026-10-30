@@ -114,6 +114,7 @@ type Manager interface {
 type DataViewRef = qviews.DataViewRef
 
 type LoadableSegment struct {
+	PartitionStatsVersion       int64
 	SchemaVersion               int32
 	SegmentID                   int64
 	VChannel                    string
@@ -780,8 +781,9 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 				segments = append(segments, segment)
 			}
 			nativeShard.Partitions = append(nativeShard.Partitions, &api.PartitionDataView{
-				PartitionID: partition.GetPartitionId(),
-				Segments:    segments,
+				PartitionID:           partition.GetPartitionId(),
+				PartitionStatsVersion: partition.GetPartitionStatsVersion(),
+				Segments:              segments,
 			})
 		}
 		coll.Shards = append(coll.Shards, nativeShard)
@@ -1094,6 +1096,8 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			)
 		}
 		location := segmentLocation{vchannel: segment.VChannel, partitionID: segment.PartitionID}
+		partition := findOrCreatePartition(findOrCreateShard(view, segment.VChannel), segment.PartitionID)
+		partition.PartitionStatsVersion = max(partition.PartitionStatsVersion, segment.PartitionStatsVersion)
 		if known, ok := slots[segment.SegmentID]; ok {
 			if known.location != location {
 				return merr.WrapErrDataIntegrityMsg("Segment %d has conflicting DataView locations", segment.SegmentID)
@@ -1132,8 +1136,6 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			}
 			continue
 		}
-		shard := findOrCreateShard(view, segment.VChannel)
-		partition := findOrCreatePartition(shard, segment.PartitionID)
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
 		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.ManifestVersion)
 		partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)

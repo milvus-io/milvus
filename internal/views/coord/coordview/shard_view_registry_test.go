@@ -719,3 +719,43 @@ func TestRegistryPublicationReplayRejectsRetiredManager(t *testing.T) {
 	require.NoError(t, replacement.RequestRelease(context.Background()))
 	require.Len(t, published, 4)
 }
+
+func TestRegistry_LoadedSegmentsOnNode(t *testing.T) {
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: shardA.VChannel}
+	reg := &ShardViewRegistry{
+		stats: map[qviews.ShardID]*ShardStats{
+			shardA: {Segments: map[int64]*SegmentStats{
+				1: {Nodes: map[int64]SegmentState{10: SegmentStateUp}},
+				2: {Nodes: map[int64]SegmentState{10: SegmentStateReady}},
+				3: {Nodes: map[int64]SegmentState{10: SegmentStatePreparing}},
+				4: {Nodes: map[int64]SegmentState{10: SegmentStateUnrecoverable}},
+				5: {Nodes: map[int64]SegmentState{20: SegmentStateUp}},
+			}},
+			shardB: {Segments: map[int64]*SegmentStats{
+				1: {Nodes: map[int64]SegmentState{10: SegmentStateReady}},
+			}},
+		},
+		nodeShards: map[int64]map[qviews.ShardID]struct{}{10: {shardA: {}, shardB: {}}, 20: {shardA: {}}},
+	}
+	require.ElementsMatch(t, []int64{1, 2}, reg.LoadedSegmentsOnNode(10))
+	require.Equal(t, []int64{5}, reg.LoadedSegmentsOnNode(20))
+	require.Empty(t, reg.LoadedSegmentsOnNode(30))
+	// Removing the last reported resource must not leave a phantom segment.
+	delete(reg.stats[shardA].Segments, 2)
+	require.Equal(t, []int64{1}, reg.LoadedSegmentsOnNode(10))
+}
+
+func TestRegistry_CollectionIDsFollowResidentManagers(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: shardA.VChannel}
+	a, b := reg.Ensure(shardA), reg.Ensure(shardB)
+	ids := reg.CollectionIDs()
+	require.Equal(t, []int64{100}, ids)
+	require.NoError(t, a.RequestRelease(context.Background()))
+	require.Equal(t, []int64{100}, reg.CollectionIDs())
+	require.NoError(t, b.RequestRelease(context.Background()))
+	require.Empty(t, reg.CollectionIDs())
+	require.Equal(t, []int64{100}, ids)
+}

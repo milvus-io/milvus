@@ -101,9 +101,8 @@ func (s *Suite) TestCompactionTypesAreCounted() {
 }
 
 // TestClusteringCompactionAndSegmentPrune covers the two features that need a
-// clustering key: the clustering compaction type, and the QueryNode's
-// segment_prune counter, which only fires once the partition statistics that
-// compaction produced have reached the delegator.
+// clustering key: the clustering compaction type and the segment_prune counter.
+// QueryView readiness requires SN to load the referenced partition statistics.
 func (s *Suite) TestClusteringCompactionAndSegmentPrune() {
 	ctx := context.Background()
 	name := "fu_clustering_" + funcutil.GenRandomStr()
@@ -181,9 +180,8 @@ func (s *Suite) TestClusteringCompactionAndSegmentPrune() {
 	s.Require().Equal(commonpb.ErrorCode_Success, load.GetErrorCode(), load.GetReason())
 	s.WaitForLoad(ctx, name)
 
-	// Pruning needs the partition statistics the compaction wrote to reach the
-	// delegator, which the leader checker does on its own schedule; retry the
-	// search until the counter moves rather than assuming it is already there.
+	// Load completion includes statistics readiness. Allow feature-report delivery
+	// to catch up before checking the counter.
 	before := execFeatures(s.report(ctx))["segment_prune"]
 	s.Require().Eventually(func() bool {
 		req := integration.ConstructSearchRequest("", name, "cluster_key == 42", "vec",
@@ -195,8 +193,7 @@ func (s *Suite) TestClusteringCompactionAndSegmentPrune() {
 		return execFeatures(s.report(ctx))["segment_prune"] > before
 	}, 180*time.Second, 3*time.Second, "a clustering-key filter should prune segments")
 
-	// The query path prunes in the delegator too, and returns the bit on its
-	// retrieve results.
+	// The query path uses the same global pruning and propagates its feature bit.
 	before = execFeatures(s.report(ctx))["segment_prune"]
 	query, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName:        name,
@@ -207,6 +204,38 @@ func (s *Suite) TestClusteringCompactionAndSegmentPrune() {
 	s.Require().NoError(err)
 	s.Require().Equal(commonpb.ErrorCode_Success, query.GetStatus().GetErrorCode(), query.GetStatus().GetReason())
 	s.Greater(execFeatures(s.report(ctx))["segment_prune"], before, "a clustering-key query filter should prune segments")
+	var values []int64
+	for _, field := range query.GetFieldsData() {
+		if field.GetFieldName() == "cluster_key" {
+			values = field.GetScalars().GetLongData().GetData()
+		}
+	}
+	s.Require().Len(values, 100, "pruning must retain every matching row")
+	for _, value := range values {
+		s.EqualValues(42, value)
+	}
+
+	// All sealed candidates can be pruned. Exercise the no-QN-work response,
+	// including field refill, empty count, and feature accounting.
+	emptySearch := integration.ConstructSearchRequest("", name, "cluster_key == -1", "vec",
+		schemapb.DataType_FloatVector, nil, metric.L2, map[string]any{"nprobe": 4}, 1, dim, 5, -1)
+	emptySearch.SearchParams = append(emptySearch.SearchParams, &commonpb.KeyValuePair{Key: "ignore_growing", Value: "true"})
+	emptySearch.UseDefaultConsistency = true
+	emptySearch.OutputFields = []string{"cluster_key"}
+	before = execFeatures(s.report(ctx))["segment_prune"]
+	empty, err := s.Cluster.MilvusClient.Search(ctx, emptySearch)
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, empty.GetStatus().GetErrorCode(), empty.GetStatus().GetReason())
+	s.Equal([]int64{0}, empty.GetResults().GetTopks())
+	s.Greater(execFeatures(s.report(ctx))["segment_prune"], before)
+	count, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName: name, Expr: "cluster_key == -1", OutputFields: []string{"count(*)"},
+		UseDefaultConsistency: true,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, count.GetStatus().GetErrorCode(), count.GetStatus().GetReason())
+	s.Require().Len(count.GetFieldsData(), 1)
+	s.Equal([]int64{0}, count.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 // requireCounterEventually waits for a counter to become non-zero, so a test

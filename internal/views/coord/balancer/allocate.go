@@ -179,8 +179,9 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 	}
 	for _, partition := range shard.Partitions {
 		protoPartition := &viewpb.DataViewOfPartition{
-			PartitionId: partition.PartitionID,
-			SegmentIds:  make([]int64, 0, len(partition.Segments)),
+			PartitionStatsVersion: partition.PartitionStatsVersion,
+			PartitionId:           partition.PartitionID,
+			SegmentIds:            make([]int64, 0, len(partition.Segments)),
 		}
 		for _, segment := range partition.Segments {
 			protoPartition.SegmentIds = append(protoPartition.SegmentIds, segment.SegmentID)

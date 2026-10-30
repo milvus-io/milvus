@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -510,8 +511,13 @@ func (s *dqlRetryServer) QueryOnView(context.Context, *viewpb.QueryOnViewRequest
 }
 
 type dqlRetryPlanClient struct {
+	replicas *replicadiscovery.Manager
 	queryclient.QueryPlanClient
 	client viewpb.QueryPlanServiceClient
+}
+
+func (c *dqlRetryPlanClient) SubscribeReplicas(vc string, h replicadiscovery.Handler) (*replicadiscovery.Subscription, error) {
+	return c.replicas.Subscribe(vc, h)
 }
 
 func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
@@ -558,10 +564,17 @@ func newDQLRetryClient(t *testing.T, phase string) *dqlRetryClient {
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
+	directory := replicadiscovery.NewDirectory()
+	directory.Set("v0", 1, &qviews.QueryViewVersion{})
+	manager := replicadiscovery.NewManager(func(ctx context.Context, _ string) (replicadiscovery.Stream, error) {
+		return replicadiscovery.NewLocalStream(ctx, directory.Watch(), nil), nil
+	})
+	t.Cleanup(func() { manager.Close(); directory.Close() })
 	client := &dqlRetryClient{server: server}
 	client.Client = queryclient.NewLegacyViewQueryClient(queryclient.ViewQueryClientConfig{},
-		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn)},
+		&dqlRetryPlanClient{client: viewpb.NewQueryPlanServiceClient(conn), replicas: manager},
 		&dqlRetryServiceClient{client: viewpb.NewViewQueryServiceClient(conn)}, client)
+	t.Cleanup(client.Close)
 	return client
 }
 

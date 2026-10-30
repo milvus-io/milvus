@@ -562,3 +562,10 @@ placement statistics forward the retained DataViewRef's physical and logical
 statistics together. A single `LostStats` flag describes absence of the entire
 footprint; known zero values do not imply missing statistics. The Balancer never
 recalculates the model or reads `segmentBaseCost`.
+
+## Partition statistics and pruning
+
+[Global segment pruning](query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

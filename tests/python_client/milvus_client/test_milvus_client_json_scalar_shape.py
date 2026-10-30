@@ -1,5 +1,4 @@
 import pytest
-
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel
@@ -33,11 +32,19 @@ class TestJsonScalarShape(TestMilvusClientV2Base):
             rows.extend({"id": i, "v": [1.0, 1.0], "j": {}} for i in range(100, 3100))
             client.insert(name, rows)
             expressions = [
-                "j['a'] == 1", "j['a'] != 1", "j['a'] > 0",
-                "j['a'] in [1, 2]", "j['a'] not in [1, 2]", "not (j['a'] == 1)",
-                "j['a'] is null", "j['a'] is not null",
-                "j['b'] == true", "j['b'] != true",
-                "j['s'] == 'one'", "j['s'] != 'one'", "j['s'] like 'on%'",
+                "j['a'] == 1",
+                "j['a'] != 1",
+                "j['a'] > 0",
+                "j['a'] in [1, 2]",
+                "j['a'] not in [1, 2]",
+                "not (j['a'] == 1)",
+                "j['a'] is null",
+                "j['a'] is not null",
+                "j['b'] == true",
+                "j['b'] != true",
+                "j['s'] == 'one'",
+                "j['s'] != 'one'",
+                "j['s'] like 'on%'",
             ]
 
             def evaluate():
@@ -60,8 +67,9 @@ class TestJsonScalarShape(TestMilvusClientV2Base):
             client.load_collection(name)
             assert evaluate() == expected
             indexes = client.prepare_index_params()
-            indexes.add_index("j", index_name="json_flat", index_type="INVERTED",
-                              params={"json_cast_type": "JSON", "json_path": "j"})
+            indexes.add_index(
+                "j", index_name="json_flat", index_type="INVERTED", params={"json_cast_type": "JSON", "json_path": "j"}
+            )
             client.create_index(name, indexes)
             assert client.describe_index(name, "json_flat")["indexed_rows"] == len(rows)
             client.release_collection(name)
