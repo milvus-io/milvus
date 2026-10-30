@@ -640,3 +640,14 @@ The first node-side Phase 2 milestone is:
 statistics references, SN resource readiness and shared ownership, and per-worker
 Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
 QN applies the recorded selection before acquiring execution handles.
+
+## Filter-only execution
+
+SearchOnView optionally carries SearchExecutionOptions (FilterOnly and
+EnableExprCache). The server attaches these request-local controls to the
+provider's task owner; SN/QN schedulers pass them to the native search adapters.
+Acquisition, exact-instance Transform waits and release are identical to normal
+search. QN returns filter counts and segment identities through the existing
+SearchResults envelope. The client alone orchestrates the two rounds; workers
+do not call other workers, replan or select another View. See the
+[filter-first client flow](query_client.md#filter-first-ann-search).

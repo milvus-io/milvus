@@ -70,6 +70,7 @@ type qviewsRuntime struct {
 }
 
 type qviewsRuntimeDependencies struct {
+	replicaResources   loadmgr.ReplicaConfigResources
 	loadInfos          *loadmgr.LoadInfoStore
 	dataViewReconciler qvresource.DataViewReconciler
 	vchannels          func(context.Context, int64) ([]string, error)
@@ -167,6 +168,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		func(collectionID int64) {
 			balancerController.Trigger(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
 		},
+		deps.replicaResources,
 	)
 
 	runtime := &qviewsRuntime{

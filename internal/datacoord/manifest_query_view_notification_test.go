@@ -75,31 +75,20 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 				NumOfRows: 5, SchemaVersion: 1,
 			})
 			m.segments.SetSegment(10, segment)
-			m.queryViewLoadInfoNotifier = noopQueryViewLoadInfoNotifier{}
-			notifications := 0
 			recomputes := 0
 			recompute := mockey.Mock((*meta).recomputeDataView).To(func(got *meta, ctx context.Context, collectionID int64) {
 				require.Same(t, m, got)
 				require.EqualValues(t, 1, collectionID)
 				require.True(t, m.segMu.TryLock(), "recompute must run after publication outside segMu")
 				m.segMu.Unlock()
+				require.True(t, m.getSegmentManifestLocks().TryLock(10), "recompute must run outside manifest lock")
+				m.getSegmentManifestLocks().Unlock(10)
 				require.Equal(t, newManifest, m.GetSegment(ctx, 10).GetManifestPath())
 				recomputes++
 			}).Build()
 			defer recompute.UnPatch()
-			notifier := mockey.Mock(noopQueryViewLoadInfoNotifier.NotifySegments).To(func(_ noopQueryViewLoadInfoNotifier, collectionID int64, ids ...int64) {
-				notifications++
-				require.EqualValues(t, 1, collectionID)
-				require.Equal(t, []int64{10}, ids)
-				require.True(t, m.segMu.TryLock(), "notification must run outside segMu")
-				m.segMu.Unlock()
-				require.True(t, m.getSegmentManifestLocks().TryLock(10), "notification must run outside manifest lock")
-				m.getSegmentManifestLocks().Unlock(10)
-				require.Equal(t, newManifest, m.GetSegment(context.Background(), 10).GetManifestPath())
-			}).Build()
-			defer notifier.UnPatch()
 
-			// Failed persistence must leave both the in-memory pointer and subscribers
+			// Failed persistence must leave both the in-memory pointer and DataView
 			// unchanged. A canceled context also stops the atomic-flush retry loop.
 			update := mockey.Mock((*catalogkv.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
 			defer update.UnPatch()
@@ -108,14 +97,12 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			require.Error(t, tc.apply(ctx, m))
-			require.Zero(t, notifications)
 			require.Zero(t, recomputes)
 			require.Equal(t, oldManifest, m.GetSegment(context.Background(), 10).GetManifestPath())
 			update.UnPatch()
 			alter.UnPatch()
 
 			require.NoError(t, tc.apply(context.Background(), m))
-			require.Equal(t, 1, notifications)
 			require.Positive(t, recomputes, "committed Manifest must also update DataView requirements")
 			// Retrying a committed result may notify again, but cannot lose the update
 			// or move the Manifest backwards.
@@ -135,17 +122,17 @@ func TestManifestPublicationGroupsNotifications(t *testing.T) {
 			StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segment", 1),
 		}))
 	}
-	m.queryViewLoadInfoNotifier = noopQueryViewLoadInfoNotifier{}
-	observed := make(map[int64][]int64)
-	notifier := mockey.Mock(noopQueryViewLoadInfoNotifier.NotifySegments).To(func(_ noopQueryViewLoadInfoNotifier, collectionID int64, ids ...int64) {
-		observed[collectionID] = append(observed[collectionID], ids...)
+	observed := make(map[int64]int)
+	notifier := mockey.Mock((*meta).recomputeDataView).To(func(got *meta, _ context.Context, collectionID int64) {
+		require.Same(t, m, got)
+		observed[collectionID]++
 	}).Build()
 	defer notifier.UnPatch()
 	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), UpdateManifestVersion(10, 2), UpdateManifestVersion(11, 2), UpdateManifestVersion(20, 2)))
 	require.Len(t, observed, 2)
-	require.ElementsMatch(t, []int64{10, 11}, observed[1])
-	require.Equal(t, []int64{20}, observed[2])
+	require.Equal(t, 1, observed[1])
+	require.Equal(t, 1, observed[2])
 	clear(observed)
 	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), UpdateManifestVersion(10, 2), UpdateManifestVersion(20, 1)))
-	require.Empty(t, observed, "unchanged or stale Manifest must not refresh subscribers")
+	require.Empty(t, observed, "unchanged or stale Manifest must not request recompute")
 }

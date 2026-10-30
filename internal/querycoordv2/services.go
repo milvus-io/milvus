@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -940,69 +939,6 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	mlog.Info(context.TODO(), "update load config request finished")
 
 	return merr.Success(), nil
-}
-
-func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-	jobs := make([]job.Job, 0, len(collectionIDs))
-	for _, collectionID := range collectionIDs {
-		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection == nil {
-			err := merr.WrapErrCollectionNotLoaded(collectionID)
-			mlog.Warn(context.TODO(), "failed to update load config", mlog.Err(err))
-			continue
-		}
-
-		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
-		left, right := lo.Difference(collectionUsedRG, newRGs)
-		rgChanged := len(left) > 0 || len(right) > 0
-		replicaChanged := collection.GetReplicaNumber() != newReplicaNum
-
-		subReq := &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  []int64{collectionID},
-			ReplicaNumber:  newReplicaNum,
-			ResourceGroups: newRGs,
-		}
-		if len(subReq.GetResourceGroups()) == 0 {
-			subReq.ResourceGroups = collectionUsedRG
-			rgChanged = false
-		}
-
-		if subReq.GetReplicaNumber() == 0 {
-			subReq.ReplicaNumber = collection.GetReplicaNumber()
-			replicaChanged = false
-		}
-
-		if !replicaChanged && !rgChanged {
-			mlog.Info(context.TODO(), "no need to update load config", mlog.Int64("collectionID", collectionID))
-			continue
-		}
-
-		waitRG := len(needWaitRGReady) > 0 && needWaitRGReady[0]
-		updateJob := job.NewUpdateLoadConfigJob(
-			ctx,
-			subReq,
-			s.meta,
-			s.targetMgr,
-			s.targetObserver,
-			s.collectionObserver,
-			s.proxyClientManager,
-			false,
-			waitRG,
-		)
-
-		jobs = append(jobs, updateJob)
-		s.jobScheduler.Add(updateJob)
-	}
-
-	var err error
-	for _, job := range jobs {
-		subErr := job.Wait()
-		if subErr != nil {
-			err = merr.Combine(err, subErr)
-		}
-	}
-
-	return err
 }
 
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {

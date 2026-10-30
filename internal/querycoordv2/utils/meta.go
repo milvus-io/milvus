@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/samber/lo"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -112,23 +112,7 @@ func RecoverAllCollection(m *meta.Meta) {
 // collection already holds before deciding whether to admit it reads the
 // same answer from here.
 func ReplicaNumberByResourceGroup(resourceGroups []string, replicaNumber int32) (map[string]int, error) {
-	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return nil, merr.WrapErrParameterInvalidMsg("replica=[%d] resource group=[%s], resource group num can only be 0, 1 or same as replica number", replicaNumber, strings.Join(resourceGroups, ","))
-	}
-	replicaNumInRG := make(map[string]int)
-	if len(resourceGroups) == 0 {
-		// All replicas should be spawned in default resource group.
-		replicaNumInRG[meta.DefaultResourceGroupName] = int(replicaNumber)
-	} else if len(resourceGroups) == 1 {
-		// All replicas should be spawned in the given resource group.
-		replicaNumInRG[resourceGroups[0]] = int(replicaNumber)
-	} else {
-		// replicas should be spawned in different resource groups one by one.
-		for _, rgName := range resourceGroups {
-			replicaNumInRG[rgName] += 1
-		}
-	}
-	return replicaNumInRG, nil
+	return loadmgr.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
 }
 
 func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, replicaNumber int32, checkNodeNum bool) (map[string]int, error) {

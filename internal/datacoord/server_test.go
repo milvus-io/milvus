@@ -670,7 +670,8 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Len(t, indexInfos, 1)
-		info := infos[0]
+		require.NoError(t, merr.Error(infos[0].GetStatus()))
+		info := infos[0].GetLoadInfo()
 		assert.Equal(t, segmentID, info.GetSegmentID())
 		assert.Equal(t, partitionID, info.GetPartitionID())
 		assert.Equal(t, collectionID, info.GetCollectionID())
@@ -771,8 +772,8 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Len(t, indexInfos, 1)
-		require.Len(t, infos[0].GetIndexInfos(), 1)
-		segmentIndex := infos[0].GetIndexInfos()[0]
+		require.Len(t, infos[0].GetLoadInfo().GetIndexInfos(), 1)
+		segmentIndex := infos[0].GetLoadInfo().GetIndexInfos()[0]
 		assert.Equal(t, indexInfos[0].GetFieldID(), segmentIndex.GetFieldID())
 		assert.Equal(t, indexInfos[0].GetIndexName(), segmentIndex.GetIndexName())
 		assert.Contains(t, segmentIndex.GetIndexParams(), &commonpb.KeyValuePair{
@@ -784,9 +785,11 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
-		_, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404})
+		results, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404})
 
-		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.ErrorIs(t, merr.Error(results[0].GetStatus()), merr.ErrSegmentNotFound)
 	})
 
 	t.Run("preserves manifest json placeholders", func(t *testing.T) {
@@ -820,10 +823,10 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
-		assert.Equal(t, parentManifest, infos[0].GetManifestPath())
-		assert.Equal(t, uint64(123), infos[0].GetTransformStartAfterTimetick())
-		assert.Equal(t, jsonPlaceholder, infos[0].GetJsonKeyStatsLogs()[fieldID])
-		assert.Empty(t, infos[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "manifest delta summaries are not legacy files")
+		assert.Equal(t, parentManifest, infos[0].GetLoadInfo().GetManifestPath())
+		assert.Equal(t, uint64(123), infos[0].GetLoadInfo().GetTransformStartAfterTimetick())
+		assert.Equal(t, jsonPlaceholder, infos[0].GetLoadInfo().GetJsonKeyStatsLogs()[fieldID])
+		assert.Empty(t, infos[0].GetLoadInfo().GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "manifest delta summaries are not legacy files")
 	})
 }
 

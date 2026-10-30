@@ -15,17 +15,20 @@ type DirtyCollectionNotifier func(collectionID int64)
 // CollectionLoadManager is the Coord-side facade over desired load config
 // lifecycle.
 type CollectionLoadManager struct {
-	store  *LoadConfigStore
-	notify DirtyCollectionNotifier
+	store    *LoadConfigStore
+	notify   DirtyCollectionNotifier
+	replicas ReplicaConfigResources
 }
 
 func NewCollectionLoadManager(
 	store *LoadConfigStore,
 	notify DirtyCollectionNotifier,
+	replicas ReplicaConfigResources,
 ) *CollectionLoadManager {
 	return &CollectionLoadManager{
-		store:  store,
-		notify: notify,
+		store:    store,
+		notify:   notify,
+		replicas: replicas,
 	}
 }
 

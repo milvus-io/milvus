@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -478,15 +477,9 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		return merr.Wrap(err, "failed to broadcast altered collection")
 	}
 	if body.Updates.AlterLoadConfig != nil {
-		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  []int64{header.CollectionId},
-			ReplicaNumber:  body.Updates.AlterLoadConfig.ReplicaNumber,
-			ResourceGroups: body.Updates.AlterLoadConfig.ResourceGroups,
-		})
+		err := qvresource.Resource().LoadManager.UpdateReplicaConfig(ctx, header.CollectionId,
+			body.Updates.AlterLoadConfig.ReplicaNumber, body.Updates.AlterLoadConfig.ResourceGroups)
 		if err != nil {
-			return merr.Wrap(err, "failed to update load config")
-		}
-		if err := merr.CheckRPCCall(resp, err); err != nil {
 			if !errors.Is(err, merr.ErrResourceGroupNotFound) {
 				return merr.Wrap(err, "failed to update load config")
 			}

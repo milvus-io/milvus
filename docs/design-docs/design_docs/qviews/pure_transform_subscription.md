@@ -14,7 +14,7 @@ write path, or subscription acknowledgement protocol.
 ```text
 RecoveryStorage ordered PChannel observation
   -> WALSummary publication + live Transform dispatch
-       -> DispatchStream (shared replay worker + callback worker per stream)
+       -> DispatchStream (bounded replay worker pool + callback worker per stream)
           -> SubscribeTransform RPC
              -> QN VChannel TransformLogBuffer
                 -> bounded catchup pages on the shared worker pool

@@ -17,13 +17,18 @@
 package grpcproxy
 
 import (
+	"context"
+
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type viewQueryClientSetter interface {
@@ -57,6 +62,17 @@ func (s *Server) closeViewQueryClient() {
 }
 
 func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider resolver.CollectionVChannelProvider, loadInfoClient queryclient.LoadInfoClient) (queryclient.Client, func(), error) {
+	hook, err := optimizers.LoadQueryHook()
+	if err != nil && (errors.Is(err, optimizers.ErrQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()) {
+		return nil, nil, err
+	}
+	closeHook := func() {}
+	if hook != nil {
+		if err := optimizers.InitQueryHook(hook); err != nil {
+			return nil, nil, err
+		}
+		closeHook = optimizers.WatchQueryHook(context.TODO(), hook, "queryViewClientHook")
+	}
 	shardResolver := resolver.NewShardResolverImpl(vchannelProvider)
 	queryNodeClient := querynodehandler.NewClient(etcdCli)
 
@@ -66,13 +82,14 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 		queryNodeClient.QueryViewClient(),
 	)
 	client := queryclient.NewLegacyViewQueryClient(
-		queryclient.ViewQueryClientConfig{LoadInfoClient: loadInfoClient},
+		queryclient.ViewQueryClientConfig{LoadInfoClient: loadInfoClient, QueryHook: hook},
 		queryPlanClient,
 		queryServiceClient,
 		shardResolver,
 	)
 	closeFunc := func() {
 		client.Close()
+		closeHook()
 		shardResolver.Close()
 		queryNodeClient.Close()
 	}

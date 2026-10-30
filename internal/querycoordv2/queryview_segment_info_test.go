@@ -24,7 +24,7 @@ import (
 
 type segmentInfoMixCoord struct{ types.MixCoord }
 
-func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+func (m *segmentInfoMixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, cid int64, ids []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 	return m.MixCoord.GetQueryViewSegmentLoadInfos(ctx, cid, ids)
 }
 
@@ -36,6 +36,7 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 	stats := map[qviews.ShardID]*coordview.ShardStats{}
 	var onRead func()
 	var readErr error
+	var segmentErr error
 	reads := 0
 	patches := []*mockey.Mocker{
 		mockey.Mock((*loadmgr.LoadConfigStore).GetConfigWithVersion).To(func(_ *loadmgr.LoadConfigStore, cid int64) (*loadmgr.LoadConfig, uint64) {
@@ -50,11 +51,11 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 		mockey.Mock((*coordview.ShardViewRegistry).SnapshotForCollection).To(func(_ *coordview.ShardViewRegistry, _ int64) *coordview.ShardViewSnapshot {
 			return coordview.NewShardViewSnapshot(1, stats)
 		}).Build(),
-		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+		mockey.Mock((*segmentInfoMixCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentInfoMixCoord, _ context.Context, cid int64, ids []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 			reads++
-			result := make([]*querypb.SegmentLoadInfo, 0, len(ids))
+			result := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(ids))
 			for _, id := range ids {
-				result = append(result, &querypb.SegmentLoadInfo{SegmentID: id, CollectionID: cid, NumOfRows: 100, IsSorted: true, StorageVersion: 3, IndexInfos: []*querypb.FieldIndexInfo{{IndexID: 7, IndexName: "FLAT"}}})
+				result = append(result, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: id, Status: merr.Status(segmentErr), LoadInfo: &querypb.SegmentLoadInfo{SegmentID: id, CollectionID: cid, NumOfRows: 100, IsSorted: true, StorageVersion: 3, IndexInfos: []*querypb.FieldIndexInfo{{IndexID: 7, IndexName: "FLAT"}}}})
 			}
 			if onRead != nil {
 				onRead()
@@ -142,6 +143,12 @@ func TestQueryViewSegmentInfo(t *testing.T) {
 	t.Run("metadata failure is not empty success", func(t *testing.T) {
 		readErr = merr.WrapErrServiceUnavailableMsg("metadata unavailable")
 		defer func() { readErr = nil }()
+		_, err := get(1)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	})
+	t.Run("per-segment failure is not empty success", func(t *testing.T) {
+		segmentErr = merr.WrapErrServiceUnavailableMsg("metadata unavailable")
+		defer func() { segmentErr = nil }()
 		_, err := get(1)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	})

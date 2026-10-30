@@ -34,7 +34,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,7 +59,6 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -70,7 +68,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -672,21 +669,7 @@ func (node *QueryNode) SetAddress(address string) {
 // hook is otherwise treated exactly as the plug-in is: the same two Init calls
 // with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
-	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
-
-	if compiled := extension.InstalledQueryHook(); compiled != nil {
-		if path != "" {
-			mlog.Warn(node.ctx, "queryNode.soPath is ignored, a query hook is compiled into this binary",
-				mlog.String("so_path", path))
-		}
-		return node.useQueryHook(compiled)
-	}
-
-	if path == "" {
-		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
-	}
-
-	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
+	hoo, err := optimizers.LoadQueryHook()
 	if err != nil {
 		return err
 	}
@@ -698,11 +681,8 @@ func (node *QueryNode) initHook() error {
 // for a plug-in and a compiled-in hook, which is the point: a hook a
 // distribution compiled in must not be a second-class one.
 func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
-	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init configs for the hook")
-	}
-	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init tuning configs for the hook")
+	if err := optimizers.InitQueryHook(hoo); err != nil {
+		return err
 	}
 
 	node.queryHook = hoo
@@ -711,31 +691,7 @@ func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
 }
 
 func (node *QueryNode) handleQueryHookEvent() {
-	onEvent := func(event *config.Event) {
-		if node.queryHook != nil {
-			if err := node.queryHook.Init(event.Value); err != nil {
-				mlog.Error(node.ctx, "failed to refresh hook config", mlog.Err(err))
-			}
-		}
-	}
-	onEvent2 := func(event *config.Event) {
-		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
-			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
-			switch event.EventType {
-			case config.CreateType, config.UpdateType:
-				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
-					mlog.Warn(node.ctx, "failed to refresh hook tuning config", mlog.Err(err))
-				}
-			case config.DeleteType:
-				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
-					mlog.Warn(node.ctx, "failed to delete hook tuning config", mlog.Err(err))
-				}
-			}
-		}
-	}
-	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
-
-	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+	optimizers.WatchQueryHook(node.ctx, node.queryHook, "queryHook")
 }
 
 // cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files

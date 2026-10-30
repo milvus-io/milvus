@@ -3644,16 +3644,11 @@ class SegmentExpr : public Expr {
                     exec_path_ = ExprExecPath::RawData;
                     return false;
                 }
-                // JsonFlat postings flatten array elements into the same path
-                // as scalar values. They cannot answer scalar predicates exactly
-                // (including NULL/type validity and negation). Use raw JSON until
-                // the reader can distinguish the path's actual value shape.
-                if (entry->value_type == DataType::JSON &&
-                    !req.json_array_cast) {
-                    ClearSelectedIndex();
-                    exec_path_ = ExprExecPath::RawData;
-                    return false;
-                }
+                // By design, JsonFlat indexes array elements at the same path
+                // as scalar values, so scalar predicates may match array
+                // elements (e.g. a == 1 matches {"a": [1, 2]}). Preserve this
+                // index behavior rather than forcing raw JSON evaluation to
+                // distinguish scalar and array shapes.
                 selected_json_view_ =
                     json_reader_->Resolve(req.json_path, *cast);
                 if (!selected_json_view_) {

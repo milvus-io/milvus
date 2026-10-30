@@ -6114,73 +6114,9 @@ func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// GetQueryViewSegmentLoadInfos provides a mock function with given fields: ctx, collectionID, segmentIDs
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
 func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	ret := _m.Called(ctx, collectionID, segmentIDs)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetQueryViewSegmentLoadInfos")
-	}
-
-	var r0 []*querypb.SegmentLoadInfo
-	var r1 []*indexpb.IndexInfo
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)); ok {
-		return rf(ctx, collectionID, segmentIDs)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) []*querypb.SegmentLoadInfo); ok {
-		r0 = rf(ctx, collectionID, segmentIDs)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*querypb.SegmentLoadInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64) []*indexpb.IndexInfo); ok {
-		r1 = rf(ctx, collectionID, segmentIDs)
-	} else {
-		if ret.Get(1) != nil {
-			r1 = ret.Get(1).([]*indexpb.IndexInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(2).(func(context.Context, int64, []int64) error); ok {
-		r2 = rf(ctx, collectionID, segmentIDs)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
-}
-
-// MixCoord_GetQueryViewSegmentLoadInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewSegmentLoadInfos'
-type MixCoord_GetQueryViewSegmentLoadInfos_Call struct {
-	*mock.Call
-}
-
-// GetQueryViewSegmentLoadInfos is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - segmentIDs []int64
-func (_e *MixCoord_Expecter) GetQueryViewSegmentLoadInfos(ctx interface{}, collectionID interface{}, segmentIDs interface{}) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
-	return &MixCoord_GetQueryViewSegmentLoadInfos_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfos", ctx, collectionID, segmentIDs)}
-}
-
-func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
-	})
-	return _c
-}
-
-func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Return(_a0 []*querypb.SegmentLoadInfo, _a1 []*indexpb.IndexInfo, _a2 error) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
-	_c.Call.Return(_a0, _a1, _a2)
-	return _c
-}
-
-func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) RunAndReturn(run func(context.Context, int64, []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
-	_c.Call.Return(run)
-	return _c
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
 }
 
 // GetQuotaMetrics provides a mock function with given fields: _a0, _a1
@@ -12188,15 +12124,12 @@ func (_c *MixCoord_WatchChannels_Call) RunAndReturn(run func(context.Context, *d
 	return _c
 }
 
-// WatchQueryViewSegmentLoadInfo provides a mock function with given fields: _a0
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
 
-// MixCoord_WatchQueryViewSegmentLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WatchQueryViewSegmentLoadInfo'
-type MixCoord_WatchQueryViewSegmentLoadInfo_Call struct {
-	*mock.Call
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }
-
-// WatchQueryViewSegmentLoadInfo is a helper method to define mock.On call
-//   - _a0 querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer
 
 // NewMixCoord creates a new instance of MixCoord. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
@@ -12210,11 +12143,4 @@ func NewMixCoord(t interface {
 	t.Cleanup(func() { mock.AssertExpectations(t) })
 
 	return mock
-}
-
-// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
-
-// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
-func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
-	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }

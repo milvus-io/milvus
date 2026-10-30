@@ -175,7 +175,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	t.Cleanup(func() { schemaPreparation.UnPatch() })
 	qvresource.Init(&qvresource.Resources{
 		Reconciler:  &testSchemaDataViews{},
-		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil),
+		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil, nil),
 		ShardViews: &coordview.ShardViewRegistry{}, Readiness: notifications,
 	})
 	t.Cleanup(func() { notifications.Close(); qvresource.Init(previous) })
