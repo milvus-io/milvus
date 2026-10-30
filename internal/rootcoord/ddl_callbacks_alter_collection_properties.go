@@ -399,6 +399,14 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 
 // getCacheExpireForCollection gets the cache expirations for collection.
 func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, collectionNameOrAlias string) (*message.CacheExpirations, error) {
+	return c.getCacheExpireForCollectionWithMsgType(ctx, dbName, collectionNameOrAlias, commonpb.MsgType_AlterCollection)
+}
+
+// getCacheExpireForCollectionWithMsgType is getCacheExpireForCollection with
+// the message type the collection's own expiration carries, which tells the
+// proxy what happened to the collection - a rename, for one, has the proxy
+// delete the metric series labeled with the old name.
+func (c *Core) getCacheExpireForCollectionWithMsgType(ctx context.Context, dbName string, collectionNameOrAlias string, msgType commonpb.MsgType) (*message.CacheExpirations, error) {
 	coll, err := c.meta.GetCollectionByName(ctx, dbName, collectionNameOrAlias, typeutil.MaxTimestamp, false)
 	if err != nil {
 		return nil, err
@@ -412,7 +420,7 @@ func (c *Core) getCacheExpireForCollection(ctx context.Context, dbName string, c
 		ce.OptLPCMDBName(dbName),
 		ce.OptLPCMCollectionName(coll.Name),
 		ce.OptLPCMCollectionID(coll.CollectionID),
-		ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
+		ce.OptLPCMMsgType(msgType),
 	)
 	for _, alias := range aliases {
 		builder.WithLegacyProxyCollectionMetaCache(

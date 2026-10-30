@@ -1818,6 +1818,52 @@ func TestMetaCache_Database(t *testing.T) {
 	assert.Equal(t, CheckDatabase(ctx, cache, dbName), true)
 }
 
+func TestMetaCache_HasCachedCollectionAndDatabase(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockMixCoordClientInterface{}
+	cache, err := initMetaCache(ctx, rootCoord)
+	assert.NoError(t, err)
+
+	// They read the cache only: nothing is cached yet, and rootcoord is not asked.
+	assert.False(t, cache.HasCachedCollection(dbName, "collection1"))
+	assert.False(t, cache.HasCachedCollection(dbName, "collection1_alias"))
+	assert.False(t, cache.HasCachedCollection(dbName, ""))
+	assert.False(t, cache.HasCachedDatabase("otherdb"))
+	assert.True(t, cache.HasCachedDatabase(""), "the default database always exists")
+	assert.True(t, cache.HasCachedDatabase("default"))
+	assert.Equal(t, 0, rootCoord.GetAccessCount())
+
+	_, err = cache.GetCollectionID(ctx, dbName, "collection1")
+	assert.NoError(t, err)
+	assert.True(t, cache.HasCachedCollection(dbName, "collection1"))
+	assert.True(t, cache.HasCachedCollection(dbName, "collection1_alias"), "an alias of a cached collection is cached")
+	assert.True(t, cache.HasCachedCollection("", "collection1"), "an empty database is the default one")
+	assert.False(t, cache.HasCachedCollection(dbName, "collection2"))
+
+	cache.RemoveCollection(ctx, dbName, "collection1")
+	assert.False(t, cache.HasCachedCollection(dbName, "collection1"))
+	assert.False(t, cache.HasCachedCollection(dbName, "collection1_alias"))
+	assert.Equal(t, 1, rootCoord.GetAccessCount())
+
+	t.Run("a database whose info is cached", func(t *testing.T) {
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		cache, err := NewMetaCache(mixCoord)
+		assert.NoError(t, err)
+		mixCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Success(),
+			DbID:   2,
+			DbName: "otherdb",
+		}, nil).Once()
+
+		assert.False(t, cache.HasCachedDatabase("otherdb"))
+		_, err = cache.GetDatabaseInfo(ctx, "otherdb")
+		assert.NoError(t, err)
+		assert.True(t, cache.HasCachedDatabase("otherdb"))
+		cache.RemoveDatabase(ctx, "otherdb")
+		assert.False(t, cache.HasCachedDatabase("otherdb"))
+	})
+}
+
 func TestGetDatabaseInfo(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()

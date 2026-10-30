@@ -98,6 +98,13 @@ type Cache interface {
 	// it must not pay RemoveDatabase's O(number of cached collections) cleanup.
 	RemoveDatabaseInfo(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
+	// HasCachedCollection reports whether collectionName, a collection or an
+	// alias of one, is cached in database. It reads the cache only and never
+	// asks rootcoord, so it is cheap enough for every request.
+	HasCachedCollection(database, collectionName string) bool
+	// HasCachedDatabase reports whether database is the default database, or
+	// its info or one of its collections is cached. It reads the cache only.
+	HasCachedDatabase(database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*DatabaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
@@ -1516,6 +1523,28 @@ func (m *MetaCache) RemoveDatabaseInfo(ctx context.Context, database string) {
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	_, ok := m.nameIdx[database]
+	return ok
+}
+
+func (m *MetaCache) HasCachedCollection(database, collectionName string) bool {
+	if collectionName == "" {
+		return false
+	}
+	_, ok := m.getCollection(database, collectionName, 0)
+	return ok
+}
+
+func (m *MetaCache) HasCachedDatabase(database string) bool {
+	database = normalizeDBName(database)
+	if database == util.DefaultDBName {
+		return true
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.dbInfo[database]; ok {
+		return true
+	}
 	_, ok := m.nameIdx[database]
 	return ok
 }

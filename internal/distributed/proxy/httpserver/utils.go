@@ -4932,8 +4932,24 @@ func getElementTypeParams(param interface{}) (string, error) {
 	return string(jsonBytes), nil
 }
 
+// metricsUnmatchedPath is the path label of a request that matched no route.
+const metricsUnmatchedPath = "unmatched"
+
+// metricsPathLabel is the path label of the RESTful metrics: the template of the
+// route the request matched, so the label takes only values the server
+// registered. The raw URL path is chosen by the client and would mint a new set
+// of series per distinct path, which are never deleted; MetricsHandlerFunc runs
+// ahead of authentication and on the 404 chain, so that is open to anyone who
+// can reach the port.
+func metricsPathLabel(c *gin.Context) string {
+	if path := c.FullPath(); path != "" {
+		return path
+	}
+	return metricsUnmatchedPath
+}
+
 func MetricsHandlerFunc(c *gin.Context) {
-	path := c.Request.URL.Path
+	path := metricsPathLabel(c)
 	metrics.RestfulFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10), path,
 	).Inc()
