@@ -835,26 +835,43 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
 	collectionNames := request.GetCollectionName()
-	if len(collectionNames) == 0 {
+	collectionIDs := request.GetCollectionID()
+	if len(collectionNames) == 0 && len(collectionIDs) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names or collection IDs cannot be empty")),
+		}, nil
+	}
+	if len(collectionNames) > 0 && len(collectionIDs) > 0 {
+		return &milvuspb.BatchDescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names and collection IDs cannot both be set")),
 		}, nil
 	}
 
-	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
-
+	// Each collection is described on its own, by name or by ID, exactly as
+	// a single DescribeCollection request would.
+	describeRequests := make([]*milvuspb.DescribeCollectionRequest, 0, len(collectionNames)+len(collectionIDs))
 	for _, collectionName := range collectionNames {
-		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
+		describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
 			DbName:         request.GetDbName(),
 			CollectionName: collectionName,
-		}
+		})
+	}
+	for _, collectionID := range collectionIDs {
+		describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+			DbName:       request.GetDbName(),
+			CollectionID: collectionID,
+		})
+	}
 
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(describeRequests))
+	for _, describeCollectionRequest := range describeRequests {
 		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
 		// If there's an error, create a response with error status
 		if err != nil {
 			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
 				Status:         merr.Status(err),
-				CollectionName: collectionName,
+				CollectionName: describeCollectionRequest.GetCollectionName(),
+				CollectionID:   describeCollectionRequest.GetCollectionID(),
 			}
 		}
 		responses = append(responses, describeCollectionResponse)
