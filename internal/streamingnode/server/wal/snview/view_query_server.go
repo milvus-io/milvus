@@ -3,8 +3,6 @@ package snview
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -36,7 +34,7 @@ func (s *PChannelViewQueryServer) SearchOnView(ctx context.Context, req *viewpb.
 	}
 	provider, err := s.taskProviderForVChannel(ctx, req.GetShardId().GetVchannel())
 	if err != nil {
-		return nil, asViewQueryGRPCError(err)
+		return nil, err
 	}
 	return viewquery.NewServer(provider, s.scheduler).SearchOnView(ctx, req)
 }
@@ -47,7 +45,7 @@ func (s *PChannelViewQueryServer) QueryOnView(ctx context.Context, req *viewpb.Q
 	}
 	provider, err := s.taskProviderForVChannel(ctx, req.GetShardId().GetVchannel())
 	if err != nil {
-		return nil, asViewQueryGRPCError(err)
+		return nil, err
 	}
 	return viewquery.NewServer(provider, s.scheduler).QueryOnView(ctx, req)
 }
@@ -76,16 +74,6 @@ func (s *PChannelViewQueryServer) taskProviderForVChannel(ctx context.Context, v
 		return nil, viewerror.NewUnknownError("local WAL for vchannel %s does not implement view query task provider", vchannel)
 	}
 	return provider, nil
-}
-
-func asViewQueryGRPCError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
-		return err
-	}
-	return viewerror.NewGRPCStatusFromError(err).Err()
 }
 
 type pchannelWALProvider interface {

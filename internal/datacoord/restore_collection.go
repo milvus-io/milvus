@@ -46,6 +46,7 @@ type RestoreCollectionManager interface {
 	PrepareRestoreCollection(context.Context, *milvuspb.CreateCollectionRequest, []string) (*messagespb.RestoreSnapshotMessageBody, func(), error)
 	ApplyRestoreCollection(context.Context, message.BroadcastResultRestoreSnapshotMessageV2) error
 	CompleteRestoreCollection(context.Context, int64) error
+	IsCollectionDropped(context.Context, int64) (bool, error)
 	CheckRestoreTargetAbsent(context.Context, string, string) error
 }
 

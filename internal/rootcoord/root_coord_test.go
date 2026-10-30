@@ -88,6 +88,46 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestIsCollectionDropped(t *testing.T) {
+	mockey.PatchConvey("only definitive lifecycle deletion releases publication obligations", t, func() {
+		var collection *model.Collection
+		var lookupErr error
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(_ *MetaTable, _ context.Context, _ string, id UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+			require.Equal(t, int64(100), id)
+			require.Equal(t, typeutil.MaxTimestamp, ts)
+			require.True(t, allowUnavailable, "Creating/Restoring must not be mistaken for deleted")
+			return collection, lookupErr
+		}).Build()
+		core := &Core{meta: &MetaTable{}}
+		for state, want := range map[etcdpb.CollectionState]bool{
+			etcdpb.CollectionState_CollectionCreating:  false,
+			etcdpb.CollectionState_CollectionCreated:   false,
+			etcdpb.CollectionState_CollectionRestoring: false,
+			etcdpb.CollectionState_CollectionDropping:  true,
+			etcdpb.CollectionState_CollectionDropped:   true,
+		} {
+			collection = &model.Collection{CollectionID: 100, State: state}
+			dropped, err := core.IsCollectionDropped(t.Context(), 100)
+			require.NoError(t, err)
+			require.Equal(t, want, dropped, state.String())
+		}
+		collection = nil
+		lookupErr = merr.WrapErrCollectionNotFound(int64(100))
+		dropped, err := core.IsCollectionDropped(t.Context(), 100)
+		require.NoError(t, err)
+		require.True(t, dropped)
+		lookupErr = context.DeadlineExceeded
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, dropped)
+		lookupErr = nil
+		collection = &model.Collection{CollectionID: 100, State: etcdpb.CollectionState(100)}
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.False(t, dropped)
+	})
+}
+
 func TestDataViewCollectionRecoveryValidator(t *testing.T) {
 	mockey.PatchConvey("validate CollectionMeta state for DataView recovery", t, func() {
 		lookupErr := errors.New("lookup failed")

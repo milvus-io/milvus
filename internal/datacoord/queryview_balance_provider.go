@@ -24,6 +24,16 @@ func (s *Server) RefreshDataView(ctx context.Context, collectionID int64) (*view
 		return nil, err
 	}
 	if version == nil {
+		// A dropped collection has no publication obligation. Consult RootCoord
+		// rather than the DataView manager's process-local drop markers so this
+		// also works when a durable callback is replayed after recovery.
+		dropped, err := s.collectionDropped(ctx, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		if dropped {
+			return nil, merr.WrapErrCollectionNotFound(collectionID)
+		}
 		return nil, merr.WrapErrServiceNotReadyMsg("collection %d DataView is not published", collectionID)
 	}
 	return version, nil

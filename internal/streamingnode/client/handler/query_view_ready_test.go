@@ -65,19 +65,21 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 			query := &fakeViewQueryServiceClient{}
 			client := newTestHandlerClient(plan, query, nil)
 			client.watcher = &analyzerWatcher{}
+			client.rebalanceTrigger = &analyzerTrigger{}
+			reports := mockey.Mock((*analyzerTrigger).ReportAssignmentError).Return(nil).Build()
 			switch method {
 			case "plan":
 				req := &viewpb.GetQueryPlanRequest{ShardId: shard.IntoProto()}
 				before := proto.Clone(req)
 				mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).To(func(_ *fakeQueryPlanServiceClient, ctx context.Context, actual *viewpb.GetQueryPlanRequest, _ ...grpc.CallOption) (*viewpb.GetQueryPlanResponse, error) {
 					require.True(t, proto.Equal(before, actual))
-					return &viewpb.GetQueryPlanResponse{}, attempt(ctx)
+					return &viewpb.GetQueryPlanResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
 				_, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
 				require.NoError(t, err)
 			case "mvcc":
 				mockey.Mock((*fakeQueryPlanServiceClient).GetMVCCTimestamp).To(func(_ *fakeQueryPlanServiceClient, ctx context.Context, _ *viewpb.GetMVCCTimestampRequest, _ ...grpc.CallOption) (*viewpb.GetMVCCTimestampResponse, error) {
-					return &viewpb.GetMVCCTimestampResponse{}, attempt(ctx)
+					return &viewpb.GetMVCCTimestampResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
 				_, err := client.QueryViewClient().GetMVCCTimestamp(t.Context(), shard, &viewpb.GetMVCCTimestampRequest{Vchannel: shard.VChannel})
 				require.NoError(t, err)
@@ -87,7 +89,7 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 				mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, actual *viewpb.SearchOnViewRequest, _ ...grpc.CallOption) (*viewpb.SearchOnViewResponse, error) {
 					require.Same(t, req, actual)
 					require.True(t, proto.Equal(before, actual))
-					return &viewpb.SearchOnViewResponse{}, attempt(ctx)
+					return &viewpb.SearchOnViewResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
 				_, err := client.QueryViewClient().SearchOnView(t.Context(), types.PChannelInfo{Name: "p0", Term: 1}, req)
 				require.NoError(t, err)
@@ -97,13 +99,14 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 				mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, actual *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 					require.Same(t, req, actual)
 					require.True(t, proto.Equal(before, actual))
-					return &viewpb.QueryOnViewResponse{}, attempt(ctx)
+					return &viewpb.QueryOnViewResponse{}, viewerror.ConvertViewError("test", attempt(ctx))
 				}).Build()
 				_, err := client.QueryViewClient().QueryOnView(t.Context(), types.PChannelInfo{Name: "p0", Term: 1}, req)
 				require.NoError(t, err)
 			}
 			require.Equal(t, 5, calls)
 			require.Equal(t, 4, waits)
+			require.Equal(t, 1, reports.Times())
 		})
 	}
 }
@@ -116,13 +119,16 @@ func TestQueryViewRPCDoesNotWaitForViewOrRequestErrors(t *testing.T) {
 		grpcstatus.Error(codes.Unimplemented, "older node"),
 	} {
 		mockey.PatchConvey(failure.Error(), t, func() {
-			call := mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).Return(nil, failure).Build()
+			call := mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).Return(nil, viewerror.ConvertViewError(viewpb.ViewQueryService_QueryOnView_FullMethodName, failure)).Build()
 			wait := mockey.Mock(fakeAssignmentWatcher.Watch).Return(context.Canceled).Build()
 			client := newTestHandlerClient(nil, &fakeViewQueryServiceClient{}, nil)
 			_, err := client.QueryViewClient().QueryOnView(t.Context(), types.PChannelInfo{Name: "p0"}, &viewpb.QueryOnViewRequest{})
 			require.Equal(t, grpcstatus.Code(failure), grpcstatus.Code(err))
 			require.Equal(t, viewerror.AsViewError(viewerror.ConvertViewError("test", failure)).Code, viewerror.AsViewError(err).Code)
 			require.Equal(t, 1, call.Times())
+			// No pick was observed by this injected transport: do not infer a node
+			// from the handler's assignment or routing input.
+			require.Nil(t, viewerror.RPCContextFromDetails(grpcstatus.Convert(err).Details()))
 			require.Zero(t, wait.Times())
 		})
 	}
@@ -143,7 +149,7 @@ func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 				<-ctx.Done()
 				return ctx.Err()
 			}).Build()
-			call := mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).Return(nil, viewerror.NewGRPCStatusFromViewError(viewerror.NewOnShutdownError("closed")).Err()).Build()
+			call := mockey.Mock((*fakeQueryPlanServiceClient).GetQueryPlan).Return(nil, viewerror.ConvertViewError(viewpb.QueryPlanService_GetQueryPlan_FullMethodName, viewerror.NewGRPCStatusFromViewError(viewerror.NewOnShutdownError("closed")).Err())).Build()
 			if scenario == "already canceled" {
 				cancel()
 			}
@@ -189,5 +195,37 @@ func TestQueryViewRPCUsesWALWaitForReady(t *testing.T) {
 			require.True(t, *cfg.WaitForReady, method)
 			require.Equal(t, walConfig.RetryPolicy, cfg.RetryPolicy, method)
 		}
+	})
+}
+
+func TestQueryViewRPCPreservesTransportContextAfterMigration(t *testing.T) {
+	mockey.PatchConvey("a migrated WAL reports the node that rejected the query", t, func() {
+		term := int64(1)
+		calls := 0
+		client := newTestHandlerClient(nil, &fakeViewQueryServiceClient{}, nil)
+		client.watcher = &analyzerWatcher{}
+		mockey.Mock((*analyzerWatcher).Get).To(func(*analyzerWatcher, context.Context, string) *types.PChannelInfoAssigned {
+			return &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p0", Term: term, AccessMode: types.AccessModeRW}, Node: types.StreamingNodeInfo{ServerID: 100 + term}}
+		}).Build()
+		mockey.Mock((*analyzerWatcher).Watch).To(func(*analyzerWatcher, context.Context, string, *types.PChannelInfoAssigned) error {
+			term = 2
+			return nil
+		}).Build()
+		mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, _ *viewpb.SearchOnViewRequest, _ ...grpc.CallOption) (*viewpb.SearchOnViewResponse, error) {
+			calls++
+			target, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.Equal(t, 100+term, target)
+			if term == 1 {
+				return nil, grpcstatus.Error(codes.Unavailable, "moved")
+			}
+			return nil, viewerror.AttachRPCContext(
+				viewerror.ConvertViewError(viewpb.ViewQueryService_SearchOnView_FullMethodName, viewerror.NewGRPCStatusFromError(merr.SegcoreError(2042, "invalid ef")).Err()),
+				&viewpb.RPCRequestContext{Method: viewpb.ViewQueryService_SearchOnView_FullMethodName, Target: &viewpb.RPCRequestContext_StreamingNode{StreamingNode: &viewpb.StreamingNodeRequestContext{NodeId: 999}}})
+		}).Build()
+		_, err := client.QueryViewClient().SearchOnView(t.Context(), types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
+		require.Equal(t, 2, calls)
+		require.EqualValues(t, 2042, merr.Code(err))
+		require.True(t, proto.Equal(&viewpb.RPCRequestContext{Method: viewpb.ViewQueryService_SearchOnView_FullMethodName, Target: &viewpb.RPCRequestContext_StreamingNode{StreamingNode: &viewpb.StreamingNodeRequestContext{NodeId: 999}}}, viewerror.RPCContextFromDetails(grpcstatus.Convert(err).Details())))
 	})
 }

@@ -83,6 +83,8 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 }
 
 func TestRestorePublicationRetriesWithoutNewState(t *testing.T) {
+	lookup := mockey.Mock((*rootcoord.Core).IsCollectionDropped).Return(false, nil).Build()
+	defer lookup.UnPatch()
 	ctx := t.Context()
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copies, meta := newCopySegmentTaskTestMeta(t, task)

@@ -94,14 +94,14 @@ func TestTransformLogReportsRejectedOwnerBeforeRetry(t *testing.T) {
 					}
 				}).Build()
 				listener := bufconn.Listen(64 * 1024)
-				server := grpc.NewServer(grpc.StreamInterceptor(interceptor.NewStreamingServiceStreamServerInterceptor()))
+				server := grpc.NewServer(grpc.StreamInterceptor(interceptor.NewServiceStreamServerInterceptor()))
 				streamingpb.RegisterStreamingNodeHandlerServiceServer(server, &streamingpb.UnimplementedStreamingNodeHandlerServiceServer{})
 				go func() { _ = server.Serve(listener) }()
 				defer listener.Close()
 				defer server.Stop()
 				conn, err := grpc.NewClient("passthrough:///transform-assignment",
 					grpc.WithTransportCredentials(insecure.NewCredentials()),
-					grpc.WithStreamInterceptor(interceptor.NewStreamingServiceStreamClientInterceptor()),
+					grpc.WithStreamInterceptor(interceptor.NewServiceStreamClientInterceptor()),
 					grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))
 				require.NoError(t, err)
 				defer conn.Close()

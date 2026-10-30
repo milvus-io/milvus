@@ -474,6 +474,8 @@ message QueryOnViewResponse {
     internal.RetrieveResults legacy_results = 1;
 }
 
+// Phase 1 response metadata used only for client-side payload restoration and
+// search optimization. Worker execution receives the restored/optimized request.
 message QueryPlanClientOptimizeInfo {
     // Restore only explicitly marked payloads, preserving intentional clearing.
     QueryPayloadReuse reused_payloads = 1;
@@ -490,4 +492,26 @@ message SearchOptimizationInfo {
 message SearchExecutionOptions {
     bool filter_only = 1;
     bool enable_expr_cache = 2;
+}
+
+// Context of one client RPC attempt, attached as an independent gRPC status
+// detail on failure. This describes the request target, not the error cause.
+message RPCRequestContext {
+    // Generated full gRPC method name, including service and method.
+    string method = 1;
+    // The selected target and its role-specific request context.
+    oneof target {
+        QueryNodeRequestContext query_node = 2;
+        StreamingNodeRequestContext streaming_node = 3;
+    }
+}
+
+message QueryNodeRequestContext {
+    // Node selected for this attempt; does not imply the server received it.
+    int64 node_id = 1;
+}
+
+message StreamingNodeRequestContext {
+    // Node selected for this attempt; does not imply the server received it.
+    int64 node_id = 1;
 }

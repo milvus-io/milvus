@@ -19,7 +19,6 @@ package grpcproxy
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -63,7 +62,7 @@ func (s *Server) closeViewQueryClient() {
 
 func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider resolver.CollectionVChannelProvider, loadInfoClient queryclient.LoadInfoClient) (queryclient.Client, func(), error) {
 	hook, err := optimizers.LoadQueryHook()
-	if err != nil && (errors.Is(err, optimizers.ErrQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()) {
+	if err != nil && paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		return nil, nil, err
 	}
 	closeHook := func() {}

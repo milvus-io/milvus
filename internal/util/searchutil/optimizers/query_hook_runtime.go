@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
@@ -14,17 +12,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ErrQueryHookConflict is an initialization sentinel checked by hosts before
-// deciding whether an optional hook loading failure is fatal.
-var ErrQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
-
 // LoadQueryHook shares the same plugin/compiled-hook policy between the legacy
 // QueryNode delegator and Proxy's QueryViewClient.
 func LoadQueryHook() (QueryHook, error) {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 	if compiled := extension.InstalledQueryHook(); compiled != nil {
 		if path != "" {
-			return nil, merr.Wrapf(ErrQueryHookConflict, "queryNode.soPath is set to %q and a query hook is also compiled in; both tune every search, and only one can", path)
+			mlog.Warn(context.TODO(), "queryNode.soPath is ignored, a query hook is compiled into this binary", mlog.String("so_path", path))
 		}
 		return compiled, nil
 	}

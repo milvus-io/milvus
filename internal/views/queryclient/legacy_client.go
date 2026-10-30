@@ -22,6 +22,7 @@ type Client interface {
 }
 
 // LegacyClient executes proxy-generated legacy internal requests and returns raw results.
+// Errors are business merr errors; ViewError and StreamingError remain internal.
 type LegacyClient interface {
 	// Statistics uses the outer BarrierMVCC; zero selects ordinary Strong sampling.
 	Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error)
@@ -107,7 +108,8 @@ func newLegacyClient(
 	}
 }
 
-func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error) {
+func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
+	defer func() { err = toMilvusError(err) }()
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
@@ -147,7 +149,8 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 	}, nil
 }
 
-func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error) {
+func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (result *LegacyQueryResult, err error) {
+	defer func() { err = toMilvusError(err) }()
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}

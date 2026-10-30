@@ -38,7 +38,7 @@ func rpcClient(t *testing.T, server streamingpb.StreamingNodeHandlerServiceServe
 	go func() { _ = rpc.Serve(listener) }()
 	conn, err := grpc.NewClient("passthrough:///transform-rpc",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStreamInterceptor(interceptor.NewStreamingServiceStreamClientInterceptor()),
+		grpc.WithStreamInterceptor(interceptor.NewServiceStreamClientInterceptor()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))
 	require.NoError(t, err)
 	t.Cleanup(func() { rpc.Stop(); _ = conn.Close(); _ = listener.Close() })
