@@ -999,6 +999,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
 	cpTimestamp Timestamp,
+	collectionDropped func(collectionID int64) bool,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
 
@@ -1022,16 +1023,11 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		return true
 	}
 
-	// A removed channel no longer needs checkpoint protection. Its checkpoint
-	// may stop advancing, while collection cleanup waits for segment GC.
-	segInsertChannel := segment.GetInsertChannel()
-	channelExists, err := gc.meta.metaStore.ChannelExists(gc.ctx, segInsertChannel)
-	if err != nil {
-		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
-			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
-		return false
-	}
-	if channelExists {
+	// A dropped collection no longer needs checkpoint protection: it is never
+	// recovered from its channel checkpoint, which may stop advancing, while
+	// RootCoord removes the collection meta only after its segments are
+	// recycled.
+	if !collectionDropped(segment.GetCollectionID()) {
 		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
 			mlog.Uint64("dmlPosTs", dmlTs),
 			mlog.Uint64("channelCpTs", cpTimestamp),
@@ -1039,6 +1035,29 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		return false
 	}
 	return true
+}
+
+// collectionDropped reports whether RootCoord no longer has the collection. The
+// answer is memoized in dropped for one GC round. A failed lookup counts as not
+// dropped, which only delays recycling to a later round.
+func (gc *garbageCollector) collectionDropped(ctx context.Context, dropped map[int64]bool, collectionID int64) bool {
+	if v, ok := dropped[collectionID]; ok {
+		return v
+	}
+	// A positive resident lookup avoids the RootCoord call.
+	if availability, ok := gc.option.broker.(broker.CollectionAvailability); ok && availability.IsCollectionAvailable(collectionID) {
+		dropped[collectionID] = false
+		return false
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to check whether collection exists, treat it as alive in this GC round",
+			mlog.Int64("collectionID", collectionID), mlog.Err(err))
+	}
+	dropped[collectionID] = err == nil && !has
+	return dropped[collectionID]
 }
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
@@ -1100,6 +1119,11 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 	io := packed.NewManifestIOContext(1)
 	defer io.Close()
+	droppedCollections := make(map[int64]bool)
+	collectionDropped := func(collectionID int64) bool {
+		return gc.collectionDropped(ctx, droppedCollections, collectionID)
+	}
+
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -1135,7 +1159,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			}
 		}
 
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel], collectionDropped) {
 			continue
 		}
 
@@ -1541,7 +1565,18 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
 			cancel()
 			if err == nil && !has {
-				collectionID2GcStatus[collectionID] = gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
+				confirmed := gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
+				// Drop the rest of the collection's DataCoord state before its
+				// channel checkpoints: they are what brings GC back to the
+				// collection if the drop fails.
+				if confirmed {
+					if err := gc.recycleDroppedCollection(ctx, collectionID); err != nil {
+						mlog.Warn(ctx, "failed to recycle dropped collection meta, retry in next GC round",
+							mlog.Int64("collectionID", collectionID), mlog.Err(err))
+						confirmed = false
+					}
+				}
+				collectionID2GcStatus[collectionID] = confirmed
 			} else {
 				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
 				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
@@ -1567,6 +1602,18 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 	}
 
 	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
+}
+
+// recycleDroppedCollection drops what DataCoord still keeps for a collection
+// that RootCoord has dropped and whose segments are all recycled: its segment
+// change groups, its cached collection info and its metrics. RootCoord removes
+// the collection meta on the same condition (GcConfirm).
+func (gc *garbageCollector) recycleDroppedCollection(ctx context.Context, collectionID int64) error {
+	if err := gc.meta.DropSegmentChangeGroupsOfCollection(ctx, collectionID); err != nil {
+		return err
+	}
+	gc.meta.DropCollection(collectionID)
+	return nil
 }
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {

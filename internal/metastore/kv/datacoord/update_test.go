@@ -38,14 +38,19 @@ import (
 func TestCatalog_Update_Atomic(t *testing.T) {
 	metakv := mocks.NewMetaKv(t)
 	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	var removals []string
 	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil).Once()
+		RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
+			removals = keys
+			return nil
+		}).Once()
 	c := NewCatalog(metakv, "", "")
 	seg := &datapb.SegmentInfo{ID: 1, CollectionID: 1, PartitionID: 1, State: commonpb.SegmentState_Flushed}
 	err := c.Update(context.TODO(),
 		metastore.AddSegment(seg),
-		metastore.MarkChannelDropped("ch-1"))
+		metastore.DropChannelFlag("ch-1"))
 	assert.NoError(t, err)
+	assert.Contains(t, removals, buildChannelRemovePath("ch-1"))
 }
 
 func TestCatalog_Update_Empty(t *testing.T) {

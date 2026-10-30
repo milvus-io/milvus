@@ -1183,10 +1183,9 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 		}},
 	}
 
-	// catalog has no SaveDroppedSegmentsInBatch/MarkChannelDeleted
-	// expectation: if batchSaveDropSegments still called those directly (the
-	// old two-call path), mockery would fail the test with an
-	// unexpected-call panic.
+	// catalog has no SaveDroppedSegmentsInBatch expectation: if
+	// batchSaveDropSegments still called it directly (the old two-call path),
+	// mockery would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
@@ -1204,14 +1203,14 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments)
 	suite.NoError(err)
 
-	// One UpdateSegment per dropped segment (2), then the channel tombstone.
+	// One UpdateSegment per dropped segment (2), then the channel flag delete.
 	// catalog.Update called exactly once (.Once()).
 	suite.Require().Len(gotActions, 3, "expected two segment updates + one channel action")
 
-	// The channel tombstone is last (the visibility marker).
+	// The channel flag delete is last, after the dropped segments.
 	channelEntry, ok := gotActions[2].Entry.(metastore.ChannelEntry)
 	suite.Require().True(ok)
-	suite.Equal(metastore.ActionUpdate, gotActions[2].Type)
+	suite.Equal(metastore.ActionDelete, gotActions[2].Type)
 	suite.Require().Equal("ch-1", channelEntry.Channel)
 
 	var droppedIDs []int64

@@ -574,34 +574,32 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
-func (kc *Catalog) ShouldDropChannel(ctx context.Context, channel string) bool {
-	key := buildChannelRemovePath(channel)
-	v, err := kc.MetaKv.Load(ctx, key)
-	if err != nil || v != RemoveFlagTomestone {
-		return false
+// RemoveDroppedChannelFlags deletes every channel removal flag whose value is
+// "removed". Older versions rewrote the flag to "removed" when a channel was
+// dropped and never deleted it. A missing flag reads the same as "removed" for
+// every reader, including older versions after a downgrade, so the delete
+// changes no behavior.
+func (kc *Catalog) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {
+	keys := make([]string, 0)
+	applyFn := func(key []byte, value []byte) error {
+		if string(value) != RemoveFlagTomestone {
+			return nil
+		}
+		ss := strings.Split(string(key), "/")
+		keys = append(keys, buildChannelRemovePath(ss[len(ss)-1]))
+		return nil
 	}
-	return true
-}
-
-// ChannelExists reports whether the channel marker is active. Missing keys are
-// treated as absent; other lookup failures are returned to the caller.
-func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
-	key := buildChannelRemovePath(channel)
-	v, err := kc.MetaKv.Load(ctx, key)
-	if errors.Is(err, merr.ErrIoKeyNotFound) {
-		return false, nil
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ChannelRemovePrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return 0, err
 	}
-	if err != nil {
-		return false, merr.Wrapf(err, "failed to load channel marker %s", channel)
+	removeFn := func(partialKeys []string) error {
+		return kc.MetaKv.MultiRemove(ctx, partialKeys)
 	}
-	return v == NonRemoveFlagTomestone, nil
-}
-
-// DropChannel removes channel remove flag after whole procedure is finished
-func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
-	key := buildChannelRemovePath(channel)
-	mlog.Info(ctx, "removing channel remove path", mlog.String("channel", channel))
-	return kc.MetaKv.Remove(ctx, key)
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if err := etcd.RemoveByBatchWithLimit(keys, maxTxnNum, removeFn); err != nil {
+		return 0, err
+	}
+	return len(keys), nil
 }
 
 func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {

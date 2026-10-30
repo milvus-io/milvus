@@ -18,18 +18,18 @@ package datacoord
 
 import (
 	"context"
-	"path"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -42,7 +42,8 @@ import (
 )
 
 // Exercise real etcd metadata and local object deletion through the GC sweep.
-// Faults affect only channel-marker Load; segment reads and deletion stay healthy.
+// Faults affect only the RootCoord collection lookup; segment reads and
+// deletion stay healthy.
 func TestGarbageCollector_ChannelLookup(t *testing.T) {
 	ctx := context.Background()
 	client, err := clientv3.New(clientv3.Config{
@@ -55,28 +56,24 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 	defer loaded.UnPatch()
 
 	for _, tc := range []struct {
-		name            string
-		marker          string
-		checkpoint      uint64
-		lookupErr       error
-		persistentError bool
-		wantRetained    bool
+		name              string
+		collectionDropped bool
+		checkpoint        uint64
+		lookupErr         error
+		persistentError   bool
+		wantRetained      bool
 	}{
-		{name: "transient lookup failure", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 100, lookupErr: context.DeadlineExceeded, wantRetained: true},
-		{name: "persistent lookup failure", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 100, lookupErr: rpctypes.ErrPermissionDenied, persistentError: true, wantRetained: true},
-		{name: "checkpoint behind", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 100, wantRetained: true},
-		{name: "checkpoint equal", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 120},
-		{name: "checkpoint passed", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 130},
-		{name: "checkpoint equal with persistent failure", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 120, lookupErr: context.DeadlineExceeded, persistentError: true},
-		{name: "checkpoint passed with persistent failure", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 130, lookupErr: rpctypes.ErrPermissionDenied, persistentError: true},
-		{name: "dropped checkpoint with persistent failure", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: funcutil.DroppedChannelCheckpointTimestamp, lookupErr: rpctypes.ErrPermissionDenied, persistentError: true},
-		{name: "removed channel", marker: kvdatacoord.RemoveFlagTomestone, checkpoint: 100},
-		{name: "missing marker", checkpoint: 100},
-		{name: "removed channel after lookup recovers", marker: kvdatacoord.RemoveFlagTomestone, checkpoint: 100, lookupErr: context.DeadlineExceeded, wantRetained: true},
-		{name: "missing marker after lookup recovers", checkpoint: 100, lookupErr: context.DeadlineExceeded, wantRetained: true},
-		{name: "permission denied", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 100, lookupErr: rpctypes.ErrPermissionDenied, wantRetained: true},
-		{name: "canceled lookup", marker: kvdatacoord.NonRemoveFlagTomestone, checkpoint: 100, lookupErr: context.Canceled, wantRetained: true},
-		{name: "unknown marker preserves legacy behavior", marker: "invalid", checkpoint: 100},
+		{name: "transient lookup failure", checkpoint: 100, lookupErr: context.DeadlineExceeded, wantRetained: true},
+		{name: "persistent lookup failure", checkpoint: 100, lookupErr: merr.ErrServiceUnavailable, persistentError: true, wantRetained: true},
+		{name: "checkpoint behind", checkpoint: 100, wantRetained: true},
+		{name: "checkpoint equal", checkpoint: 120},
+		{name: "checkpoint passed", checkpoint: 130},
+		{name: "checkpoint equal with persistent failure", checkpoint: 120, lookupErr: context.DeadlineExceeded, persistentError: true},
+		{name: "checkpoint passed with persistent failure", checkpoint: 130, lookupErr: merr.ErrServiceUnavailable, persistentError: true},
+		{name: "dropped checkpoint with persistent failure", checkpoint: funcutil.DroppedChannelCheckpointTimestamp, lookupErr: merr.ErrServiceUnavailable, persistentError: true},
+		{name: "dropped collection", collectionDropped: true, checkpoint: 100},
+		{name: "dropped collection after lookup recovers", collectionDropped: true, checkpoint: 100, lookupErr: context.DeadlineExceeded, wantRetained: true},
+		{name: "canceled lookup", checkpoint: 100, lookupErr: context.Canceled, wantRetained: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := "gc-channel-lookup-" + uuid.NewString()
@@ -90,14 +87,21 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			store := metacache.NewMetaStore(catalog)
 			m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(store), metaStore: store, channelSync: newChannelSync()}
 			handler := &ServerHandler{s: &Server{ctx: ctx, meta: m}}
-			gc := newGarbageCollector(m, handler, GcOption{cli: cli, dropTolerance: 0})
+
+			lookups, injected := 0, 0
+			b := broker2.NewMockBroker(t)
+			b.EXPECT().HasCollection(mock.Anything, int64(1)).RunAndReturn(func(context.Context, int64) (bool, error) {
+				lookups++
+				if tc.lookupErr != nil && (tc.persistentError || injected == 0) {
+					injected++
+					return false, tc.lookupErr
+				}
+				return !tc.collectionDropped, nil
+			}).Maybe()
+			gc := newGarbageCollector(m, handler, GcOption{cli: cli, dropTolerance: 0, broker: b})
 			defer gc.close()
 
 			const channel = "gc-channel-lookup_1v0"
-			markerKey := path.Join(kvdatacoord.ChannelRemovePrefix, channel)
-			if tc.marker != "" {
-				require.NoError(t, kv.Save(ctx, markerKey, tc.marker))
-			}
 			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 				channel: {ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}},
 			})
@@ -112,20 +116,6 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			objectPath, err := binlog.BuildLogPath(storage.InsertBinlog, 1, 2, 3, 100, 10)
 			require.NoError(t, err)
 			require.NoError(t, cli.Write(ctx, objectPath, []byte("segment data")))
-
-			markerReads, injected := 0, 0
-			patch := mockey.Mock(mockey.GetMethod(kv, "Load")).When(func(_ context.Context, key string) bool {
-				if key != markerKey {
-					return false
-				}
-				markerReads++
-				if tc.lookupErr != nil && (tc.persistentError || injected == 0) {
-					injected++
-					return true
-				}
-				return false
-			}).Return("", tc.lookupErr).Build()
-			defer patch.UnPatch()
 
 			assertState := func(retained bool) {
 				t.Helper()
@@ -161,20 +151,20 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			}
 			gc.recycleDroppedSegments(ctx, nil)
 			if tc.checkpoint >= 120 {
-				require.Zero(t, markerReads, "a sufficient checkpoint must not depend on marker availability")
+				require.Zero(t, lookups, "a sufficient checkpoint must not depend on the collection lookup")
 			} else {
-				require.Equal(t, 1, markerReads)
+				require.Equal(t, 1, lookups)
 				if tc.lookupErr != nil {
-					require.Equal(t, 1, injected, "fault must occur at the channel marker lookup")
+					require.Equal(t, 1, injected, "fault must occur at the collection lookup")
 				}
 			}
 			assertState(tc.wantRetained)
 			if tc.wantRetained {
-				// Retry without rewriting the marker or clearing the injected fault.
+				// Retry without clearing a persistent fault.
 				gc.recycleDroppedSegments(ctx, nil)
-				stillRetained := tc.persistentError || tc.marker == kvdatacoord.NonRemoveFlagTomestone
+				stillRetained := tc.persistentError || !tc.collectionDropped
 				assertState(stillRetained)
-				require.Equal(t, 2, markerReads)
+				require.Equal(t, 2, lookups)
 				if tc.lookupErr != nil {
 					if tc.persistentError {
 						require.Equal(t, 2, injected)
@@ -191,7 +181,7 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					})
 					gc.recycleDroppedSegments(ctx, nil)
 					assertState(false)
-					require.Equal(t, 2, markerReads, "checkpoint progress must unblock GC even if marker reads still fail")
+					require.Equal(t, 2, lookups, "checkpoint progress must unblock GC even if lookups still fail")
 				}
 			}
 		})
