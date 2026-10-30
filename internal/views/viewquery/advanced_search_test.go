@@ -27,6 +27,7 @@ import (
 func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	parent := &internalpb.SearchRequest{
 		CollectionID:            12,
+		SchemaVersion:           3,
 		OutputFieldsId:          []int64{13},
 		MvccTimestamp:           14,
 		IsAdvanced:              true,
@@ -55,6 +56,7 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	assert.False(t, req.GetIsAdvanced())
 	assert.Nil(t, req.GetSubReqs())
 	assert.Equal(t, parent.GetCollectionID(), req.GetCollectionID())
+	assert.Equal(t, parent.GetSchemaVersion(), req.GetSchemaVersion())
 	assert.Equal(t, parent.GetOutputFieldsId(), req.GetOutputFieldsId())
 	assert.Equal(t, parent.GetMvccTimestamp(), req.GetMvccTimestamp())
 	assert.Equal(t, parent.GetCollectionTtlTimestamps(), req.GetCollectionTtlTimestamps())
@@ -274,6 +276,7 @@ func (t *advancedSearchTasks) Release() {
 }
 
 type advancedTaskProvider struct {
+	TaskProvider
 	mu            sync.Mutex
 	emptyFields   map[int64]struct{}
 	acquired      []int64
@@ -297,6 +300,7 @@ func (p *advancedTaskProvider) AcquireSearchSegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	fieldID := req.GetFieldId()
 	p.mu.Lock()
@@ -320,6 +324,7 @@ func (*advancedTaskProvider) AcquireQuerySegmentTasks(
 	qviews.QueryViewVersion,
 	*viewpb.QueryPlanMVCC,
 	*internalpb.RetrieveRequest,
+	*viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	return nil, viewerror.NewUnknownError("unexpected query")
 }

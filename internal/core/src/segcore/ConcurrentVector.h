@@ -612,6 +612,11 @@ class ConcurrentVectorImpl : public VectorBase {
         if (physical_index == -1) {
             return nullptr;
         }
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
+        }
         auto chunk_id = physical_index / size_per_chunk_;
         auto chunk_offset = physical_index % size_per_chunk_;
         auto data =
@@ -626,6 +631,11 @@ class ConcurrentVectorImpl : public VectorBase {
                          ssize_t physical_index) const {
         if (physical_index == -1) {
             return nullptr;
+        }
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
         }
         auto chunk_id = physical_index / size_per_chunk_;
         auto chunk_offset = physical_index % size_per_chunk_;
@@ -645,6 +655,10 @@ class ConcurrentVectorImpl : public VectorBase {
             AssertInfo(!chunks_ptr_->is_mmap(),
                        "mmap nested ARRAY rows must be accessed through "
                        "view_element()");
+        } else if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
         }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
@@ -963,6 +977,13 @@ class ConcurrentVector<VectorArray>
               std::move(mmap_descriptor),
               valid_data_ptr,
               use_mapping_storage) {
+    }
+
+    VectorArrayView
+    view_physical_element(ssize_t physical_index) const {
+        auto chunk_id = physical_index / size_per_chunk_;
+        auto chunk_offset = physical_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
 };
 

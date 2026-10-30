@@ -11,12 +11,14 @@
 
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <iosfwd>
 #include <map>
@@ -30,9 +32,12 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
+#include "arrow/api.h"
+#include "arrow/filesystem/localfs.h"
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
 #include "cachinglayer/CacheSlot.h"
@@ -60,7 +65,11 @@
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
+#include "milvus-storage/format/vortex/vortex_writer.h"
+#include "milvus-storage/properties.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/VortexColumn.h"
+#include "mmap/VortexColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -2135,4 +2144,199 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     }
 
     EXPECT_EQ(expired_count, test_data_count / 4);
+}
+
+namespace {
+
+// Writes one Arrow list<int64> column per Vortex file. A nullopt row is a NULL
+// row, a nullopt element a NULL element.
+using VortexInt64ListRow = std::optional<std::vector<std::optional<int64_t>>>;
+
+std::shared_ptr<arrow::Array>
+BuildVortexInt64ListArray(const std::vector<VortexInt64ListRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), values);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(builder.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(builder.Append().ok());
+        for (const auto& value : *row) {
+            if (value.has_value()) {
+                EXPECT_TRUE(values->Append(*value).ok());
+            } else {
+                EXPECT_TRUE(values->AppendNull().ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(builder.Finish(&array).ok());
+    return array;
+}
+
+VortexColumn::FileInfo
+WriteInt64ListVortexFile(const std::filesystem::path& path,
+                         FieldId field_id,
+                         const std::vector<VortexInt64ListRow>& rows,
+                         int64_t start_index,
+                         const milvus_storage::api::Properties& properties) {
+    auto array = BuildVortexInt64ListArray(rows);
+    auto schema = arrow::schema(
+        {arrow::field(std::to_string(field_id.get()), array->type(), true)});
+    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
+    auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
+    auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
+        fs, schema, path.string(), properties);
+    EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    if (!writer_result.ok()) {
+        return {};
+    }
+    auto writer = std::move(writer_result).ValueOrDie();
+    EXPECT_TRUE(writer->Write(batch).ok());
+    EXPECT_TRUE(writer->Flush().ok());
+    auto close_result = writer->Close();
+    EXPECT_TRUE(close_result.ok());
+    if (!close_result.ok()) {
+        return {};
+    }
+    auto cg_file = close_result.ValueOrDie();
+    VortexColumn::FileInfo info;
+    info.path = path.string();
+    info.start_index = start_index;
+    info.end_index = start_index + array->length();
+    info.file_size =
+        cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFileSize, 0);
+    info.footer_size =
+        cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFooterSize, 0);
+    return info;
+}
+
+}  // namespace
+
+// A nullable struct with a single-level element-nullable Array<Int64>
+// sub-field, loaded as Vortex. Output of the sub-field must read the rows as
+// ArrayValueView (native list), including NULL rows and NULL elements.
+//   0 [10, NULL, 30]   1 [NULL]   2 NULL row
+//   3 [50, NULL]       4 []       5 [60]
+TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto field = schema->AddDebugArrayField("s[arr]",
+                                            DataType::INT64,
+                                            /*nullable=*/true,
+                                            /*element_nullable=*/true);
+    const auto& field_meta = (*schema)[field];
+    ASSERT_TRUE(field_meta.is_native_list_array());
+    ASSERT_TRUE(field_meta.is_nullable());
+
+    constexpr int64_t rows = 6;
+    auto data = segcore::DataGen(schema, rows);
+    auto segment =
+        CreateSealedWithFieldDataLoaded(schema, data, false, {field.get()});
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    (*properties)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*properties)[PROPERTY_FS_ROOT_PATH] = std::string("/");
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_segment_vortex_element_nullable_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto dir_guard =
+        folly::makeGuard([&dir] { std::filesystem::remove_all(dir); });
+    auto first = WriteInt64ListVortexFile(
+        dir / "first.vx",
+        field,
+        {std::vector<std::optional<int64_t>>{10, std::nullopt, 30},
+         std::vector<std::optional<int64_t>>{std::nullopt},
+         std::nullopt},
+        0,
+        *properties);
+    auto second = WriteInt64ListVortexFile(
+        dir / "second.vx",
+        field,
+        {std::vector<std::optional<int64_t>>{50, std::nullopt},
+         std::vector<std::optional<int64_t>>{},
+         std::vector<std::optional<int64_t>>{60}},
+        3,
+        *properties);
+    std::vector<std::string> field_names{std::to_string(field.get())};
+    auto column_group = std::make_shared<VortexColumnGroup>(
+        std::vector<VortexColumn::FileInfo>{first, second},
+        properties,
+        field_names,
+        field_names.size(),
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+        nullptr);
+    auto column = std::make_shared<VortexColumn>(field,
+                                                 field_meta,
+                                                 std::to_string(field.get()),
+                                                 properties,
+                                                 column_group);
+    ASSERT_EQ(column->GetLocalFormat(),
+              ChunkedColumnInterface::LocalFormat::Vortex);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+    initial.schema = schema;
+    initial.load_info = current->load_info;
+    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial);
+    segcore::ChunkedSegmentSealedImpl::StateDelta final;
+    final.schema = schema;
+    final.load_info = current->load_info;
+    final.commit_ts = current->commit_ts;
+    sealed->TestStageLoadFieldDataThenPublish(field,
+                                              column,
+                                              rows,
+                                              DataType::ARRAY,
+                                              schema,
+                                              runtime,
+                                              staged.get(),
+                                              current,
+                                              final,
+                                              [] {});
+
+    const std::vector<int64_t> offsets{5, 0, 2, 3, 1, 4, 0};
+    auto result = segment->bulk_subscript(
+        nullptr, field, offsets.data(), static_cast<int64_t>(offsets.size()));
+    ASSERT_NE(result, nullptr);
+    const auto& row_valid = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(row_valid.size(), offsets.size());
+    const auto& array_data = result->scalars().array_data();
+    EXPECT_EQ(array_data.element_type(), proto::schema::DataType::Int64);
+    ASSERT_EQ(array_data.data_size(), offsets.size());
+
+    const std::map<int64_t, std::vector<std::optional<int64_t>>> expected{
+        {0, {10, std::nullopt, 30}},
+        {1, {std::nullopt}},
+        {3, {50, std::nullopt}},
+        {4, {}},
+        {5, {60}},
+    };
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto row = offsets[i];
+        SCOPED_TRACE(row);
+        EXPECT_EQ(row_valid[i], row != 2);
+        if (row == 2) {
+            continue;
+        }
+        const auto& cell = array_data.data(i);
+        const auto& want = expected.at(row);
+        ASSERT_EQ(cell.long_data().data_size(), want.size());
+        ASSERT_EQ(cell.valid_data_size(), want.size());
+        for (size_t j = 0; j < want.size(); ++j) {
+            EXPECT_EQ(cell.valid_data(j), want[j].has_value());
+            if (want[j].has_value()) {
+                EXPECT_EQ(cell.long_data().data(j), *want[j]);
+            }
+        }
+    }
 }

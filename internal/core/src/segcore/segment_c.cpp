@@ -974,9 +974,10 @@ BuildRetrieveUserColumnBatch(const std::shared_ptr<RetrieveUserColumns>& holder,
         // already has Arrow's value-buffer layout is aliased rather than
         // copied. See FieldDataToArrow's contract: the holder is kept alive by
         // the returned arrays, and its storage must not be mutated after this.
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              milvus::segcore::FieldDataToArrow(
-                                  name, field_data, total_rows, false, holder));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            milvus::segcore::FieldDataToArrow(
+                name, field_data, total_rows, false, holder, &field_meta));
         auto array = converted.second;
         // Plain arrow::field, NOT MilvusField: no per-field metadata.
         //
@@ -2033,7 +2034,8 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         }
 
         const auto physical_offset = physical_offsets[next_physical++];
-        const auto& vector_array = (*vector_array_vec)[physical_offset];
+        const auto vector_array =
+            vector_array_vec->view_physical_element(physical_offset);
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
         }

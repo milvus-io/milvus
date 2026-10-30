@@ -166,6 +166,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 		name          string
 		field         *schemapb.FieldSchema
 		expectedRatio int
+		wantErr       bool
 	}{
 		{
 			name: "legacy int32 array",
@@ -184,7 +185,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 				ElementType: schemapb.DataType_Array,
 				TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
 			},
-			expectedRatio: 4,
+			expectedRatio: 1,
 		},
 		{
 			name: "deeply nested int64 array",
@@ -196,7 +197,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 					leaf(schemapb.DataType_Int64),
 				))),
 			},
-			expectedRatio: 8,
+			wantErr: true,
 		},
 		{
 			name: "nested float array",
@@ -214,6 +215,10 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var buffer bytes.Buffer
 			writer, err := newSingleFieldRecordWriter(test.field, &buffer)
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, test.expectedRatio, writer.memoryExpansionRatio)
 			require.NoError(t, writer.Close())
@@ -338,7 +343,7 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 			},
 		}
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			serdeMap[schemapb.DataType_FloatVector].arrowType(2, schemapb.DataType_None, false))
+			serdeMap[schemapb.DataType_FloatVector].legacyArrowType(2, schemapb.DataType_None, false))
 		require.NoError(t, serdeMap[schemapb.DataType_FloatVector].serialize(
 			builder, []float32{1, 2}, schemapb.DataType_None, 0, false))
 		arr := builder.NewArray()
@@ -374,7 +379,7 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 		}
 		entry := serdeMap[schemapb.DataType_ArrayOfVector]
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			entry.arrowType(2, schemapb.DataType_FloatVector, false))
+			entry.legacyArrowType(2, schemapb.DataType_FloatVector, false))
 		require.NoError(t, entry.serialize(builder, &schemapb.VectorField{
 			Dim: 2,
 			Data: &schemapb.VectorField_FloatVector{

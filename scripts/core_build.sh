@@ -102,6 +102,7 @@ USE_DYNAMIC_SIMD="ON"
 USE_SVS="OFF"
 WITH_CRT="OFF"
 TANTIVY_FEATURES=""
+: "${TANTIVY_ANALYZER_REMOTE_TLS:=ON}"
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -185,6 +186,10 @@ parameter:
 -R: build milvus-storage with AWS S3 CRT read path(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
+
+environment:
+TANTIVY_ANALYZER_REMOTE_TLS: ON/OFF (default: ON). Set OFF for FIPS builds that must not link rustls/ring
+  (disables Lindera online dictionary download and gRPC tokenizer TLS).
 
 usage:
 ./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
@@ -289,6 +294,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DWITH_SVS=${USE_SVS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
+-DTANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS} \
 -DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
 -DWITH_CRT=${WITH_CRT} \

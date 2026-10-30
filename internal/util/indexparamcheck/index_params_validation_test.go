@@ -278,6 +278,32 @@ func TestValidateFieldIndexParams(t *testing.T) {
 	})
 }
 
+func TestElementNullableArrayOfVectorMetrics(t *testing.T) {
+	scalar := &schemapb.FieldSchema{
+		Name: "scores", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, ElementNullable: true,
+	}
+	assert.ErrorContains(t, ValidateFieldIndexParams(scalar, map[string]string{common.IndexTypeKey: IndexINVERTED}),
+		"indexing element-nullable ARRAY field scores is not supported yet")
+
+	field := &schemapb.FieldSchema{
+		Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+	}
+	for _, metricType := range EmbListMetrics {
+		err := ValidateArrayOfVectorMetricType(field.GetElementType(), field.GetElementNullable(), metricType)
+		assert.ErrorContains(t, err, "only support element-level metrics")
+		err = ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType})
+		assert.ErrorContains(t, err, "only support element-level metrics")
+	}
+	for _, metricType := range []string{"COSINE", "L2", "IP", "UNKNOWN"} {
+		err := ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType})
+		assert.ErrorContains(t, err, "indexing element-nullable vector array field vectors is not supported yet")
+	}
+	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), true, "COSINE"))
+	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), false, "MAX_SIM_COSINE"))
+}
+
 func TestValidateIndexName(t *testing.T) {
 	paramtable.Init()
 	assert.NoError(t, ValidateIndexName(""))

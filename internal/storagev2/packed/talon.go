@@ -282,15 +282,16 @@ func (c *TalonClient) submit(ctx context.Context, request talonRequest) (<-chan 
 	})
 	mu.Lock()
 	var status C.LoonFFIResult
+	// Nil request options preserve the client's namespace and broker defaults.
 	switch request.operation {
 	case C.LOON_TALON_READ:
-		status = C.loon_talon_read_async(c.io.native, c.native, cURI, C.uint64_t(request.read.Offset), C.uint64_t(request.read.Length), cVersion, cObjectSize, dst, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
+		status = C.loon_talon_read_async(c.io.native, c.native, cURI, C.uint64_t(request.read.Offset), C.uint64_t(request.read.Length), cVersion, cObjectSize, dst, nil, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
 	case C.LOON_TALON_LOAD:
-		status = C.loon_talon_load_async(c.io.native, c.native, &entries[0], (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
+		status = C.loon_talon_load_async(c.io.native, c.native, &entries[0], nil, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
 	case C.LOON_TALON_BATCH_LOAD:
-		status = C.loon_talon_batch_load_async(c.io.native, c.native, &entries[0], C.size_t(len(entries)), (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
+		status = C.loon_talon_batch_load_async(c.io.native, c.native, &entries[0], C.size_t(len(entries)), nil, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
 	case C.LOON_TALON_STAT:
-		status = C.loon_talon_stat_async(c.io.native, c.native, cURI, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
+		status = C.loon_talon_stat_async(c.io.native, c.native, cURI, nil, (C.LoonTalonCallback)(C.milvusTalonDone), C.uintptr_t(token), &operation)
 	}
 	if err := handleManifestAsyncResult(status); err != nil {
 		mu.Unlock()

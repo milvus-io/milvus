@@ -170,8 +170,10 @@ BuildRetrieveFieldsBatch(
         }
         auto& field_meta = plan->schema_->operator[](field_id);
         auto name = std::string(field_meta.get_name().get());
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              FieldDataToArrow(name, *it->second, total_rows));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            FieldDataToArrow(
+                name, *it->second, total_rows, false, nullptr, &field_meta));
         auto array = converted.second;
         fields.push_back(MilvusField(name,
                                      array->type(),

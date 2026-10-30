@@ -35,16 +35,16 @@ on the wire. What remains is small enough to state on one page.
 ```go
 package extension
 
-func SetHook(h hook.Hook)                     // hookutil prefers it over proxy.soPath
+func SetHook(h hook.Hook)                     // hookutil uses it; proxy.soPath is ignored
 func InstalledHook() hook.Hook
 func SetForm()                                // declares a form installed, in every role
 func FormInstalled() bool                     // reads SetForm's mark; independent of SetHook
 
 type QueryHook interface { ... }              // the queryNode.soPath plug-in's method set
-func SetQueryHook(h QueryHook)                // the QueryNode prefers it over queryNode.soPath
+func SetQueryHook(h QueryHook)                // the QueryNode uses it; queryNode.soPath is ignored
 func InstalledQueryHook() QueryHook
 
-func SetCipher(c hook.Cipher)                 // hookutil prefers it over cipherPlugin.soPathGo
+func SetCipher(c hook.Cipher)                 // hookutil uses it; cipherPlugin.soPathGo is ignored
 func InstalledCipher() hook.Cipher
 
 type Coordinator interface {                  // the coordinator as its own clients see it
@@ -85,33 +85,28 @@ which sees the same metadata the authentication interceptor does; a refusal
 from `Before` always reaches the client as the interceptor's own
 `InvalidArgument`, which is in pymilvus's non-retried set.
 
-One addition to hookutil: a compiled-in hook (`SetHook`) is used in preference
-to `proxy.soPath`, and a deployment that configures both is refused at
-start-up. A compiled-in hook is otherwise treated exactly as a plug-in is: it
-gets the same `Init` call with the `hook.*` configuration before it is
-installed, a failure to initialize keeps the proxy from starting, and it is
-registered with the same watcher, so editing a `hook.*` key re-initializes it
-with the new configuration without a restart. It differs in one respect:
-`common.panicWhenPluginFail`, which lets an operator run on without a plug-in
-that failed to load, does not reach it. A compiled-in hook that cannot
-initialize, or is configured beside a plug-in, stops the proxy whatever the
-setting says, because the distribution that compiled it in has switched the
-coordinators' behaviors on too, and a proxy serving through the default hook
-beside them would run half of that distribution.
+One addition to hookutil: a compiled-in hook (`SetHook`) is used and
+`proxy.soPath` is ignored, with a warning. A compiled-in hook is otherwise
+treated exactly as a plug-in is: it gets the same `Init` call with the
+`hook.*` configuration before it is installed, and it is registered with the
+same watcher, so editing a `hook.*` key re-initializes it with the new
+configuration without a restart. A failure to initialize follows
+`common.panicWhenPluginFail`, as a plug-in's load failure does: with the
+default `true` it stops the proxy, and with `false` the proxy starts on the
+default hook. When a form is installed (`SetForm`), a failure to initialize
+stops the proxy whatever the setting says.
 
 ### The query hook
 
 The QueryNode's search-parameter tuning hook - the `QueryNodePlugin` symbol a
 `queryNode.soPath` plug-in exports - can be compiled in the same way
-(`SetQueryHook`). A compiled-in query hook is used in preference to
-`queryNode.soPath`, and a deployment that configures both is refused at
-start-up: both would tune every search, and only one can. The refusal is
-reported the way a plug-in's load failure is: the QueryNode treats it as
-fatal when `autoIndex.enable` is on, and with tuning off it starts without
-either hook, as it always has. It is otherwise treated exactly as the plug-in
-is: it gets the same two `Init` calls with the
-`autoIndex.params.search` and `autoIndex.params.tuning` configuration before it
-is installed, and the same watchers re-initialize it when those keys change.
+(`SetQueryHook`). A compiled-in query hook is used and `queryNode.soPath` is
+ignored, with a warning. A compiled-in hook that fails to initialize is
+reported the way a plug-in's load failure is: the QueryNode treats it as fatal
+when `autoIndex.enable` is on, and with tuning off it starts without either
+hook, as it always has. It is otherwise treated exactly as the plug-in is: it
+gets the same two `Init` calls with the `autoIndex.params.search` and
+`autoIndex.params.tuning` configuration before it is installed, and the same watchers re-initialize it when those keys change.
 `autoIndex.enable` still decides whether tuning happens at all, whichever way
 the hook got there. `optimizers.QueryHook` is now an alias of
 `extension.QueryHook`, so nothing in the tree changes.
@@ -120,10 +115,10 @@ the hook got there. `optimizers.QueryHook` is now an alias of
 
 The Go half of the cipher plug-in pair - the `CipherPlugin` symbol a
 `cipherPlugin.soPathGo` plug-in exports - can be compiled in the same way
-(`SetCipher`). A compiled-in cipher is used in preference to
-`cipherPlugin.soPathGo`, and a deployment that configures both is refused at
-start-up: both would answer for the encryption keys, and only one can. Only
-that half changes hands: the C++ half is still loaded by the core from
+(`SetCipher`). A compiled-in cipher is used and `cipherPlugin.soPathGo` is
+ignored, with a warning that names the key but not its value: cipher paths
+stay out of the logs, as they do when a plug-in fails to load. Only that half
+changes hands: the C++ half is still loaded by the core from
 `cipherPlugin.soPathCpp`, and that path stays the deployment's declaration
 that encryption is on. A compiled-in cipher in a deployment without
 `soPathCpp` is left idle and `IsClusterEncryptionEnabled` stays false,
@@ -286,15 +281,17 @@ them through `user.yaml` or the environment.
 ## Test plan
 
 - `pkg/extension`: the setters and getters, and the context mark.
-- hookutil: a compiled-in hook is used, refused beside a plug-in, absent by
+- hookutil: a compiled-in hook is used, `proxy.soPath` ignored beside it, absent by
   default, initialized with the `hook.*` configuration, re-initialized when
-  that configuration changes, and fatal when it cannot initialize even with
-  `common.panicWhenPluginFail` off.
+  that configuration changes; when it cannot initialize, fatal with a form
+  installed even with `common.panicWhenPluginFail` off, and following that
+  setting without a form.
 - hookutil: a compiled-in cipher is used when `cipherPlugin.soPathCpp` is
-  set, refused beside `cipherPlugin.soPathGo`, idle without `soPathCpp`,
-  absent by default, not installed when it cannot initialize, and
+  set, `cipherPlugin.soPathGo` ignored beside it without its value reaching
+  the logs (whether the cipher initializes, fails to, or stays idle), idle
+  without `soPathCpp`, absent by default, not installed when it cannot initialize, and
   re-initialized on a `cipherPlugin.*` edit.
-- querynode: a compiled-in query hook is used, refused beside a plug-in,
+- querynode: a compiled-in query hook is used, `queryNode.soPath` ignored beside it,
   absent by default, initialized with the `autoIndex.params.*` configuration,
   and not installed when it cannot initialize.
 - proxy: a hook-pinned resource group reaches the search task; per-resource-

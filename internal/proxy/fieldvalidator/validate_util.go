@@ -553,6 +553,19 @@ func (v *ValidateUtil) fillWithValue(data []*schemapb.FieldData, schema *typeuti
 				}
 			}
 		}
+		if fieldSchema.GetDataType() == schemapb.DataType_Array &&
+			typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+			arrayData := field.GetScalars().GetArrayData()
+			rowValidData := typeutil.GetFieldDataValidData(field)
+			for rowIdx, row := range arrayData.GetData() {
+				if len(rowValidData) > 0 && !rowValidData[rowIdx] {
+					continue
+				}
+				if err := fillNestedArrayValue(row, fieldSchema.GetTypeSchema(), field.GetFieldName(), rowIdx, 0); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return nil
@@ -1176,6 +1189,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 				return merr.WrapErrParameterInvalid("bool array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
+			if payload := row.GetData().(*schemapb.ScalarField_BoolData); payload == nil || payload.BoolData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
+			}
 			if err := validateValidity(validData, len(row.GetBoolData().GetData()), rowIdx); err != nil {
 				return err
 			}
@@ -1190,6 +1206,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_IntData)(nil)) {
 				return merr.WrapErrParameterInvalid("int array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			if payload := row.GetData().(*schemapb.ScalarField_IntData); payload == nil || payload.IntData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
 			}
 			values := row.GetIntData().GetData()
 			if err := validateValidity(validData, len(values), rowIdx); err != nil {
@@ -1219,6 +1238,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 				return merr.WrapErrParameterInvalid("int64 array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
+			if payload := row.GetData().(*schemapb.ScalarField_LongData); payload == nil || payload.LongData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
+			}
 			if err := validateValidity(validData, len(row.GetLongData().GetData()), rowIdx); err != nil {
 				return err
 			}
@@ -1233,6 +1255,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_FloatData)(nil)) {
 				return merr.WrapErrParameterInvalid("float array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			if payload := row.GetData().(*schemapb.ScalarField_FloatData); payload == nil || payload.FloatData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
 			}
 			if err := validateValidity(validData, len(row.GetFloatData().GetData()), rowIdx); err != nil {
 				return err
@@ -1249,6 +1274,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 				return merr.WrapErrParameterInvalid("double array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
 			}
+			if payload := row.GetData().(*schemapb.ScalarField_DoubleData); payload == nil || payload.DoubleData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
+			}
 			if err := validateValidity(validData, len(row.GetDoubleData().GetData()), rowIdx); err != nil {
 				return err
 			}
@@ -1263,6 +1291,9 @@ func (v *ValidateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_StringData)(nil)) {
 				return merr.WrapErrParameterInvalid("string array",
 					fmt.Sprintf("%s array", actualType.String()), "insert data does not match")
+			}
+			if payload := row.GetData().(*schemapb.ScalarField_StringData); payload == nil || payload.StringData == nil {
+				return merr.WrapErrParameterInvalidMsg("field %s row %d has nil leaf payload", field.GetName(), rowIdx)
 			}
 			values := row.GetStringData().GetData()
 			if err := validateValidity(validData, len(values), rowIdx); err != nil {
@@ -1294,6 +1325,89 @@ func arraySchemaElementType(arrayType *schemapb.TypeSchema) schemapb.DataType {
 		return schemapb.DataType_Array
 	}
 	return element.GetLeafType()
+}
+
+func fillNestedArrayValue(row *schemapb.ScalarField, arrayType *schemapb.TypeSchema, fieldName string, rowIdx, level int) error {
+	elementSchema := arrayType.GetArrayElement()
+	validData := typeutil.GetArrayElementValidData(row)
+	if elementSchema.GetArrayElement() != nil {
+		arrayData := row.GetArrayData()
+		if elementSchema.GetNullable() {
+			children := make([]*schemapb.ScalarField, len(validData))
+			physical := 0
+			for i, valid := range validData {
+				if valid {
+					children[i] = arrayData.Data[physical]
+					physical++
+				} else {
+					var err error
+					children[i], err = newEmptyNestedArrayElement(elementSchema)
+					if err != nil {
+						return merr.Wrapf(err, "nested array field %s row %d level %d element %d", fieldName, rowIdx, level, i)
+					}
+				}
+			}
+			arrayData.Data = children
+		}
+		for i, child := range arrayData.GetData() {
+			if len(validData) > 0 && !validData[i] {
+				continue
+			}
+			if err := fillNestedArrayValue(child, elementSchema, fieldName, rowIdx, level+1); err != nil {
+				return merr.Wrapf(err, "nested array element %d", i)
+			}
+		}
+		return nil
+	}
+	if !elementSchema.GetNullable() {
+		return nil
+	}
+	var err error
+	switch rowData := row.GetData().(type) {
+	case *schemapb.ScalarField_BoolData:
+		rowData.BoolData.Data, err = fillWithNullValueImpl(rowData.BoolData.Data, validData)
+	case *schemapb.ScalarField_IntData:
+		rowData.IntData.Data, err = fillWithNullValueImpl(rowData.IntData.Data, validData)
+	case *schemapb.ScalarField_LongData:
+		rowData.LongData.Data, err = fillWithNullValueImpl(rowData.LongData.Data, validData)
+	case *schemapb.ScalarField_FloatData:
+		rowData.FloatData.Data, err = fillWithNullValueImpl(rowData.FloatData.Data, validData)
+	case *schemapb.ScalarField_DoubleData:
+		rowData.DoubleData.Data, err = fillWithNullValueImpl(rowData.DoubleData.Data, validData)
+	case *schemapb.ScalarField_StringData:
+		rowData.StringData.Data, err = fillWithNullValueImpl(rowData.StringData.Data, validData)
+	default:
+		return merr.WrapErrParameterInvalidMsg("nested array field %s row %d level %d has unsupported leaf type %s", fieldName, rowIdx, level, elementSchema.GetLeafType())
+	}
+	if err != nil {
+		return merr.Wrapf(err, "nested array field %s row %d level %d", fieldName, rowIdx, level)
+	}
+	return nil
+}
+
+func newEmptyNestedArrayElement(arrayType *schemapb.TypeSchema) (*schemapb.ScalarField, error) {
+	element := arrayType.GetArrayElement()
+	if element.GetArrayElement() != nil {
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+			ArrayData: &schemapb.ArrayArray{ElementType: arraySchemaElementType(arrayType)},
+		}}, nil
+	}
+	switch element.GetLeafType() {
+	case schemapb.DataType_Bool:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{}}}, nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{}}}, nil
+	case schemapb.DataType_Int64:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}}, nil
+	case schemapb.DataType_Float:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{}}}, nil
+	case schemapb.DataType_Double:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{}}}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}}, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported nested array leaf type %s", element.GetLeafType())
+	}
 }
 
 func normalizeNestedArrayElementType(
@@ -1330,14 +1444,6 @@ func (v *ValidateUtil) checkNestedArrayValue(
 
 	elementSchema := arrayType.GetArrayElement()
 	if elementSchema.GetArrayElement() != nil {
-		// TODO: handle this when we support element valid_data for nested array
-		if len(typeutil.GetArrayElementValidData(row)) > 0 {
-			return merr.WrapErrParameterInvalidMsg(
-				"nested array field %s does not support element valid_data at level %d",
-				fieldName,
-				level,
-			)
-		}
 		arrayData := row.GetArrayData()
 		if arrayData == nil {
 			return merr.WrapErrParameterInvalidMsg(
@@ -1350,15 +1456,27 @@ func (v *ValidateUtil) checkNestedArrayValue(
 		if err := normalizeNestedArrayElementType(arrayData, expectedType, fieldName); err != nil {
 			return err
 		}
+		validData := typeutil.GetArrayElementValidData(row)
+		logicalLen := len(arrayData.GetData())
+		if elementSchema.GetNullable() {
+			logicalLen = len(validData)
+			validCount := GetValidNumber(validData)
+			if validCount != len(arrayData.GetData()) {
+				return merr.WrapErrParameterInvalidMsg("nested array field %s level %d has %d valid elements, but compact payload has %d elements",
+					fieldName, level, validCount, len(arrayData.GetData()))
+			}
+		} else if len(validData) > 0 {
+			return merr.WrapErrParameterInvalidMsg("nested array field %s does not support element valid_data at level %d because the element is not nullable", fieldName, level)
+		}
 		if v.checkMaxCap {
 			maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
 			if err != nil {
 				return err
 			}
-			if int64(len(arrayData.GetData())) > maxCapacity {
+			if int64(logicalLen) > maxCapacity {
 				return merr.WrapErrParameterInvalidMsg(
 					"the length (%d) of nested array field %s at level %d exceeds max capacity (%d)",
-					len(arrayData.GetData()),
+					logicalLen,
 					fieldName,
 					level,
 					maxCapacity,
@@ -1380,30 +1498,35 @@ func (v *ValidateUtil) checkNestedArrayValue(
 
 	elementType := elementSchema.GetLeafType()
 	leafField := &schemapb.FieldSchema{
-		Name:        fieldName,
-		DataType:    schemapb.DataType_Array,
-		ElementType: elementType,
-		TypeParams:  elementSchema.GetTypeParams(),
+		Name:            fieldName,
+		DataType:        schemapb.DataType_Array,
+		ElementType:     elementType,
+		ElementNullable: elementSchema.GetNullable(),
+		TypeParams:      elementSchema.GetTypeParams(),
 	}
 	leafArray := &schemapb.ArrayArray{
 		Data:        []*schemapb.ScalarField{row},
 		ElementType: elementType,
+	}
+	if err := v.checkArrayElement(leafArray, leafField); err != nil {
+		return merr.Wrapf(err, "nested array field %s level %d", fieldName, level)
 	}
 	if v.checkMaxCap {
 		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(arrayType)
 		if err != nil {
 			return err
 		}
-		if err := verifyCapacityPerRow(leafArray, maxCapacity, elementType, false); err != nil {
-			return err
+		if err := verifyCapacityPerRow(leafArray, maxCapacity, elementType, elementSchema.GetNullable()); err != nil {
+			return merr.Wrapf(err, "nested array field %s level %d", fieldName, level)
 		}
 	}
-	return v.checkArrayElement(leafArray, leafField)
+	return nil
 }
 
 func (v *ValidateUtil) checkNestedArrayFieldData(
 	data *schemapb.ArrayArray,
 	fieldSchema *schemapb.FieldSchema,
+	rowValidData []bool,
 ) error {
 	rootType := fieldSchema.GetTypeSchema()
 	if err := normalizeNestedArrayElementType(
@@ -1411,10 +1534,20 @@ func (v *ValidateUtil) checkNestedArrayFieldData(
 	); err != nil {
 		return err
 	}
+	logicalRow := 0
 	for rowIndex, row := range data.GetData() {
-		if err := v.checkNestedArrayValue(row, rootType, fieldSchema.GetName(), 0); err != nil {
-			return merr.Wrapf(err, "nested array row %d", rowIndex)
+		if len(rowValidData) > 0 {
+			for logicalRow < len(rowValidData) && !rowValidData[logicalRow] {
+				logicalRow++
+			}
 		}
+		if err := v.checkNestedArrayValue(row, rootType, fieldSchema.GetName(), 0); err != nil {
+			if len(rowValidData) == 0 || logicalRow >= len(rowValidData) {
+				return merr.Wrapf(err, "nested array row %d", rowIndex)
+			}
+			return merr.Wrapf(err, "nested array row %d", logicalRow)
+		}
+		logicalRow++
 	}
 	return nil
 }
@@ -1428,7 +1561,7 @@ func (v *ValidateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
 	}
 	if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
-		return v.checkNestedArrayFieldData(data, fieldSchema)
+		return v.checkNestedArrayFieldData(data, fieldSchema, typeutil.GetFieldDataValidData(field))
 	}
 	if v.checkMaxCap {
 		maxCapacity, err := parameterutil.GetMaxCapacity(fieldSchema)

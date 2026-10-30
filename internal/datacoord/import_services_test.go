@@ -227,6 +227,41 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 }
 
+func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocation() {
+	paramtable.Init()
+	for _, backup := range []bool{false, true} {
+		for _, elementNullable := range []bool{false, true} {
+			s.Run(fmt.Sprintf("backup=%t/element_nullable=%t", backup, elementNullable), func() {
+				server := &Server{}
+				server.stateCode.Store(commonpb.StateCode_Healthy)
+				options := []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}
+				if backup {
+					options = append(options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
+				}
+				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
+					Schema: &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+						StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{
+							Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+							ElementNullable: elementNullable,
+						}}}},
+					},
+					Options: options,
+				})
+				s.Require().NoError(err)
+				if !elementNullable {
+					s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+					s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
+					return
+				}
+				s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				s.Contains(resp.GetStatus().GetReason(), "not supported yet")
+				s.Contains(resp.GetStatus().GetReason(), "s.arr")
+			})
+		}
+	}
+}
+
 func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	ctx := context.Background()
 	paramtable.Init()
@@ -735,6 +770,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"l0_enabled", nil},
 		{"unsupported_version", nil},
 		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
+		{"native_list_array", nil},
+		{"native_list_array_backup", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -772,6 +809,17 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Version = 99
 			case "unsupported_version_no_job_id":
 				body.Version, body.JobID = 99, 0
+			case "native_list_array", "native_list_array_backup":
+				body.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+					Name: "s", Fields: []*schemapb.FieldSchema{{
+						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: true,
+					}},
+				}}
+				if tc.name == "native_list_array_backup" {
+					// The job fails before binlog listing: server.meta is nil here.
+					body.Options["backup"] = "true"
+				}
 			}
 			params := paramtable.Get()
 			s.Require().NoError(params.Save(params.DataCoordCfg.EnableL0Import.Key, fmt.Sprint(tc.name == "l0_enabled")))
@@ -874,6 +922,11 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			if tc.name == "l0_disabled" {
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
 				s.Contains(saved.Reason, "l0 import is disabled")
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+			} else if strings.HasPrefix(tc.name, "native_list_array") {
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, "not supported yet")
+				s.Contains(saved.Reason, "s.arr")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
 			} else {
 				s.Equal(internalpb.ImportJobState_Pending, saved.State)

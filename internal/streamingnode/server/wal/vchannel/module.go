@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
@@ -24,6 +25,7 @@ import (
 // ModuleConfig contains the initial state and dependencies for one vchannel
 // recovery module.
 type ModuleConfig struct {
+	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 	QueryDispatcher            *queryresource.Dispatcher
@@ -110,7 +112,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		querySealed:             make(map[int64]bool),
 		queryTransformLogStream: config.TransformLogStream,
 		summaryManager:          config.SummaryManager,
-		queryResources:          queryresource.NewManager(queryresource.Config{Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
+		queryResources:          queryresource.NewManager(queryresource.Config{ChunkManager: config.QueryStatsChunkManager, Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
 		vchannel:                config.VChannel,
 		runtime:                 config.Runtime,
 		logger:                  config.Logger,

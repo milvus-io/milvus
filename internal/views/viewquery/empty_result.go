@@ -34,3 +34,20 @@ func emptyQueryResults() *internalpb.RetrieveResults {
 		CostAggregation: &internalpb.CostAggregation{},
 	}
 }
+
+// EmptySearchResults preserves the regular/hybrid response shape for plans
+// with no worker results, whether or not pruning was applied.
+func EmptySearchResults(req *internalpb.SearchRequest) (*internalpb.SearchResults, error) {
+	if !req.GetIsAdvanced() {
+		return emptySearchResults(req), nil
+	}
+	requests, err := BuildSubSearchRequests(req)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]*internalpb.SearchResults, len(requests))
+	for i, request := range requests {
+		results[i] = emptySearchResults(request)
+	}
+	return assembleAdvancedSearchResults(results), nil
+}

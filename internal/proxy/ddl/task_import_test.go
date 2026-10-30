@@ -18,6 +18,7 @@ package ddl
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -713,4 +714,45 @@ func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
 
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "duplicate import option key: backup")
+}
+
+func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name    string
+		paths   []string
+		options []*commonpb.KeyValuePair
+	}{
+		{"parquet", []string{"staging/file.parquet"}, nil},
+		{"json", []string{"staging/file.json"}, nil},
+		{"numpy", []string{"staging/file.npy"}, nil},
+		{"csv", []string{"staging/file.csv"}, nil},
+		{"binlog", []string{"insert", "delta"}, []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}},
+	} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{
+					Name:   "test_collection",
+					Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{
+						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: elementNullable,
+					}}}},
+				}
+				it := newImportTaskForPreExecute(t, tc.options, schema)
+				it.req.Files = []*internalpb.ImportFile{{Id: 1, Paths: tc.paths}}
+				if tc.name == "binlog" {
+					it.req.PartitionName = "_default"
+				}
+				err := it.PreExecute(context.Background())
+				if !elementNullable {
+					require.NoError(t, err)
+					return
+				}
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Contains(t, err.Error(), "not supported yet")
+				require.Contains(t, err.Error(), "s.arr")
+			})
+		}
+	}
 }

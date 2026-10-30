@@ -34,7 +34,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -79,13 +78,6 @@ func storeExtension(ext hook.Extension) {
 	extension.Store(extensionContainer{extension: ext})
 }
 
-// errHookConflict is returned when a hook is compiled in and proxy.soPath is
-// also set. Both answer VerifyAPIKey and the request interception, only one
-// can, and picking silently would make the winner depend on start-up order.
-// It is fatal whatever common.panicWhenPluginFail says: it is a contradiction
-// in the deployment, not an optional plug-in that failed to load.
-var errHookConflict = errors.New("proxy.soPath and a compiled-in hook are both configured")
-
 func initHook() error {
 	// setup default hook & extension
 	storeHook(DefaultHook{})
@@ -95,15 +87,12 @@ func initHook() error {
 
 	// A form compiled into this binary installs its hook by filling in the
 	// Hook capability, which is the same interface a plug-in provides and is
-	// consulted by the same interceptor. It is not merged with a plug-in:
-	// both answer VerifyAPIKey and the request interception, only one can,
-	// and picking silently would make which one wins depend on start-up
-	// order rather than on the deployment.
+	// consulted by the same interceptor. A compiled-in hook is used and
+	// proxy.soPath is ignored.
 	if compiled := ext.InstalledHook(); compiled != nil {
 		if path != "" {
-			return merr.Wrapf(errHookConflict,
-				"hookutil: proxy.soPath is set to %q and a hook is also compiled in; "+
-					"both answer VerifyAPIKey and the request interception, and only one can", path)
+			mlog.Warn(context.TODO(), "proxy.soPath is ignored, a hook is compiled into this binary",
+				mlog.String("so_path", path))
 		}
 		// The compiled-in hook is initialized exactly as a plug-in is, with the
 		// same configuration and the same consequence: a hook that cannot
@@ -224,16 +213,13 @@ func InitOnceHook() {
 		err := initHook()
 		if err != nil {
 			soPath := paramtable.Get().ProxyCfg.SoPath.GetValue()
-			// A soPath configured beside a compiled-in hook is a contradiction
-			// in the deployment, not an optional plug-in that failed to load:
-			// it is fatal whatever the setting says. Any other failure of a
-			// compiled-in hook follows the form rule - the distribution that
-			// installed it switched the coordinators' behaviors on too
-			// (extension.FormInstalled), so a proxy that carried on through
-			// the default hook would run half of that distribution, with its
-			// request policy missing - and a plug-in's failure keeps
-			// common.panicWhenPluginFail's meaning.
-			if errors.Is(err, errHookConflict) || ext.FormInstalled() ||
+			// A failure of a compiled-in hook follows the form rule - the
+			// distribution that installed it switched the coordinators'
+			// behaviors on too (extension.FormInstalled), so a proxy that
+			// carried on through the default hook would run half of that
+			// distribution, with its request policy missing - and a plug-in's
+			// failure keeps common.panicWhenPluginFail's meaning.
+			if ext.FormInstalled() ||
 				paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
 				mlog.Panic(context.TODO(), "fail to init hook",
 					mlog.String("so_path", soPath), mlog.String("error", config.RedactedValue))

@@ -27,6 +27,7 @@
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Json.h"
 #include "common/Span.h"
 #include "common/Types.h"
@@ -173,6 +174,31 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
     // All values should be marked as invalid (null)
     for (size_t i = 0; i < span.row_count(); ++i) {
         EXPECT_FALSE(fixed_chunk->isValid(i));
+    }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, NativeListNullBackfill) {
+    FieldMeta field_meta(FieldName("struct_array[values]"),
+                         FieldId(103),
+                         DataType::ARRAY,
+                         DataType::INT16,
+                         true,
+                         true,
+                         std::nullopt);
+    FieldDataInfo info(103, 5, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, field_meta, info, GetParam(), true);
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), 5);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(chunk->is_valid(i));
+        EXPECT_EQ(chunk->offsets()[i], chunk->offsets()[i + 1]);
+        EXPECT_EQ(chunk->output_data(i).data_case(),
+                  ScalarFieldProto::DATA_NOT_SET);
     }
 }
 
@@ -1150,6 +1176,39 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
     }
 
     EXPECT_EQ(total_rows, row_count);
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, TestElementNullableVectorArray) {
+    constexpr int64_t row_count = 5;
+    FieldMeta field_meta(FieldName("struct_array[embeddings]"),
+                         FieldId(1303),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         4,
+                         std::nullopt,
+                         true,
+                         true);
+    FieldDataInfo info(1303, row_count, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, field_meta, info, GetParam(), true);
+    ASSERT_EQ(translator->num_cells(), 1);
+
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), row_count);
+    EXPECT_TRUE(chunk->IsElementNullable());
+    auto [views, validity] = chunk->Views();
+    ASSERT_EQ(views.size(), row_count);
+    ASSERT_TRUE(validity);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_FALSE(chunk->isValid(i));
+        EXPECT_FALSE(validity[i]);
+        EXPECT_EQ(views[i].length(), 0);
+        EXPECT_EQ(chunk->Offsets()[i], 0);
+    }
+    EXPECT_EQ(chunk->Offsets()[row_count], 0);
 }
 
 // Test nullable VECTOR_SPARSE_U32_F32 with all-null default values

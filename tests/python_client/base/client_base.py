@@ -55,10 +55,12 @@ class Base:
 
     def _setup_objects(self):
         # TestCaseClassBase calls this once per class; ordinary cases call it
-        # once per method. Keep the registry in the same scope as the wrappers.
+        # once per method. Keep the registries in the same scope as the wrappers.
         self.tear_down_collection_names = []
+        self.tear_down_role_names = []
+        self.tear_down_user_names = []
         self.connection_wrap = ApiConnectionsWrapper()
-        self.utility_wrap = ApiUtilityWrapper()
+        self.utility_wrap = ApiUtilityWrapper(role_names=self.tear_down_role_names)
         self.collection_wrap = ApiCollectionWrapper()
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
@@ -191,19 +193,21 @@ class Base:
 
         if not self.skip_global_role_cleanup:
             try:
-                """ Drop roles before disconnect """
+                """ Drop only roles created by this test before disconnect """
                 if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                     if token:
                         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
                     else:
                         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
-                role_list = self.utility_wrap.list_roles(False)[0]
-                for role in role_list.groups:
-                    role_name = role.role_name
+                for role_name in self.tear_down_role_names:
                     if role_name not in ["admin", "public"]:
-                        each_role = self.utility_wrap.init_role(name=role_name)[0]
-                        each_role.drop()
+                        try:
+                            each_role = self.utility_wrap.init_role(name=role_name)[0]
+                            if each_role.is_exist():
+                                each_role.drop()
+                        except Exception as e:
+                            log.debug(str(e))
 
             except Exception as e:
                 log.debug(str(e))

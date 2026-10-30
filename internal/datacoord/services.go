@@ -2045,6 +2045,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
 	}
+	if err := importutilv2.ValidateImportSchema(in.GetSchema()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 
 	mlog.Info(ctx, "receive import request from proxy",
 		mlog.Int("fileNum", len(in.GetFiles())),
@@ -2278,9 +2282,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema())
 
 	isBackup := importutilv2.IsBackup(options)
-	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
+	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && unsupportedSchemaErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2352,6 +2357,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		// context as a terminal job instead of retrying or omitting deletes.
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
 		UpdateJobReason(sourceErr.Error())(job)
+	}
+	if unsupportedSchemaErr != nil {
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(unsupportedSchemaErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

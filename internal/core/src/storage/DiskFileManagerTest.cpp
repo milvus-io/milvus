@@ -521,15 +521,21 @@ TEST_F(DiskAnnFileManagerTest, OpenInputStreamUsesBasenameForIndexPath) {
 
     const std::string local_path =
         fm->GetLocalIndexObjectPrefix() + "index_data";
-    auto output = fm->OpenOutputStream(local_path);
     const uint64_t expected = 0x1020304050607080ULL;
-    output->Write(expected);
-    output->Close();
+    for (bool use_memory : {false, true}) {
+        SCOPED_TRACE(use_memory);
+        milvus::FileManager& manager = *fm;
+        auto output = manager.OpenOutputStream(
+            local_path, {.expected_size = 1, .use_memory = use_memory});
+        output->Write(expected);
+        output->Close();
 
-    auto input = fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
-    uint64_t actual = 0;
-    input->Read(actual);
-    EXPECT_EQ(actual, expected);
+        auto input =
+            fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
+        uint64_t actual = 0;
+        input->Read(actual);
+        EXPECT_EQ(actual, expected);
+    }
 
     boost::filesystem::remove_all(conf.root_path);
 }

@@ -52,6 +52,38 @@ func TestCheckTsField(t *testing.T) {
 	assert.True(t, checkTsField(data))
 }
 
+func TestValidateStorageV1InsertWritableSchemaStructFields(t *testing.T) {
+	leaf := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}}
+	inner := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: leaf}}
+	nestedType := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: inner}}
+	for _, tc := range []struct {
+		name      string
+		field     *schemapb.FieldSchema
+		wantError bool
+	}{
+		{"legacy scalar array", &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, false},
+		{"legacy vector array", &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}, false},
+		{"element-nullable scalar array", &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}, true},
+		{"element-nullable vector array", &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}, true},
+		{"nested array", &schemapb.FieldSchema{Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nestedType}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				Name: "s", Fields: []*schemapb.FieldSchema{tc.field},
+			}}}
+			err := ValidateStorageV1InsertWritableSchema(schema)
+			if !tc.wantError {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not supported")
+			require.Contains(t, err.Error(), "structName=s")
+			require.Contains(t, err.Error(), "fieldName=arr")
+		})
+	}
+}
+
 func TestCheckRowIDField(t *testing.T) {
 	data := &InsertData{
 		Data: make(map[FieldID]FieldData),
