@@ -404,6 +404,23 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 		}
 	}
 
+	// a collection reaching the limit must not stop the following ones from recovering
+	limit := paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()
+	expired := mgr.GetCollection(ctx, suite.collections[0]).Clone()
+	expired.RecoverTimes = limit
+	expiredPartitions := lo.Map(mgr.GetPartitionsByCollection(ctx, expired.GetCollectionID()), func(partition *Partition, _ int) *Partition {
+		partition = partition.Clone()
+		partition.RecoverTimes = limit
+		return partition
+	})
+	suite.NoError(mgr.PutCollection(ctx, expired, expiredPartitions...))
+	suite.clearMemory()
+	suite.NoError(mgr.Recover(ctx, suite.broker))
+	suite.Nil(mgr.GetCollection(ctx, suite.collections[0]))
+	for _, collectionID := range suite.collections[1:] {
+		suite.Equal(int32(3), mgr.GetCollection(ctx, collectionID).GetRecoverTimes())
+	}
+
 	// test recover loading collection reach limit
 	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
 		mlog.Info(suite.ctx, "stupid", mlog.Int("count", i))
