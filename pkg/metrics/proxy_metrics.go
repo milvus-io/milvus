@@ -484,6 +484,17 @@ var (
 			Help:      "",
 		}, []string{nodeIDLabelName, queueTypeLabelName, TaskStateLabel})
 
+	// ProxyExprCacheLen is set by planparserv2 during package initialization.
+	ProxyExprCacheLen = func() int { return 0 }
+
+	ProxyExprCacheEntries = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "expr_cache_entries",
+			Help:      "Current count of entries in the expression parser cache.",
+		}, func() float64 { return float64(ProxyExprCacheLen()) })
+
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -586,6 +597,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyQueueTaskNum)
 
 	registry.MustRegister(ProxyParseExpressionLatency)
+	registry.MustRegister(ProxyExprCacheEntries)
 
 	registry.MustRegister(ProxyFunctionlatency)
 
