@@ -30,6 +30,8 @@ std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT(
     DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
 std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT(
     DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
+std::atomic<float> SEARCH_FANOUT_THREAD_CORE_COEFFICIENT(
+    DEFAULT_SEARCH_FANOUT_THREAD_CORE_COEFFICIENT);
 std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT(
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
 
@@ -45,6 +47,13 @@ SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
     MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
     LOG_INFO("set middle priority thread pool core coefficient: {}",
              MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+}
+
+void
+SetSearchFanoutThreadCoreCoefficient(const float coefficient) {
+    SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.store(coefficient);
+    LOG_INFO("set search fanout thread pool core coefficient: {}",
+             SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.load());
 }
 
 void
@@ -75,9 +84,12 @@ constexpr std::chrono::milliseconds kIdleThreadTimeout{2000};
 
 }  // namespace
 
-ThreadPool::ThreadPool(const float thread_core_coefficient, std::string name)
-    : name_(std::move(name)) {
-    int max_threads = ComputeThreadPoolMaxThreads(thread_core_coefficient);
+ThreadPool::ThreadPool(const float thread_core_coefficient,
+                       std::string name,
+                       bool apply_global_limit)
+    : name_(std::move(name)), apply_global_limit_(apply_global_limit) {
+    int max_threads = ComputeThreadPoolMaxThreads(thread_core_coefficient,
+                                                  apply_global_limit_);
     max_threads_size_.store(max_threads);
 
     LOG_INFO("Init thread pool:{}", name_)
@@ -118,7 +130,8 @@ ThreadPool::GetMaxThreadNum() {
 
 void
 ThreadPool::Resize(int new_size) {
-    new_size = ClampThreadPoolMaxThreads(new_size);
+    new_size = apply_global_limit_ ? ClampThreadPoolMaxThreads(new_size)
+                                   : std::max(1, new_size);
     max_threads_size_.store(new_size);
     if (executor_) {
         executor_->setNumThreads(static_cast<size_t>(new_size));

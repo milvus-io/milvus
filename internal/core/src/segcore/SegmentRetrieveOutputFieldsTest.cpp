@@ -646,9 +646,10 @@ TEST_F(RetrieveOutputFieldsTest, DynamicProjectionAndMissingFields) {
     local_schema->set_primary_field_id(local_pk);
     auto dynamic = local_schema->AddDebugField("$meta", DataType::JSON);
     local_schema->set_dynamic_field_id(dynamic);
-    auto array =
-        local_schema->AddDebugArrayField("array", DataType::INT64, false);
+    auto array = local_schema->AddDebugArrayField(
+        "items[source]", DataType::INT64, true);
     auto local_segment = CreateGrowingSegment(local_schema, nullptr);
+    const std::vector<int64_t> offsets{3, 1, 0, 3};
     auto data = DataGen(local_schema, 4);
     for (auto& field : *data.raw_->mutable_fields_data()) {
         if (field.field_id() == dynamic.get()) {
@@ -656,6 +657,18 @@ TEST_F(RetrieveOutputFieldsTest, DynamicProjectionAndMissingFields) {
                                    ->mutable_json_data()
                                    ->mutable_data()) {
                 json = R"({"keep":42,"drop":99})";
+            }
+        }
+        if (field.field_id() == array.get()) {
+            for (int i = 0; i < 4; ++i) {
+                auto* row =
+                    field.mutable_scalars()->mutable_array_data()->mutable_data(
+                        i);
+                row->Clear();
+                for (int j = 0; j < (i == 1 ? 0 : i + 1); ++j) {
+                    row->mutable_long_data()->add_data(j);
+                }
+                MutableFieldDataRowValidData(&field)->Set(i, i != 1);
             }
         }
     }
@@ -673,28 +686,57 @@ TEST_F(RetrieveOutputFieldsTest, DynamicProjectionAndMissingFields) {
         "added", DataType::INT64, default_value);
     auto missing_array =
         evolved->AddDebugArrayField("missing_array", DataType::VARCHAR, true);
+    auto missing_child = evolved->AddDebugArrayField(
+        "items[added]", DataType::INT64, true, true);
     query::RetrievePlan local_plan(evolved);
-    local_plan.field_ids_ = {dynamic, added, array, missing_array, local_pk};
+    local_plan.field_ids_ = {
+        dynamic, added, array, missing_array, local_pk, missing_child};
     local_plan.target_dynamic_fields_ = {"keep"};
     auto results = local_segment->Retrieve(nullptr,
                                            &local_plan,
                                            offsets.data(),
                                            offsets.size(),
                                            folly::CancellationToken());
-    ASSERT_EQ(results->fields_data_size(), 5);
+    ASSERT_EQ(results->fields_data_size(), 6);
     const auto& added_validity =
         GetFieldDataRowValidData(results->fields_data(1));
     const auto& array_validity =
         GetFieldDataRowValidData(results->fields_data(3));
     ASSERT_EQ(added_validity.size(), offsets.size());
     ASSERT_EQ(array_validity.size(), offsets.size());
+    const auto& child = results->fields_data(5);
+    const auto child_validity = GetFieldDataRowValidData(child);
+    ASSERT_EQ(child_validity.size(), offsets.size());
+    ASSERT_EQ(child.scalars().array_data().data_size(), offsets.size());
     for (size_t i = 0; i < offsets.size(); ++i) {
         EXPECT_EQ(results->fields_data(0).scalars().json_data().data(i),
                   R"({"keep":42})");
         EXPECT_EQ(results->fields_data(1).scalars().long_data().data(i), 42);
         EXPECT_TRUE(added_validity[i]);
         EXPECT_FALSE(array_validity[i]);
+        EXPECT_EQ(child_validity[i], offsets[i] != 1);
+        const auto& row = child.scalars().array_data().data(i);
+        // Null parent rows retain an empty payload at their row position.
+        if (offsets[i] == 1) {
+            EXPECT_EQ(row.data_case(),
+                      proto::schema::ScalarField::DATA_NOT_SET);
+            EXPECT_EQ(row.valid_data_size(), 0);
+            continue;
+        }
+        ASSERT_EQ(row.valid_data_size(), offsets[i] + 1);
+        for (bool valid : row.valid_data()) {
+            EXPECT_FALSE(valid);
+        }
     }
+    query::Plan search_plan(evolved);
+    search_plan.target_entries_ = {array, missing_child};
+    SearchResult search_result;
+    search_result.seg_offsets_ = offsets;
+    search_result.distances_.resize(offsets.size());
+    local_segment->FillTargetEntry(&search_plan, search_result);
+    EXPECT_EQ(search_result.output_fields_data_.at(missing_child)
+                  ->SerializeAsString(),
+              results->fields_data(5).SerializeAsString());
     EXPECT_EQ(results->fields_data(2).scalars().array_data().element_type(),
               proto::schema::DataType::Int64);
     EXPECT_EQ(results->fields_data(3).scalars().array_data().element_type(),
