@@ -191,11 +191,12 @@ type DataCoordCatalog interface {
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
-	// The channel removal flag is no longer read by this version. MarkChannelAdded
-	// keeps writing it because an older DataCoord (downgrade) only waits for the
-	// channel checkpoint before recycling a dropped segment when the flag says the
-	// channel is live. DropChannel deletes it when the channel is dropped.
+	// The channel removal flag tells dropped-segment GC whether a channel is
+	// still live. MarkChannelAdded writes it when the channel is created, and
+	// DropChannel deletes it when the channel is dropped. A missing flag reads as
+	// a dropped channel.
 	MarkChannelAdded(ctx context.Context, channel string) error
+	ChannelExists(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
 	// RemoveDroppedChannelFlags deletes the flags older versions left behind as
 	// "removed" for dropped channels and returns how many were deleted.
