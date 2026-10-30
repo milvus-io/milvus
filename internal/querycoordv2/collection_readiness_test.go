@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -383,7 +384,11 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 	total := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel))
 	success := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel))
 	fail := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel))
-	s, _, broker := newLoadConfigQViewsServer(t)
+	indexes := []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}
+	s, _, broker := newLoadConfigQViewsServer(t, func(deps *loadmgr.LoadConfigStoreDependencies) {
+		// Publication resolves the committed index set independently of the load RPC.
+		deps.Indexes = func(int64, ...int64) []*indexpb.IndexInfo { return indexes }
+	})
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	s.ctx = ctx
@@ -420,7 +425,7 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 			loading <- ctx
 			select {
 			case <-proceed:
-				return &indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}}, nil
+				return &indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: indexes}, nil
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
@@ -516,7 +521,11 @@ func newEnsureRPCClient(t *testing.T, s *Server) querypb.QueryCoordClient {
 func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, _, broker := newLoadConfigQViewsServer(t)
+	indexes := []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}
+	s, _, broker := newLoadConfigQViewsServer(t, func(deps *loadmgr.LoadConfigStoreDependencies) {
+		// Publication resolves the committed index set independently of the load RPC.
+		deps.Indexes = func(int64, ...int64) []*indexpb.IndexInfo { return indexes }
+	})
 	s.ctx = context.Background()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	t.Cleanup(s.qviewsRuntime.stop)
@@ -533,7 +542,7 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 	mix := mocks.NewMixCoord(t)
 	s.mixCoord = mix
 	mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
-		&indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}}, nil).Once()
+		&indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: indexes}, nil).Once()
 	config := &loadmgr.LoadConfig{
 		DbID: 1, CollectionID: 100, PartitionIDs: []int64{10}, UserSpecifiedReplicaMode: true,
 		LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexIds: []int64{1000}}},
@@ -593,7 +602,11 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 	assertReadinessBlocked(t, result)
 	entry := s.qviewsRuntime.loadConfigStore.Get(100)
 	loaded := entry.Config
-	require.Equal(t, []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexIds: []int64{1000}}, {FieldId: 102}}, loaded.LoadFields)
+	expectedFields := []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexIds: []int64{1000}}, {FieldId: 102}}
+	require.Len(t, loaded.LoadFields, len(expectedFields))
+	for i, expected := range expectedFields {
+		require.True(t, proto.Equal(expected, loaded.LoadFields[i]), "field %d: want %v, got %v", i, expected, loaded.LoadFields[i])
+	}
 	require.Len(t, loaded.Replicas, 1)
 	require.EqualValues(t, 1000, loaded.Replicas[0].ReplicaID)
 	require.Equal(t, meta.DefaultResourceGroupName, loaded.Replicas[0].ResourceGroup)
