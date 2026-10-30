@@ -400,10 +400,7 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
-	s.segmentChangeInspector.cleaner = &segmentChangeCleaner{
-		mt: s.meta, importMeta: s.importMeta, copyMeta: s.copySegmentMeta,
-		refreshMeta: s.meta.externalCollectionRefreshMeta,
-	}
+	s.initSegmentChangeCleaner()
 	if cph, ok := s.compactionInspector.(*compactionInspector); ok {
 		cph.copySegmentMeta = s.copySegmentMeta
 	}
@@ -453,6 +450,13 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
+}
+
+func (s *Server) initSegmentChangeCleaner() {
+	s.segmentChangeInspector.cleaner = &segmentChangeCleaner{
+		mt: s.meta, importMeta: s.importMeta, copyMeta: s.copySegmentMeta,
+		refreshMeta: s.meta.externalCollectionRefreshMeta,
+	}
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -288,8 +289,12 @@ func TestSegmentChangeExternalRefreshMembership(t *testing.T) {
 		ID: 1001, CollectionID: 10, NumOfRows: 84, StorageVersion: 3, ManifestPath: packed.MarshalManifestPath("/private/tmp/external/10/100/1001", 1),
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 84}}}},
 	}
+	nudges := 0
+	patch := mockey.Mock(notifySegmentIndexBuild).To(func(...UniqueID) { nudges++ }).Build()
 	err := applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming})
+	patch.UnPatch()
 	require.NoError(t, err, "registration retains the job for asynchronous publication")
+	require.Zero(t, nudges, "the refreshed source/spec is not visible when the group is registered")
 	require.True(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState())
 	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), func(pack *updateSegmentPack) bool {

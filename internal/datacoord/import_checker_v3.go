@@ -240,7 +240,8 @@ func (c *importCheckerV3) LogTaskStats() {
 func (c *importCheckerV3) tryTimeoutJob(job ImportJob) {
 	if job.GetState() == internalpb.ImportJobState_Failed ||
 		job.GetState() == internalpb.ImportJobState_Completed ||
-		job.GetState() == internalpb.ImportJobState_Committing {
+		job.GetState() == internalpb.ImportJobState_Committing ||
+		job.GetCommitBroadcastStarted() {
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())

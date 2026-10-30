@@ -2070,7 +2070,7 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock4.UnPatch()
 
-	mock5 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
+	mock5 := mockey.Mock((*meta).snapshotCandidateSegments).To(func(m *meta, collectionID int64) []*SegmentInfo {
 		seg := NewSegmentInfo(&datapb.SegmentInfo{
 			ID:               1001,
 			CollectionID:     200,
@@ -2194,7 +2194,7 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).
+	mockSelectSegments := mockey.Mock((*meta).snapshotCandidateSegments).
 		Return([]*SegmentInfo{}).
 		Build()
 	defer mockSelectSegments.UnPatch()
@@ -2278,24 +2278,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			candidates := []*SegmentInfo{segCh1, segCh2}
-			var result []*SegmentInfo
-			for _, seg := range candidates {
-				pass := true
-				for _, filter := range filters {
-					if !filter.Match(seg) {
-						pass = false
-						break
-					}
-				}
-				if pass {
-					result = append(result, seg)
-				}
-			}
-			return result
-		}).Build()
+	mockSelectSegments := mockey.Mock((*meta).snapshotCandidateSegments).Return([]*SegmentInfo{segCh1, segCh2}).Build()
 	defer mockSelectSegments.UnPatch()
 
 	mockCompactionTo := mockey.Mock((*meta).GetCompactionTo).To(func(m *meta, segmentID int64) ([]*SegmentInfo, bool) {
@@ -2488,22 +2471,17 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			var result []*SegmentInfo
-			for _, seg := range candidates {
-				pass := true
-				for _, filter := range filters {
-					if !filter.Match(seg) {
-						pass = false
-						break
-					}
-				}
-				if pass {
-					result = append(result, seg)
+	mockSelectSegments := mockey.Mock((*meta).snapshotCandidateSegments).To(
+		func(m *meta, collectionID int64) []*SegmentInfo {
+			unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
+			var selected []*SegmentInfo
+			for _, segment := range candidates {
+				if segment.GetCollectionID() == collectionID && segment.GetState() != commonpb.SegmentState_Dropped &&
+					!segment.GetIsImporting() && !unpublished.Contain(segment.GetID()) {
+					selected = append(selected, segment)
 				}
 			}
-			return result
+			return selected
 		}).Build()
 	defer mockSelectSegments.UnPatch()
 
@@ -2579,7 +2557,7 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 				Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 				JsonKeyStats: map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
 			})
-			segments := mockey.Mock((*meta).SelectSegments).Return([]*SegmentInfo{segment}).Build()
+			segments := mockey.Mock((*meta).snapshotCandidateSegments).Return([]*SegmentInfo{segment}).Build()
 			defer segments.UnPatch()
 			decompress := mockey.Mock(binlog.DecompressMultiBinLogs).Return(errFor("decompress")).Build()
 			defer decompress.UnPatch()
@@ -2652,15 +2630,8 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		}).Build()
 	defer mockIndexes.UnPatch()
 
-	mockSelectSegments := mockey.Mock((*meta).SelectSegments).To(
-		func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			for _, filter := range filters {
-				if !filter.Match(seg) {
-					return nil
-				}
-			}
-			return []*SegmentInfo{seg}
-		}).Build()
+	mockSelectSegments := mockey.Mock((*meta).snapshotCandidateSegments).To(
+		func(m *meta, collectionID int64) []*SegmentInfo { return []*SegmentInfo{seg} }).Build()
 	defer mockSelectSegments.UnPatch()
 
 	for _, test := range []struct {
@@ -2867,23 +2838,11 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m2)
 
-		m3 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-			// Apply each filter to the candidate segment list.
-			candidates := []*SegmentInfo{importSeg}
-			var result []*SegmentInfo
-			for _, seg := range candidates {
-				pass := true
-				for _, f := range filters {
-					if !f.Match(seg) {
-						pass = false
-						break
-					}
-				}
-				if pass {
-					result = append(result, seg)
-				}
+		m3 := mockey.Mock((*meta).snapshotCandidateSegments).To(func(m *meta, collectionID int64) []*SegmentInfo {
+			if importSeg.GetIsImporting() {
+				return nil
 			}
-			return result
+			return []*SegmentInfo{importSeg}
 		}).Build()
 		mockers = append(mockers, m3)
 

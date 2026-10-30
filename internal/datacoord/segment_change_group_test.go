@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -62,6 +63,29 @@ func seedPublishMeta(t *testing.T, m *meta, source model.SegmentChangeSource) *m
 	ready.State = model.SegmentChangeStateReady
 	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
 	return ready
+}
+
+func TestSnapshotCandidatesAndPublishShareOneMetadataBoundary(t *testing.T) {
+	ctx := t.Context()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	ids := func() []int64 {
+		var result []int64
+		for _, segment := range m.snapshotCandidateSegments(10) {
+			result = append(result, segment.GetID())
+		}
+		return result
+	}
+	require.Equal(t, []int64{2001}, ids(), "snapshot must retain the parent while its replacement is staged")
+	m.snapshotMeta = createTestSnapshotMetaLoaded(t)
+	m.snapshotMeta.SetSnapshotPending(10)
+	require.ErrorIs(t, m.commitSegmentChangeGroup(ctx, ready, 1, nil), merr.ErrServiceUnavailable,
+		"the final metadata write must honor snapshot protection even after publish preflight")
+	require.Equal(t, []int64{2001}, ids())
+	m.snapshotMeta.ClearSnapshotPending(10)
+	require.NoError(t, m.publishGroup(ctx, ready, newMockAllocator(t)))
+	require.Equal(t, []int64{1001}, ids(), "snapshot must include the committed replacement")
 }
 
 func TestPublishGroup_Dataviewless(t *testing.T) {

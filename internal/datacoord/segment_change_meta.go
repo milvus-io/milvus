@@ -149,6 +149,9 @@ func (m *meta) addSegmentChangeGroupLocked(ctx context.Context, group *model.Seg
 		return merr.WrapErrDataIntegrityMsg(
 			"segment change group %d already exists in collection %d", group.GroupID, group.CollectionID)
 	}
+	if err := validateSegmentChangePredecessor(group, m.segmentChangeGroups[group.PreviousGroupID]); err != nil {
+		return err
+	}
 	if err := m.validateSegmentChangeGroupOwnershipLocked(group); err != nil {
 		return err
 	}
@@ -429,6 +432,18 @@ func (m *meta) unpublishedSegmentMembers(ctx context.Context, collectionID int64
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
 	return m.segmentChangeExclusionsLocked(collectionID, false)
+}
+
+// snapshotCandidateSegments reads the change-group exclusions and SegmentMeta
+// from one version. Otherwise a publish between two reads can retire parents
+// while the snapshot still excludes their newly committed replacements.
+func (m *meta) snapshotCandidateSegments(collectionID int64) []*SegmentInfo {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
+	return m.segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting() && !unpublished.Contain(info.GetID())
+	}))
 }
 
 // stagedSegmentMembers is the async-work set: terminal groups remain excluded
@@ -728,16 +743,52 @@ func (m *meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.C
 		}
 	}
 	groupActions = normalized
-	// The persisted index only describes the state before this transaction.
-	// A sibling save must not introduce a new successor of a group deleted
-	// in the same write, regardless of action order.
+	// Validate the complete post-write chain. A predecessor may be saved in the
+	// same transaction, but must not be deleted there or already be missing.
+	savedGroups := make(map[int64]*model.SegmentChangeGroup)
+	deletedGroups := make(map[int64]struct{})
 	newPredecessors := make(map[int64]struct{})
 	for _, action := range groupActions {
+		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
 		if action.Type == metastore.ActionUpdate {
-			group := action.Entry.(metastore.SegmentChangeGroupEntry).Group
-			if group.PreviousGroupID != 0 {
-				newPredecessors[group.PreviousGroupID] = struct{}{}
+			savedGroups[entry.Group.GroupID] = entry.Group
+			if entry.Group.PreviousGroupID != 0 {
+				newPredecessors[entry.Group.PreviousGroupID] = struct{}{}
 			}
+		} else {
+			deletedGroups[entry.GroupID] = struct{}{}
+		}
+	}
+	for _, group := range savedGroups {
+		if group.PreviousGroupID == 0 {
+			continue
+		}
+		previous := savedGroups[group.PreviousGroupID]
+		if previous == nil {
+			previous = m.segmentChangeGroups[group.PreviousGroupID]
+		}
+		if _, deleted := deletedGroups[group.PreviousGroupID]; deleted {
+			previous = nil
+		}
+		if err := validateSegmentChangePredecessor(group, previous); err != nil {
+			return err
+		}
+	}
+	// Hold segMu through the final catalog write. A snapshot that already set
+	// its pending marker wins; one that starts after this check waits for the
+	// write and selects the committed SegmentMeta state.
+	for _, action := range groupActions {
+		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if action.Type != metastore.ActionUpdate || entry.Group == nil ||
+			entry.Group.State != model.SegmentChangeStateCommitted {
+			continue
+		}
+		if (entry.Group.Source == model.SegmentChangeSourceMixCompaction ||
+			entry.Group.Source == model.SegmentChangeSourceSortCompaction ||
+			entry.Group.Source == model.SegmentChangeSourceClustering ||
+			entry.Group.Source == model.SegmentChangeSourceBumpSchema) &&
+			m.isCollectionCompactionBlocked(entry.Group.CollectionID) {
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish is waiting for collection snapshot protection", entry.Group.GroupID)
 		}
 	}
 
@@ -1178,6 +1229,18 @@ func (m *meta) ensureSegmentChangeGroupStoreLocked() {
 	if m.segmentChangeSuccessors == nil {
 		m.rebuildSegmentChangeSuccessorsLocked()
 	}
+}
+
+func validateSegmentChangePredecessor(group, previous *model.SegmentChangeGroup) error {
+	if group.PreviousGroupID == 0 {
+		return nil
+	}
+	if previous == nil || previous.CollectionID != group.CollectionID || previous.Source != group.Source ||
+		previous.SourceJobID != group.SourceJobID || previous.VChannel != group.VChannel ||
+		previous.SubgroupOrdinal+1 != group.SubgroupOrdinal {
+		return merr.WrapErrDataIntegrityMsg("segment change subgroup %d has missing or invalid predecessor %d", group.GroupID, group.PreviousGroupID)
+	}
+	return nil
 }
 
 // The predecessor index includes terminal successors: deleting a predecessor

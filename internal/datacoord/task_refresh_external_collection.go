@@ -530,9 +530,9 @@ func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta
 		if err != nil {
 			return err
 		}
-		for _, id := range newIDs {
-			notifySegmentIndexBuild(id)
-		}
+		// The checker nudges index builds once this refresh's source/spec is
+		// visible in collection meta. A build dispatched here can use the old
+		// external location and fail permanently.
 		return nil // Registration succeeded; publication is a later job phase.
 	}
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {

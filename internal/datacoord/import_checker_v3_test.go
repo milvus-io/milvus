@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -30,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -43,7 +46,85 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestImportCheckerV3FailedJobAbortsStagedChange(t *testing.T) {
+	ctx := t.Context()
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	mt.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Importing, Level: datapb.SegmentLevel_L1,
+		IsInvisible: true, IsImporting: true, NumOfRows: 10,
+	})))
+	require.NoError(t, mt.AddSegmentChangeGroup(ctx, &model.SegmentChangeGroup{
+		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateStaged,
+		NewSegmentIDs: []int64{1001}, AwaitCommitFence: true,
+	}))
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 8000, Version: internalpb.ImportVersion_ImportVersionV3,
+		State: internalpb.ImportJobState_Failed, AutoCommit: true,
+		CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
+	}}
+	importMeta := NewMockImportMeta(t)
+	cluster := session.NewMockCluster(t)
+	checker := &importCheckerV3{ctx: ctx, meta: mt, importMeta: importMeta, cluster: cluster}
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(8000), mock.Anything).Return(nil).Once()
+	checker.checkJob(job)
+	require.Equal(t, model.SegmentChangeStateStaged, mt.GetSegmentChangeGroup(ctx, 10, 1001).State,
+		"the state machine must not reclaim a segment before GC has stopped its worker")
+	task := newReshardTask(&datapb.ReshardTask{
+		JobId: 8000, TaskId: 9000, State: datapb.ImportTaskStateV2_InProgress, NodeId: 5,
+	}, importMeta, nil, nil)
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(8000)).Return([]ImportTask{task}).Twice()
+	cluster.EXPECT().DropReshard(int64(5), mock.Anything).Return(nil).Once()
+	importMeta.EXPECT().UpdateTask(mock.Anything, int64(9000), mock.Anything).Return(nil).Once()
+	checker.checkGC(job)
+	require.Equal(t, model.SegmentChangeStateStaged, mt.GetSegmentChangeGroup(ctx, 10, 1001).State,
+		"a bound worker keeps the group alive")
+	task.task.Load().NodeId = NullNodeID
+	checker.checkGC(job)
+	require.Equal(t, model.SegmentChangeStateAborted, mt.GetSegmentChangeGroup(ctx, 10, 1001).State)
+	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 1001).GetState())
+}
+
+func TestImportCheckerV3FailedJobRetainsCommittedFence(t *testing.T) {
+	ctx := t.Context()
+	mt, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Importing, Level: datapb.SegmentLevel_L1,
+		IsInvisible: true, IsImporting: true, NumOfRows: 10,
+	})))
+	require.NoError(t, mt.AddSegmentChangeGroup(ctx, &model.SegmentChangeGroup{
+		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateStaged,
+		NewSegmentIDs: []int64{1001}, AwaitCommitFence: true, CommitTS: 100,
+	}))
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 8000, Version: internalpb.ImportVersion_ImportVersionV3,
+		State: internalpb.ImportJobState_Failed, AutoCommit: true,
+	}}
+	checker := &importCheckerV3{ctx: ctx, meta: mt, importMeta: NewMockImportMeta(t)}
+	checker.checkGC(job)
+	require.Equal(t, model.SegmentChangeStateStaged, mt.GetSegmentChangeGroup(ctx, 10, 1001).State)
+	require.Equal(t, commonpb.SegmentState_Importing, mt.GetSegment(ctx, 1001).GetState())
+}
+
+func TestImportCheckerV3TimeoutRespectsCommitBroadcastMarker(t *testing.T) {
+	checker := &importCheckerV3{ctx: t.Context(), importMeta: NewMockImportMeta(t)}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 8000, Version: internalpb.ImportVersion_ImportVersionV3,
+		State:                  internalpb.ImportJobState_Uncommitted,
+		TimeoutTs:              tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
+		CommitBroadcastStarted: true,
+	}}
+	checker.tryTimeoutJob(job)
+}
 
 func TestCalculateImportV3TaskSlots(t *testing.T) {
 	const mib = int64(1024 * 1024)
