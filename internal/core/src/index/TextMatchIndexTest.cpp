@@ -634,8 +634,8 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
         storagev1translator::TextMatchIndexTranslator translator(
             load_info, ctx, config);
 
-        auto [estimated_loaded, estimated_overhead] =
-            translator.estimated_byte_size_of_cell(0);
+        auto [estimated_loaded, estimated_overhead, shared_overhead] =
+            translator.estimated_loading_usage({0});
         if (mmap_enabled) {
             EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
             EXPECT_EQ(estimated_loaded.file_bytes, index_size);

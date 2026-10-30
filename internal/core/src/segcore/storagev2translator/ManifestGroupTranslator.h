@@ -126,17 +126,17 @@ class ManifestGroupTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
     /**
-     * @brief Estimate memory and disk usage for a cell
+     * @brief Estimate memory and disk usage for a batch of cells
      *
-     * Returns resource usage estimates for loading a specific chunk.
+     * Returns resource usage estimates for loading the requested chunks.
      * For mmap mode, reserves double the disk space for temporary files.
      *
-     * @param cid Cell ID to estimate
-     * @return Pair of (memory_usage, disk_usage) for loading and storage
+     * @param cids Cell IDs to estimate together
+     * @return Resident, private overhead, and shared overhead resource usage
      */
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     /**
      * @brief Get the cache key for this translator
