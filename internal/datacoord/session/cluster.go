@@ -123,17 +123,60 @@ type Cluster interface {
 
 var _ Cluster = (*cluster)(nil)
 
+// CollectionMeta names the collection a task works on, besides its ID.
+type CollectionMeta struct {
+	CollectionName string
+	DatabaseID     int64
+	DatabaseName   string
+}
+
+// CollectionMetaLookup resolves a collection's names for task dispatch. It
+// reports false for a collection it does not know; it must not block, as it
+// runs on every dispatch.
+type CollectionMetaLookup func(collectionID int64) (CollectionMeta, bool)
+
+// ClusterOption configures a cluster.
+type ClusterOption func(*cluster)
+
+// WithCollectionMetaLookup stamps the collection and database names onto
+// every task dispatched for a collection the lookup knows.
+func WithCollectionMetaLookup(lookup CollectionMetaLookup) ClusterOption {
+	return func(c *cluster) {
+		c.collectionMeta = lookup
+	}
+}
+
 // cluster implements the Cluster interface
 type cluster struct {
-	nm NodeManager
+	nm             NodeManager
+	collectionMeta CollectionMetaLookup
 }
 
 // NewCluster creates a new instance of cluster
-func NewCluster(nm NodeManager) Cluster {
+func NewCluster(nm NodeManager, opts ...ClusterOption) Cluster {
 	c := &cluster{
 		nm: nm,
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
 	return c
+}
+
+// appendCollection stamps the collection a task works on into its
+// properties: always its ID, and its names when the lookup knows them.
+func (c *cluster) appendCollection(properties taskcommon.Properties, collectionID int64) {
+	properties.AppendCollectionID(collectionID)
+	if c.collectionMeta == nil {
+		return
+	}
+	meta, ok := c.collectionMeta(collectionID)
+	if !ok {
+		return
+	}
+	properties.AppendCollectionName(meta.CollectionName)
+	properties.AppendDatabaseID(meta.DatabaseID)
+	properties.AppendDatabaseName(meta.DatabaseName)
 }
 
 func (c *cluster) createTask(nodeID int64, in proto.Message, properties taskcommon.Properties) error {
@@ -237,7 +280,7 @@ func (c *cluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, coll
 	properties.AppendTaskID(in.GetPlanID())
 	properties.AppendType(taskcommon.Compaction)
 	properties.AppendTaskSlot(in.GetSlotUsage())
-	properties.AppendCollectionID(collectionID)
+	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -316,7 +359,7 @@ func (c *cluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, tas
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImport)
 	properties.AppendTaskSlot(taskSlot)
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -326,7 +369,7 @@ func (c *cluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot 
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Import)
 	properties.AppendTaskSlot(taskSlot)
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -383,7 +426,7 @@ func (c *cluster) CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, t
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.PreImportV3)
 	properties.AppendTaskSlot(taskSlot)
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -490,7 +533,7 @@ func (c *cluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, col
 	properties.AppendType(taskcommon.Reshard)
 	properties.AppendTaskSlot(in.GetSlot())
 	properties.AppendTaskVersion(in.GetRunId())
-	properties.AppendCollectionID(collectionID)
+	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -558,7 +601,7 @@ func (c *cluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, c
 	properties.AppendType(taskcommon.ImportV3)
 	properties.AppendTaskSlot(in.GetSlot())
 	properties.AppendTaskVersion(in.GetRunId())
-	properties.AppendCollectionID(collectionID)
+	c.appendCollection(properties, collectionID)
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -644,7 +687,7 @@ func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetIndexVersion())
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -721,7 +764,7 @@ func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) err
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
 	properties.AppendTaskVersion(in.GetTaskVersion())
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -796,7 +839,7 @@ func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendTaskVersion(in.GetVersion())
-	properties.AppendCollectionID(in.GetCollectionID())
+	c.appendCollection(properties, in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
 
@@ -879,7 +922,7 @@ func (c *cluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.
 	properties.AppendTaskID(req.GetTaskID())
 	properties.AppendType(taskcommon.RefreshExternalCollection)
 	properties.AppendTaskSlot(1)
-	properties.AppendCollectionID(req.GetCollectionID())
+	c.appendCollection(properties, req.GetCollectionID())
 
 	payload, err := proto.Marshal(req)
 	if err != nil {
@@ -943,7 +986,7 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	}
 	properties.AppendType(taskType)
 	properties.AppendTaskSlot(in.GetTaskSlot())
-	properties.AppendCollectionID(collectionID)
+	c.appendCollection(properties, collectionID)
 	// Query the selected worker, rather than infer capability from a version
 	// string. Unknown workers retain the original wire representation.
 	segmentRooted := false
