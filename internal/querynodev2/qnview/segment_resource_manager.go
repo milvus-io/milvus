@@ -37,6 +37,10 @@ type SegmentResourceManager struct {
 	mu          sync.Mutex
 	views       map[qviews.QueryViewKey]*viewResources
 	resources   map[int64]*segmentResource
+	closed      bool
+	closeOnce   sync.Once
+	// Tracks owners through actual cleanup, including views removed from the map.
+	drain sync.WaitGroup
 }
 
 type viewResources struct {
@@ -51,6 +55,7 @@ type viewResources struct {
 	released         bool
 	operationRefs    int // queries and synchronous resource preparation borrowing the View collection
 	cleanupOnce      sync.Once
+	cleanupDone      chan struct{} // dependencies and this View's segment operations have finished
 }
 
 type segmentBinding struct {
@@ -115,19 +120,22 @@ func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Sche
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 	req = cloneAcquireSegments(req)
 	ctx, cancel := context.WithCancel(m.ctx)
-	v := &viewResources{req: req, ctx: ctx, cancel: cancel, dependenciesDone: make(chan struct{}), bindings: make(map[int64]*segmentBinding)}
-	// Buffer range ownership is registered synchronously with the View.
-	var bindErr error
-	v.buffer, bindErr = m.buffer.Bind(qviews.NewQueryViewAtQueryNode(req.Meta, req.View).(*qviews.QueryViewAtQueryNode))
+	v := &viewResources{req: req, ctx: ctx, cancel: cancel, dependenciesDone: make(chan struct{}), cleanupDone: make(chan struct{}), bindings: make(map[int64]*segmentBinding)}
 	m.mu.Lock()
-	if m.views[req.Key] != nil {
+	if m.closed || m.views[req.Key] != nil {
+		closed := m.closed
 		m.mu.Unlock()
 		cancel()
-		if v.buffer != nil {
-			go v.buffer.Release()
+		if closed && req.OnUnrecoverable != nil {
+			go req.OnUnrecoverable()
 		}
 		return
 	}
+	// Bind only registers in-memory range ownership; it never performs I/O.
+	// Admission and ownership accounting must precede Close's drain.
+	var bindErr error
+	v.buffer, bindErr = m.buffer.Bind(qviews.NewQueryViewAtQueryNode(req.Meta, req.View).(*qviews.QueryViewAtQueryNode))
+	m.drain.Add(1)
 	m.views[req.Key] = v
 	for _, partition := range req.View.GetPartitions() {
 		for i, id := range partition.GetSegmentIds() {
@@ -160,6 +168,7 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 func (m *SegmentResourceManager) newResourceLocked(id, collection int64) *segmentResource {
 	ctx, cancel := context.WithCancel(m.ctx) // #nosec G118 -- Ownership transfers to the resource; Release or reconciliation cancels it.
 	r := &segmentResource{manager: m, id: id, collectionID: collection, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	m.drain.Add(1)
 	m.resources[id] = r
 	return r
 }
@@ -566,6 +575,7 @@ func (r *segmentResource) catchup(base *segmentBase) {
 
 func (r *segmentResource) close() {
 	m := r.manager
+	defer m.drain.Done()
 	r.operations.Wait()
 	for _, base := range r.bases {
 		if base.registration != nil {
@@ -593,42 +603,68 @@ func (r *segmentResource) close() {
 	m.mu.Unlock()
 }
 
+// closeIfUnusedLocked fences an unreferenced incarnation before a new binding
+// can reuse it. The caller holds manager.mu; closing itself runs asynchronously.
+func (r *segmentResource) closeIfUnusedLocked() bool {
+	if r.closing {
+		return true
+	}
+	if len(r.bindings) != 0 || r.queryRefs != 0 {
+		return false
+	}
+	r.wakeLocked()
+	r.closing = true
+	r.stopRetryLocked()
+	r.cancel()
+	return true
+}
+
 func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 	m.mu.Lock()
 	v := m.views[req.Key]
 	delete(m.views, req.Key)
-	var closed []<-chan struct{}
+	var resources []*segmentResource
 	if v != nil {
+		m.drain.Add(1) // Join the release callback as well as the resource owners.
 		v.released = true
 		v.cancel()
 		for _, b := range v.bindings {
 			r := b.resource
+			resources = append(resources, r)
 			for i, candidate := range r.bindings {
 				if candidate == b {
 					r.bindings = slices.Delete(r.bindings, i, i+1)
 					break
 				}
 			}
-			if len(r.bindings) == 0 && r.queryRefs == 0 && !r.closing {
-				// Establish closure before another Bind can reuse this owner.
-				r.wakeLocked()
-				r.closing = true
-				r.stopRetryLocked()
-				r.cancel()
-				closed = append(closed, r.done)
-			} else {
+			if !r.closeIfUnusedLocked() {
 				r.wakeLocked()
 			}
 		}
 	}
 	m.mu.Unlock()
 	go func() {
-		for _, done := range closed {
-			<-done
-		}
 		if v != nil {
+			defer m.drain.Done()
 			<-v.dependenciesDone
 			m.cleanupView(v)
+			// Dropped includes queries and preparation that borrowed this View.
+			// Their final operation release completes cleanup without blocking a worker.
+			<-v.cleanupDone
+			m.mu.Lock()
+			var closed []<-chan struct{}
+			for _, r := range resources {
+				// Other Views or their queries may still own the segment. Do not
+				// wait for those references or a later takeover. An already-closing
+				// incarnation must finish even if successor bindings now wait on it.
+				if r.closeIfUnusedLocked() {
+					closed = append(closed, r.done)
+				}
+			}
+			m.mu.Unlock()
+			for _, done := range closed {
+				<-done
+			}
 		}
 		if req.OnDropped != nil {
 			req.OnDropped()
@@ -636,12 +672,40 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 	}()
 }
 
+// Close stops admission and joins physical release, preparation, and existing
+// query handles. The shared node scheduler remains alive throughout draining.
+func (m *SegmentResourceManager) Close() {
+	m.closeOnce.Do(func() {
+		m.mu.Lock()
+		m.closed = true
+		keys := make([]qviews.QueryViewKey, 0, len(m.views))
+		for key := range m.views {
+			keys = append(keys, key)
+		}
+		m.mu.Unlock()
+		for _, key := range keys {
+			m.Release(ReleaseSegments{Key: key})
+		}
+		m.drain.Wait()
+		m.buffer.Close()
+	})
+}
+
 func (m *SegmentResourceManager) cleanupView(v *viewResources) {
+	// Preparation may still be installing or releasing dependency guards.
+	// Release's waiter retries cleanup once this phase has finished.
+	select {
+	case <-v.dependenciesDone:
+	default:
+		return
+	}
 	m.mu.Lock()
 	cleanup := v.released && v.operationRefs == 0
 	m.mu.Unlock()
 	if cleanup {
 		v.cleanupOnce.Do(func() {
+			defer m.drain.Done()
+			defer close(v.cleanupDone)
 			if v.buffer != nil {
 				v.buffer.Release()
 			}

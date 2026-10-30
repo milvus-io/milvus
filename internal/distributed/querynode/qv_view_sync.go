@@ -24,16 +24,18 @@ import (
 func registerQueryViewSyncHandler(grpcServer *grpc.Server, queryViewHandler *qnview.QNQueryViewHandler) {
 	viewpb.RegisterViewSyncServiceServer(grpcServer, &queryNodeViewSyncServer{
 		ViewSyncServer: handler.NewViewSyncServer(queryViewHandler),
+		closing:        queryViewHandler.Closing(),
 	})
 }
 
 type queryNodeViewSyncServer struct {
 	viewpb.UnimplementedViewSyncServiceServer
 	*handler.ViewSyncServer
+	closing <-chan struct{}
 }
 
 func (s *queryNodeViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_SyncQueryViewServer) error {
-	return s.ViewSyncServer.SyncQueryView(stream)
+	return s.SyncQueryViewUntil(stream, s.closing)
 }
 
 type lazyQNSegmentManager struct {
@@ -60,6 +62,17 @@ func (m *lazyQNSegmentManager) Release(req qnview.ReleaseSegments) {
 		return
 	}
 	manager.Release(req)
+}
+
+// Close does not initialize an unused runtime. Handler shutdown has already
+// stopped admission and joined all admitted Acquire/Release calls.
+func (m *lazyQNSegmentManager) Close() {
+	m.mu.Lock()
+	manager := m.manager
+	m.mu.Unlock()
+	if manager != nil {
+		manager.Close()
+	}
 }
 
 func (m *lazyQNSegmentManager) submitCallback(callback func()) {

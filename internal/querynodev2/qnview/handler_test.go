@@ -43,6 +43,8 @@ func newMockSegmentManager() *mockSegmentManager {
 	}
 }
 
+func (*mockSegmentManager) Close() { panic("patch with mockey") }
+
 func (m *mockSegmentManager) Acquire(req AcquireSegments) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

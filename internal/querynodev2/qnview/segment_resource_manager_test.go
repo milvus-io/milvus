@@ -48,6 +48,7 @@ func (*resourceTestMetadata) GetQueryViewSegmentLoadInfo(context.Context, int64,
 type resourceTestFixture struct {
 	dependencyMock *mockey.Mocker
 	loadMock       *mockey.Mocker
+	releaseMock    *mockey.Mocker
 	registerMock   *mockey.Mocker
 	manager        *SegmentResourceManager
 	ready          chan int32
@@ -78,7 +79,7 @@ func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *res
 	}).Build()
 	mockey.Mock((*resourceTestRead).RetainReadState).Return(func() {}).Build()
 	mockey.Mock((*resourceTestRead).ReleaseReadState).Return().Build()
-	mockey.Mock((*fakeTransformSegment).Release).To(func(*fakeTransformSegment, context.Context) error { f.releases.Add(1); return nil }).Build()
+	f.releaseMock = mockey.Mock((*fakeTransformSegment).Release).To(func(*fakeTransformSegment, context.Context) error { f.releases.Add(1); return nil }).Build()
 	f.getMock = mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
 		f.gets.Add(1)
 		return resourceSnapshot(collectionID, segmentID, f.manifest.Load()), nil
@@ -108,9 +109,14 @@ func (f *resourceTestFixture) acquire(version int64, schema int32, load uint64) 
 	return req
 }
 
-func (f *resourceTestFixture) drop(t *testing.T, req AcquireSegments) {
+func (f *resourceTestFixture) beginDrop(req AcquireSegments) <-chan struct{} {
 	done := make(chan struct{})
 	f.manager.Release(ReleaseSegments{Key: req.Key, OnDropped: func() { close(done) }})
+	return done
+}
+
+func (f *resourceTestFixture) drop(t *testing.T, req AcquireSegments) {
+	done := f.beginDrop(req)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -143,11 +149,13 @@ func TestSegmentResourceOutOfOrderSchemasAndQueryLifetime(t *testing.T) {
 		require.EqualValues(t, 10, handles[0].PartitionID())
 		require.NotNil(t, handles[0].Segment())
 		f.drop(t, newer)
-		f.drop(t, older)
+		dropped := f.beginDrop(older)
+		requireDropPending(t, dropped)
 		require.EqualValues(t, 1, retiredCollections.Load(), "the executing query retains its View's collection")
 		require.Zero(t, f.releases.Load(), "executing query owns the concrete resource")
 		handles[0].Release()
 		handles[0].Release()
+		awaitShutdown(t, dropped)
 		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
 		require.Eventually(t, func() bool { return retiredCollections.Load() == 2 }, 5*time.Second, time.Millisecond)
 	})
@@ -353,11 +361,13 @@ func TestSegmentResourceSharedPreparationSurvivesInitiatorRelease(t *testing.T) 
 		first := f.acquire(1, 1, 1)
 		<-entered
 		next := f.acquire(2, 1, 1)
-		f.drop(t, first)
+		dropped := f.beginDrop(first)
+		requireDropPending(t, dropped)
 		require.Zero(t, retiredCollections.Load(), "native preparation still borrows the released View's schema")
 		require.Zero(t, f.releases.Load())
 		close(resume)
 		f.await(t, 1)
+		awaitShutdown(t, dropped)
 		require.Eventually(t, func() bool { return retiredCollections.Load() == 1 }, 5*time.Second, time.Millisecond)
 		require.EqualValues(t, 1, f.loads.Load())
 		f.drop(t, next)

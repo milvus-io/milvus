@@ -79,6 +79,8 @@ func TestRegisterQueryViewServers(t *testing.T) {
 
 type noopQNSegmentManager struct{}
 
+func (noopQNSegmentManager) Close() {}
+
 func (noopQNSegmentManager) Acquire(qnview.AcquireSegments) {}
 
 func (noopQNSegmentManager) Release(qnview.ReleaseSegments) {}
@@ -114,4 +116,16 @@ func TestQueryViewTransformTransportInstalled(t *testing.T) {
 	patchProvider := mockey.Mock((*queryViewWALWithTransport).TransformLogStreamManager).Return(expected).Build()
 	defer patchProvider.UnPatch()
 	require.Equal(t, expected, queryViewTransformLogStreamManager())
+}
+
+func TestLazyQNSegmentManagerCloseDoesNotInitialize(t *testing.T) {
+	mockey.PatchConvey("closing unused QueryView RPC services must not allocate a runtime", t, func() {
+		m := &lazyQNSegmentManager{build: func() qnview.SegmentManager { t.Fatal("unexpected lazy initialization"); return nil }}
+		m.Close()
+		resources := &qnview.SegmentResourceManager{}
+		closed := mockey.Mock((*qnview.SegmentResourceManager).Close).Return().Build()
+		m.manager = resources
+		m.Close()
+		require.EqualValues(t, 1, closed.Times())
+	})
 }

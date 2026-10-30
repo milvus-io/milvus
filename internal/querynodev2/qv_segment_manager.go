@@ -19,3 +19,8 @@ func (node *QueryNode) NewQueryViewSegmentManager(ctx context.Context, meta qnvi
 	node.queryViewSegments.Store(manager)
 	return manager
 }
+
+// SetQueryViewHandler binds the RPC handler to the node's shutdown lifecycle.
+func (node *QueryNode) SetQueryViewHandler(handler *qnview.QNQueryViewHandler) {
+	node.queryViewHandler.Store(handler)
+}

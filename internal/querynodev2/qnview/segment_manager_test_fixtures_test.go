@@ -91,6 +91,7 @@ func (r *fakeTransformRegistration) Unregister() {
 }
 
 type fakeTransformLogBuffer struct {
+	closed           bool
 	mu               sync.Mutex
 	acquireView      *qviews.QueryViewAtQueryNode
 	acquireErr       error
@@ -98,6 +99,12 @@ type fakeTransformLogBuffer struct {
 	registerSegments []int64
 	registerErr      error
 	regs             []*fakeTransformRegistration
+}
+
+func (b *fakeTransformLogBuffer) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
 }
 
 func (b *fakeTransformLogBuffer) Bind(view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error) {

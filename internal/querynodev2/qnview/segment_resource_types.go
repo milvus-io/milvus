@@ -16,6 +16,8 @@ import (
 // TransformLogBuffer gates QueryView readiness on transform-log continuity and
 // segment catch-up.
 type TransformLogBuffer interface {
+	// Close joins the owned workers after all guards and registrations are released.
+	Close()
 	Bind(view *qviews.QueryViewAtQueryNode) (TransformLogGuard, error)
 	RegisterSegment(ctx context.Context, segment TransformSegment) (TransformRegistration, error)
 }

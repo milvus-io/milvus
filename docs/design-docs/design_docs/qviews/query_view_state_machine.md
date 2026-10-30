@@ -433,7 +433,7 @@ The resource preparation steps below describe the target QN integration. Remote
 TransformLog consumption and its catch-up readiness wiring are not implemented
 by the current SN extraction.
 
-QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
+QueryNode is fully stateless with no persistence and no recovery process. It does NOT follow Coord Up/Down states — it can serve queries as soon as it reaches Ready. A local Dropping state waits for asynchronous segment release before reporting Dropped.
 
 QN stores the complete pending report proto at the moment a state/progress
 event occurs. `ConsumeReport` returns that immutable snapshot and clears it;
@@ -476,7 +476,7 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Preparing → QN continues preparing; normal.
-- Coord pushes Dropped → QN transitions to Dropped directly.
+- Coord pushes Dropped → QN enters local Dropping, then reports Dropped after segment release completes.
 - Other signals → QN ignores (invalid transition).
 
 ### 3.2 Ready
@@ -520,11 +520,14 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 ### 3.4 Dropped
 
 **Entry Conditions:**
-- Received Dropped push from Coord.
+- Received Dropped push from Coord and completed the local segment release.
 
-**Automatic Behavior:**
-1. Release all view-related segments.
-2. Disconnect pure delete stream subscriptions.
-3. Report Dropped to Coord.
+**Before reporting Dropped:**
+1. Withdraw query admission and wait for this View's segment queries and
+   preparation operations to finish.
+2. Release its references and wait for unshared or already-closing segment
+   owners to finish physical destruction. Segments still shared by other Views
+   may remain; synchronous field/index/ReadState pruning is not required.
+3. Release its buffer/runtime references and report Dropped to Coord.
 
 **Transitions:** None (terminal state; state machine instance destroyed).
