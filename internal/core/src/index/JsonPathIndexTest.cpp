@@ -366,6 +366,33 @@ MakeMixedJsonDoubleFieldData() {
     });
 }
 
+// A valid row whose stored bytes are empty has no document; the build must
+// treat it as a row where the path does not exist instead of throwing.
+TEST(JsonPathIndexTest, SortDouble_EmptyValidDocument) {
+    auto json_fd = MakeJsonFieldData({
+        R"({"a": 1.0})",  // 0: valid double
+        "",               // 1: valid row, empty bytes
+        R"({"a": 5.0})",  // 2: valid double
+    });
+    auto schema = MakeJsonSchema();
+    auto ctx = MakeTestContext();
+
+    JsonScalarIndexWrapper<double, ScalarIndexSort<double>> idx(
+        JsonCastType::FromString("DOUBLE"),
+        "/a",
+        JsonCastFunction::FromString("unknown"),
+        schema,
+        ctx);
+
+    ASSERT_NO_THROW(idx.BuildWithFieldData({json_fd}));
+
+    auto exists = idx.Exists();
+    ASSERT_EQ(exists.size(), 3);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);
+    EXPECT_TRUE(exists[2]);
+}
+
 TEST(JsonPathIndexTest, SortDouble_ComparisonUnknowns) {
     auto json_fd = MakeMixedJsonDoubleFieldData();
     auto schema = MakeJsonSchema();
