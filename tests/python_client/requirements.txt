@@ -26,8 +26,8 @@ pytest-sugar==0.9.5
 pytest-random-order
 
 # pymilvus
-pymilvus==3.1.0rc98
-pymilvus[bulk_writer]==3.1.0rc98
+pymilvus==3.1.0rc99
+pymilvus[bulk_writer]==3.1.0rc99
 # for protobuf
 protobuf>=5.29.5
 
@@ -36,6 +36,8 @@ python-benedict==0.24.3
 
 # for bulk insert test
 minio==7.2.0
+# Read the versioned Avro header in snapshot segment descriptors.
+fastavro>=1.9,<2
 npy-append-array==0.9.19
 Faker==19.2.0
 
