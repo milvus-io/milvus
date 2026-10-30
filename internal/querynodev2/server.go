@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -108,6 +110,7 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
+	queryViewSegments     atomic.Pointer[qnview.SegmentResourceManager]
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager

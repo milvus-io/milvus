@@ -20,10 +20,12 @@ The accompanying metadata supply adds unary GetQueryViewSegmentLoadInfo and
 exact retained collection LoadInfo lookup. Segment loading assumes StorageV3
 with index artifacts published into manifests. New View requirements trigger
 metadata acquisition; ready Views do not poll or subscribe to metadata changes.
-Manifest publication retains its DataView recompute notification. `coord/qv-load-info/<collection>/<version>` holds immutable scope
-snapshots. Nonzero versions use the shared `LoadInfoStore`: snapshots without
-`required_fields` fail with DataIntegrity, and each read resolves current indexes
-only for the retained required fields, including fields outside preload hints.
+Manifest publication retains its DataView recompute notification.
+`coord/load_info/<collection>/<version>` contains the parent's immutable
+CollectionLoadConfig records. The child supplies a read-only exact-version adapter:
+records without required fields fail with DataIntegrity, and each read resolves
+only the recorded IndexIDs, including multiple indexes on one field and fields
+outside preload hints. Missing selected index metadata returns ServiceNotReady.
 MixCoord forwards this response without appending collection-wide indexes. A
 missing retained version returns ServiceNotReady, never current collection
 metadata. The node also rejects a response with a different collection/version
@@ -41,13 +43,13 @@ a loading collection counts as loaded configuration, while a released collection
 returns CollectionNotLoaded even if retained snapshots remain. This probe does
 not publish a historical scope or supply a resource-preparation identity. Once
 integrated, the parent runtime resolves its current LoadConfigStore version
-through the same LoadInfoStore. Nonzero historical reads remain independent of
+through its LoadConfigStore.GetLoadInfo interface. Nonzero historical reads remain independent of
 current load state.
 
 This extraction does not publish LoadInfo snapshots from legacy Load APIs,
 generate QueryViews, generate DataView W/A or Segment replay cursors, switch Proxy
 routing, or implement schema publication. A production producer must persist the
-exact scope before publishing its View and provide the certified base cursor and
+exact requirements before publishing its View and provide the certified base cursor and
 retained Transform range. The cursor field is transported without reconstructing
 it from StartPosition/DeltaPosition. A missing/zero base cursor returns
 ServiceNotReady rather than claiming safe replay. Those producer workflows are separate
@@ -56,9 +58,13 @@ query routing or complete production recovery.
 
 ## Native requirements
 
-CCollection supplies an immutable Schema per collection/version. LoadScope is a
-separate value. SealedFieldLayout retains only physical descriptors and mappings,
-while ReadStates retain immutable columns/readers/index generations. Go View
+Collection bindings distinguish SchemaVersion and LoadInfoVersion. Native Schema
+objects are shared by collection/schema identity; index metadata remains binding
+specific. LoadScope is a separate value. SealedFieldLayout owns references to the
+immutable native Schema and IndexMeta, with derived lookup data instead of copied
+FieldMeta. PublishedStates/ReadStates retain the layout independently of the
+creating View or CCollection shell. See [load requirements](collection_load_info.md).
+ReadStates retain immutable columns/readers/index generations. Go View
 operation references retain CCollection until synchronous CSegment operations
 and their native children and result conversion complete. There is no additional
 Collection Pin layer. Shared expression and scoring code use the plan schema.
@@ -80,6 +86,13 @@ supersedes the earlier field-removal/allowlist contract in the source snapshot's
 schema_evolution.md section 6.2. Exact-instance Transform MVCC and poison checks
 remain mandatory.
 
+The QN handler client uses fail-fast server-ID picking and disables configured
+same-node gRPC retries. A missing-session error carries the shared resolver
+revision notification captured before dispatch, allowing the shard client to
+reconsider unavailable nodes after discovery changes without losing a racing
+update. Closing the client joins its single session observer. Proxy ownership
+and routing integration remain outside this extraction.
+
 QueryViewOfPartition carries segment_manifest_versions at tag 4, aligned with the
 Coordinator producer (#54547). The packed array follows segment_ids in the same
 order. Neither the retired tag 5 nor the removed schema-binding protocol is a
@@ -94,3 +107,14 @@ unchanged. Hybrid selections retain subrequest positions, including empty All
 and None slots. SN providers accept the shared parameter without applying sealed
 statistics to growing resources. SN partition-statistics preparation, global
 pruning and Proxy planning/requery orchestration remain separate integration work.
+
+## Node-local observability
+
+The segment metrics endpoint includes physical bases owned by the QueryView
+resource manager, independently of the legacy SegmentManager. Sampling pins
+the existing resource/base operation references while reading native metadata;
+it releases those references afterward so normal retirement can proceed.
+Memory is counted once per physical base, while logical rows and repeated index
+metadata are deduplicated per segment. View acquisition, readiness, coordinator
+state application, failure, reporting and release emit the shared QueryView
+observation events.

@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -55,12 +54,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -73,7 +72,9 @@ import (
 var Params = params.Params
 
 type Server struct {
-	loadInfos           *loadmgr.LoadInfoStore
+	loadInfos interface {
+		GetLoadInfo(context.Context, int64, uint64) (*querypb.GetQueryViewLoadInfoResponse, error)
+	}
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
@@ -385,14 +386,14 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
-	s.loadInfos = loadmgr.NewLoadInfoStore(queryview.NewLoadInfoCatalog(s.kv), func(id int64) []*indexpb.IndexInfo {
+	s.loadInfos = &queryViewLoadInfoReader{storage: s.kv, indexes: func(id int64, indexIDs ...int64) []*indexpb.IndexInfo {
 		if source, ok := s.mixCoord.(interface {
-			QueryViewCollectionIndexInfos(int64) []*indexpb.IndexInfo
+			QueryViewCollectionIndexInfos(int64, ...int64) []*indexpb.IndexInfo
 		}); ok {
-			return source.QueryViewCollectionIndexInfos(id)
+			return source.QueryViewCollectionIndexInfos(id, indexIDs...)
 		}
 		return nil
-	})
+	}}
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(

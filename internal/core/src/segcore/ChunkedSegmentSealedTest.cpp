@@ -618,7 +618,7 @@ TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
     schema->set_primary_field_id(pk);
     schema->set_ttl_field_id(ttl);
     auto layout = std::make_shared<const segcore::SealedFieldLayout>(
-        schema.get(), segcore::LoadScope({pk.get(), value.get()}));
+        schema, segcore::LoadScope({pk.get(), value.get()}));
     segcore::ChunkedSegmentSealedImpl physical(
         layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
     auto read = physical.PinReadState();
@@ -640,7 +640,7 @@ TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
     EXPECT_NE(exec::CreateTTLFieldFilterExpression(&new_view), nullptr);
 }
 
-TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
+TEST(test_chunk_segment, SealedReadsRetainPreparingSchema) {
     auto previous_snapshot_setting =
         ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(true);
     auto restore_snapshot_setting = folly::makeGuard([&] {
@@ -659,7 +659,7 @@ TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     auto read = physical->PinReadState();
     preparing.reset();
-    ASSERT_TRUE(retired.expired());
+    ASSERT_FALSE(retired.expired());
 
     query::Plan plan(query_schema);
     plan.target_entries_ = {pk};
@@ -678,7 +678,7 @@ TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
     physical->Delete(1, &ids, &timestamp);
     EXPECT_EQ(physical->get_real_count(), 15);
     EXPECT_EQ(read->get_real_count(), 15);
-    EXPECT_TRUE(retired.expired());
+    EXPECT_FALSE(retired.expired());
 
     // Historical replay after a streaming delete must be included immediately,
     // even if a timestamped query bitmap snapshot predates the replay.
@@ -696,6 +696,10 @@ TEST(test_chunk_segment, SealedResourcesOutlivePreparingSchema) {
     physical->ClearData();
     EXPECT_EQ(physical->get_real_count(), 0);
     EXPECT_EQ(read->get_real_count(), 14);
+    segment.reset();
+    EXPECT_FALSE(retired.expired());  // the retained read still owns its layout
+    read.reset();
+    EXPECT_TRUE(retired.expired());
 }
 
 TEST(test_chunk_segment, ReadStateForkPreparesEarlierSchemaIndependently) {
@@ -2544,13 +2548,13 @@ TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     segcore::ChunkedSegmentSealedImpl::StateDelta initial;
-    initial.schema = schema;
+    initial.fields = current->fields;
     initial.load_info = current->load_info;
     initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial.commit_ts = current->commit_ts;
     auto staged = sealed->TestBuildNextPublishedState(current, initial);
     segcore::ChunkedSegmentSealedImpl::StateDelta final;
-    final.schema = schema;
+    final.fields = current->fields;
     final.load_info = current->load_info;
     final.commit_ts = current->commit_ts;
     sealed->TestStageLoadFieldDataThenPublish(field,

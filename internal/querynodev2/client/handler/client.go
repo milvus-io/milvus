@@ -41,8 +41,9 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		)
 	})
 	client := &clientImpl{
-		lifetime: typeutil.NewLifetime(),
-		rb:       rb,
+		lifetime:       typeutil.NewLifetime(),
+		rb:             rb,
+		sessionChanges: newSessionChanges(rb.Resolver()),
 	}
 	client.queryViewClient = newQueryViewClient(client, conn)
 	return client
@@ -51,8 +52,6 @@ func NewClient(etcdCli *clientv3.Client) Client {
 func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	cfg := &paramtable.Get().QueryNodeGrpcClientCfg
 	tlsCfg := &paramtable.Get().InternalTLSCfg
-	retryPolicy := cfg.GetDefaultRetryPolicy()
-	retryPolicy["retryableStatusCodes"] = []string{"UNAVAILABLE"}
 	defaultServiceConfig := map[string]interface{}{
 		"loadBalancingConfig": []map[string]interface{}{
 			{picker.ServerIDPickerBalancerName: map[string]interface{}{}},
@@ -62,8 +61,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 				"name": []map[string]string{
 					{"service": "milvus.proto.view.ViewQueryService"},
 				},
-				"waitForReady": true,
-				"retryPolicy":  retryPolicy,
+				"waitForReady": false,
 			},
 		},
 	}
@@ -78,6 +76,7 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	dialOptions := cfg.GetDialOptionsFromConfig()
 	dialOptions = append(dialOptions,
 		grpc.WithBlock(),
+		grpc.WithDisableRetry(),
 		grpc.WithResolvers(rb),
 		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(

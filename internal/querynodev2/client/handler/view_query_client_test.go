@@ -4,9 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -86,4 +90,33 @@ func (c *fakeViewQueryServiceClient) SearchOnView(ctx context.Context, req *view
 
 func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 	return c.queryOnView(ctx, req)
+}
+
+func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
+	changed := make(chan struct{})
+	owner := &clientImpl{lifetime: typeutil.NewLifetime(), sessionChanges: &sessionChanges{changed: changed}}
+	service := &fakeViewQueryServiceClient{}
+	patch := mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, ctx context.Context, _ *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
+		require.True(t, contextutil.IsFailFastPick(ctx))
+		// An update before the RPC returns must wake the consumer of this error.
+		owner.sessionChanges.mu.Lock()
+		close(changed)
+		owner.sessionChanges.changed = make(chan struct{})
+		owner.sessionChanges.mu.Unlock()
+		return nil, picker.ErrSubConnNotExist
+	}).Build()
+	defer patch.UnPatch()
+	client := &queryViewClient{owner: owner, service: fakeLazyService[viewpb.ViewQueryServiceClient]{service: service}}
+	_, err := client.QueryOnView(t.Context(), 11, &viewpb.QueryOnViewRequest{})
+	var unavailable *viewerror.NodeSessionUnavailable
+	require.ErrorAs(t, err, &unavailable)
+	require.Equal(t, (<-chan struct{})(changed), unavailable.Changed)
+	require.True(t, picker.IsErrSubConnNoExist(unavailable.Cause))
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	require.NotEmpty(t, err.Error())
+	select {
+	case <-unavailable.Changed:
+	default:
+		t.Fatal("resolver update lost")
+	}
 }

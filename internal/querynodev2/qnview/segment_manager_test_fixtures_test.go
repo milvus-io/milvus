@@ -216,10 +216,7 @@ func (g *fakeCollectionRuntimeGuard) Collection() *segments.Collection {
 	return nil
 }
 
-func (g *fakeCollectionRuntimeGuard) UpdateIndexMeta(_ context.Context, indexes []*indexpb.IndexInfo) error {
-	g.updatedIndexes = append([]*indexpb.IndexInfo(nil), indexes...)
-	return g.updateErr
-}
+func (g *fakeCollectionRuntimeGuard) IndexInfos() []*indexpb.IndexInfo { return g.updatedIndexes }
 
 type instantTransformRegistration struct{}
 

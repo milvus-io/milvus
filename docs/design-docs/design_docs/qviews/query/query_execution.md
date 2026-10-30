@@ -1,8 +1,8 @@
 # QueryView node execution boundary
 
-This master-based extraction implements the StreamingNode query path and an
-injectable [query client](query_client.md). QueryNode service/resource/native
-implementation and production Proxy switching remain separate work. Scoped WAL
+This branch combines the StreamingNode query path, the injectable
+[query client](query_client.md), and QueryNode query/resource preparation.
+Production Proxy switching remains separate work. Scoped WAL
 barrier production and ordered delivery are provided by master. The plan's QN
 workers use the existing ViewQueryService protocol through the client's injected
 ViewQueryServiceClient.
@@ -47,7 +47,7 @@ integration or legacy repeated-version recovery.
 The existing SN scheduler executes `SearchTask` / `QueryTask.ExecuteOnSegments`
 with segment adapters. It does not use the old QueryNode scheduler or delegate
 historical work to SN. The client fans out the sealed portion separately.
-This PR does not copy QN loaders, ReadState management or native implementation.
+QN loaders, ReadState management and native preparation are described below.
 
 ## Required interfaces
 
@@ -97,9 +97,9 @@ Key source paths:
 requested View and partition scope, waits for visibility, retains the concrete
 segment handles, samples their existing `RowNum`, and releases every handle on
 success, cancellation or error. It needs no query scheduler or expression plan.
-The separately integrated QN provider must read `ReadableSealedSegment.QuerySegment()` so it uses the
+The QN provider reads `ReadableSealedSegment.QuerySegment()` so it uses the
 same pinned ReadState as queries, never a new SegmentID lookup or a base's latest
-state. It must wait for Transform on the exact registrations behind those handles. The RPC adapter is `StatisticsOnView`; errors use the existing status
+state. It waits for Transform on the exact registrations behind those handles. The RPC adapter is `StatisticsOnView`; errors use the existing status
 conversion and successful responses contain only `row_count`.
 
 SN invokes this operation while selecting the statistics View and returns the
@@ -145,15 +145,15 @@ does not change remote TransformLog delivery.
 
 SearchOnView optionally carries SearchExecutionOptions (FilterOnly and
 EnableExprCache). The shared server attaches these request-local controls to
-the provider's task owner; the SN scheduler and executor pass them to the native
-search adapter. Acquisition and release retain their existing ownership.
-QN adapters must propagate the same controls in their separate integration.
+the provider's task owner; both SN and QN schedulers and executors pass them
+to their native search adapters. Acquisition and release retain their existing
+ownership.
 Filter-first orchestration resides in QueryViewClient and uses the same View,
 Schema, MVCC and selection in both rounds; workers do not replan or call peers.
 See the [client flow](query_client.md#filter-first-ann-search).
 
-> Extraction scope: this document describes the full query protocol. This change
-> wires only the QueryNode half; see the [extraction boundary](../querynode_extraction.md).
+> The following sections describe the QueryNode execution and resource binding
+> added by this PR; see the [extraction boundary](../querynode_extraction.md).
 
 # Query Execution Node-Side Design
 
@@ -444,6 +444,10 @@ pinned physical ReadState. The View resource operation reference retains the
 Collection through queueing, native completion and result conversion, including
 cancellation. Releasing a View cannot revoke an executing task's handles. See
 [QN resource preparation](../qnview/querynode_queryview_resource_preparation.md).
+
+Retained physical ReadStates own shared layouts and can keep native Schema/index
+metadata alive after the creating View exits. Queries still use their own plan
+Schema; the physical base's current state is never a query-schema source.
 
 Phase 2 receives `SegmentSelection` from its worker plan. An absent selection
 means `All`; `Include` and `Exclude` constrain IDs within the existing View and

@@ -23,7 +23,7 @@ func TestDirectSegmentTaskExecutorSearchBuildsHistoricalRequestFromHandles(t *te
 	legacyReq := &internalpb.SearchRequest{CollectionID: 10}
 	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99}
 	tasks := []qnview.QNSearchSegmentTask{
-		{Handle: fakeSealedSegmentHandle{id: 1, segment: fakeReadableSegment{id: 1, vchannel: "v1"}}, Request: legacyReq, MVCC: mvcc},
+		{Handle: fakeSealedSegmentHandle{id: 1, segment: fakeReadableSegment{id: 1, vchannel: "v1"}}, Request: legacyReq, MVCC: mvcc, Options: &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}},
 		{Handle: fakeSealedSegmentHandle{id: 2, segment: fakeReadableSegment{id: 2, vchannel: "v1"}}, Request: legacyReq, MVCC: mvcc},
 	}
 
@@ -32,6 +32,8 @@ func TestDirectSegmentTaskExecutorSearchBuildsHistoricalRequestFromHandles(t *te
 	require.NoError(t, err)
 	assert.Same(t, runner.result, result)
 	require.NotNil(t, runner.req)
+	assert.True(t, runner.req.GetFilterOnly())
+	assert.True(t, runner.req.GetEnableExprCache())
 	assert.Equal(t, querypb.DataScope_Historical, runner.req.GetScope())
 	assert.Equal(t, []int64{1, 2}, runner.req.GetSegmentIDs())
 	assert.Equal(t, []string{"v1"}, runner.req.GetDmlChannels())

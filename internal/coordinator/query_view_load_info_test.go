@@ -36,12 +36,13 @@ func TestMixCoordQueryViewLoadInfoPreservesResolvedScope(t *testing.T) {
 func TestMixCoordQueryViewCollectionIndexInfos(t *testing.T) {
 	dc := &datacoord.Server{}
 	indexes := []*indexpb.IndexInfo{{FieldID: 100, IndexID: 200}}
-	patch := mockey.Mock((*datacoord.Server).GetQueryViewCollectionIndexInfos).To(func(receiver *datacoord.Server, id int64) []*indexpb.IndexInfo {
+	patch := mockey.Mock((*datacoord.Server).GetQueryViewCollectionIndexInfos).To(func(receiver *datacoord.Server, id int64, ids ...int64) []*indexpb.IndexInfo {
 		require.Same(t, dc, receiver)
+		require.Equal(t, []int64{200}, ids)
 		require.EqualValues(t, 1, id)
 		return indexes
 	}).Build()
 	defer patch.UnPatch()
 	s := &mixCoordImpl{datacoordServer: dc}
-	require.Equal(t, indexes, s.QueryViewCollectionIndexInfos(1))
+	require.Equal(t, indexes, s.QueryViewCollectionIndexInfos(1, 200))
 }

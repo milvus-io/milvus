@@ -15,10 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -141,41 +138,6 @@ func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *test
 	})
 }
 
-func TestQueryViewCollectionRuntimeGuard_UpdateIndexMetaUsesCollection(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Name: "coll"}
-	localCollection := segments.NewCollectionWithoutSegcoreForTest(1, schema)
-	collection := &fakeQVCollectionManager{collection: localCollection}
-	guard := &queryViewCollectionRuntimeGuard{
-		collection:   localCollection,
-		collectionID: 1,
-		schema:       schema,
-	}
-	indexes := []*indexpb.IndexInfo{{CollectionID: 1, FieldID: 100, IndexName: "vec_idx"}}
-
-	var updatedCollection *segments.Collection
-	var updatedMeta *segcorepb.CollectionIndexMeta
-	patch := mockey.Mock((*segments.Collection).UpdateIndexMeta).
-		To(func(collection *segments.Collection, meta *segcorepb.CollectionIndexMeta) error {
-			updatedCollection = collection
-			updatedMeta = meta
-			return nil
-		}).
-		Build()
-	t.Cleanup(func() {
-		patch.UnPatch()
-	})
-
-	err := guard.UpdateIndexMeta(context.Background(), indexes)
-	require.NoError(t, err)
-
-	assert.Same(t, localCollection, updatedCollection)
-	require.Len(t, updatedMeta.GetIndexMetas(), 1)
-	assert.Equal(t, int64(100), updatedMeta.GetIndexMetas()[0].GetFieldID())
-	assert.Equal(t, "vec_idx", updatedMeta.GetIndexMetas()[0].GetIndexName())
-	assert.Zero(t, collection.putCount)
-	assert.Zero(t, collection.unrefCount)
-}
-
 // Patch points use mockey so requests are checked at the streaming boundary.
 type queryViewSchemaClient struct{ streaming.SchemaClient }
 
@@ -263,11 +225,11 @@ func TestQueryViewCollectionRuntimeIsolatesReadGenerations(t *testing.T) {
 	changedLoad := acquire(1, 12)
 	require.Same(t, old.CCollection(), oldAgain.CCollection(), "identical read generations share planning resources")
 	require.NotSame(t, old.CCollection(), target.CCollection())
-	require.Same(t, target.CCollection(), changedLoad.CCollection(), "load scope is not a native schema identity")
+	require.NotSame(t, target.CCollection(), changedLoad.CCollection(), "index selections have independent bindings over the shared parsed Schema")
 	require.EqualValues(t, 0, old.Collection().Schema().GetVersion())
 	require.EqualValues(t, 1, target.Collection().Schema().GetVersion())
 	old.Release()
-	require.Len(t, manager.collections, 2, "another View keeps its exact schema collection alive")
+	require.Len(t, manager.collections, 3, "another View keeps its exact metadata binding alive")
 	target.Release()
 	changedLoad.Release()
 	require.Len(t, manager.collections, 1)
@@ -308,26 +270,6 @@ func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 	}
 }
 
-func TestQueryViewCollectionRuntimeFailedScopeUpdateReleasesReference(t *testing.T) {
-	paramtable.Init()
-	manager := newQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, mockQueryViewSchemaClient(t))
-	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{
-		CollectionId: 1, SchemaVersion: 1, LoadInfoVersion: 10,
-	}, &viewpb.QueryViewOfQueryNode{NodeId: 1}).(*qviews.QueryViewAtQueryNode)
-	old, retry, err := manager.Acquire(t.Context(), view)
-	require.NoError(t, err)
-	require.False(t, retry)
-	patch := mockey.Mock((*segments.Collection).UpdateIndexMeta).Return(merr.WrapErrServiceInternalMsg("native update failed")).Build()
-	defer patch.UnPatch()
-	failed, _, err := manager.Acquire(t.Context(), view)
-	require.Error(t, err)
-	require.Nil(t, failed)
-	require.Len(t, manager.collections, 1)
-	require.NotNil(t, old.CCollection().Schema())
-	old.Release()
-	require.Empty(t, manager.collections, "the failed acquisition must not leak an owner pin")
-}
-
 func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102, IsDynamic: true}}}
 	for _, tc := range []struct {
@@ -342,9 +284,9 @@ func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
 		{name: "hints filtered by bound schema", hints: []int64{103, 101}, want: []int64{101}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			info := qnview.QueryViewLoadInfo{RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}}
+			info := qnview.QueryViewLoadInfo{RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}}
 			for _, id := range tc.hints {
-				info.LoadFields = append(info.LoadFields, &messagespb.LoadFieldConfig{FieldId: id})
+				info.LoadFields = append(info.LoadFields, &viewpb.LoadFieldConfig{FieldId: id})
 			}
 			require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info), "preload hints must not remove dynamic-field query access")
 			require.Equal(t, tc.want, loadInfoHintIDs(info, schema))
@@ -370,7 +312,7 @@ func TestCollectionRuntimeRejectsMismatchedLoadIdentity(t *testing.T) {
 
 func TestCollectionRuntimeRejectsMissingRequiredFields(t *testing.T) {
 	patch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).Return(qnview.QueryViewLoadInfo{
-		CollectionID: 1, Version: 7, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}},
+		CollectionID: 1, Version: 7, LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}},
 	}, nil).Build()
 	defer patch.UnPatch()
 	collection := &fakeQVCollectionManager{}

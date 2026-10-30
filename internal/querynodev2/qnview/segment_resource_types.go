@@ -8,9 +8,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // TransformLogBuffer gates QueryView readiness on transform-log continuity and
@@ -59,11 +59,8 @@ type CollectionRuntime interface {
 	Schema() *schemapb.CollectionSchema
 	SchemaVersion() int64
 	CCollection() *segcore.CCollection
+	IndexInfos() []*indexpb.IndexInfo
 	Collection() *segments.Collection
-}
-
-type CollectionIndexMetaUpdater interface {
-	UpdateIndexMeta(ctx context.Context, indexes []*indexpb.IndexInfo) error
 }
 
 // TransformSegment consumes transform-log entries for one loaded sealed segment.
@@ -111,8 +108,8 @@ type QueryViewLoadInfo struct {
 	CollectionID   int64
 	Version        QueryViewLoadInfoVersion
 	PartitionIDs   []int64
-	LoadFields     []*messagespb.LoadFieldConfig
-	RequiredFields []*messagespb.LoadFieldConfig
+	LoadFields     []*viewpb.LoadFieldConfig
+	RequiredFields []*viewpb.LoadFieldConfig
 	IndexInfos     []*indexpb.IndexInfo
 }
 

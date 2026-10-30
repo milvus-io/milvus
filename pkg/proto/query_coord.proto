@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "view.proto";
 import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
@@ -1243,7 +1244,7 @@ message GetQueryViewLoadInfoResponse {
     int64 collectionID = 2;
     uint64 version = 3;
     repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated view.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
-    repeated messages.LoadFieldConfig required_fields = 7;
+    repeated view.LoadFieldConfig required_fields = 7;
 }

@@ -21,8 +21,9 @@ import (
 )
 
 type collectionRuntimeKey struct {
-	collectionID  int64
-	schemaVersion int32
+	collectionID    int64
+	schemaVersion   int32
+	loadInfoVersion uint64
 }
 
 type queryViewCollectionRuntimeManager struct {
@@ -37,7 +38,7 @@ func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvi
 	return &queryViewCollectionRuntimeManager{
 		meta: meta, schemas: schemas,
 		collections:    make(map[collectionRuntimeKey]qvCollectionManager),
-		newCollections: func() qvCollectionManager { return segments.NewCollectionManager() },
+		newCollections: func() qvCollectionManager { return segments.NewQueryViewCollectionManager() },
 	}
 }
 
@@ -63,17 +64,15 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
-	// Native planning resources belong to a SchemaVersion. A target view must never
-	// mutate the schema from which a published view builds query plans.
-	// Native schema identity is collection-scoped too: per-channel WAL ticks
-	// differ for the same ALTER and must not advance this shared runtime.
-	key := collectionRuntimeKey{meta.GetCollectionId(), meta.GetSchemaVersion()}
+	// The parsed native Schema is shared by collection and SchemaVersion; each
+	// LoadInfoVersion gets its own immutable index-metadata binding. Per-channel
+	// WAL ticks do not identify either resource.
+	key := collectionRuntimeKey{meta.GetCollectionId(), meta.GetSchemaVersion(), meta.GetLoadInfoVersion()}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	collections := m.collections[key]
-	shared := collections != nil
-	indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.Schema)
 	if collections == nil {
+		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.Schema)
 		collections = m.newCollections()
 		if err := collections.PutOrRef(
 			meta.GetCollectionId(), collection.Schema, indexMeta,
@@ -94,12 +93,6 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if localCollection != nil {
 		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo, collection.Schema))
 		ccollection = localCollection.GetCCollection()
-		if shared {
-			if err := localCollection.UpdateIndexMeta(indexMeta); err != nil {
-				m.releaseLocked(key)
-				return nil, false, err
-			}
-		}
 	}
 	return &queryViewCollectionRuntimeGuard{
 		manager:       m,
@@ -110,6 +103,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		schema:        collection.Schema,
 		schemaVersion: int64(meta.GetSchemaVersion()),
 		ccollection:   ccollection,
+		indexes:       loadInfo.IndexInfos,
 	}, false, nil
 }
 
@@ -148,6 +142,7 @@ type queryViewCollectionRuntimeGuard struct {
 	schema        *schemapb.CollectionSchema
 	schemaVersion int64
 	ccollection   *segcore.CCollection
+	indexes       []*indexpb.IndexInfo
 }
 
 func (g *queryViewCollectionRuntimeGuard) CollectionID() int64 {
@@ -172,11 +167,6 @@ func (g *queryViewCollectionRuntimeGuard) CCollection() *segcore.CCollection {
 
 func (g *queryViewCollectionRuntimeGuard) Collection() *segments.Collection {
 	return g.collection
-}
-
-func (g *queryViewCollectionRuntimeGuard) UpdateIndexMeta(ctx context.Context, indexes []*indexpb.IndexInfo) error {
-	indexMeta := segments.ComposeIndexMeta(ctx, indexes, g.schema)
-	return g.collection.UpdateIndexMeta(indexMeta)
 }
 
 func (g *queryViewCollectionRuntimeGuard) Release() {
@@ -219,3 +209,5 @@ func loadInfoHintIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionS
 	}
 	return fields
 }
+
+func (g *queryViewCollectionRuntimeGuard) IndexInfos() []*indexpb.IndexInfo { return g.indexes }

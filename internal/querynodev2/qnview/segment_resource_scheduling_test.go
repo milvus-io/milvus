@@ -3,6 +3,7 @@ package qnview
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bytedance/mockey"
@@ -27,7 +28,6 @@ type resourceSchedulingFixture struct {
 	r         *segmentResource
 	queue     chan nodescheduler.Task
 	timers    []func()
-	now       time.Time
 	prepares  int
 	getMock   *mockey.Mocker
 	caughtUp  bool
@@ -36,10 +36,21 @@ type resourceSchedulingFixture struct {
 	onRelease func()
 }
 
+func runResourceSchedulingTest(t *testing.T, description string, test func(*testing.T, *resourceSchedulingFixture)) {
+	t.Helper()
+	// Use the bubble clock instead of globally patching time.Now while other
+	// package workers may be running. Each test advances time deterministically.
+	synctest.Test(t, func(t *testing.T) {
+		mockey.PatchConvey(description, t, func() {
+			test(t, setupResourceSchedulingTest(t))
+		})
+	})
+}
+
 func setupResourceSchedulingTest(t *testing.T) *resourceSchedulingFixture {
-	f := &resourceSchedulingFixture{t: t, queue: make(chan nodescheduler.Task, 20), now: time.Now(), caughtUp: true}
-	mockey.Mock(time.Now).To(func() time.Time { return f.now }).Build()
-	mockey.Mock(time.AfterFunc).To(func(_ time.Duration, callback func()) *time.Timer {
+	f := &resourceSchedulingFixture{t: t, queue: make(chan nodescheduler.Task, 20), caughtUp: true}
+	// Reconcile runs on the test goroutine; background timers stay independent.
+	mockey.Mock(time.AfterFunc).IncludeCurrentGoRoutine().To(func(_ time.Duration, callback func()) *time.Timer {
 		timer := time.NewTimer(time.Hour)
 		timer.Stop()
 		f.timers = append(f.timers, callback)
@@ -123,8 +134,7 @@ func (f *resourceSchedulingFixture) runNext() {
 }
 
 func TestSegmentResourceSnapshotWithoutSchedulerDelay(t *testing.T) {
-	mockey.PatchConvey("Get completion immediately drives preparation", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "Get completion immediately drives preparation", func(t *testing.T, f *resourceSchedulingFixture) {
 		f.wake()
 		f.runNext()
 		require.Equal(t, 1, f.prepares)
@@ -134,9 +144,22 @@ func TestSegmentResourceSnapshotWithoutSchedulerDelay(t *testing.T) {
 	})
 }
 
+func TestSegmentResourceTimerMockStaysInSchedulingGoroutine(t *testing.T) {
+	runResourceSchedulingTest(t, "background timers remain independent", func(t *testing.T, f *resourceSchedulingFixture) {
+		fired := make(chan struct{})
+		go func() { time.AfterFunc(0, func() { close(fired) }) }()
+		synctest.Wait()
+		select {
+		case <-fired:
+		default:
+			t.Fatal("background timer was intercepted by the scheduling fixture")
+		}
+		require.Empty(t, f.timers)
+	})
+}
+
 func TestSegmentResourceCatchupWakeWithoutPolling(t *testing.T) {
-	mockey.PatchConvey("prepare waits for catch-up and its event publishes ready", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "prepare waits for catch-up and its event publishes ready", func(t *testing.T, f *resourceSchedulingFixture) {
 		f.caughtUp = false
 		f.wake()
 		f.runNext()
@@ -161,8 +184,7 @@ func TestSegmentResourceWakeDuringReconcile(t *testing.T) {
 			name = "during prepare"
 		}
 		t.Run(name, func(t *testing.T) {
-			mockey.PatchConvey("events during work transfer to one immediate successor", t, func() {
-				f := setupResourceSchedulingTest(t)
+			runResourceSchedulingTest(t, "events during work transfer to one immediate successor", func(t *testing.T, f *resourceSchedulingFixture) {
 				published := false
 				publish := func() {
 					if published {
@@ -199,8 +221,7 @@ func TestSegmentResourceWakeDuringReconcile(t *testing.T) {
 }
 
 func TestSegmentResourceRetryDoesNotBlockEvents(t *testing.T) {
-	mockey.PatchConvey("failed bindings back off while another binding prepares", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "failed bindings back off while another binding prepares", func(t *testing.T, f *resourceSchedulingFixture) {
 		failed := f.r.bindings[0]
 		f.onPrepare = func(b *segmentBinding) error {
 			if b == failed {
@@ -213,7 +234,7 @@ func TestSegmentResourceRetryDoesNotBlockEvents(t *testing.T) {
 		require.False(t, f.r.scheduled)
 		require.Empty(t, f.queue)
 		require.Len(t, f.timers, 1)
-		requireResourceRetryDelay(t, failed.retryAfter.Sub(f.now), 200*time.Millisecond)
+		requireResourceRetryDelay(t, time.Until(failed.retryAfter), 200*time.Millisecond)
 		stale := f.timers[0]
 		other := f.addBinding(2)
 		f.wake()
@@ -224,7 +245,7 @@ func TestSegmentResourceRetryDoesNotBlockEvents(t *testing.T) {
 		require.Empty(t, f.queue)
 		stale()
 		require.Empty(t, f.queue, "replaced timer must not wake the resource")
-		f.now = failed.retryAfter
+		time.Sleep(time.Until(failed.retryAfter))
 		f.onPrepare = nil
 		f.timers[len(f.timers)-1]()
 		f.runNext()
@@ -236,8 +257,7 @@ func TestSegmentResourceRetryDoesNotBlockEvents(t *testing.T) {
 }
 
 func TestSegmentResourceReleaseCancelsRetry(t *testing.T) {
-	mockey.PatchConvey("late retry callback cannot wake a released or replacement owner", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "late retry callback cannot wake a released or replacement owner", func(t *testing.T, f *resourceSchedulingFixture) {
 		f.onPrepare = func(*segmentBinding) error { return merr.WrapErrServiceNotReadyMsg("storage pending") }
 		f.wake()
 		f.runNext()
@@ -265,8 +285,7 @@ func TestSegmentResourceReleaseCancelsRetry(t *testing.T) {
 }
 
 func TestSegmentResourceReleaseDuringPreparation(t *testing.T) {
-	mockey.PatchConvey("release during physical work closes only after that work returns", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "release during physical work closes only after that work returns", func(t *testing.T, f *resourceSchedulingFixture) {
 		dropped := make(chan struct{})
 		f.onPrepare = func(b *segmentBinding) error {
 			f.r.manager.Release(ReleaseSegments{Key: b.view.req.Key, OnDropped: func() { close(dropped) }})
@@ -291,8 +310,7 @@ func TestSegmentResourceReleaseDuringPreparation(t *testing.T) {
 }
 
 func TestSegmentResourceGetDoesNotLoseRetiredReads(t *testing.T) {
-	mockey.PatchConvey("metadata acquisition cannot discard deferred read releases", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "metadata acquisition cannot discard deferred read releases", func(t *testing.T, f *resourceSchedulingFixture) {
 		base := &segmentBase{segment: &fakeTransformSegment{id: f.r.id}, caughtUp: true}
 		// Two old scopes share a base. The latest can anchor pending work, but the
 		// older read must be released even when this pass first needs a metadata Get.

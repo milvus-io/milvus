@@ -28,13 +28,15 @@ func TestSchedulerSearchDelegatesQNTasks(t *testing.T) {
 		{Handle: fakeSealedSegmentHandle{id: 2}, Request: req, MVCC: mvcc},
 	})
 
-	result, err := scheduler.Search(context.Background(), tasks)
+	options := &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}
+	result, err := scheduler.Search(context.Background(), &sharedviewquery.SearchTasksWithOptions{SearchSegmentTasks: tasks, Options: options})
 
 	require.NoError(t, err)
 	assert.Same(t, executor.searchResult, result)
 	require.Len(t, executor.searchTasks, 2)
 	assert.Equal(t, int64(1), executor.searchTasks[0].Handle.ID())
 	assert.Equal(t, int64(2), executor.searchTasks[1].Handle.ID())
+	assert.Same(t, options, executor.searchTasks[0].Options)
 	assert.Same(t, req, executor.searchTasks[0].Request)
 	assert.Same(t, mvcc, executor.searchTasks[0].MVCC)
 }
