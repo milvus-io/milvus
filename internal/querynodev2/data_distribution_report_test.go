@@ -231,10 +231,9 @@ func TestGetDataDistributionDeltaReportInvalidatesBaseWhileBuilding(t *testing.T
 		manager: &segments.Manager{
 			Segment: segmentManager,
 		},
-		delegators:            typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
-		distDeltaTracker:      newDataDistributionDeltaTracker(),
-		subscribingChannels:   typeutil.NewConcurrentSet[string](),
-		unsubscribingChannels: typeutil.NewConcurrentSet[string](),
+		delegators:        typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		distDeltaTracker:  newDataDistributionDeltaTracker(),
+		channelOperations: newChannelOperations(),
 	}
 	node.lastModifyTs = 20
 	node.distDeltaTracker.lastReportedTs = 10
@@ -303,10 +302,9 @@ func TestGetDataDistributionSkipsStaleCommitAfterConcurrentReset(t *testing.T) {
 		manager: &segments.Manager{
 			Segment: segmentManager,
 		},
-		delegators:            typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
-		distDeltaTracker:      newDataDistributionDeltaTracker(),
-		subscribingChannels:   typeutil.NewConcurrentSet[string](),
-		unsubscribingChannels: typeutil.NewConcurrentSet[string](),
+		delegators:        typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		distDeltaTracker:  newDataDistributionDeltaTracker(),
+		channelOperations: newChannelOperations(),
 	}
 	node.lastModifyTs = 20
 	node.distDeltaTracker.lastReportedTs = 10
