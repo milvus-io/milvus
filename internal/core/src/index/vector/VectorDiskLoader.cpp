@@ -460,10 +460,19 @@ OpenIndex(bool use_async,
         auto config = params.knowhere_config;
         PrepareCommonLoadConfig(
             config, params, open_options, prefix, stream_backend, enable_mmap);
+        // Indexes built before the validity fix persisted the per-row bitmap
+        // for a flat element index. Load the engine without it and import the
+        // element-domain validity once the element count is known.
+        const bool element_domain =
+            input.validity.has_value() &&
+            IsElementDomainEmbeddingList(params.elem_type != DataType::NONE,
+                                         params.metric_type);
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
-                    knowhere::BinarySet{}, config, input);
+                    knowhere::BinarySet{},
+                    config,
+                    element_domain ? knowhere::LoadOptions{} : input);
                 selected_handle->RethrowFirstFailure();
                 // The knowhere deserialize API has no OpContext entrance. FileSource
                 // observes its captured cancellation/priority while materializing
@@ -475,6 +484,26 @@ OpenIndex(bool use_async,
                 }
             };
             if (use_async) {
+                co_await storage::RunLocalFileIOAsync(local_io, priority);
+            } else {
+                local_io();
+            }
+        }
+        if (element_domain) {
+            const auto element_count =
+                static_cast<size_t>(engine.native_index.Count());
+            const auto all_valid = MakeAllValidBitmap(element_count);
+            auto local_io = [&] {
+                const auto status = engine.native_index.ImportValidity(
+                    knowhere::ValidityView{all_valid.data(),
+                                           all_valid.size(),
+                                           ToValidDataCount(element_count)},
+                    input.mmap);
+                if (status != knowhere::Status::success) {
+                    ThrowDeserializeError(status);
+                }
+            };
+            if (use_async && params.id_map_mmap.Any()) {
                 co_await storage::RunLocalFileIOAsync(local_io, priority);
             } else {
                 local_io();

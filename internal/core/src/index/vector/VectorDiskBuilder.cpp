@@ -396,6 +396,18 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             }
         }
 
+        if (validity.present && !all_null && raw.rows > 0 &&
+            IsElementDomainEmbeddingList(embedding_list, engine_->Metric())) {
+            // Publish the element-domain validity the flat element index is
+            // searched with, not the per-row bitmap of the raw-data cache.
+            const auto bitmap = MakeAllValidBitmap(raw.rows);
+            const auto wire_count = ToValidDataCount(raw.rows);
+            validity.bytes.assign(sizeof(wire_count) + bitmap.size(), 0);
+            std::memcpy(validity.bytes.data(), &wire_count, sizeof(wire_count));
+            std::memcpy(validity.bytes.data() + sizeof(wire_count),
+                        bitmap.data(),
+                        bitmap.size());
+        }
         if (validity.present) {
             const auto path =
                 (std::filesystem::path(file_manager_->Directory()) /

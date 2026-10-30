@@ -33,6 +33,7 @@
 #include "common/Utils.h"
 #include "common/ValidityView.h"
 #include "index/Meta.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/expected.h"
 #include "knowhere/index/index.h"
 
@@ -136,6 +137,24 @@ IsAllNullNullable(const knowhere::Index<knowhere::IndexNode>& index) {
 inline size_t
 GetValidDataBitmapSize(size_t count) {
     return count / 8 + (count % 8 != 0);
+}
+
+// An embedding list searched with an ordinary metric is indexed as a flat
+// element index: its ids are the element ids the search bitset uses, while
+// persisted list validity is per row. Element nulls are not supported, so the
+// element-domain validity of such an index is all valid.
+inline bool
+IsElementDomainEmbeddingList(bool embedding_list, const MetricType& metric) {
+    return embedding_list && !knowhere::get_el_metric_type(metric).has_value();
+}
+
+inline std::vector<uint8_t>
+MakeAllValidBitmap(size_t count) {
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(count), 0xFF);
+    if (count % 8 != 0) {
+        bitmap.back() &= static_cast<uint8_t>((1U << (count % 8)) - 1);
+    }
+    return bitmap;
 }
 
 inline void
