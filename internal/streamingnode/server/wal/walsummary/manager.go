@@ -239,13 +239,12 @@ func insertSummaryOf(msg message.ImmutableMessage) (
 // when the summary must not remember one for it.
 func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	// A replicated message preserves the SOURCE cluster's properties, including
-	// its idempotency key. That key must never materialize a record here: the
-	// local key history is independent of the source's, and a poisoned record
-	// would drive replicated appends down the duplicate path after a restart.
-	// Replicated writes are treated as keyless, matching the interceptor bypass.
-	if msg.ReplicateHeader() != nil {
-		return ""
-	}
+	// its idempotency key, and the key is remembered like a native one: the
+	// interceptor records replicated writes without ever consulting the window
+	// for them, so a restored record cannot drive a replicated append down the
+	// duplicate path. It only serves a client retry after this cluster is
+	// promoted.
+	//
 	// Gated to the message types the append path deduplicates: the key property
 	// alone must not materialize a record for a type that is never deduped.
 	//
@@ -282,8 +281,8 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 }
 
 // insertResultOf reports whether the message contains committed inserts and
-// returns their optional header result. Replicated writes do not restore
-// source-cluster results; missing results do not erase the write fact.
+// returns their optional header result. A replicated write restores the result
+// the source cluster stamped; missing results do not erase the write fact.
 //
 // For a transaction it is REBUILT from the insert bodies rather than read off
 // the commit: the interceptor merges the per-body results in memory and hands
@@ -294,12 +293,8 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 // is what makes a post-restart duplicate answer with the same primary keys the
 // first attempt returned.
 func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
-	replicated := msg.ReplicateHeader() != nil
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		if replicated {
-			return nil, true
-		}
 		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
 			return nil, true
@@ -318,9 +313,6 @@ func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertR
 				return nil
 			}
 			hasInsert = true
-			if replicated {
-				return nil
-			}
 			insertMsg, err := message.AsImmutableInsertMessageV1(sub)
 			if err != nil {
 				return nil

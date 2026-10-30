@@ -90,8 +90,11 @@ cannot be done correctly for autoID collections at all.
   sent (`client/milvusclient`), but REST, pymilvus and raw gRPC callers reach the server,
   where it is dropped silently. Deleting the same rows twice is already effectively a
   no-op; `Upsert` needs its delete leg deduped as well, which is a separate design.
-- Cross-cluster dedup. Replicated writes bypass the window entirely (see
-  [Replication and CDC](#replication-and-cdc)).
+- Cross-cluster dedup of replicated writes. A replicated write is never deduplicated
+  against the local window; it is only recorded there, so that a client retry after a
+  planned switchover is served on the promoted cluster (see
+  [Replication and CDC](#replication-and-cdc)). Keys that replication had not delivered
+  before a force promote are not recovered.
 - Unbounded retention. Duplicate visibility is a bounded window (see
   [Retention](#retention)).
 
@@ -422,17 +425,45 @@ be recovered from WALSummary.
 
 ## Replication and CDC
 
-Replicated messages **bypass the window entirely**. The replicate stream has its own
+Replicated messages are **recorded in the window but never checked against it**.
+
+The window is never read for a replicated message. The replicate stream has its own
 exactly-once delivery via source-timetick checkpoints, and the idempotency key inside a
 replicated message belongs to the *source* cluster's window history. Deduplicating
 against the local window would silently drop replicated writes whenever the key happens
 to sit in this cluster's window — after a demotion, or after the source released the key
-and a client legally re-issued it.
+and a client legally re-issued it. So a replicated message is appended unconditionally.
 
-The recovery observer applies the same rule: a replicated write becomes a *keyless*
-committed write in Summary, so a foreign key can never materialize a local dedup
-entry. Its local WAL positions still participate in Summary persistence and
-checkpoint gating.
+The window is written after the append. A replicated Insert carries the source's key and
+its `idempotent_result` header; a replicated transaction carries them on its bodies and
+its commit, and the interceptor merges the body results on the commit exactly as it does
+for a native transaction. The recorded entry replaces an entry already held for the key:
+when the source evicted the key and a client legally reused it, the newer write is the one
+a retry must see. The recovery observer applies the same rule, so a window rebuilt from
+Summary carries the replicated keys too, and restore already keeps the newest record per
+key.
+
+What this buys: after a **planned switchover**, the promoted cluster answers a client
+retry of a key the old primary committed with the primary keys the old primary assigned,
+instead of appending a second copy. The `AlterReplicateConfig` message is appended behind
+every earlier message of each pchannel, so the promoted cluster holds every key the source
+committed before it accepts its first client write. Routing lines up because row *i* goes
+to shard `i % n` on every attempt and a secondary names its vchannels by pchannel index.
+
+What it does not buy: after a **force promote**, keys that replication had not yet
+delivered are absent, and a retry of one of them appends again. That is a property of
+unplanned failover, not of the window.
+
+Recording is best effort. A replicated write must land even when its key cannot be
+remembered, so a malformed result header is logged and the append proceeds without a
+record. A replicated transaction is recorded only when the buffer holds a result for every
+body, that is, when the buffered count equals the commit's `BodyCnt`. Bodies can be missing
+from the buffer although they are in the WAL: after a restart (the buffer is in memory,
+while the replicate side recovers the open transaction from the WAL), or when the source
+replays a transaction and the bodies that already landed are ignored. A missing record
+only makes a retry append again; a partial record would answer it with missing primary
+keys. For the same reason the buffer is released only after the commit lands, so a
+rejected commit that the source replays still finds the earlier bodies.
 
 ## Reader-side physical dedup
 
@@ -505,7 +536,8 @@ retention GC; restoring idempotency interceptor windows remains follow-up work.
 switches, key length validation, autoID routing stability and result merging; window
 owner/wait/duplicate decisions, byte-cap eviction, restore-from-snapshot,
 transaction commit dedup with rollback synthesis, expired transaction buffers,
-replicated bypass, and DDL preservation of request history.
+replicated writes recorded without being checked, and DDL preservation of request
+history.
 
 Shared codec, persistence, recovery and GC tests are described in
 [WALSummary validation](wal/summary.md#10-validation-and-source-map).
