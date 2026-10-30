@@ -640,6 +640,7 @@ func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, star
 		PKStatsBlob:             config.PKStatsBlob,
 		MergedPKStatsBlob:       config.MergedPKStatsBlob,
 		ReadVersion:             config.ReadVersion,
+		ReadManifestSize:        config.ReadManifestSize,
 		WriterFormat:            config.WriterFormat,
 		SchemaBasedPattern:      config.SchemaBasedPattern,
 		SchemaBasedFormats:      config.SchemaBasedFormats,

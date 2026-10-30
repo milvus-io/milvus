@@ -64,12 +64,25 @@ TEST(LoonManifestPathTest, IsSameLoonManifestPathComparesRevision) {
 TEST(LoonManifestPathTest, ParseLoonManifestPathRequiresBasePathAndVersion) {
     auto revision = ParseLoonManifestPath(R"({"base_path":"files/b","ver":3})");
     ASSERT_TRUE(revision.has_value());
-    EXPECT_EQ(revision->first, "files/b");
-    EXPECT_EQ(revision->second, 3);
+    EXPECT_EQ(revision->base_path, "files/b");
+    EXPECT_EQ(revision->version, 3);
+    EXPECT_EQ(revision->size, -1);
     EXPECT_FALSE(
         ParseLoonManifestPath(R"({"base_path":"files/b"})").has_value());
     EXPECT_FALSE(ParseLoonManifestPath(R"({"ver":3})").has_value());
     EXPECT_FALSE(ParseLoonManifestPath("/path/a").has_value());
+}
+
+TEST(LoonManifestPathTest, ParseLoonManifestPathReadsOptionalSize) {
+    auto sized =
+        ParseLoonManifestPath(R"({"ver":3,"base_path":"files/b","size":1024})");
+    ASSERT_TRUE(sized.has_value());
+    EXPECT_EQ(sized->size, 1024);
+    // A size that is not an integer is treated as unknown.
+    auto malformed = ParseLoonManifestPath(
+        R"({"ver":3,"base_path":"files/b","size":"1024"})");
+    ASSERT_TRUE(malformed.has_value());
+    EXPECT_EQ(malformed->size, -1);
 }
 
 class SegmentLoadInfoTest : public ::testing::Test {

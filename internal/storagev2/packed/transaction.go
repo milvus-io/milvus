@@ -90,14 +90,14 @@ func addDeltaLogsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	mlog.Debug(context.TODO(), "AddDeltaLogsToManifest",
-		mlog.String("basePath", basePath),
-		mlog.Int64("version", version),
+		mlog.String("basePath", manifest.BasePath),
+		mlog.Int64("version", manifest.ManifestVersion),
 		mlog.Int("numDeltaLogs", len(deltaLogs)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -106,13 +106,9 @@ func addDeltaLogsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
 	// Start transaction
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
+	transactionHandle, err := openTransaction(manifest, cProperties, resolveID, getRetryLimit())
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
@@ -121,7 +117,7 @@ func addDeltaLogsToManifest(
 	// The C++ loon library converts absolute paths to relative at commit time
 	for _, deltaLog := range deltaLogs {
 		cPath := C.CString(deltaLog.Path)
-		result = C.loon_transaction_add_delta_log(transactionHandle, cPath, C.int64_t(deltaLog.NumEntries))
+		result := C.loon_transaction_add_delta_log(transactionHandle, cPath, C.int64_t(deltaLog.NumEntries))
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
@@ -133,15 +129,11 @@ func addDeltaLogsToManifest(
 			mlog.Int64("numEntries", deltaLog.NumEntries))
 	}
 
-	// Commit transaction
-	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion, nil)
-	if err := HandleLoonFFIResult(result); err != nil {
+	newManifestPath, err := commitTransaction(transactionHandle, manifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
-
-	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Delta logs committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Delta logs committed to manifest", mlog.String("newManifestPath", newManifestPath))
 
 	return newManifestPath, nil
 }
@@ -210,7 +202,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) ([]*datapb.FieldBinlog, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
@@ -224,20 +216,9 @@ func GetDeltaLogsFromManifestWithExtfs(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
-	}
-	defer C.loon_transaction_destroy(cTransactionHandle)
-
-	var cManifest *C.LoonManifest
-	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to get manifest")
+	cManifest, err := openManifest(manifest, cProperties)
+	if err != nil {
+		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
@@ -312,14 +293,14 @@ func AddStatsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	mlog.Debug(context.TODO(), "AddStatsToManifest",
-		mlog.String("basePath", basePath),
-		mlog.Int64("version", version),
+		mlog.String("basePath", manifest.BasePath),
+		mlog.Int64("version", manifest.ManifestVersion),
 		mlog.Int("numStats", len(stats)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -328,12 +309,8 @@ func AddStatsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
+	transactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
@@ -348,14 +325,11 @@ func AddStatsToManifest(
 			mlog.Strings("files", stat.Files))
 	}
 
-	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion, nil)
-	if err := HandleLoonFFIResult(result); err != nil {
+	newManifestPath, err := commitTransaction(transactionHandle, manifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
-
-	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Stats committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Stats committed to manifest", mlog.String("newManifestPath", newManifestPath))
 
 	return newManifestPath, nil
 }

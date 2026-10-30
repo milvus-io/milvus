@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -75,6 +76,47 @@ func TestL0ManifestBatchSingleWorker(t *testing.T) {
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{base + "/_delta/1", base + "/_delta/2", base + "/_delta/3"}, paths)
 	}
+}
+
+// On object storage, every revision the L0 chain publishes records the size of
+// its manifest object, and the next commit opens it with that size.
+func TestL0ManifestBatchRecordsManifestSize(t *testing.T) {
+	cfg := packed.CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	executor := newManifestCommitExecutor(1)
+	defer executor.close()
+	base := path.Join(cfg.GetRootPath(), fmt.Sprintf("l0-manifest-size/%d", time.Now().UnixNano()))
+	initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg,
+		&packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
+	require.NoError(t, err)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, ManifestPath: initial})
+	cache := make(map[int64]string)
+	var updates []*l0ManifestUpdate
+	for logID := 2; logID <= 3; logID++ {
+		updates = append(updates, &l0ManifestUpdate{
+			segmentID: 1, segment: segment, storageConfig: cfg, committedV3Manifests: cache,
+			entries: []packed.DeltaLogEntry{{Path: fmt.Sprintf("%s/_delta/%d", base, logID), NumEntries: 1}},
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, commitL0ManifestUpdates(ctx, executor, updates))
+
+	published := segment.GetManifestPath()
+	require.Equal(t, published, cache[1])
+	revision, err := packed.ParseManifestPath(published)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, revision.ManifestVersion)
+	manifestFile, err := packed.ManifestFilePath(published)
+	require.NoError(t, err)
+	data, err := packed.ReadFile(cfg, manifestFile)
+	require.NoError(t, err)
+	require.EqualValues(t, len(data), revision.Size)
+	paths, err := packed.GetDeltaLogPathsFromManifest(published, cfg)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{base + "/_delta/1", base + "/_delta/2", base + "/_delta/3"}, paths)
 }
 
 func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {

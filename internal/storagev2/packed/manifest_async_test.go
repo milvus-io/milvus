@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestAsyncManifestRoundTrip(t *testing.T) {
@@ -69,6 +70,65 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	_, err = GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+// On object storage an async commit records the size of the manifest object it
+// wrote, like CommitManifestUpdates, and every async open passes the size a
+// manifest path records. loon reads exactly the recorded number of bytes, so a
+// wrong size fails each entry point; those reads come first because loon caches
+// a revision once it has been read.
+func TestAsyncManifestRecordsAndPassesManifestSize(t *testing.T) {
+	paramtable.Init()
+	cfg := CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	io := NewManifestIOContext(2)
+	defer io.Close()
+	ctx := context.Background()
+	base := path.Join(cfg.GetRootPath(), fmt.Sprintf("async_manifest_size/%d", time.Now().UnixNano()))
+	requireRecordedSize := func(manifestPath string) ManifestJSON {
+		t.Helper()
+		manifest, err := ParseManifestPath(manifestPath)
+		require.NoError(t, err)
+		manifestFile, err := ManifestFilePath(manifestPath)
+		require.NoError(t, err)
+		data, err := ReadFile(cfg, manifestFile)
+		require.NoError(t, err)
+		require.EqualValues(t, len(data), manifest.Size, "path %s", manifestPath)
+		return manifest
+	}
+
+	index := ManifestIndexInfo{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}
+	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, MarshalManifestPath(base, ManifestEarliest), cfg,
+		&ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
+	require.NoError(t, err)
+	recorded := requireRecordedSize(first.ManifestPath)
+
+	wrongSize := recorded
+	wrongSize.Size += 7
+	wrong := marshalManifestPath(wrongSize)
+	_, err = GetManifestIndexInfosAsync(ctx, io, wrong, cfg)
+	require.Error(t, err, "GetManifestIndexInfosAsync")
+	_, err = GetManifestLobFilesAsync(ctx, io, wrong, cfg)
+	require.Error(t, err, "GetManifestLobFilesAsync")
+	done := make(chan error, 1)
+	require.NoError(t, SubmitManifestIndexInfos(ctx, io, wrong, cfg, func(_ []ManifestIndexInfo, err error) { done <- err }))
+	require.Error(t, <-done, "SubmitManifestIndexInfos")
+	_, err = CommitManifestUpdatesWithResultAsync(ctx, io, wrong, cfg,
+		&ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	require.Error(t, err, "CommitManifestUpdatesWithResultAsync")
+
+	entries, err := GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	second, err := CommitManifestUpdatesWithResultAsync(ctx, io, first.ManifestPath, cfg,
+		&ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	require.NoError(t, err)
+	require.Equal(t, recorded.ManifestVersion+1, requireRecordedSize(second.ManifestPath).ManifestVersion)
+	entries, err = GetManifestIndexInfosAsync(ctx, io, second.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.Empty(t, entries)
 }
 
 // Like CommitManifestUpdates, an empty update returns the base pointer verbatim
@@ -338,11 +398,12 @@ func TestAsyncManifestQueuedCommitDeadline(t *testing.T) {
 func TestAsyncManifestCommitOutcomeSurvivesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	version, err := (manifestCommitResult{outcome: ManifestCommitted, version: 42}).finish(ctx)
+	version, size, err := (manifestCommitResult{outcome: ManifestCommitted, version: 42, size: 1024}).finish(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(42), version)
+	require.Equal(t, int64(1024), size)
 	for _, outcome := range []ManifestCommitOutcome{ManifestNotCommitted, ManifestCommitUnknown} {
-		_, err := (manifestCommitResult{outcome: outcome, version: -1, err: ErrLoonTransient}).finish(ctx)
+		_, _, err := (manifestCommitResult{outcome: outcome, version: -1, size: -1, err: ErrLoonTransient}).finish(ctx)
 		var commitErr *ManifestCommitError
 		require.True(t, errors.As(merr.Wrap(err, "coordinator commit"), &commitErr))
 		require.Equal(t, outcome, commitErr.Outcome)

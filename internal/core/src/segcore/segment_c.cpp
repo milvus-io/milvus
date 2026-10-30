@@ -2530,6 +2530,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
         result->manifest_path = nullptr;
         result->committed_version = 0;
+        result->manifest_size = -1;
         result->num_rows = 0;
         result->timestamp_from = 0;
         result->timestamp_to = 0;
@@ -3080,7 +3081,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 fs,
                 writer_config.segment_path,
                 read_version,
-                -1,
+                config->read_manifest_size,
                 milvus_storage::api::transaction::OverwriteResolver,
                 retry_limit);
         if (!transaction_result.ok()) {
@@ -3239,7 +3240,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
 
         // commit
-        auto commit_result = transaction->Commit();
+        auto commit_result = transaction->Commit(&result->manifest_size);
         if (!commit_result.ok()) {
             auto error = milvus_storage::ToSegcoreError(commit_result.status());
             return milvus::FailureCStatus(&error);
