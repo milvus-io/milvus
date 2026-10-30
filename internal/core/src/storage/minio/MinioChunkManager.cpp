@@ -513,7 +513,22 @@ MinioChunkManager::BuildGoogleCloudClient(
                 MilvusGcpProviders().emplace(key, provider).first->second;
         }
     }
-    milvus_storage::GcpCredentialRegistry::Instance().Register(key, provider);
+    // Milvus's own storage address is operator configuration, so mark the
+    // endpoint trusted: Bearer tokens may go to it even when it is not an
+    // HTTPS Google API host. External filesystems register their endpoints
+    // untrusted, and the registry refuses to bind this (endpoint, bucket)
+    // to a different identity, so a conflict is a configuration error.
+    auto registered =
+        milvus_storage::GcpCredentialRegistry::Instance().Register(
+            key, provider, /*trusted_endpoint=*/true);
+    if (!registered.ok()) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "failed to register GCP credentials for bucket '{}' at "
+                  "'{}': {}",
+                  storage_config.bucket_name,
+                  storage_config.address,
+                  registered.message());
+    }
     AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
 
     if (storage_config.useIAM) {
