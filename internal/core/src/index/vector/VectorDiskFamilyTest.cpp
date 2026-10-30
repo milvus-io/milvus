@@ -25,6 +25,8 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
+#include <random>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -39,12 +41,14 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorDiskArtifact.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
+#include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 #include "storage/artifact/LocalDirectory.h"
 
@@ -109,6 +113,7 @@ MakeRows() {
 template <typename T>
 struct OpenedDiskIndex {
     IIndexReaderBasePtr base;
+    std::vector<uint8_t> persisted_validity;
 };
 
 template <typename T>
@@ -120,7 +125,9 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          const std::string& validity_path = {},
+          bool mmap_id_map = false) {
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type =
@@ -142,10 +149,15 @@ BuildDisk(const std::string& raw_path,
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
             adapted.family, adapted.params);
     ASSERT_NE(builder, nullptr);
-    PreparedVectorBuildFiles<T> input{.raw_path = raw_path};
-    if (!offsets_path.empty()) {
-        input.embedding_offsets_path = offsets_path;
-    }
+    PreparedVectorBuildFiles<T> input{
+        .raw_path = raw_path,
+        .validity_path = validity_path.empty()
+                             ? std::nullopt
+                             : std::make_optional(validity_path),
+        .embedding_offsets_path = offsets_path.empty()
+                                      ? std::nullopt
+                                      : std::make_optional(offsets_path),
+    };
     auto artifact = std::move(*builder).Build(input);
     ASSERT_NE(artifact, nullptr);
 
@@ -180,10 +192,23 @@ BuildDisk(const std::string& raw_path,
     for (const auto& file : stats.Files()) {
         paths.push_back(file.file_name);
     }
+    if (!validity_path.empty()) {
+        storage::V1RemoteSource source(context,
+                                       paths,
+                                       {},
+                                       storage::ArtifactStorageNamespace::Index,
+                                       storage::V1SourceLayout::DiskFiles);
+        opened.persisted_validity = source.ReadEntry(VALID_DATA_KEY);
+    }
     sink.ReleaseLocalStaging();
     storage::LoadOptions options;
     options.params = adapted.params;
     options.params[INDEX_NUM_ROWS_KEY] = logical_rows;
+    if (!validity_path.empty()) {
+        options.params["nullable"] = true;
+        options.params[ENABLE_MMAP_I2O_MAP] = mmap_id_map;
+        options.params[ENABLE_MMAP_O2I_MAP] = mmap_id_map;
+    }
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = mmap;
     options.mmap_dir_path = staging_dir;
@@ -506,6 +531,109 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     EXPECT_EQ(result.unity_topK_, 4);
     EXPECT_EQ(result.seg_offsets_.size(), 8);
     EXPECT_EQ(result.distances_.size(), 8);
+}
+
+// Disk validity describes lists; ordinary-metric searches use element ids.
+// Keep the persisted row bitmap and restore element validity during loading.
+void
+RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
+                                  bool mmap_id_map) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_nullable_XXXXXX", "vector disk nullable test");
+    // Both shapes need enough vectors for the disk index's PQ training.
+    constexpr int64_t parents = kRows * 2;
+    std::vector<uint8_t> bitmap((parents + 7) / 8, 0);
+    std::vector<size_t> offsets{0};
+    for (int64_t row = 0; row < parents; ++row) {
+        if (row % 5 == 1) {
+            continue;  // Null lists contribute neither vectors nor offsets.
+        }
+        bitmap[row / 8] |= static_cast<uint8_t>(1U << (row % 8));
+        const size_t vectors = more_rows_than_vectors
+                                   ? (row % 5 == 0 ? 1 : 0)
+                                   : (row % 5 == 3 ? 0 : row % 4 + 1);
+        offsets.push_back(offsets.back() + vectors);
+    }
+    const auto element_count = static_cast<int64_t>(offsets.back());
+    ASSERT_EQ(more_rows_than_vectors, parents > element_count);
+    std::default_random_engine rng(42);
+    std::normal_distribution<float> dist(0.0F, 1.0F);
+    std::vector<float> values(element_count * kDim);
+    for (auto& value : values) {
+        value = dist(rng);
+    }
+    std::vector<uint8_t> row_validity(sizeof(uint64_t) + bitmap.size());
+    const uint64_t wire_count = parents;
+    std::memcpy(row_validity.data(), &wire_count, sizeof(wire_count));
+    std::memcpy(
+        row_validity.data() + sizeof(wire_count), bitmap.data(), bitmap.size());
+
+    const auto raw_path = files->Path() + "/raw";
+    const auto offsets_path = files->Path() + "/offsets";
+    const auto validity_path = files->Path() + "/input_" + VALID_DATA_KEY;
+    WriteRaw(raw_path, values, element_count, kDim);
+    WriteOffsets(offsets_path, offsets);
+    {
+        std::ofstream stream(validity_path, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(row_validity.data()),
+                     static_cast<std::streamsize>(row_validity.size()));
+        ASSERT_TRUE(stream.good());
+    }
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              knowhere::metric::COSINE,
+              kDim,
+              parents,
+              offsets_path,
+              KnowhereMmapSupported(knowhere::IndexEnum::INDEX_DISKANN),
+              validity_path,
+              mmap_id_map);
+    ASSERT_NE(opened.base, nullptr);
+    EXPECT_EQ(opened.persisted_validity, row_validity);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(opened.base->Count(), element_count);
+    EXPECT_EQ(reader->ValidCount(), element_count);
+
+    TargetBitmap filtered(element_count, false);
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 128}},
+        .metric_type_ = knowhere::metric::COSINE,
+        .topk_ = 1,
+    };
+    SearchResult unfiltered_result;
+    reader->Search(GenDataset(1, kDim, values.data()),
+                   params,
+                   BitsetView(filtered),
+                   nullptr,
+                   unfiltered_result);
+    ASSERT_EQ(unfiltered_result.seg_offsets_.size(), 1);
+    EXPECT_GE(unfiltered_result.seg_offsets_[0], 0);
+    EXPECT_LT(unfiltered_result.seg_offsets_[0], element_count);
+    // A nonempty filter also has to address the flattened element ids.
+    filtered.set();
+    const auto allowed = element_count - 1;
+    filtered.reset(allowed);
+    SearchResult result;
+    reader->Search(GenDataset(1, kDim, values.data() + allowed * kDim),
+                   params,
+                   BitsetView(filtered),
+                   nullptr,
+                   result);
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_[0], allowed);
+}
+
+TEST(VectorDiskFamilyTest, NullableElementLevelLoadsRowValidity) {
+    RunNullableElementLevelDiskSearch(false, false);
+    RunNullableElementLevelDiskSearch(true, false);
+}
+
+TEST(VectorDiskFamilyTest, MmapNullableElementLevelLoadsRowValidity) {
+    RunNullableElementLevelDiskSearch(false, true);
+    RunNullableElementLevelDiskSearch(true, true);
 }
 
 }  // namespace

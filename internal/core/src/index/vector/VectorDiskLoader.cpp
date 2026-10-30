@@ -222,7 +222,10 @@ ReadValidity(bool use_async,
         CountValidDataBitmap(valid_data.count, valid_data.bitmap) == 0) {
         mmap_flags = {};
     }
-    co_return MakeNullableLoadInput(valid_data, mmap_flags, local_prefix);
+    co_return MakeNullableLoadInput(valid_data,
+                                    mmap_flags,
+                                    local_prefix,
+                                    params.elem_type != DataType::NONE);
 }
 
 using detail::EmptyEmbeddingListState;
