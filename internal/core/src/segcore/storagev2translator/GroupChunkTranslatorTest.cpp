@@ -214,13 +214,41 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             expected_size += static_cast<int64_t>(
                 row_group_metadata_vector.Get(row_group_idx).memory_size());
         }
-        auto usage = translator->estimated_byte_size_of_cell(i).first;
+        auto usage = translator->estimated_loading_usage({i}).resident;
         if (use_mmap) {
             EXPECT_EQ(usage.file_bytes, expected_size);
         } else {
             EXPECT_EQ(usage.memory_bytes, expected_size);
         }
     }
+
+    std::vector<cachinglayer::cid_t> estimate_cids{0};
+    if (translator->num_cells() > 1) {
+        estimate_cids.push_back(translator->num_cells() - 1);
+    }
+    int64_t expected_batch_bytes = 0;
+    for (const auto cid : estimate_cids) {
+        expected_batch_bytes += static_cast<GroupCTMeta*>(translator->meta())
+                                    ->chunk_memory_size_[cid];
+    }
+    const auto batch = translator->estimated_loading_usage(estimate_cids);
+    EXPECT_EQ(
+        batch.resident,
+        (use_mmap ? cachinglayer::ResourceUsage{0, expected_batch_bytes}
+                  : cachinglayer::ResourceUsage{expected_batch_bytes, 0}));
+    // This schema contains ARRAY fields, whose memory scratch is doubled.
+    const cachinglayer::ResourceUsage expected_overhead{
+        2 * expected_batch_bytes, use_mmap ? expected_batch_bytes : 0};
+    EXPECT_EQ(batch.private_overhead + batch.shared_overhead,
+              expected_overhead);
+    EXPECT_EQ(batch.shared_overhead,
+              translator->meta()->loading_overhead_config
+                  ? expected_overhead
+                  : cachinglayer::ResourceUsage{});
+    const auto empty = translator->estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 
     // getting cells - use all valid cell IDs
     std::vector<cachinglayer::cid_t> cids;
@@ -425,7 +453,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     }
 
     for (size_t cid = 0; cid < translator->num_cells(); ++cid) {
-        auto usage = translator->estimated_byte_size_of_cell(cid).first;
+        auto usage = translator->estimated_loading_usage({cid}).resident;
 
         // Calculate expected size by summing all row groups in this cell
         auto [rg_start, rg_end] = static_cast<GroupCTMeta*>(translator->meta())

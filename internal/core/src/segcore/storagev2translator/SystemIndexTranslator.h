@@ -116,9 +116,9 @@ class TimestampIndexTranslator
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     const std::string&
     key() const override;
@@ -160,9 +160,9 @@ class PkIndexTranslator : public milvus::cachinglayer::Translator<PkIndexCell> {
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     const std::string&
     key() const override;
