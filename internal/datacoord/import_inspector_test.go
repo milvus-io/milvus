@@ -421,6 +421,26 @@ func TestImportInspector(t *testing.T) {
 	suite.Run(t, new(ImportInspectorSuite))
 }
 
+func TestImportInspectorSkipsPendingTasksOfTerminalJobs(t *testing.T) {
+	for _, state := range []internalpb.ImportJobState{
+		internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			importMeta := NewMockImportMeta(t)
+			scheduler := task2.NewMockGlobalScheduler(t)
+			inspector := NewImportInspector(context.Background(), nil, importMeta, scheduler, nil).(*importInspector)
+			job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: state}}
+			preImport := &preImportTask{}
+			preImport.task.Store(&datapb.PreImportTask{JobID: 1, TaskID: 10, State: datapb.ImportTaskStateV2_Pending})
+			importing := &importTask{}
+			importing.task.Store(&datapb.ImportTaskV2{JobID: 1, TaskID: 20, State: datapb.ImportTaskStateV2_Pending})
+			importMeta.EXPECT().GetJobBy(mock.Anything).Return([]ImportJob{job}).Once()
+			importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1)).Return([]ImportTask{preImport, importing}).Once()
+			inspector.inspect()
+		})
+	}
+}
+
 func TestImportInspectorSchedulesV3PendingTasksWithoutJobGate(t *testing.T) {
 	ctx := context.Background()
 	importMeta := NewMockImportMeta(t)
