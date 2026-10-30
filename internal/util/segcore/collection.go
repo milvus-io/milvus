@@ -56,20 +56,30 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 			return nil, err
 		}
 	}
-	if req.LoadFieldList != nil {
-		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
-			C.int64_t(len(req.LoadFieldList)))
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			C.DeleteCollection(ptr)
-			return nil, err
-		}
-	}
-	return &CCollection{
+	collection := &CCollection{
 		collectionID: req.CollectionID,
 		ptr:          ptr,
 		schema:       req.Schema,
 		indexMeta:    req.IndexMeta,
-	}, nil
+	}
+	// NewCollection parses the fields but leaves the native revision at zero.
+	// Immutable QueryView planning collections must carry their logical version
+	// so LazyCheckSchema can backfill older growing segments before reading.
+	if err := collection.UpdateSchema(req.Schema, uint64(req.Schema.GetVersion())); err != nil {
+		collection.Release()
+		return nil, err
+	}
+	// Schema initialization can rebuild the native load-field selection. Apply
+	// legacy preload hints afterwards so a nonzero version cannot erase them.
+	if req.LoadFieldList != nil {
+		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
+			C.int64_t(len(req.LoadFieldList)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			collection.Release()
+			return nil, err
+		}
+	}
+	return collection, nil
 }
 
 // CCollection is just a wrapper of the underlying C-structure CCollection.
@@ -82,6 +92,7 @@ type CCollection struct {
 	// WAL callers pass a timetick, not the logical Schema.Version.
 	schemaVersion uint64
 	schema        *schemapb.CollectionSchema
+	indexMetaMu   sync.RWMutex
 	indexMeta     *segcorepb.CollectionIndexMeta
 }
 
@@ -102,6 +113,8 @@ func (c *CCollection) Schema() *schemapb.CollectionSchema {
 }
 
 func (c *CCollection) IndexMeta() *segcorepb.CollectionIndexMeta {
+	c.indexMetaMu.RLock()
+	defer c.indexMetaMu.RUnlock()
 	return c.indexMeta
 }
 
@@ -109,6 +122,8 @@ func (c *CCollection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error
 	if meta == nil {
 		return nil
 	}
+	c.indexMetaMu.Lock()
+	defer c.indexMetaMu.Unlock()
 
 	indexMetaBlob, err := proto.Marshal(meta)
 	if err != nil {
@@ -132,7 +147,6 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	if version <= c.schemaVersion {
 		return nil
 	}
-
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err
