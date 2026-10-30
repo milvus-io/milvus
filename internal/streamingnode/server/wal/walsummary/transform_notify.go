@@ -46,9 +46,12 @@ func (m *Manager) notifyTransformMessageLocked(msg message.ImmutableMessage) {
 		}
 		return
 	}
-	// Recovery consumes a committed transaction as one message at the commit's
-	// TimeTick. Even an insert-only transaction advances query Transform MVCC.
+	// A pure Insert transaction affects only Growing MVCC. Do not wake remote
+	// Transform consumers for its commit.
 	if msg.MessageType() == message.MessageTypeTxn {
+		if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindNone {
+			return
+		}
 		msg = message.AsImmutableTxnMessage(msg).Commit()
 	}
 	if messageutil.AdvancesQueryTransformMVCC(msg) {

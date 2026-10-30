@@ -2,7 +2,7 @@
 
 This branch combines the StreamingNode query path, the injectable
 [query client](query_client.md), and QueryNode query/resource preparation.
-Production Proxy switching remains separate work. Scoped WAL
+Production Proxy routing and Coordinator runtime activation are wired. Scoped WAL
 barrier production and ordered delivery are provided by master. The plan's QN
 workers use the existing ViewQueryService protocol through the client's injected
 ViewQueryServiceClient.
@@ -65,7 +65,7 @@ QN loaders, ReadState management and native preparation are described below.
   producer normalizes the user-facing skip-dynamic-field option into those
   hints, so the response needs no separate boolean. Skipping dynamic-field
   preloading does not remove that field from the logical query scope.
-  Producers are supplied by the separate control-plane implementation.
+  The integrated coordinator supplies this metadata.
 
 Retained requery uses QueryOnView with the original plan, workers, Schema and
 MVCC. It does not select new resources through Phase 1 or use a separate requery

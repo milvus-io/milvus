@@ -170,6 +170,13 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64, 
 			s.cleanup()
 			return status.NewTransactionExpired("txn %d body count mismatch: expected %d, appended %d", s.txnContext.TxnID, bodyCnt, s.bodyCount)
 		}
+		// Classify only after all admitted appends finish: an in-flight body
+		// may still succeed, and a failed append does not make a transaction nonempty.
+		if s.bodyCount == 0 {
+			s.state = message.TxnStateRollbacked
+			s.cleanup()
+			return status.NewInvalidArgument("cannot commit an empty transaction")
+		}
 		return nil
 	}
 }

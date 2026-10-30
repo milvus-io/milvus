@@ -21,13 +21,15 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -39,11 +41,11 @@ type HighlightTask struct {
 	baseTask
 	Condition
 	*querypb.GetHighlightRequest
-	ctx            context.Context
-	collectionName string
-	collectionID   typeutil.UniqueID
-	dbName         string
-	lb             shardclient.LBPolicy
+	ctx               context.Context
+	collectionName    string
+	collectionID      typeutil.UniqueID
+	dbName            string
+	readSchemaVersion *int32
 
 	result *querypb.GetHighlightResponse
 }
@@ -93,31 +95,49 @@ func (t *HighlightTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
-	t.Channel = channel
-	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
+func (t *HighlightTask) Execute(ctx context.Context) error {
+	// Pin metadata to the search collection ID; a same-name recreation must not
+	// redirect highlighting to a different collection's analyzer.
+	info, err := t.GetMetaCache().GetCollectionInfo(ctx, t.dbName, "", t.collectionID)
 	if err != nil {
 		return err
 	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return err
+	if len(info.VChannels) == 0 {
+		return merr.WrapErrServiceNotReadyMsg("collection has no analyzer channel")
 	}
-	t.result = resp
+	result := &querypb.GetHighlightResponse{Status: merr.Success()}
+	for _, task := range t.GetTasks() {
+		texts := make([][]byte, len(task.GetTexts()))
+		for i, text := range task.GetTexts() {
+			texts[i] = []byte(text)
+		}
+		response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
+			Placeholder: texts, WithDetail: true,
+			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
+				CollectionId: t.collectionID, Vchannel: info.VChannels[0], FieldId: task.GetFieldId(), AnalyzerNames: task.GetAnalyzerNames(), ReadSchemaVersion: t.readSchemaVersion,
+			}},
+		})
+		if err != nil {
+			if status.IsCanceled(err) {
+				return err
+			}
+			return merr.WrapErrServiceUnavailableErr(err, "highlight analyzer transport")
+		}
+		if err := merr.Error(response.GetStatus()); err != nil {
+			return err
+		}
+		tokens := make([][]*milvuspb.AnalyzerToken, len(response.GetResults()))
+		for i, analyzed := range response.GetResults() {
+			tokens[i] = analyzed.GetTokens()
+		}
+		fragments, err := highlight.BuildFragments(task, t.GetTopks(), tokens)
+		if err != nil {
+			return err
+		}
+		result.Results = append(result.Results, fragments...)
+	}
+	t.result = result
 	return nil
-}
-
-func (t *HighlightTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.collectionName,
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
-		Exec:           t.getHighlightOnShardleader,
-	})
-
-	return err
 }
 
 func (t *HighlightTask) PostExecute(ctx context.Context) error {

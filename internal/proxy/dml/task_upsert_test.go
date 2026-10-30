@@ -1819,7 +1819,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 
 	m := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema}, nil).Build()
+	m = mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{Schema: task.schema}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(task.schema, nil).Build()
 	defer m.UnPatch()
@@ -2028,6 +2028,10 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.req.FieldOps[0].Op = schemapb.FieldPartialUpdateOp_REPLACE
 	task.node.(*mockUpsertNode).tsoAllocator = &mockTsoAllocator{}
@@ -2642,6 +2646,10 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 }
 
 func TestRetrieveByPKs_Success(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, partitionKeyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
@@ -2694,6 +2702,10 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 }
 
 func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	const beginTS = uint64(200)
 	var captured *dql.QueryTask
 
@@ -2865,7 +2877,7 @@ func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
 		t.Helper()
 		collectionIDPatch := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		t.Cleanup(func() { collectionIDPatch.UnPatch() })
-		collectionInfoPatch := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		collectionInfoPatch := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
 			Schema:          schema,
 		}, nil).Build()
@@ -3476,6 +3488,10 @@ func TestPrepareUpsertFullAutoIDRejectsAllocatedIDCollision(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -3511,6 +3527,10 @@ func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, scenario := range []string{"missing", "zero", "query_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
@@ -3595,6 +3615,10 @@ func TestBindPartialUpdateReadTimestampsRequiresCompleteAttempt(t *testing.T) {
 }
 
 func TestRetrieveByPKs_GetPrimaryFieldSchemaError(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	expectedErr := merr.WrapErrParameterInvalidMsg("primary field not found")
 	patch := mockey.Mock(typeutil.GetPrimaryFieldSchema).Return(nil, expectedErr).Build()
 	defer patch.UnPatch()
@@ -3836,7 +3860,7 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 		defer patch1.UnPatch()
 
 		schema := createTestSchema()
-		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
 			Schema:          schema,
 		}, nil).Build()
@@ -3899,7 +3923,7 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 	m := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
-	m = mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+	m = mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 		UpdateTimestamp: 12345,
 		Schema:          schema,
 	}, nil).Build()
@@ -3955,7 +3979,7 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 		schema := createTestSchema()
 		schema.HasPartitionKeyField = true
 		mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
 			Schema:          schema,
 		}, nil).Build()
@@ -3974,7 +3998,7 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
 		schema := createTestSchema()
 		mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
 			Schema:          schema,
 		}, nil).Build()
@@ -4000,7 +4024,7 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 		schema := createTestSchema()
 		patch1 := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		defer patch1.UnPatch()
-		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
 			Schema:          schema,
 		}, nil).Build()
@@ -4437,7 +4461,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 				t.Cleanup(func() { m.UnPatch() })
 			}
 			patch((*metacache.MetaCache).GetCollectionID, task.collectionID, nil)
-			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
+			patch((*metacache.MetaCache).GetCollectionWriteInfo, &collectionInfo{Schema: task.schema}, nil)
 			patch((*metacache.MetaCache).GetCollectionSchema, task.schema, nil)
 			patch((*metacache.MetaCache).GetPartitionID, int64(100), nil)
 			patch((*metacache.MetaCache).GetPartitionsIndex, []string{"_default_0"}, nil)
@@ -6405,7 +6429,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
+			mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(dql.IsPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
@@ -6522,7 +6546,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test non-nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
+			mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(dql.IsPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
@@ -7618,6 +7642,10 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 }
 
 func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	for _, name := range []string{"invalid_name", "lookup_error"} {
 		t.Run(name, func(t *testing.T) {
 			task := createTestUpdateTask()
@@ -7647,6 +7675,10 @@ func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
 }
 
 func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -7739,7 +7771,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			}
 			patch(validateAndNormalizeFieldDataValidData, failure("valid_data"))
 			patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
+			patch((*metacache.MetaCache).GetCollectionWriteInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
 			patch((*metacache.MetaCache).GetCollectionSchema, task.schema, failure("schema"))
 			patch(dql.ValidateTextStorageV3Enabled, failure("text_storage"))
 			implicit := stage == "implicit_partial_namespace"

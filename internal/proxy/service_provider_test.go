@@ -312,8 +312,9 @@ func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOne
 			assert.Empty(t, req.GetDbName())
 			assert.Empty(t, req.GetCollectionName())
 			return &milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: collectionID,
+				Status:              merr.Success(),
+				CollectionID:        collectionID,
+				VirtualChannelNames: []string{"test-v0"},
 				// Rolling-upgrade old RootCoord resolves the id but cannot report
 				// the collection's real database.
 				DbName: "",
@@ -325,6 +326,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOne
 	cache, err := NewMetaCache(mixCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
+	assert.NoError(t, cache.SeedSchemaForTest(collectionID, &schemapb.CollectionSchema{Name: "foo"}))
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}
 	request := &milvuspb.DescribeCollectionRequest{CollectionID: collectionID}
 	interceptor := DatabaseInterceptor()

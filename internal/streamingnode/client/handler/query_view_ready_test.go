@@ -63,7 +63,7 @@ func TestQueryViewRPCWaitForReady(t *testing.T) {
 			shard := qviews.ShardID{ReplicaID: 1, VChannel: "p0_100v0"}
 			plan := &fakeQueryPlanServiceClient{}
 			query := &fakeViewQueryServiceClient{}
-			client := newTestHandlerClient(plan, query)
+			client := newTestHandlerClient(plan, query, nil)
 			client.watcher = &analyzerWatcher{}
 			switch method {
 			case "plan":
@@ -118,7 +118,7 @@ func TestQueryViewRPCDoesNotWaitForViewOrRequestErrors(t *testing.T) {
 		mockey.PatchConvey(failure.Error(), t, func() {
 			call := mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).Return(nil, failure).Build()
 			wait := mockey.Mock(fakeAssignmentWatcher.Watch).Return(context.Canceled).Build()
-			client := newTestHandlerClient(nil, &fakeViewQueryServiceClient{})
+			client := newTestHandlerClient(nil, &fakeViewQueryServiceClient{}, nil)
 			_, err := client.QueryViewClient().QueryOnView(t.Context(), types.PChannelInfo{Name: "p0"}, &viewpb.QueryOnViewRequest{})
 			require.Equal(t, grpcstatus.Code(failure), grpcstatus.Code(err))
 			require.Equal(t, viewerror.AsViewError(viewerror.ConvertViewError("test", failure)).Code, viewerror.AsViewError(err).Code)
@@ -131,7 +131,7 @@ func TestQueryViewRPCDoesNotWaitForViewOrRequestErrors(t *testing.T) {
 func TestQueryViewRPCWaitForReadyCancellation(t *testing.T) {
 	for _, scenario := range []string{"deadline", "cancel", "already canceled", "closed client"} {
 		mockey.PatchConvey(scenario, t, func() {
-			client := newTestHandlerClient(&fakeQueryPlanServiceClient{}, nil)
+			client := newTestHandlerClient(&fakeQueryPlanServiceClient{}, nil, nil)
 			client.watcher = &analyzerWatcher{}
 			mockey.Mock((*analyzerWatcher).Get).Return(&types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p0", Term: 1}}).Build()
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)

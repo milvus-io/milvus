@@ -178,7 +178,7 @@ For this bounded SN bootstrap, SyncUp(T) proves delivery through the captured
 snapshot boundary T. GrowingRuntime applies all collected Delete entries before
 publishing its base frontiers; SyncUp receipt alone does not complete resource
 preparation. The subsequent live-event barrier provides additional applied
-progress before reporting the view Ready. This is distinct from the planned QN
+progress before reporting the view Ready. This is distinct from the QN
 use of unbounded SyncUp to establish catch-up to a sampled current tail. Neither
 path guarantees zero lag from new writes between readiness and Up. See
 [SyncUp's two roles](transform_log.md#3-entry-and-syncup-semantics).
@@ -304,13 +304,27 @@ all partitions in that scope; explicitly requesting an unloaded partition fails.
 IDF initialization and refresh filter both growing contributions and sealed
 resource descriptors using the same nil-versus-empty load-scope convention.
 
-TODO(#40451, pending discussion): a later QueryView with a different
-load_info_version or schema still reuses the initial runtime/load scope. It does
-not yet trigger resource-spec reconciliation or replacement. The minimal Coord
-load-info RPC also lacks exact historical-version resolution. This follow-up
-must define old/new resource ownership across Up leases while retaining one
-shared current BM25 aggregate. The partition-scope fix does not implement this
-load-config transition protocol.
+Later QueryViews reuse the runtime, including across replica IDs during a quick
+release/reload while the old serving lease remains active. WAL events update
+the shared schema; readiness fences their application and checks SchemaVersion.
+IDF tracks its prepared schema revision and LoadInfoVersion: a changed requirement
+rebuilds its snapshot and live tail before readiness, even when the original
+runtime disabled BM25. See [IDF schema changes](../qviews/snview/idf_oracle_runtime.md#schema-changes).
+When load_info_version changes, readiness also resolves current load/index
+metadata and updates the shared collection's native search index metadata.
+MixCoord supplements QueryCoord's load configuration with DataCoord's index
+definitions. Resolution and publication are serialized so an older concurrent
+preparation cannot publish a stale response after a newer update. The identity
+is cached only after successful application; it is a hash, not an ordered clock.
+Native updates share the live-application/close serialization, but the metadata
+RPC does not hold that lock. Fields absent from the new index list retain their
+metadata for old leased views. No growing data or TransformLog is replayed.
+
+TODO(#40451, pending discussion): partition/load-field scope reconciliation or
+runtime replacement remains separate from the index-metadata refresh. The load
+RPC does not resolve historical configurations. General field removal and
+incompatible index replacement still require defining old/new ownership across
+Up leases while retaining one shared current BM25 aggregate.
 
 ## 9. QueryView Readiness and Version Ordering
 

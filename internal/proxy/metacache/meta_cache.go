@@ -64,6 +64,7 @@ type Cache interface {
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's Schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*SchemaInfo, error)
+	GetCollectionWriteInfo(ctx context.Context, database, collectionName string, collectionID int64) (*CollectionInfo, error)
 	// ResolveCollectionAlias returns the actual collection name if input is an alias,
 	// or returns the input name if it's already a collection name.
 	ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error)
@@ -107,6 +108,7 @@ type Cache interface {
 }
 
 type CollectionInfo struct {
+	writeSchema           *writeSchemaSelection
 	CollID                typeutil.UniqueID
 	DBID                  typeutil.UniqueID
 	DBName                string
@@ -358,7 +360,8 @@ var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
-	mixCoord types.MixCoordClient
+	schemaBodies sync.Map // schemaIdentity -> immutable *SchemaInfo
+	mixCoord     types.MixCoordClient
 
 	dbInfo map[string]*DatabaseInfo // database -> db_info
 
@@ -542,7 +545,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
 
-	schemaInfo, err := NewSchemaInfo(collection.Schema)
+	schemaVersion := collection.GetSchema().GetVersion()
+	schemaInfo, err := m.resolveCollectionSchema(ctx, collection.GetCollectionID(), collection.GetVirtualChannelNames(), &schemaVersion)
+	if err != nil {
+		return nil, err
+	}
+	schemaInfo, err = schemaInfo.withCollectionMetadata(collection.GetSchema(), collection.GetProperties())
 	if err != nil {
 		return nil, err
 	}
@@ -633,6 +641,7 @@ func NormalizeDBName(database string) string {
 // without being cached.
 func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *SchemaInfo, isolation bool, queryMode string) *CollectionInfo {
 	return &CollectionInfo{
+		writeSchema:           &writeSchemaSelection{},
 		CollID:                collection.CollectionID,
 		DBID:                  collection.GetDbId(),
 		DBName:                collection.GetDbName(),

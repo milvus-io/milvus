@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -132,6 +135,7 @@ func buildAlterSchemaAddFunctionReq(dbName, collName string, functionSchema *sch
 }
 
 func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
+	enableFunctionBackfillForTest(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1008,6 +1012,7 @@ func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.
 }
 
 func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) {
+	enableFunctionBackfillForTest(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1447,12 +1452,29 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
 		MustBuildBroadcast()
 
-	meta := &mockMetaTable{}
-	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	published, waited := false, false
+	meta := &MetaTable{}
+	read := mockey.Mock((*MetaTable).GetCollectionByIDWithMaxTs).Return(&model.Collection{CollectionID: 1, SchemaVersion: 1}, nil).Build()
+	defer read.UnPatch()
+	publish := mockey.Mock((*MetaTable).AlterCollection).To(func(_ *MetaTable, ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		require.True(t, waited)
+		published = true
 		return nil
-	}
-
+	}).Build()
+	defer publish.UnPatch()
+	previous := qvresource.Resource()
+	qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
+	defer qvresource.Init(previous)
 	mixc := imocks.NewMixCoord(t)
+	handoff := mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, id int64, old, target *schemapb.CollectionSchema, _ []*messagespb.LoadFieldConfig) error {
+		require.False(t, published, "public metadata must stay old during preparation")
+		require.EqualValues(t, 1, id)
+		require.EqualValues(t, 1, old.GetVersion())
+		require.EqualValues(t, 2, target.GetVersion())
+		waited = true
+		return nil
+	}).Build()
+	defer handoff.UnPatch()
 	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
 		&indexpb.DescribeIndexResponse{
 			Status: merr.Success(),
@@ -1472,6 +1494,7 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	require.True(t, waited)
 }
 
 func newBoundIndexTestPlan() (*model.Collection, *schemautil.AlterSchemaAddPlan) {

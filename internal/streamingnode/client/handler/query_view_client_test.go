@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,7 +42,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 			return planResp, nil
 		},
 	}
-	client := newTestHandlerClient(queryPlanService, nil)
+	client := newTestHandlerClient(queryPlanService, nil, nil)
 
 	resp, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID, planReq)
 
@@ -68,7 +69,7 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 			return searchResp, nil
 		},
 	}
-	client := newTestHandlerClient(nil, viewQueryService)
+	client := newTestHandlerClient(nil, viewQueryService, nil)
 
 	resp, err := client.QueryViewClient().SearchOnView(context.Background(), types.PChannelInfo{Name: "p0"}, searchReq)
 
@@ -83,7 +84,7 @@ func TestHandlerClientConvertsViewQueryRPCError(t *testing.T) {
 			return nil, viewerror.NewGRPCStatusFromViewError(viewErr).Err()
 		},
 	}
-	client := newTestHandlerClient(nil, viewQueryService)
+	client := newTestHandlerClient(nil, viewQueryService, nil)
 
 	_, err := client.QueryViewClient().SearchOnView(context.Background(), types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
 
@@ -91,7 +92,30 @@ func TestHandlerClientConvertsViewQueryRPCError(t *testing.T) {
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 }
 
-func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQueryService viewpb.ViewQueryServiceClient) *handlerClientImpl {
+func TestHandlerClientViewSyncRoutesByPChannelAssignment(t *testing.T) {
+	viewSyncService := &fakeViewSyncServiceClient{
+		syncQueryView: func(ctx context.Context) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.Equal(t, int64(101), serverID)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
+			require.NoError(t, err)
+			require.Equal(t, types.PChannelInfo{
+				Name:       "p0",
+				Term:       1,
+				AccessMode: types.AccessModeRW,
+			}, pchannel)
+			return &noopViewSyncClientStream{ctx: ctx}, nil
+		},
+	}
+	client := newTestHandlerClient(nil, nil, viewSyncService)
+
+	_, err := client.QueryViewSyncClient().SyncQueryView(context.Background(), "p0")
+
+	require.NoError(t, err)
+}
+
+func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQueryService viewpb.ViewQueryServiceClient, viewSyncService viewpb.ViewSyncServiceClient) *handlerClientImpl {
 	client := &handlerClientImpl{
 		lifetime: typeutil.NewLifetime(),
 		watcher: fakeAssignmentWatcher{
@@ -105,6 +129,10 @@ func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQu
 		owner:            client,
 		queryPlanService: fakeLazyService[viewpb.QueryPlanServiceClient]{service: queryPlanService},
 		viewQueryService: fakeLazyService[viewpb.ViewQueryServiceClient]{service: viewQueryService},
+	}
+	client.queryViewSyncClient = &queryViewSyncClient{
+		owner:           client,
+		viewSyncService: fakeLazyService[viewpb.ViewSyncServiceClient]{service: viewSyncService},
 	}
 	return client
 }
@@ -151,7 +179,7 @@ func (c *fakeQueryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, req *
 }
 
 type fakeViewQueryServiceClient struct {
-	viewpb.ViewQueryServiceClient // Retain the baseline, unused Requery RPC contract.
+	viewpb.ViewQueryServiceClient // Retain the unused Requery RPC contract.
 	searchOnView                  func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	queryOnView                   func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
@@ -162,6 +190,50 @@ func (c *fakeViewQueryServiceClient) SearchOnView(ctx context.Context, req *view
 
 func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 	return c.queryOnView(ctx, req)
+}
+
+type fakeViewSyncServiceClient struct {
+	syncQueryView func(context.Context) (viewpb.ViewSyncService_SyncQueryViewClient, error)
+}
+
+func (c *fakeViewSyncServiceClient) SyncQueryView(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+	return c.syncQueryView(ctx)
+}
+
+type noopViewSyncClientStream struct {
+	ctx context.Context
+}
+
+func (s *noopViewSyncClientStream) Send(*viewpb.SyncRequest) error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) Recv() (*viewpb.SyncResponse, error) {
+	return nil, io.EOF
+}
+
+func (s *noopViewSyncClientStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *noopViewSyncClientStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) CloseSend() error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *noopViewSyncClientStream) SendMsg(interface{}) error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) RecvMsg(interface{}) error {
+	return io.EOF
 }
 
 func decodeOutgoingQueryViewPChannel(ctx context.Context) (types.PChannelInfo, error) {

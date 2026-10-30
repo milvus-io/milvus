@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -156,7 +157,17 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 			return err
 		}
 		meta := segment.AssignmentMeta()
-		version, err := segment.lifecycle.CommitL1Segment(ctx, meta)
+		var version *viewpb.DataVersion
+		var err error
+		if committer, ok := segment.lifecycle.(TransformFrontierCommitter); ok {
+			var startAfter uint64
+			if provider, ok := segment.owner.(GrowingTransformFrontierProvider); ok {
+				startAfter = provider.GrowingTransformStartAfterTimeTick(segment.ID())
+			}
+			version, err = committer.CommitL1SegmentWithTransformStart(ctx, meta, startAfter)
+		} else {
+			version, err = segment.lifecycle.CommitL1Segment(ctx, meta)
+		}
 		if err != nil {
 			// Same as ensure: classification is execute's job, marking ErrDelay
 			// here would requeue a terminally-failed task.

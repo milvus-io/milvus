@@ -69,6 +69,10 @@ type restoreAllocatorTarget struct {
 	allocator.Allocator
 }
 
+func (*restoreAllocatorTarget) AllocN(int64) (int64, int64, error) {
+	panic("AllocN must be patched in tests")
+}
+
 type restoreBrokerTarget struct {
 	broker.Broker
 }
@@ -1844,7 +1848,6 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	}
 
 	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), nil)
 
 	mockHandler := NewNMockHandler(t)
 	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&collectionInfo{
@@ -2020,11 +2023,15 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 	ctx := context.Background()
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
-		Segments:     []*datapb.SegmentDescription{},
+		Segments:     []*datapb.SegmentDescription{{SegmentId: 11}},
 	}
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), errors.New("alloc segment IDs failed"))
+	mockAlloc := &restoreAllocatorTarget{}
+	alloc := mockey.Mock((*restoreAllocatorTarget).AllocN).To(func(_ *restoreAllocatorTarget, count int64) (int64, int64, error) {
+		require.EqualValues(t, 1, count)
+		return 0, 0, errors.New("alloc segment IDs failed")
+	}).Build()
+	defer alloc.UnPatch()
 
 	addJobCalled := false
 	mAddJob := mockey.Mock((*copySegmentMeta).AddJob).To(
@@ -2040,7 +2047,7 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 		copySegmentMeta: &copySegmentMeta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "")
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), true, "", "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "alloc segment IDs failed")
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
@@ -2418,6 +2425,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		publication ...*restorePublication,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
@@ -2668,6 +2676,7 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		publication ...*restorePublication,
 	) error {
 		assert.False(t, external)
 		assert.Empty(t, snapshotS3Location)
