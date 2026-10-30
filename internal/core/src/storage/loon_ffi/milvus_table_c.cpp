@@ -839,7 +839,6 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
             target_column_set.emplace(target_columns[i]);
         }
 
->>>>>>> 87e6c6aeb0 (fix: commit external delete refresh manifests in one transaction)
         std::unordered_set<std::string> added_delta_paths;
         std::unordered_set<std::string> added_stat_paths;
         std::map<std::string, StatData> imported_stats;
@@ -889,30 +888,6 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
             }
         }
 
-<<<<<<< HEAD
-        AppendImportedStats(transaction.handle, imported_stats);
-
-        ThrowIfFFIError(
-            loon_transaction_commit(
-                transaction.handle, out_committed_version, out_manifest_size),
-            "commit milvus-table target manifest");
-||||||| parent of 87e6c6aeb0 (fix: commit external delete refresh manifests in one transaction)
-        AppendImportedStats(transaction.handle, imported_stats);
-
-        int64_t committed_version = 0;
-        ThrowIfFFIError(loon_transaction_commit(
-                            transaction.handle, &committed_version, nullptr),
-                        "commit milvus-table target manifest");
-        json manifest_path = {
-            {"base_path", std::string(base_path)},
-            {"ver", committed_version},
-        };
-        *out_manifest_path = strdup(manifest_path.dump().c_str());
-        if (*out_manifest_path == nullptr) {
-            RETURN_ERROR(LOON_MEMORY_ERROR,
-                         "failed to allocate milvus-table manifest path");
-        }
-=======
         AppendImportedStats(transaction, imported_stats);
         RETURN_SUCCESS();
     } catch (const LoonFFIError& e) {
