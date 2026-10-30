@@ -22,8 +22,8 @@ func TestPublishedSchemaRecoversWithoutCancellingTarget(t *testing.T) {
 		CollectionId: testCollectionID,
 		DataVersion:  testVersion(2, 1, 1).DataVersion.IntoProto(),
 		Shards: []*viewpb.DataViewOfShard{{
-			Vchannel:                    testVChannel,
-			TransformStartAfterTimetick: 50,
+			Vchannel:                           testVChannel,
+			GrowingTransformStartAfterTimetick: 50, CompactedTransformStartAfterTimetick: 50,
 		}},
 	}, testVChannel).SetSchemaVersion(1).SetLoadInfoVersion(100).
 		SetAssignments(map[int64]map[int64][]int64{2: {10: {2001}}})

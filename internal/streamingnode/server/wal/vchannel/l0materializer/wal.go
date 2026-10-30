@@ -44,46 +44,45 @@ type WALConfig struct {
 	Runtime              moduleapi.Runtime
 	Materializer         Materializer
 	OnMaterialized       func(uint64)
-	// Earlier L1 segments must exist in DataCoord before L0 can be compacted.
-	// This waits for registration only, never for L1 flush or final commit.
-	GrowingSegmentsRegistered func(uint64) bool
+	// Every earlier L1 must have completed final DataCoord publication.
+	// Object writes and Growing registration alone do not satisfy this gate.
+	EarlierSegmentsFlushed func(uint64) bool
 }
 
 // WALMaterializer holds Delete handles until L0 output is registered with
 // DataCoord. This makes the global recovery checkpoint safe for legacy queries.
 // TODO: Remove after enabling queryview and reconnect the Summary materializer.
-// Unlike the Summary consumer, it can write L0 while L1 segments are growing;
-// DataCoord's L0 compaction policy owns the dependency on those segments.
+// Materialization waits for earlier L1 final commits across all partitions.
 type WALMaterializer struct {
-	growingSegmentsRegistered func(uint64) bool
-	mu                        sync.Mutex
-	vchannel                  string
-	materialized              uint64
-	observed                  uint64
-	pending                   []message.RetainedImmutableMessage
-	pendingBytes              uint64
-	pendingSince              time.Time
-	flushThrough              uint64
-	maxBytes                  uint64
-	maxRows                   uint64
-	runtime                   moduleapi.Runtime
-	writer                    Materializer
-	onMaterialized            func(uint64)
-	task                      *walMaterializeTask
-	terminalErr               error
+	earlierSegmentsFlushed func(uint64) bool
+	mu                     sync.Mutex
+	vchannel               string
+	materialized           uint64
+	observed               uint64
+	pending                []message.RetainedImmutableMessage
+	pendingBytes           uint64
+	pendingSince           time.Time
+	flushThrough           uint64
+	maxBytes               uint64
+	maxRows                uint64
+	runtime                moduleapi.Runtime
+	writer                 Materializer
+	onMaterialized         func(uint64)
+	task                   *walMaterializeTask
+	terminalErr            error
 }
 
 func NewWALMaterializer(config WALConfig) *WALMaterializer {
 	return &WALMaterializer{
-		vchannel:                  config.VChannel,
-		materialized:              config.MaterializedTimeTick,
-		observed:                  config.MaterializedTimeTick,
-		maxBytes:                  config.MaterializeMaxBytes,
-		maxRows:                   config.MaterializeMaxRows,
-		runtime:                   config.Runtime,
-		writer:                    config.Materializer,
-		onMaterialized:            config.OnMaterialized,
-		growingSegmentsRegistered: config.GrowingSegmentsRegistered,
+		vchannel:               config.VChannel,
+		materialized:           config.MaterializedTimeTick,
+		observed:               config.MaterializedTimeTick,
+		maxBytes:               config.MaterializeMaxBytes,
+		maxRows:                config.MaterializeMaxRows,
+		runtime:                config.Runtime,
+		writer:                 config.Materializer,
+		onMaterialized:         config.OnMaterialized,
+		earlierSegmentsFlushed: config.EarlierSegmentsFlushed,
 	}
 }
 
@@ -235,7 +234,7 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		return err
 	}
 	m := t.owner
-	if m.growingSegmentsRegistered != nil && !m.growingSegmentsRegistered(t.through) {
+	if m.earlierSegmentsFlushed != nil && !m.earlierSegmentsFlushed(t.through) {
 		return nodescheduler.ErrDelay
 	}
 	var entries []*streamingpb.TransformLogEntry

@@ -5,8 +5,8 @@ the read-only wrapper over WALSummary: streams, subscriptions, Entry /
 SyncUp delivery, and resume semantics. It has no ObserveMessage or storage path.
 Local bounded SN bootstrap replay is implemented and wired into QueryRuntime
 preparation. The local unbounded adaptor also provides VChannel-scoped
-notifications; remote transport and QN continuous-subscription integration remain
-planned. See the canonical document for current limitations and follow-up work.
+notifications. The qv branch wires remote transport and QN continuous subscriptions
+through the same reader. See the canonical document for current limitations and follow-up work.
 
 Related contracts:
 

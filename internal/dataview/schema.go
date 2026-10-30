@@ -60,6 +60,9 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 		if err := rebuildSegments(next, segments); err != nil {
 			return nil, nil, err
 		}
+		if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
+			return nil, nil, err
+		}
 		stats = buildSegmentStats(segments)
 	} else {
 		// Cost normalization mutates its input, never share an old entry's map.

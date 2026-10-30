@@ -733,6 +733,10 @@ func (s *mockMixCoord) ListCheckers(ctx context.Context, req *querypb.ListChecke
 	panic("implement me")
 }
 
+func (s *mockMixCoord) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (s *mockMixCoord) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	panic("implement me")
 }
@@ -1066,10 +1070,6 @@ func (s *mockMixCoord) TruncateCollection(ctx context.Context, req *milvuspb.Tru
 }
 
 func (s *mockMixCoord) DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error {
-	panic("implement me")
-}
-
-func (s *mockMixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
 	panic("implement me")
 }
 

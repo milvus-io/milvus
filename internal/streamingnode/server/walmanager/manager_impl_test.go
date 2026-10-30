@@ -57,7 +57,7 @@ func TestIdempotencyInterceptorRunsOutermost(t *testing.T) {
 func TestManager(t *testing.T) {
 	mixcoord := mocks.NewMockMixCoordClient(t)
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
-	fMixcoord.Set(mixcoord)
+	fMixcoord.Set(testMixCoordClient{MockMixCoordClient: mixcoord})
 	resource.InitForTest(
 		t,
 		resource.OptMixCoordClient(fMixcoord),

@@ -44,6 +44,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 		collectionID int64,
 		collectionName string,
 		externalSource, externalSpec string,
+		starts ...map[string]uint64,
 	) (int64, error) {
 		submitCalled = true
 		assert.Equal(t, int64(123), jobID)
@@ -51,6 +52,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 		assert.Equal(t, "test_collection", collectionName)
 		assert.Equal(t, "s3://bucket/path", externalSource)
 		assert.Equal(t, "iceberg", externalSpec)
+		assert.Equal(t, []map[string]uint64{{"p_1_v100": 42, "p_2_v100": 43}}, starts)
 		return jobID, nil
 	}).Build()
 	defer mockSubmit.UnPatch()
@@ -79,6 +81,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 
 	result := message.BroadcastResultRefreshExternalCollectionMessageV2{
 		Message: typedMsg,
+		Results: map[string]*message.AppendResult{"p_1_v100": {TimeTick: 42}, "p_2_v100": {TimeTick: 43}},
 	}
 
 	// Execute
@@ -100,6 +103,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_SubmitFailed(t *tes
 		collectionID int64,
 		collectionName string,
 		externalSource, externalSpec string,
+		starts ...map[string]uint64,
 	) (int64, error) {
 		return 0, errors.New("submit failed: collection not found")
 	}).Build()
@@ -151,6 +155,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_EmptySource(t *test
 		collectionID int64,
 		collectionName string,
 		externalSource, externalSpec string,
+		starts ...map[string]uint64,
 	) (int64, error) {
 		capturedSource = externalSource
 		capturedSpec = externalSpec
@@ -204,6 +209,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_NonRetriableError(t
 		collectionID int64,
 		collectionName string,
 		externalSource, externalSpec string,
+		starts ...map[string]uint64,
 	) (int64, error) {
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}).Build()

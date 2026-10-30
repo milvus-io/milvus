@@ -9,13 +9,13 @@
 Until QueryView is enabled, VChannelRecoveryModule owns one `WALMaterializer`.
 It observes retained WAL messages and holds Delete handles until L0 output and
 DataCoord registration succeed. Together with SegmentView's temporary growing
-SaveBinlogPaths publication, this makes the published global WAL checkpoint a
-safe DataCoord channel checkpoint for legacy query recovery.
+SaveBinlogPaths publication, this protects the recoverability of the WAL
+prefix covered by the published global checkpoint.
 
 The [Summary reader materializer](summary_l0_materializer.md) remains in the
 same package with its tests, but is not instantiated by the current manager.
 The implementations are mutually exclusive. There is no user enable switch.
-After QueryView is enabled, remove WALMaterializer, cp_updater and the growing
+After QueryView is enabled, remove WALMaterializer and the growing
 publication bridge, and reconnect the Summary consumer.
 
 ## 2. Observation and Ownership
@@ -80,23 +80,24 @@ Summary remains permanently enabled, with independent persistence/backlog and
 LastAcked gating. Its materialization-request callback is disconnected for this
 consumer; it does not add a competing materialization policy.
 
-## 4. L1 Registration, Not L1 Flush
+## 4. Final L1 Publication Before Materialization
 
-L0 output can precede L1 final flush. DataCoord's L0 compaction policy waits on
-the earliest growing segment start position before merging eligible L0 output.
+Materialization through T requires every L1 created before T in the VChannel,
+across every partition, to complete final DataCoord publication or retirement.
+Initial AllocSegment registration or a durable first pack is insufficient.
+The owner checks final-commit state, including recovered `sealed_at_data_version`;
+concurrent final Flush RPCs remain blockers until acknowledged. A later
+CreateSegment cannot invalidate the captured earlier batch.
 
-Because SegmentView's initial AllocSegment is asynchronous, an L0 task must
-first check that every earlier L1 has completed growing registration. A stable
-Segment checkpoint at or after CreateSegment proves this. An unregistered L1
-returns scheduler delay; it does not block a worker or force L1 flush. A later
-CreateSegment cannot invalidate a captured earlier L0 batch.
+A blocked task returns scheduler delay, releasing its worker. L1 tasks run
+independently and never wait for L0; L0 retries after L1 publication. Explicit
+Flush message handles join both completions before acknowledging the request.
+Capacity/idle materialization also observes this prerequisite, so open earlier
+L1 can delay it until the ordinary segment seal/Flush path completes.
 
-Explicit Flush tasks on L1 and L0 execute independently. Their clones of the
-same message join through Tracker/BroadcastAck. There is no VChannel-wide L1
-creation upper bound on L0 output and no second L1 completion queue in L0.
-The shard manager's DropPartition API fences allocation for every earlier Segment
-in the Collection after successful WAL append, while the VChannel exclusive append
-lock is still held, matching its VChannel-wide persistence scope.
+The shard manager's DropPartition API fences allocation for every earlier
+Segment in the Collection after successful WAL append while the VChannel
+exclusive append lock is held, matching its VChannel-wide persistence scope.
 Only the requested partition is logically dropped; surviving partitions allocate
 new Segments for later Inserts.
 
@@ -153,25 +154,25 @@ captured durable materialized position to Summary for GC. In-memory completion
 alone cannot authorize deletion. Tombstones remain until Summary has durably
 retired the relevant history.
 
-## 6. Checkpoint Reporting
+## 6. Checkpoint And Flush Completion
 
-cp_updater reports the published global checkpoint's original MessageID and
-TimeTick together for each VChannel. It has no candidate queue, materialized
-TimeTick minimum, or completed-Flush fallback. RPC failure retries a currently
-published point on the next tick.
-
-Insert registration and L0 completion are already required by the message
-handles before checkpoint publication. No additional requirement forces an L0
+RecoveryStorage persists the global checkpoint after its covered component
+snapshots. Insert registration and L0 completion are required by the retained
+message handles before publication. No additional requirement forces an L0
 cursor to equal checkpoint TimeTick across a range containing no Deletes.
-A blocked VChannel can hold the PChannel prefix and other VChannels' reported
-progress; this is the deliberate cost of the shared checkpoint.
+
+There is no periodic per-VChannel checkpoint reporting to DataCoord. Explicit
+Flush completion joins L1/L0 work through message handles and consuming-side
+acknowledgements; unrelated VChannels holding the global checkpoint cannot
+prevent that Flush from completing. WAL replay and truncation continue to use
+the durable global checkpoint.
 
 ## 7. Validation
 
 Cover size/age/explicit/stall triggers, complete mixed Txns, frozen batches,
 retry and cancellation, replay before/after materialized metadata persistence,
-L0-before-L1-flush with registration delay, both L1/L0 Flush completion orders,
-empty Flush, checkpoint pair reporting, and Drop/Summary retirement.
+L0 retry before final L1 publication, registration-insufficient and cross-partition gates,
+empty Flush, durable checkpoint publication, and Drop/Summary retirement.
 Live validation must include growing Inserts plus Deletes, reload, SN/QN crash
 recovery, and enabled L0 compaction. WAL physical Truncate integration remains
 the separately deferred work.

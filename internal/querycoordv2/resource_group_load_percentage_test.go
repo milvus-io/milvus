@@ -85,18 +85,6 @@ func newRGLoadPercentageFixture(t *testing.T) *rgLoadPercentageFixture {
 	}
 }
 
-// server builds a *Server wired to this fixture's stores, ready to call
-// GetLoadPercentageByResourceGroup on.
-// server builds a *Server wired to this fixture's stores. The status has to
-// be set explicitly: GetLoadPercentageByResourceGroup gates on
-// merr.CheckHealthy(s.State()), and a zero Server reports
-// StateCode_Initializing.
-func (f *rgLoadPercentageFixture) server() *Server {
-	s := &Server{meta: f.meta, targetMgr: f.targetMgr, dist: f.dist, nodeMgr: f.nodeMgr}
-	s.status.Store(int32(commonpb.StateCode_Healthy))
-	return s
-}
-
 // freeFn calls utils.LoadPercentageByResourceGroup with nothing but the three
 // stores CollectionObserver already holds -- no *Server anywhere. The tests
 // that use it therefore double as a compile-time statement of the point of
@@ -228,14 +216,14 @@ func (f *rgLoadPercentageFixture) putServiceableDelegator(collectionID, nodeID i
 // "if len(replicas) == 0 { return -1, nil }" guard in
 // GetLoadPercentageByResourceGroup would make this test fall through to the
 // percentage computation with an empty replica set instead.
-func TestGetLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
 	f.putReplica(t, 100, 10, "rg-other")
 	f.putDelegator(100, 10, "100-dmc0", 1, 2)
 	f.putResourceGroup(t, "rg-target") // exists, but nothing of collection 100 lives in it
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 100, "rg-target")
+	percentage, err := f.freeFn(context.Background(), 100, "rg-target")
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, -1, percentage)
@@ -250,7 +238,7 @@ func TestGetLoadPercentageByResourceGroup_NoReplicaOnRG(t *testing.T) {
 // replicaLoadPercentage (i.e. checking "replica.Contains(delegator.Node)"
 // instead of aggregating over every replica) collapses both results back to
 // the same number.
-func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 200, 2000, "200-dmc0", 1, 2)
 
@@ -261,11 +249,11 @@ func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) 
 	// rg-empty's replica exists but its node carries nothing at all.
 	f.putReplica(t, 200, 21, "rg-empty")
 
-	full, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 200, "rg-full")
+	full, err := f.freeFn(context.Background(), 200, "rg-full")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 100, full)
 
-	empty, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 200, "rg-empty")
+	empty, err := f.freeFn(context.Background(), 200, "rg-empty")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, empty)
 
@@ -284,7 +272,7 @@ func TestGetLoadPercentageByResourceGroup_TwoResourceGroupsDiffer(t *testing.T) 
 // deleting the
 // "if targetNum == 0 { return 0 }" guard is exercised by a separate test
 // below, since this test's target is non-empty.
-func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 300, 3000, "300-dmc0", 1, 2)
 	f.putReplica(t, 300, 30, "rg-present")
@@ -292,11 +280,11 @@ func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
 	// No putDelegator call: rg-present's replica has not picked up
 	// anything from the target yet.
 
-	present, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 300, "rg-present")
+	present, err := f.freeFn(context.Background(), 300, "rg-present")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, present)
 
-	absent, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 300, "rg-absent")
+	absent, err := f.freeFn(context.Background(), 300, "rg-absent")
 	assert.NoError(t, err)
 	assert.EqualValues(t, -1, absent)
 
@@ -310,13 +298,13 @@ func TestGetLoadPercentageByResourceGroup_ZeroVsAbsent(t *testing.T) {
 // expected figure is 50 (1 of 2 targets). Deleting either the channel-loop's
 // "loadedCount++" or the "channelTargets" term inside "targetNum := ..."
 // changes this to 0 or 100 respectively.
-func TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 400, 4000, "400-dmc0", 1)
 	f.putReplica(t, 400, 40, "rg-target")
 	f.putDelegator(400, 40, "400-dmc0") // watching the channel, no segments
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 400, "rg-target")
+	percentage, err := f.freeFn(context.Background(), 400, "rg-target")
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, 50, percentage)
@@ -327,7 +315,7 @@ func TestGetLoadPercentageByResourceGroup_ChannelWatchedNoSegments(t *testing.T)
 // been computed yet (targetNum == 0), reports 0 without panicking. Deleting
 // the "if targetNum == 0 { return 0 }" guard in replicaLoadPercentage
 // turns this into an integer-divide-by-zero panic.
-func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	ctx := context.Background()
 	require.NoError(t, f.meta.PutCollectionWithoutSave(ctx, &meta.Collection{
@@ -343,7 +331,7 @@ func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 	f.putReplica(t, 500, 50, "rg-target")
 
 	assert.NotPanics(t, func() {
-		percentage, err := f.server().GetLoadPercentageByResourceGroup(ctx, 500, "rg-target")
+		percentage, err := f.freeFn(ctx, 500, "rg-target")
 		assert.NoError(t, err)
 		assert.EqualValues(t, 0, percentage)
 	})
@@ -356,7 +344,7 @@ func TestGetLoadPercentageByResourceGroup_NoTargetYet(t *testing.T) {
 // "if p := ...; p < percentage" comparison (replacing it with, say, always
 // taking the last replica's figure) would report 100 here instead of 0,
 // because the fully-loaded replica is inserted before the empty one.
-func TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 600, 6000, "600-dmc0", 1, 2)
 
@@ -366,7 +354,7 @@ func TestGetLoadPercentageByResourceGroup_MultipleReplicasSameRG(t *testing.T) {
 	f.putReplica(t, 600, 61, "rg-shared")
 	// this replica: nothing loaded
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 600, "rg-shared")
+	percentage, err := f.freeFn(context.Background(), 600, "rg-shared")
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, percentage)
@@ -472,7 +460,7 @@ func nilFailedLoadCache(t *testing.T) {
 // initMeta has already wired meta, dist and targetMgr, and FailedLoadCache.Get
 // dereferences a nil receiver. Reading the cache without a nil check panics in
 // that window on any collection that is not registered.
-func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putResourceGroup(t, "rg-target")
 	nilFailedLoadCache(t)
@@ -496,7 +484,7 @@ func TestGetLoadPercentageByResourceGroup_NilFailedLoadCache(t *testing.T) {
 // not on errors.Is against the seeded error -- see
 // TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable for why the
 // normalization is load-bearing.
-func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	// Collection 700 is never registered via putTarget/PutCollectionWithoutSave,
 	// so its load percentage reads negative even though a replica record exists.
@@ -505,7 +493,7 @@ func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 	loadErr := errors.New("mocked load failure")
 	seedFailedLoadCache(t, 700, loadErr)
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 700, "rg-target")
+	percentage, err := f.freeFn(context.Background(), 700, "rg-target")
 
 	assert.EqualValues(t, -1, percentage)
 	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
@@ -528,13 +516,13 @@ func TestGetLoadPercentageByResourceGroup_FailedLoad(t *testing.T) {
 // contract would retry until the cache entry expires 24h later. The seeded
 // error here is deliberately a retriable sentinel; the previous test's
 // errors.New could not catch this.
-func TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_FailedLoadIsNotRetriable(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putReplica(t, 720, 72, "rg-target")
 
 	seedFailedLoadCache(t, 720, merr.WrapErrServiceNotReady("querynode", 72, "restarting"))
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 720, "rg-target")
+	percentage, err := f.freeFn(context.Background(), 720, "rg-target")
 
 	assert.EqualValues(t, -1, percentage)
 	assert.ErrorIs(t, err, merr.ErrCollectionNotLoaded,
@@ -552,7 +540,7 @@ func TestGetLoadPercentageByResourceGroup_FailedLoadIsNotRetriable(t *testing.T)
 // behind. The recorded failure must still reach the caller from that state;
 // checking replicas before consulting the cache would swallow it into a bare
 // (-1, nil), which reads as "nothing here" rather than "the load failed".
-func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	// No putTarget, no putReplica: collection 1200 has been fully cleaned up
 	// after its load timed out; only the failure record remains.
@@ -583,7 +571,7 @@ func TestGetLoadPercentageByResourceGroup_FailedLoadSurvivesReplicaCleanup(t *te
 // replica of the collection in rg-target, so a bare -1 would state the
 // opposite of the truth ("no replica in this resource group") for a state in
 // which nothing is known at all.
-func TestGetLoadPercentageByResourceGroup_NotHealthy(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_NotHealthy(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 1100, 11000, "1100-dmc0", 1)
 	f.putReplica(t, 1100, 110, "rg-target")
@@ -784,13 +772,13 @@ func (f *rgLoadPercentageFixture) putTargetTwoPartitions(t *testing.T, collectio
 // Both agree at 0 and at 100; only the intermediate weighting differs. If
 // this test starts failing at 62, the function has silently switched to
 // per-partition averaging and its doc comment is now wrong.
-func TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTargetTwoPartitions(t, 1400, 14000, 14001, "1400-dmc0", []int64{1}, []int64{2, 3, 4})
 	f.putReplica(t, 1400, 140, "rg-target")
 	f.putDelegator(1400, 140, "1400-dmc0", 1) // channel + partition A's segment
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1400, "rg-target")
+	percentage, err := f.freeFn(context.Background(), 1400, "rg-target")
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, 40, percentage,
@@ -806,14 +794,14 @@ func TestGetLoadPercentageByResourceGroup_PoolsTargetsAcrossPartitions(t *testin
 // This is what makes the figure progress rather than a gate: on a collection
 // under ingestion == 100 is a transient, so a caller must read it as "how far
 // along" and leave "may I route" to readiness, never AND the two.
-func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T) {
 	ctx := context.Background()
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 1500, 15000, "1500-dmc0", 1)
 	f.putReplica(t, 1500, 150, "rg-target")
 	f.putDelegator(1500, 150, "1500-dmc0", 1)
 
-	before, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1500, "rg-target")
+	before, err := f.freeFn(ctx, 1500, "rg-target")
 	require.NoError(t, err)
 	require.EqualValues(t, 100, before, "the fixture must start fully loaded")
 
@@ -830,7 +818,7 @@ func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T
 		segments, nil).Once()
 	require.NoError(t, f.targetMgr.UpdateCollectionNextTarget(ctx, 1500))
 
-	after, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1500, "rg-target")
+	after, err := f.freeFn(ctx, 1500, "rg-target")
 
 	assert.NoError(t, err)
 	assert.EqualValues(t, 66, after,
@@ -843,7 +831,7 @@ func TestGetLoadPercentageByResourceGroup_NewSegmentReArmsTheFigure(t *testing.T
 // NextTarget read in that window reports 0 - a fully loaded, serving resource
 // group flapping 100/0 on every promotion. Changing NextTargetFirst back to
 // NextTarget in replicaLoadPercentage fails this at 0.
-func TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 900, 9000, "900-dmc0")
 	f.putReplica(t, 900, 90, "rg-promoted")
@@ -852,7 +840,7 @@ func TestGetLoadPercentageByResourceGroup_SurvivesTargetPromotion(t *testing.T) 
 	require.True(t, f.targetMgr.UpdateCollectionCurrentTarget(context.Background(), 900),
 		"promotion moves next to current and clears next")
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 900, "rg-promoted")
+	percentage, err := f.freeFn(context.Background(), 900, "rg-promoted")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 100, percentage,
 		"a promoted target must keep reporting the loaded figure, not flap to 0")
@@ -916,12 +904,12 @@ func TestLoadPercentageByResourceGroup_ReadsTargetsOncePerCall(t *testing.T) {
 // The two look identical to the replica scan; only the ResourceManager can
 // tell them apart, and a caller told "-1, stop" for a typo has no way to
 // learn what it actually did wrong.
-func TestGetLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError(t *testing.T) {
 	f := newRGLoadPercentageFixture(t)
 	f.putTarget(t, 1600, 16000, "1600-dmc0", 1)
 	f.putReplica(t, 1600, 160, "rg-real")
 
-	percentage, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1600, "rg-typo")
+	percentage, err := f.freeFn(context.Background(), 1600, "rg-typo")
 
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
 	assert.Equal(t, merr.InputError, merr.GetErrorType(err), "a misspelled group is the request's fault")
@@ -930,11 +918,11 @@ func TestGetLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError(t *te
 
 	// The check is about the name, not the collection: an unknown group is
 	// refused the same way for a collection that is not loaded at all.
-	_, err = f.server().GetLoadPercentageByResourceGroup(context.Background(), 999999, "rg-typo")
+	_, err = f.freeFn(context.Background(), 999999, "rg-typo")
 	assert.ErrorIs(t, err, merr.ErrResourceGroupNotFound)
 
 	// And the empty name is the absence of a filter, never a name to validate.
-	all, err := f.server().GetLoadPercentageByResourceGroup(context.Background(), 1600, "")
+	all, err := f.freeFn(context.Background(), 1600, "")
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, all)
 }
@@ -945,7 +933,7 @@ func TestGetLoadPercentageByResourceGroup_UnknownResourceGroupIsInputError(t *te
 // the value is rounded up so a caller reading 0 can rely on that meaning.
 // The top end is asserted alongside: 199 of 200 must still read 99, since
 // 100 is reached only when every target is carried.
-func TestGetLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne(t *testing.T) {
+func TestLegacyLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne(t *testing.T) {
 	ctx := context.Background()
 	f := newRGLoadPercentageFixture(t)
 	segments := make([]int64, 0, 199)
@@ -956,12 +944,12 @@ func TestGetLoadPercentageByResourceGroup_AnyProgressReadsAtLeastOne(t *testing.
 	f.putReplica(t, 1700, 170, "rg-target")
 
 	f.putDelegator(1700, 170, "1700-dmc0") // the channel only: 1 of 200
-	low, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1700, "rg-target")
+	low, err := f.freeFn(ctx, 1700, "rg-target")
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, low, "1 of 200 is progress, and progress must not read as 0")
 
 	f.putDelegator(1700, 170, "1700-dmc0", segments[:198]...) // channel + 198 segments: 199 of 200
-	high, err := f.server().GetLoadPercentageByResourceGroup(ctx, 1700, "rg-target")
+	high, err := f.freeFn(ctx, 1700, "rg-target")
 	require.NoError(t, err)
 	assert.EqualValues(t, 99, high, "199 of 200 must not round up to 100")
 }

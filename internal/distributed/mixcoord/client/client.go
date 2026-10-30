@@ -1336,7 +1336,7 @@ func (c *Client) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	})
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (c *Client) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.GetFlushStateResponse, error) {
 		return client.GetFlushState(ctx, req)
@@ -1664,6 +1664,14 @@ func (c *Client) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest, opts ...grpc.CallOption) (*indexpb.ListIndexesResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*indexpb.ListIndexesResponse, error) {
 		return client.ListIndexes(ctx, in)
+	})
+}
+
+func (c *Client) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())))
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.EnsureCollectionReady(ctx, req, opts...)
 	})
 }
 
