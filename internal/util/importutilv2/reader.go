@@ -18,6 +18,7 @@ package importutilv2
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -48,6 +49,14 @@ type Reader interface {
 
 	// Close closes the underlying file reader.
 	Close()
+}
+
+// snapshotCommitBoundReader hides a segment committed after the restore's
+// replication anchor. Its raw row timestamps can still precede that anchor.
+type snapshotCommitBoundReader struct{ Reader }
+
+func (r *snapshotCommitBoundReader) Read() (*storage.InsertData, error) {
+	return nil, io.EOF
 }
 
 // ReaderFactory belongs to one task execution. Only resolved source dependencies
@@ -269,13 +278,25 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				if err != nil {
 					return nil, err
 				}
+				var r Reader
 				if shared != nil {
-					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
+					r, err = binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
 						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
+				} else {
+					r, err = binlog.NewStorageV3ManifestReader(
+						ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
+					)
 				}
-				return binlog.NewStorageV3ManifestReader(
-					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
-				)
+				if err != nil {
+					return nil, err
+				}
+				// Only the replication bound uses commit time; the job's ordinary
+				// start/end range keeps its raw row timestamp semantics.
+				channelEnd, bounded := SnapshotPChannelEnd(pchannelEndTS, importFile.GetSnapshotSource().GetSourceChannel())
+				if bounded && source.GetSourceCommitTimestamp() > channelEnd {
+					return &snapshotCommitBoundReader{Reader: r}, nil
+				}
+				return r, nil
 			}
 			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.

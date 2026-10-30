@@ -1409,6 +1409,113 @@ func TestSnapshotPChannelEnd(t *testing.T) {
 	assert.ErrorContains(t, err, "no end bound for source channel")
 }
 
+type snapshotCutRecordReader struct {
+	storage.RecordReader
+	record storage.Record
+	read   bool
+}
+
+func (r *snapshotCutRecordReader) Next() (storage.Record, error) {
+	if r.read {
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *snapshotCutRecordReader) Close() error {
+	if r.record != nil {
+		r.record.Release()
+		r.record = nil
+	}
+	return nil
+}
+
+// A source import can commit after the flush anchor while its rows retain raw
+// timestamps before it. Both phases and both L0 paths must hide the whole
+// segment; CDC replays that import after the anchor.
+func TestSnapshotPChannelEndSkipsPostBoundCommit(t *testing.T) {
+	paramtable.Init()
+	const channelEnd = uint64(4611686018427387904)
+	const rawRowTimestamp = channelEnd - 100
+	options := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: SnapshotPChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, channelEnd)},
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	fields := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{0: {}, 1: {}, 100: {}}, nil).Build()
+	defer fields.UnPatch()
+	fragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment(nil), nil).Build()
+	defer fragments.UnPatch()
+	lobs := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+	defer lobs.UnPatch()
+	deltas := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer deltas.UnPatch()
+	manifest := mockey.Mock(storage.NewManifestRecordReader).To(func(_ context.Context, _ string,
+		_ *schemapb.CollectionSchema, _ ...storage.RwOption,
+	) (storage.RecordReader, error) {
+		record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{
+			common.RowIDField: int64(1), common.TimeStampField: int64(rawRowTimestamp), 100: int64(42),
+		}}}, typeutil.AppendSystemFields(schema))
+		require.NoError(t, err)
+		return &snapshotCutRecordReader{record: record}, nil
+	}).Build()
+	defer manifest.UnPatch()
+
+	for _, sharedL0 := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			commit  uint64
+			wantCut bool
+		}{
+			{name: "raw_before_bound_before_commit", commit: channelEnd + 100, wantCut: true},
+			{name: "commit_at_bound", commit: channelEnd},
+			{name: "zero_commit", commit: 0},
+		} {
+			t.Run(fmt.Sprintf("shared_l0_%t/%s", sharedL0, tc.name), func(t *testing.T) {
+				version := uint32(17)
+				if sharedL0 {
+					version = 21
+				}
+				file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
+					Version: version, ManifestPath: packed.MarshalManifestPath("root/data", 7),
+					SourceChannel: "dml_0_4600v0", SourcePartitionId: 10, SourceCommitTimestamp: tc.commit,
+				}}
+
+				// PreImport and Import each rebuild their reader and delete masks.
+				for phase := 0; phase < 2; phase++ {
+					factory := NewReaderFactory(context.Background(), nil, &indexpb.StorageConfig{}, options)
+					var shared *binlog.SnapshotL0Deletes
+					if sharedL0 {
+						var err error
+						shared, err = factory.PrepareSnapshotDeletes(context.Background(), schema, []*internalpb.ImportFile{file},
+							&internalpb.SnapshotImportL0Source{SourceChannel: "dml_0_4600v0", SourcePartitionId: 10}, 1024, 1024)
+						require.NoError(t, err)
+					}
+					r, err := factory.NewReader(context.Background(), schema, file, 1024, 1024, shared)
+					require.NoError(t, err)
+					_, err = r.Size()
+					require.NoError(t, err)
+					data, err := r.Read()
+					if tc.wantCut {
+						require.ErrorIs(t, err, io.EOF)
+						require.Nil(t, data)
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, 1, data.GetRowNum())
+						require.EqualValues(t, 42, data.Data[100].GetRow(0))
+						require.EqualValues(t, rawRowTimestamp, data.Data[common.TimeStampField].GetRow(0))
+					}
+					r.Close()
+				}
+			})
+		}
+	}
+}
+
 // The data reader only implements the 1-4 contract, so the scope bit leaves the
 // version it is handed — and only the handed view changes: the persisted
 // descriptor keeps the version a worker must have understood to get here.

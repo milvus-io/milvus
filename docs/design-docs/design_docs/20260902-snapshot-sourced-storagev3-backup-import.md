@@ -1243,6 +1243,14 @@ importing it uncut is exactly the duplication the option exists to prevent, so
 silence is not an option. Bounds that leave a data segment's PChannel unnamed,
 or a data segment with no source channel, fail expansion as well.
 
+The PChannel bound also has a segment-level commit-time check. An import-produced
+segment can retain raw row timestamps before the flush while its captured
+`SourceCommitTimestamp` is after it. When that commit timestamp is nonzero and
+above the channel bound, the whole file contributes zero rows in both PreImport
+and Import; CDC replays the source Import instead. A zero or in-bound commit
+timestamp keeps the raw row-range rule above. This extra check belongs only to
+the replication bound and does not change ordinary `start_ts`/`end_ts` semantics.
+
 The bound is an **inclusive** upper bound, matching the secondary's
 `TimeTick <= checkpoint` deduplication: rows at exactly the bound are imported
 and are not replayed. That makes the map's values load-bearing in both
