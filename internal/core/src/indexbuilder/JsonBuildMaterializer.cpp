@@ -238,23 +238,22 @@ RowPresence
 Locate(const JsonBatch& batch,
        size_t row,
        const ProjectionParams& params,
-       simdjson::dom::element& root) {
+       value_result<simdjson::dom::element>& root) {
     if (!batch.IsValid(row))
         return RowPresence::FieldNull;
     const auto& document = batch.Document(row);
     // A valid row with empty bytes has no document, so no path exists in it.
-    auto dom = document.dom_doc();
-    if (!path_exists(dom, params.path_tokens) ||
+    root = document.dom_doc();
+    if (!path_exists(root, params.path_tokens) ||
         !document.exist(params.json_path)) {
         return RowPresence::NoValue;
     }
-    root = dom.value_unsafe();
     return RowPresence::Present;
 }
 
 RowPresence
 Locate(const JsonBatch& batch, size_t row, const ProjectionParams& params) {
-    simdjson::dom::element root;
+    value_result<simdjson::dom::element> root;
     return Locate(batch, row, params, root);
 }
 
@@ -627,7 +626,7 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
             std::vector<size_t> non_exist;
             for (size_t i = 0; i < count; ++i) {
                 const auto row = begin + i;
-                simdjson::dom::element root;
+                value_result<simdjson::dom::element> root;
                 const auto presence = Locate(source, row, Params(), root);
                 batch->validity[i] = presence != RowPresence::FieldNull;
                 if (presence != RowPresence::Present)
@@ -663,7 +662,8 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
 
  private:
     bool
-    ExtractArray(const simdjson::dom::element& root, Row& row) const {
+    ExtractArray(const value_result<simdjson::dom::element>& root,
+                 Row& row) const {
         auto array = root.at_pointer(Params().json_path).get_array();
         if (array.error() != simdjson::SUCCESS)
             return false;
