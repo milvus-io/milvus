@@ -838,8 +838,6 @@ queryNode:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
     bm25StatsBytesPerEntry: 20 # Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.
-  queryView:
-    transformLogDrainConcurrencyRatio: 0.25 # QueryNode-wide catch-up workers: max(1, floor(CPU count * ratio)); dynamically resizable.
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -985,7 +983,7 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
-    # Enabled by default: completed StorageV3 index artifacts publish a new manifest revision, advancing DataView and driving QueryView resource preparation. The commit atomically deletes the Finished etcd task row; active, failed and fake-finished tasks remain in etcd. Disabling selects the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
+    # Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
     # New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
     # The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.

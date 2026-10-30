@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
@@ -335,18 +337,28 @@ func TestEnsureCollectionReadyGRPCContract(t *testing.T) {
 }
 
 func TestEnsureCollectionReadyCancellationDoesNotWaitForCatalog(t *testing.T) {
-	s, catalog, _ := newReadinessTestServer(t)
+	s, _, _ := newReadinessTestServer(t)
 	writeStarted, finishWrite := make(chan struct{}), make(chan struct{})
 	var finishOnce sync.Once
 	finish := func() { finishOnce.Do(func() { close(finishWrite) }) }
-	defer finish()
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Run(func(context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) {
+	catalog := queryview.NewCollectionLoadInfoCatalog(nil)
+	patch := mockey.Mock(mockey.GetMethod(catalog, "Save")).To(func(context.Context, *viewpb.CollectionLoadConfig) error {
 		close(writeStarted)
 		<-finishWrite
-	}).Return(nil).Once()
+		return nil
+	}).Build()
 	writeResult := make(chan error, 1)
+	writeFinished := make(chan struct{})
+	defer func() {
+		finish()
+		<-writeFinished
+		patch.UnPatch()
+	}()
+	cfg := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
+	cfg.PartitionIDs = append(cfg.PartitionIDs, 999)
 	go func() {
-		writeResult <- s.qviewsRuntime.loadConfigStore.Put(context.Background(), s.qviewsRuntime.loadConfigStore.Get(100).Config)
+		defer close(writeFinished)
+		writeResult <- s.qviewsRuntime.loadConfigStore.Put(context.Background(), cfg)
 	}()
 	select {
 	case <-writeStarted:
@@ -504,7 +516,7 @@ func newEnsureRPCClient(t *testing.T, s *Server) querypb.QueryCoordClient {
 func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, catalog, broker := newLoadConfigQViewsServer(t)
+	s, _, broker := newLoadConfigQViewsServer(t)
 	s.ctx = context.Background()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	t.Cleanup(s.qviewsRuntime.stop)
@@ -531,8 +543,6 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 			{ReplicaID: 1002, ResourceGroup: meta.DefaultResourceGroupName, Priority: commonpb.LoadPriority_HIGH},
 		},
 	}
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
-	catalog.EXPECT().ReleaseReplica(mock.Anything, int64(100), int64(1001), int64(1002)).Return(nil).Once()
 
 	// The retained replica already has an Up view; the extra concurrent replicas do not.
 	s.qviewsRuntime.shardViewRegistry.Close()

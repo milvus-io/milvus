@@ -930,6 +930,10 @@ func TestProxy(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
+	// QueryView sealed resources require committed StorageV3 manifests.
+	previousLoonFFI := params.CommonCfg.UseLoonFFI.GetValue()
+	require.NoError(t, params.Save(params.CommonCfg.UseLoonFFI.Key, "true"))
+	t.Cleanup(func() { _ = params.Save(params.CommonCfg.UseLoonFFI.Key, previousLoonFFI) })
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
