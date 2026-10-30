@@ -215,10 +215,6 @@ func TestPlaceholderLogByteBudget(t *testing.T) {
 	assert.NotContains(t, got, "<truncated>")
 }
 
-type placeholderLogBuffer struct{ bytes.Buffer }
-
-func (*placeholderLogBuffer) Sync() error { return nil }
-
 func TestLogSearchPlaceholders(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
@@ -229,16 +225,10 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, params.Save(sizeKey, oldSize)) })
 	require.NoError(t, params.Save(sizeKey, "16384"))
 	t.Cleanup(func() { require.NoError(t, params.Save(key, oldRate)) })
-	buf := &placeholderLogBuffer{}
-	logger, _, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{Level: "info"}, buf)
-	require.NoError(t, err)
-	oldLogger, oldLevel := mlog.L(), mlog.GetLevel()
-	mlog.ReplaceGlobals(logger, nil)
-	mlog.SetLevel(mlog.InfoLevel)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, nil)
-		mlog.SetLevel(oldLevel)
-	})
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+	// Read snapshots instead of resetting the sink while background logs may write.
+	offset := 0
+	logs := func() string { return sink.String()[offset:] }
 	log := mlog.With(mlog.FieldCollectionID(100))
 	ctx := context.Background()
 	var decodeCalls atomic.Int64
@@ -254,7 +244,7 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	for _, limit := range []string{"0", "-1", "NaN"} {
 		require.NoError(t, params.Save(key, limit))
 		logSearchPlaceholders(ctx, log, nil, nil)
-		assert.Empty(t, buf.String())
+		assert.Empty(t, logs())
 		assert.Zero(t, decodeCalls.Load())
 	}
 
@@ -270,38 +260,38 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	// Prime the real limiter so this test also works with -count > 1.
 	require.NoError(t, params.Save(key, "+Inf"))
 	logSearchPlaceholders(ctx, log, request, infos)
-	buf.Reset()
+	offset = len(sink.String())
 	decodeCalls.Store(0)
 	require.NoError(t, params.Save(key, "0.000000001"))
 	for i := 0; i < 100; i++ {
 		logSearchPlaceholders(ctx, log, request, infos)
 	}
-	assert.Equal(t, 1, strings.Count(buf.String(), "proxy search request placeholder"))
+	assert.Equal(t, 1, strings.Count(logs(), "proxy search request placeholder"))
 	assert.Equal(t, int64(3), decodeCalls.Load(), "only the admitted request decodes its three sub-requests")
 	for i := 0; i < 3; i++ {
-		assert.Contains(t, buf.String(), fmt.Sprintf("index=%d anns_field_id=%d", i, 101+i))
-		assert.Contains(t, buf.String(), fmt.Sprintf("query-%d", i))
+		assert.Contains(t, logs(), fmt.Sprintf("index=%d anns_field_id=%d", i, 101+i))
+		assert.Contains(t, logs(), fmt.Sprintf("query-%d", i))
 	}
-	buf.Reset()
+	offset = len(sink.String())
 	// Search and HybridSearch share one budget. Then exercise runtime refresh.
 	ordinary := &milvuspb.SearchRequest{Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{
 		PlaceholderGroup: marshalLogPlaceholder(t, commonpb.PlaceholderType_VarChar, []byte("ordinary")),
 	}}
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Empty(t, buf.String())
+	assert.Empty(t, logs())
 	assert.Equal(t, int64(3), decodeCalls.Load())
 	require.NoError(t, params.Save(key, "0"))
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Empty(t, buf.String())
+	assert.Empty(t, logs())
 	assert.Equal(t, int64(3), decodeCalls.Load())
 	require.NoError(t, params.Save(key, "+Inf"))
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Contains(t, buf.String(), "ordinary")
-	buf.Reset()
+	assert.Contains(t, logs(), "ordinary")
+	offset = len(sink.String())
 	decodeCalls.Store(0)
 	mlog.SetLevel(mlog.WarnLevel)
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Empty(t, buf.String())
+	assert.Empty(t, logs())
 	assert.Zero(t, decodeCalls.Load(), "disabled INFO logging must not unmarshal")
 	mlog.SetLevel(mlog.InfoLevel)
 
@@ -317,10 +307,10 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	}
 	ordinary.Nq = 1000
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Contains(t, buf.String(), "nq=1000")
-	assert.Contains(t, buf.String(), "dim=1536")
-	assert.Contains(t, buf.String(), traceID.String())
-	assert.Less(t, buf.Len(), 4096)
+	assert.Contains(t, logs(), "nq=1000")
+	assert.Contains(t, logs(), "dim=1536")
+	assert.Contains(t, logs(), traceID.String())
+	assert.Less(t, len(logs()), 4096)
 
 	// Changing the size configuration changes actual emitted logs without a restart.
 	ordinary.Nq = 1
@@ -329,16 +319,16 @@ func TestLogSearchPlaceholders(t *testing.T) {
 			[]byte(strings.Repeat("x", 1024)+"END_OF_FIRST_QUERY")),
 	}
 	require.NoError(t, params.Save(sizeKey, "256"))
-	buf.Reset()
+	offset = len(sink.String())
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.Contains(t, buf.String(), "<truncated>")
-	assert.NotContains(t, buf.String(), "END_OF_FIRST_QUERY")
-	assert.Contains(t, buf.String(), traceID.String())
+	assert.Contains(t, logs(), "<truncated>")
+	assert.NotContains(t, logs(), "END_OF_FIRST_QUERY")
+	assert.Contains(t, logs(), traceID.String())
 	require.NoError(t, params.Save(sizeKey, "16384"))
-	buf.Reset()
+	offset = len(sink.String())
 	logSearchPlaceholders(ctx, log, ordinary, infos[:1])
-	assert.NotContains(t, buf.String(), "<truncated>")
-	assert.Contains(t, buf.String(), "END_OF_FIRST_QUERY")
+	assert.NotContains(t, logs(), "<truncated>")
+	assert.Contains(t, logs(), "END_OF_FIRST_QUERY")
 }
 
 func BenchmarkPlaceholderLogLargeInput(b *testing.B) {
