@@ -248,10 +248,11 @@ func ValidateResourceGroupName(entity string) error {
 		return merr.WrapErrParameterInvalidMsg("%s the first character of a resource group name must be an underscore or letter", invalidMsg)
 	}
 
+	// Hyphens are allowed after the first character, as in partition names.
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("%s resource group name can only contain numbers, letters and underscores", invalidMsg)
+		if c != '_' && c != '-' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg("%s resource group name can only contain numbers, letters, underscores and hyphens", invalidMsg)
 		}
 	}
 	return nil
@@ -1674,6 +1675,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				Field:     subField.Field,
 				IsDynamic: subField.IsDynamic,
 			}
+			// The copy shares Field, so this rewrites the same wrapper with the
+			// same value; it also sets the legacy location on the copy, which is
+			// what older components read from the WAL.
+			typeutil.SetFieldDataValidData(subFieldCopy, validData)
 
 			flattenedFields = append(flattenedFields, subFieldCopy)
 		}

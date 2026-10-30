@@ -297,7 +297,7 @@ func TestSchedulerRetryRecreateSameRunReexecutes(t *testing.T) {
 	attempts := make(chan int64, 2)
 	submitAdmit(t, s, newFakeTask(18, 70, 1, func(context.Context) (any, error) {
 		attempts <- 1
-		return nil, merr.ErrServiceUnavailable
+		return nil, allocator.NewIDExhaustedError(0, 10, 5)
 	}))
 	waitSnapshot(t, s, 18, 70, datapb.ImportTaskStateV2_Retry)
 	require.Equal(t, int64(1), <-attempts)
@@ -311,27 +311,27 @@ func TestSchedulerRetryRecreateSameRunReexecutes(t *testing.T) {
 	require.Equal(t, datapb.ImportTaskStateV2_Completed, snapshot.State)
 }
 
-// The worker classifier shares the checker's terminal denylist
-// (common.IsTerminalImportV3Err): a transient object-store 5xx surfaces as
-// typed ErrIoFailed and must retry; raw errors must retry too
-// (RemoteChunkManager.Write does not map manifest-write failures); only
-// provably permanent errors fail the task.
-func TestSchedulerClassifiesWithCheckerDenylist(t *testing.T) {
+// The task verdict: any execution error fails the task,
+// except a canceled run (which must not fail the job it no longer owns) and
+// ID exhaustion (DataCoord re-derives the per-file width on retry).
+func TestSchedulerClassifiesWithTaskPolicy(t *testing.T) {
 	cases := []struct {
 		name   string
 		err    error
 		want   datapb.ImportTaskStateV2
 		cancel bool
 	}{
-		{"typed ErrIoFailed retries", merr.WrapErrIoFailed("manifest", errors.New("connection reset")), datapb.ImportTaskStateV2_Retry, false},
-		{"raw non-milvus error retries", errors.New("write failed: 503 service unavailable"), datapb.ImportTaskStateV2_Retry, false},
-		// ID exhaustion used to be an explicit allowlist special case; it stays
-		// retryable through the denylist because ErrServiceInternal is not a
-		// terminal code. DataCoord's prepareRetry re-derives the ID width.
+		{"typed ErrIoFailed fails", merr.WrapErrIoFailed("manifest", errors.New("connection reset")), datapb.ImportTaskStateV2_Failed, false},
+		// A raw (unclassified) execution error fails the task; classified
+		// transient errors retry.
+		{"raw non-milvus error fails", errors.New("write failed: 503 service unavailable"), datapb.ImportTaskStateV2_Failed, false},
+		// ID exhaustion is recoverable: DataCoord's prepareRetry re-derives the
+		// per-file ID width before dispatching the next run.
 		{"ID exhaustion retries", allocator.NewIDExhaustedError(0, 10, 5), datapb.ImportTaskStateV2_Retry, false},
 		{"ErrServiceUnavailable retries", merr.ErrServiceUnavailable, datapb.ImportTaskStateV2_Retry, false},
-		// Loon transients carry no terminal milvus code, whether wrapped raw or
-		// as a typed storage error, so they retry like any other transient.
+		{"ErrServiceInternal fails", merr.WrapErrServiceInternalMsg("internal"), datapb.ImportTaskStateV2_Failed, false},
+		{"ErrStorage fails", merr.WrapErrStorage(errors.New("storage"), "write"), datapb.ImportTaskStateV2_Failed, false},
+		// Loon transients are classified retryable by their producer.
 		{"Loon transient retries", merr.Wrapf(packed.ErrLoonTransient, "FFI operation failed: simulated transient"), datapb.ImportTaskStateV2_Retry, false},
 		{"Loon transient storage error retries", merr.WrapErrStorage(packed.ErrLoonTransient, "commit manifest begin"), datapb.ImportTaskStateV2_Retry, false},
 		{"ErrImportFailed fails", merr.WrapErrImportFailedMsg("parquet: invalid magic"), datapb.ImportTaskStateV2_Failed, false},

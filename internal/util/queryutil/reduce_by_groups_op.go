@@ -53,11 +53,19 @@ func NewDeduplicateByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, groupLimit, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Merge(ctx, partials)
 		if err != nil {
 			return nil, err
 		}
 
-		return []any{agg.AggResult2internalResult(reducedRes)}, nil
+		wire, err := reducer.EncodePartial(reducedRes)
+		if err != nil {
+			return nil, err
+		}
+		return []any{wire}, nil
 	})
 }

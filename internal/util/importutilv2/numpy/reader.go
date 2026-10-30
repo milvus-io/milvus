@@ -58,6 +58,9 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	for fieldID, r := range readers {
 		cr, err := NewFieldReader(r, fields[fieldID], timezone)
 		if err != nil {
+			for _, opened := range readers {
+				_ = opened.Close()
+			}
 			return nil, err
 		}
 		crs[fieldID] = cr

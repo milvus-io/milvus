@@ -135,15 +135,10 @@ SealedIndexTranslator::SealedIndexTranslator(
           milvus::segcore::getCellDataType(
               /* is_vector */ IsVectorDataType(load_index_info->field_type),
               /* is_index */ true),
-          // if index data supports lazy load internally, we always use sync for index metadata
-          // warmup policy will be used for index internally
-          // currently only vector index is possible to support lazy load
-          lazy_load_ ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
-                     : milvus::segcore::getCacheWarmupPolicy(
-                           load_index_info->warmup_policy,
-                           /* is_vector */
-                           IsVectorDataType(load_index_info->field_type),
-                           /* is_index */ true),
+          milvus::segcore::getCacheWarmupPolicy(
+              load_index_info->warmup_policy,
+              /* is_vector */ IsVectorDataType(load_index_info->field_type),
+              /* is_index */ true),
           /* support_eviction */
           // if index data supports lazy load internally, we don't need to support eviction for index metadata
           // currently only vector index is possible to support lazy load

@@ -26,11 +26,14 @@ func TestSchedulerSearchDelegatesSNTasks(t *testing.T) {
 		{Handle: fakeGrowingSegmentHandle{id: 2}, Request: req, MVCC: mvcc, VChannel: "v1"},
 	})
 
-	result, err := scheduler.Search(context.Background(), tasks)
+	options := &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}
+	result, err := scheduler.Search(context.Background(), &sharedviewquery.SearchTasksWithOptions{SearchSegmentTasks: tasks, Options: options})
 
 	require.NoError(t, err)
 	assert.Same(t, executor.searchResult, result)
 	require.Len(t, executor.searchTasks, 2)
+	assert.Same(t, options, executor.searchTasks[0].Options)
+	assert.Same(t, options, executor.searchTasks[1].Options)
 	assert.Equal(t, int64(1), executor.searchTasks[0].Handle.ID())
 	assert.Same(t, req, executor.searchTasks[0].Request)
 	assert.Same(t, mvcc, executor.searchTasks[0].MVCC)

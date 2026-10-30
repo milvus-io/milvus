@@ -2071,23 +2071,7 @@ class SegmentExpr : public Expr {
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    input->size());
         const bool has_candidate_mask = mask_present && !candidate_mask->all();
-        EnsureDataTakeResources(skip_func);
-        if (data_take_column_ == nullptr) {
-            return -1;
-        }
-        const auto nullable = data_take_column_->IsNullable();
-        // Candidate transport batches fit inline; large positional inputs
-        // remain supported without retaining request-sized scratch afterwards.
-        folly::small_vector<int32_t, 64> selected_offsets;
-        if (has_candidate_mask) {
-            selected_offsets.reserve(input->size());
-            for (size_t i = 0; i < input->size(); ++i) {
-                if ((*candidate_mask)[i]) {
-                    selected_offsets.push_back((*input)[i]);
-                }
-            }
-        }
-        if (has_candidate_mask && selected_offsets.empty()) {
+        if (has_candidate_mask && candidate_mask->none()) {
             func.template operator()<FilterType::random>(
                 nullptr,
                 ValidityView{},
@@ -2098,9 +2082,28 @@ class SegmentExpr : public Expr {
                 values...);
             return input->size();
         }
+        // Reusable bindings currently accept dense offset inputs. Compact only
+        // that opt-in path; ordinary Take passes the original positional mask
+        // through the upstream API without an offset copy.
+        const bool compact_candidates =
+            has_candidate_mask && offset_take_context_ != nullptr;
+        folly::small_vector<int32_t, 64> selected_offsets;
+        if (compact_candidates) {
+            selected_offsets.reserve(input->size());
+            for (size_t i = 0; i < input->size(); ++i) {
+                if ((*candidate_mask)[i]) {
+                    selected_offsets.push_back((*input)[i]);
+                }
+            }
+        }
+        EnsureDataTakeResources(skip_func);
+        if (data_take_column_ == nullptr) {
+            return -1;
+        }
+        const auto nullable = data_take_column_->IsNullable();
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            has_candidate_mask ? selected_offsets.data() : input->data(),
-            static_cast<int64_t>(has_candidate_mask ? selected_offsets.size()
+            compact_candidates ? selected_offsets.data() : input->data(),
+            static_cast<int64_t>(compact_candidates ? selected_offsets.size()
                                                     : input->size()));
         // The lease ends before selected_offsets goes out of scope, including
         // on kernel/reader failure. Ordinary callers keep immutable fresh Take
@@ -2117,10 +2120,14 @@ class SegmentExpr : public Expr {
         if (take == nullptr) {
             fresh_take = data_take_column_->Take(
                 op_ctx_,
-                ChunkedColumnInterface::TakeOptions{input_view,
-                                                    DataTargetType<T>(),
-                                                    data_take_filter_,
-                                                    offset_take_context_});
+                ChunkedColumnInterface::TakeOptions{
+                    input_view,
+                    DataTargetType<T>(),
+                    data_take_filter_,
+                    TakePinPolicy::CurrentCell,
+                    has_candidate_mask && !compact_candidates ? candidate_mask
+                                                              : nullptr,
+                    offset_take_context_});
             take = fresh_take.get();
         }
         if (take == nullptr) {
@@ -2237,7 +2244,6 @@ class SegmentExpr : public Expr {
                    items.Size(),
                    input_view.size);
         const T invalid_value{};
-        int64_t take_pos = 0;
         for (int64_t logical_pos = 0;
              logical_pos < static_cast<int64_t>(input->size());
              ++logical_pos) {
@@ -2254,7 +2260,7 @@ class SegmentExpr : public Expr {
                     values...);
                 continue;
             }
-            auto item = items[take_pos++];
+            auto item = items[logical_pos];
             const auto valid = item.is_valid;
             if (item.data_skipped) {
                 const auto validity = nullable
@@ -2304,10 +2310,6 @@ class SegmentExpr : public Expr {
                 valid_res + logical_pos,
                 values...);
         }
-        AssertInfo(take_pos == items.Size(),
-                   "consumed {} Take rows, expected {}",
-                   take_pos,
-                   items.Size());
         return input->size();
     }
 
@@ -3837,7 +3839,8 @@ class SegmentExpr : public Expr {
 
     bool
     SelectAndPinIndex(const ExprIndexRequirement& req) {
-        auto capabilities = segment_->IndexCapability(field_id_);
+        auto capabilities =
+            segment_->ResolveIndexCapability(op_ctx_, field_id_);
         auto decision = exec::DetermineExecPath(req, capabilities);
         exec_path_ = decision.path;
         if (!decision.key.has_value()) {
@@ -4019,8 +4022,7 @@ class SegmentExpr : public Expr {
         // predicates for both int64 and double.
         return field_type_ == DataType::JSON &&
                selected_index_entry_.has_value() &&
-               selected_index_entry_->caps.json_paths &&
-               selected_index_entry_->value_type == DataType::JSON;
+               index_path_detail::IsFlatJsonIndex(*selected_index_entry_);
     }
 
     static bool
@@ -4215,34 +4217,29 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // Whether a scalar index exists that this expression could have used,
-    // for the index-declined feature, from the segment's index metadata.
-    // Only an entry that serves filters counts (a predicate, pattern, NGRAM,
-    // spatial or JSON-path reader): a text-match index serves text_match()
-    // alone and is no index a LIKE or a comparison could have used. A JSON
-    // field's indexes are per path: one on another path is no index for
-    // this expression, so only an entry covering the path counts (a flat
-    // index routing the path, or a cast index on exactly this path).
+    // Checks scalar/NGRAM registrations for index-declined reporting without
+    // resolving lazy metadata. JSON indexes must cover this expression's path.
     bool
     HasIndexForThisPath() const {
-        const auto capabilities = segment_->IndexCapability(field_id_);
+        const auto registrations = segment_->IndexRegistrations(field_id_);
         const auto path = field_type_ == DataType::JSON
                               ? milvus::Json::pointer(nested_path_)
                               : std::string{};
-        for (const auto& entry : capabilities.entries()) {
-            const auto& caps = entry.caps;
-            if (!(caps.predicate || caps.pattern_match ||
-                  caps.ngram_candidates || caps.spatial || caps.json_paths)) {
+        for (const auto& registration : registrations) {
+            if (registration.kind != segcore::IndexKind::Scalar &&
+                registration.kind != segcore::IndexKind::Ngram) {
                 continue;
             }
             if (field_type_ != DataType::JSON) {
                 return true;
             }
-            if (caps.json_paths &&
-                index_path_detail::IsPathPrefix(entry.json_path, path)) {
+            if (registration.json_cast_type.data_type() ==
+                    JsonCastType::DataType::JSON &&
+                index_path_detail::IsPathPrefix(registration.json_path, path)) {
                 return true;
             }
-            if (!entry.json_path.empty() && entry.json_path == path) {
+            if (!registration.json_path.empty() &&
+                registration.json_path == path) {
                 return true;
             }
         }

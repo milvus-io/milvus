@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // seedPublishMeta builds a meta with one staged member (1001, IsInvisible=true,
@@ -42,6 +43,7 @@ func seedPublishMeta(t *testing.T, m *meta, source model.SegmentChangeSource) *m
 			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 			NumOfRows: 42,
+			Stats:     &datapb.Statistics{InsertBinlogSize: 131073, StatsBinlogSize: 65536, DeltaBinlogSize: 65536},
 			Binlogs:   []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 		}),
 		NewSegmentInfo(&datapb.SegmentInfo{
@@ -88,6 +90,19 @@ func TestPublishGroup_Dataviewless(t *testing.T) {
 }
 
 func TestPublishGroup_WithDataView(t *testing.T) {
+	p := paramtable.Get()
+	for _, setting := range []struct {
+		item  *paramtable.ParamItem
+		value string
+	}{
+		{&p.QueryViewCfg.LogicalSizeSource, "insertBytes"},
+		{&p.QueryViewCfg.LogicalSizeBytesPerUnit, "64KB"},
+		{&p.QueryViewCfg.LogicalSizeSegmentBaseCost, "16"},
+	} {
+		original := setting.item.GetValue()
+		require.NoError(t, p.Save(setting.item.Key, setting.value))
+		t.Cleanup(func() { require.NoError(t, p.Save(setting.item.Key, original)) })
+	}
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -116,6 +131,8 @@ func TestPublishGroup_WithDataView(t *testing.T) {
 	stats, ok := ref.Stats(1001)
 	require.True(t, ok, "published member carries its RowNum footprint")
 	require.Equal(t, int64(42), stats.RowNum)
+	require.Equal(t, int64(131073), stats.Size)
+	require.Equal(t, int64(19), stats.LogicalSize, "change-group publication uses insert bytes, not row fallback or stats/delta bytes")
 }
 
 func TestPublishGroup_ImportSetsCommitTS(t *testing.T) {

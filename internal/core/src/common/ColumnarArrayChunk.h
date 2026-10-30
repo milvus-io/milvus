@@ -59,6 +59,9 @@ CreateColumnarArrayChildChunk(
 //   Array node:
 //     [validity bitmap, when this node's TypeSchema is nullable]
 //     [alignment padding, when needed][offsets: row_count + 1][child node]
+//   Leaf node:
+//     [validity bitmap, when the leaf TypeSchema is nullable]
+//     [alignment padding][fixed-width values or string offsets and chars]
 //   Complete root block:
 //     [Array node][MMAP_ARRAY_PADDING]
 //
@@ -70,11 +73,11 @@ CreateColumnarArrayChildChunk(
 // payload. Each node's TypeSchema supplies its child type and nullability.
 //
 // Construction flow (implemented in ColumnarArrayChunkBuilder.cpp):
-//   1. Sealed, growing mmap, and single-row ArrayValue inputs are normalized
-//      into a temporary ColumnarArrayBuildNode tree. BuildNodeFromProtoRows
-//      and BuildNodeFromViews recursively build one node per Array level. Each
-//      node records its offsets and validity bitmap, while the leaf node
-//      collects the flattened scalar payload.
+//   1. Sealed Arrow ListArrays, growing mmap rows, and single-row ArrayValue
+//      inputs build a temporary ColumnarArrayBuildNode tree through
+//      BuildNodeFromArrow, BuildNodeFromProtoRows, or BuildNodeFromViews.
+//      Each Array node records offsets and validity; the leaf records its
+//      validity and flattened scalar payload.
 //   2. The builder calculates the serialized size and writes the tree into one
 //      contiguous target buffer. A complete column block serializes the root
 //      node, including its recursively serialized child, and appends trailing
@@ -265,6 +268,15 @@ class ColumnarArrayChunk final : public Chunk {
         return AlignUp(null_bitmap_bytes, alignof(ArrayOffset));
     }
 
+    static size_t
+    LeafDataOffset(ArrayOffset row_count, bool nullable) {
+        if (!nullable) {
+            return 0;
+        }
+        const auto bitmap_bytes = (static_cast<size_t>(row_count) + 7) / 8;
+        return AlignUp(bitmap_bytes, alignof(uint64_t));
+    }
+
  private:
     // A complete column block includes trailing padding, whether its backing
     // storage is memory or mmap. A child node occupies only its recursive node
@@ -331,9 +343,10 @@ class ColumnarArrayChunk final : public Chunk {
             case DataType::BOOL:
                 return sizeof(uint8_t);
             case DataType::INT8:
+                return sizeof(int8_t);
             case DataType::INT16:
+                return sizeof(int16_t);
             case DataType::INT32:
-                // ScalarField stores small integer Array values as int32.
                 return sizeof(int32_t);
             case DataType::INT64:
                 return sizeof(int64_t);
@@ -410,11 +423,12 @@ class ColumnarArrayChunk final : public Chunk {
     static void
     ValidateStringPayload(const char* data,
                           uint64_t size,
-                          ArrayOffset row_count) {
+                          ArrayOffset row_count,
+                          size_t prefix_size = 0) {
         const auto rows = CheckedLeafRowCount(row_count);
         const auto offset_count = static_cast<size_t>(rows) + 1;
         const auto offsets_bytes = offset_count * sizeof(uint32_t);
-        AssertInfo(size >= offsets_bytes,
+        AssertInfo(size >= prefix_size + offsets_bytes,
                    "string leaf size {} is smaller than offsets size {}",
                    size,
                    offsets_bytes);
@@ -422,11 +436,12 @@ class ColumnarArrayChunk final : public Chunk {
                    "string leaf size {} exceeds uint32 offset range",
                    size);
 
-        const auto* offsets = reinterpret_cast<const uint32_t*>(data);
-        AssertInfo(offsets[0] == offsets_bytes,
+        const auto* offsets =
+            reinterpret_cast<const uint32_t*>(data + prefix_size);
+        AssertInfo(offsets[0] == prefix_size + offsets_bytes,
                    "string leaf first offset {} does not match header size {}",
                    offsets[0],
-                   offsets_bytes);
+                   prefix_size + offsets_bytes);
         AssertInfo(std::is_sorted(offsets, offsets + offset_count),
                    "string leaf offsets must be monotonic");
         AssertInfo(offsets[offset_count - 1] == size,
@@ -499,7 +514,11 @@ class ColumnarArrayChunk final : public Chunk {
             const auto* value = chunk.ValueAt(static_cast<int64_t>(index));
             switch (element_type) {
                 case DataType::INT8:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int8_t*>(value));
                 case DataType::INT16:
+                    return static_cast<T>(
+                        *reinterpret_cast<const int16_t*>(value));
                 case DataType::INT32:
                     return static_cast<T>(
                         *reinterpret_cast<const int32_t*>(value));
@@ -547,9 +566,9 @@ class ColumnarArrayChunk final : public Chunk {
                 ProtoReserveSize(static_cast<size_t>(end - begin)));
             for (auto row = begin; row < end; ++row) {
                 auto* child_output = data->add_data();
-                if (!nested.isValid(static_cast<int>(row))) {
-                    child_output->Clear();
-                    continue;
+                if (child_type.nullable()) {
+                    output.add_valid_data(
+                        nested.isValid(static_cast<int>(row)));
                 }
                 OutputRange(nested.type(),
                             nested.child(),
@@ -563,6 +582,14 @@ class ColumnarArrayChunk final : public Chunk {
         const auto begin_index = static_cast<size_t>(begin);
         const auto end_index = static_cast<size_t>(end);
         const auto element_count = end_index - begin_index;
+        const auto leaf_nullable = type.array_element().nullable();
+        if (leaf_nullable) {
+            output.mutable_valid_data()->Reserve(
+                ProtoReserveSize(element_count));
+            for (size_t i = begin_index; i < end_index; ++i) {
+                output.add_valid_data(child.isValid(static_cast<int>(i)));
+            }
+        }
         switch (element_type) {
             case DataType::BOOL: {
                 auto* data = output.mutable_bool_data()->mutable_data();
@@ -570,7 +597,12 @@ class ColumnarArrayChunk final : public Chunk {
                 const auto& chunk = static_cast<const FixedWidthChunk&>(child);
                 const auto* values =
                     reinterpret_cast<const uint8_t*>(chunk.Data());
-                data->Add(values + begin_index, values + end_index);
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    data->Add(!leaf_nullable ||
+                                      child.isValid(static_cast<int>(i))
+                                  ? values[i]
+                                  : 0);
+                }
                 return;
             }
             case DataType::INT8:
@@ -579,9 +611,12 @@ class ColumnarArrayChunk final : public Chunk {
                 auto* data = output.mutable_int_data()->mutable_data();
                 data->Reserve(ProtoReserveSize(element_count));
                 const auto& chunk = static_cast<const FixedWidthChunk&>(child);
-                const auto* values =
-                    reinterpret_cast<const int32_t*>(chunk.Data());
-                data->Add(values + begin_index, values + end_index);
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    const auto valid =
+                        !leaf_nullable || child.isValid(static_cast<int>(i));
+                    data->Add(valid ? ReadScalarElement<int>(type, child, i)
+                                    : 0);
+                }
                 return;
             }
             case DataType::INT64: {
@@ -590,7 +625,12 @@ class ColumnarArrayChunk final : public Chunk {
                 const auto& chunk = static_cast<const FixedWidthChunk&>(child);
                 const auto* values =
                     reinterpret_cast<const int64_t*>(chunk.Data());
-                data->Add(values + begin_index, values + end_index);
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    data->Add(!leaf_nullable ||
+                                      child.isValid(static_cast<int>(i))
+                                  ? values[i]
+                                  : 0);
+                }
                 return;
             }
             case DataType::FLOAT: {
@@ -599,7 +639,12 @@ class ColumnarArrayChunk final : public Chunk {
                 const auto& chunk = static_cast<const FixedWidthChunk&>(child);
                 const auto* values =
                     reinterpret_cast<const float*>(chunk.Data());
-                data->Add(values + begin_index, values + end_index);
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    data->Add(!leaf_nullable ||
+                                      child.isValid(static_cast<int>(i))
+                                  ? values[i]
+                                  : 0);
+                }
                 return;
             }
             case DataType::DOUBLE: {
@@ -608,7 +653,12 @@ class ColumnarArrayChunk final : public Chunk {
                 const auto& chunk = static_cast<const FixedWidthChunk&>(child);
                 const auto* values =
                     reinterpret_cast<const double*>(chunk.Data());
-                data->Add(values + begin_index, values + end_index);
+                for (size_t i = begin_index; i < end_index; ++i) {
+                    data->Add(!leaf_nullable ||
+                                      child.isValid(static_cast<int>(i))
+                                  ? values[i]
+                                  : 0);
+                }
                 return;
             }
             case DataType::STRING:
@@ -617,8 +667,14 @@ class ColumnarArrayChunk final : public Chunk {
                 data->Reserve(ProtoReserveSize(element_count));
                 const auto& chunk = static_cast<const StringChunk&>(child);
                 for (auto i = begin; i < end; ++i) {
-                    const auto value = chunk[static_cast<int>(i)];
-                    data->Add()->assign(value.data(), value.size());
+                    const auto value =
+                        leaf_nullable && !child.isValid(static_cast<int>(i))
+                            ? std::string_view{}
+                            : chunk[static_cast<int>(i)];
+                    auto* output_value = data->Add();
+                    if (!value.empty()) {
+                        output_value->assign(value.data(), value.size());
+                    }
                 }
                 return;
             }
@@ -664,22 +720,37 @@ CreateColumnarArrayChildChunk(
 
     const auto element_type = ColumnarArrayChunk::GetElementType(*array_type);
     const auto leaf_rows = ColumnarArrayChunk::CheckedLeafRowCount(row_count);
+    const bool nullable = array_type->array_element().nullable();
+    const auto prefix = ColumnarArrayChunk::LeafDataOffset(row_count, nullable);
+    const auto bitmap_bytes = nullable ? (row_count + 7) / 8 : 0;
+    AssertInfo(size >= prefix, "array leaf is shorter than validity prefix");
     if (IsStringDataType(element_type)) {
-        ColumnarArrayChunk::ValidateStringPayload(data, size, row_count);
-        return std::make_shared<const StringChunk>(
-            leaf_rows, data, size, false, chunk_mmap_guard);
+        ColumnarArrayChunk::ValidateStringPayload(
+            data, size, row_count, prefix);
+        return std::make_shared<const StringChunk>(leaf_rows,
+                                                   data,
+                                                   size,
+                                                   nullable,
+                                                   chunk_mmap_guard,
+                                                   prefix - bitmap_bytes);
     }
 
     const auto width = ColumnarArrayChunk::ExpectedFixedWidth(element_type);
     AssertInfo(row_count <= std::numeric_limits<uint64_t>::max() / width,
                "fixed-width array leaf byte size overflows");
-    const auto expected_size = row_count * width;
+    const auto expected_size = prefix + row_count * width;
     AssertInfo(size == expected_size,
                "fixed-width array leaf size {} does not match expected {}",
                size,
                expected_size);
-    return std::make_shared<const FixedWidthChunk>(
-        leaf_rows, 1, data, size, width, false, chunk_mmap_guard);
+    return std::make_shared<const FixedWidthChunk>(leaf_rows,
+                                                   1,
+                                                   data,
+                                                   size,
+                                                   width,
+                                                   nullable,
+                                                   chunk_mmap_guard,
+                                                   prefix - bitmap_bytes);
 }
 
 }  // namespace array_detail

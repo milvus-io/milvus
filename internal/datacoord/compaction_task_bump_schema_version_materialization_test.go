@@ -119,9 +119,8 @@ func TestCommitBumpV3MaterializationHappyPath(t *testing.T) {
 	// (version 5), not on the datanode's plan-time base, and stage the shipped
 	// column-group descriptors.
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
-			assert.Equal(t, basePath, base)
-			assert.EqualValues(t, 5, version)
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			assert.Equal(t, currentManifest, baseManifest)
 			require.Len(t, updates.ColumnGroups, 1)
 			assert.Equal(t, "parquet", updates.ColumnGroups[0].Format)
 			require.Len(t, updates.ColumnGroups[0].Files, 1)
@@ -173,7 +172,7 @@ func TestCommitBumpV3MaterializationReplayShortCircuits(t *testing.T) {
 
 	called := false
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(context.Context, *packed.ManifestIOContext, string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			called = true
 			return mockManifestUpdateResult("", nil), nil
 		},

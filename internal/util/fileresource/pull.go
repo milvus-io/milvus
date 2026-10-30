@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ResourceFetcher fetches a requested batch by IDs or names (never both).
@@ -61,4 +62,16 @@ func Acquire(ctx context.Context, ids []int64, params ...string) (*Resources, er
 		return &Resources{}, nil
 	}
 	return manager.Acquire(ctx, ids, params...)
+}
+
+// AcquireNamed resolves the current resource identity before sharing its download.
+// Name lookups are deliberately not cached across Add/Remove operations.
+func AcquireNamed(ctx context.Context, name string) (*Resources, error) {
+	analyzerResources.RLock()
+	manager := analyzerResources.manager
+	analyzerResources.RUnlock()
+	if manager == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("resource fetcher is not installed")
+	}
+	return manager.acquireResources(ctx, nil, map[string]struct{}{name: {}})
 }

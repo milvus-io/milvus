@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/mocks/util/searchutil/mock_optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -259,6 +260,7 @@ func (suite *QueryNodeSuite) TestStop() {
 
 func (suite *QueryNodeSuite) TestHasOtherActiveQueryNode() {
 	metaRoot := fmt.Sprintf("milvus-ut/test-has-other-active-qn/%d", time.Now().UnixNano())
+	defer suite.etcd.Delete(context.Background(), metaRoot, clientv3.WithPrefix())
 
 	// Create and register the current node's session.
 	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
@@ -277,29 +279,25 @@ func (suite *QueryNodeSuite) TestHasOtherActiveQueryNode() {
 	suite.NoError(err)
 	suite.False(hasOther)
 
-	// Simulate a second active query node by writing session data directly to etcd.
-	otherSessionKey := fmt.Sprintf("%s/session/%s-%d", metaRoot, typeutil.QueryNodeRole, 99999)
-	activeSessionJSON := `{"ServerID":99999,"ServerName":"querynode","Address":"addr2","Stopping":false}`
-	_, err = suite.etcd.Put(context.Background(), otherSessionKey, activeSessionJSON)
-	suite.Require().NoError(err)
-	defer suite.etcd.Delete(context.Background(), otherSessionKey)
-
 	// Another active node exists — should return true.
+	suite.putQueryNodeSession(metaRoot, 99999, false, nil)
 	hasOther, err = node.hasOtherActiveQueryNode()
 	suite.NoError(err)
 	suite.True(hasOther)
 
-	// Update the other session to stopping state.
-	stoppingSessionJSON := `{"ServerID":99999,"ServerName":"querynode","Address":"addr2","Stopping":true}`
-	_, err = suite.etcd.Put(context.Background(), otherSessionKey, stoppingSessionJSON)
-	suite.Require().NoError(err)
-
 	// Only stopping node exists — should return false.
+	suite.putQueryNodeSession(metaRoot, 99999, true, nil)
 	hasOther, err = node.hasOtherActiveQueryNode()
 	suite.NoError(err)
 	suite.False(hasOther)
 
-	// Context cancellation stops the retry loop instead of being treated as no active node.
+	// An active query node embedded in a streaming node means the cluster is still serving.
+	suite.putQueryNodeSession(metaRoot, 99998, false, map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"})
+	hasOther, err = node.hasOtherActiveQueryNode()
+	suite.NoError(err)
+	suite.True(hasOther)
+
+	// Context cancellation is an unknown answer, not "no active node".
 	canceledCtx, cancel := context.WithCancel(node.ctx)
 	cancel()
 	node.ctx = canceledCtx
@@ -307,39 +305,54 @@ func (suite *QueryNodeSuite) TestHasOtherActiveQueryNode() {
 	suite.Error(err)
 	suite.False(hasOther)
 
-	// Transient lookup errors should be retried inside the helper until a session
-	// result is available.
+	// A lookup error is returned at once; the migrate loop retries on its next tick.
 	node.ctx = context.Background()
 	attempts := 0
 	patch := mockey.Mock((*sessionutil.Session).GetSessions).To(func(_ *sessionutil.Session, _ context.Context, _ string) (map[string]*sessionutil.Session, int64, error) {
 		attempts++
-		if attempts == 1 {
-			return nil, 0, errors.New("transient session lookup failure")
-		}
-		return map[string]*sessionutil.Session{}, 0, nil
+		return nil, 0, errors.New("transient session lookup failure")
 	}).Build()
 	defer patch.UnPatch()
 
 	hasOther, err = node.hasOtherActiveQueryNode()
-	suite.NoError(err)
+	suite.Error(err)
 	suite.False(hasOther)
-	suite.Equal(2, attempts)
+	suite.Equal(1, attempts)
 }
 
-func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
-	// Set standalone role and a very short migrate timeout so test finishes quickly.
-	paramtable.SetRole(typeutil.StandaloneRole)
-	defer paramtable.SetRole("")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "10")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.Key, "0s")
-	// Use a non-rocksmq WAL so the migrate data loop is entered.
-	paramtable.Get().Save("mq.type", "pulsar")
+// putQueryNodeSession writes a query node session directly to etcd.
+func (suite *QueryNodeSuite) putQueryNodeSession(metaRoot string, serverID int64, stopping bool, labels map[string]string) {
+	value, err := json.Marshal(&sessionutil.SessionRaw{
+		ServerID:     serverID,
+		ServerName:   typeutil.QueryNodeRole,
+		Address:      fmt.Sprintf("addr-%d", serverID),
+		Stopping:     stopping,
+		ServerLabels: labels,
+	})
+	suite.Require().NoError(err)
+	key := fmt.Sprintf("%s/session/%s-%d", metaRoot, typeutil.QueryNodeRole, serverID)
+	_, err = suite.etcd.Put(context.Background(), key, string(value))
+	suite.Require().NoError(err)
+}
 
-	metaRoot := fmt.Sprintf("milvus-ut/test-standalone-migrate/%d", time.Now().UnixNano())
+// prepareMigratingNode registers suite.node under metaRoot and loads a sealed
+// segment, so Stop enters the migrate data loop and checks for other active
+// query nodes right away. The caller deletes metaRoot from etcd.
+func (suite *QueryNodeSuite) prepareMigratingNode(metaRoot string, gracefulStopTimeout string) {
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.GracefulStopTimeout.Key, gracefulStopTimeout)
+	params.Save(params.QueryNodeCfg.MigrateDataTimeout.Key, "0s")
+	// Use a non-rocksmq WAL so the migrate data loop is entered.
+	params.Save("mq.type", "pulsar")
+	suite.T().Cleanup(func() {
+		params.Reset(params.QueryNodeCfg.GracefulStopTimeout.Key)
+		params.Reset(params.QueryNodeCfg.MigrateDataTimeout.Key)
+		params.Reset("mq.type")
+	})
 
 	// Set up a registered session on suite.node so GoingStop succeeds and the migrate loop runs.
 	sess := sessionutil.NewSessionWithEtcd(suite.node.ctx, metaRoot, suite.etcd)
-	sess.Init(typeutil.QueryNodeRole, "addr-standalone", false)
+	sess.Init(typeutil.QueryNodeRole, "addr-stopping", false)
 	sess.Register()
 	suite.node.session = sess
 	suite.node.serverID = sess.ServerID
@@ -351,7 +364,7 @@ func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
 	suite.Require().NoError(err)
 
 	// Put a sealed segment so the migrate data loop has something to wait for.
-	schema := mock_segcore.GenTestCollectionSchema("test_standalone_stop", schemapb.DataType_Int64, true)
+	schema := mock_segcore.GenTestCollectionSchema("test_migrate_stop", schemapb.DataType_Int64, true)
 	collection, err := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
 		LoadType: querypb.LoadType_LoadCollection,
 	})
@@ -372,14 +385,78 @@ func (suite *QueryNodeSuite) TestStopStandaloneMigrateTimeout() {
 	)
 	suite.Require().NoError(err)
 	suite.node.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, segment)
+}
 
-	// Stop should exit as soon as the first successful session lookup confirms
-	// there is no other active query node.
+func (suite *QueryNodeSuite) TestStopWithoutOtherActiveQueryNode() {
+	for _, role := range []string{typeutil.StandaloneRole, typeutil.QueryNodeRole} {
+		suite.Run(role, func() {
+			paramtable.SetRole(role)
+			defer paramtable.SetRole("")
+			metaRoot := fmt.Sprintf("milvus-ut/test-stop-no-other-qn/%s/%d", role, time.Now().UnixNano())
+			defer suite.etcd.Delete(context.Background(), metaRoot, clientv3.WithPrefix())
+			suite.node = NewQueryNode(context.Background(), suite.factory)
+			suite.prepareMigratingNode(metaRoot, "10")
+			suite.putQueryNodeSession(metaRoot, 99999, true, nil)
+
+			// Stop should exit as soon as the first successful session lookup confirms
+			// there is no other active query node.
+			start := time.Now()
+			err := suite.node.Stop()
+			elapsed := time.Since(start)
+			suite.NoError(err)
+			suite.Less(elapsed, time.Second, "stop should exit after the first successful session lookup without other active query node")
+		})
+	}
+}
+
+func (suite *QueryNodeSuite) TestStopWaitsUntilOtherQueryNodeStops() {
+	metaRoot := fmt.Sprintf("milvus-ut/test-stop-other-qn-stops/%d", time.Now().UnixNano())
+	defer suite.etcd.Delete(context.Background(), metaRoot, clientv3.WithPrefix())
+	suite.prepareMigratingNode(metaRoot, "10")
+	embedded := map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"}
+	suite.putQueryNodeSession(metaRoot, 99999, false, embedded)
+
+	// The streaming node starts stopping later, as when a whole cluster is stopped.
+	go func() {
+		time.Sleep(time.Second)
+		suite.putQueryNodeSession(metaRoot, 99999, true, embedded)
+	}()
+
 	start := time.Now()
-	err = suite.node.Stop()
+	err := suite.node.Stop()
 	elapsed := time.Since(start)
 	suite.NoError(err)
-	suite.Less(elapsed, time.Second, "standalone stop should exit after the first successful empty session result")
+	suite.GreaterOrEqual(elapsed, time.Second, "stop should keep migrating while another active query node exists")
+	suite.Less(elapsed, 5*time.Second, "stop should exit once the other query node is stopping")
+}
+
+func (suite *QueryNodeSuite) TestStopKeepsMigratingOnLookupFailure() {
+	for _, role := range []string{typeutil.StandaloneRole, typeutil.QueryNodeRole} {
+		suite.Run(role, func() {
+			paramtable.SetRole(role)
+			defer paramtable.SetRole("")
+			metaRoot := fmt.Sprintf("milvus-ut/test-stop-lookup-failure/%s/%d", role, time.Now().UnixNano())
+			defer suite.etcd.Delete(context.Background(), metaRoot, clientv3.WithPrefix())
+			suite.node = NewQueryNode(context.Background(), suite.factory)
+			suite.prepareMigratingNode(metaRoot, "2")
+			attempts := atomic.Int32{}
+			patch := mockey.Mock((*sessionutil.Session).GetSessions).To(func(_ *sessionutil.Session, _ context.Context, _ string) (map[string]*sessionutil.Session, int64, error) {
+				attempts.Add(1)
+				return nil, 0, errors.New("etcd unavailable")
+			}).Build()
+			defer patch.UnPatch()
+
+			// A failed lookup must not skip migration, and must not block the loop,
+			// so the graceful stop timeout ends it.
+			start := time.Now()
+			err := suite.node.Stop()
+			elapsed := time.Since(start)
+			suite.NoError(err)
+			suite.GreaterOrEqual(elapsed, 2*time.Second)
+			suite.Less(elapsed, 5*time.Second)
+			suite.Greater(attempts.Load(), int32(0))
+		})
+	}
 }
 
 func TestResizeThreadPools(t *testing.T) {

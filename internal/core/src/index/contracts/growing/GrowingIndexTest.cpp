@@ -42,6 +42,7 @@
 #include "index/growing/KnowhereGrowingVectorIndex.h"
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 #include "index/growing/TantivyGrowingTextIndex.h"
+#include "index/scalar/text/TextIndexReader.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 
@@ -363,6 +364,40 @@ TEST(GrowingIndexContractTest, EmptyStringAndNullRowsStayDistinct) {
     EXPECT_TRUE(is_not_null[0]);
     EXPECT_FALSE(is_not_null[1]);
     EXPECT_TRUE(is_not_null[2]);
+}
+
+TEST(GrowingIndexContractTest, TextPublicationsShareValidityAndFreezeTail) {
+    TantivyGrowingTextIndex owner("text-validity",
+                                  "milvus_tokenizer",
+                                  R"({"tokenizer":"standard"})",
+                                  DataType::VARCHAR,
+                                  1000000);
+    const std::vector<std::string_view> values(65, "needle");
+    const auto valid = std::make_unique<bool[]>(65);
+    std::fill_n(valid.get(), 65, true);
+    valid[64] = false;
+    owner.Append(0, {values.size(), values.data(), valid.get()});
+    owner.Flush();
+    const auto first = owner.PinSnapshot();
+    const std::string_view value = "needle";
+    const bool null = false;
+    owner.Append(65, {1, &value, &null});
+    owner.Flush();
+    const auto second = owner.PinSnapshot();
+    const auto& before = dynamic_cast<const TextIndexReader&>(first.Reader());
+    const auto& after = dynamic_cast<const TextIndexReader&>(second.Reader());
+    ASSERT_NE(before.Validity().FullWords().data(), nullptr);
+    EXPECT_EQ(before.Validity().FullWords().data(),
+              after.Validity().FullWords().data());
+    const auto old_nulls = before.IsNull();
+    const auto new_nulls = after.IsNull();
+    ASSERT_EQ(old_nulls.size(), 65);
+    ASSERT_EQ(new_nulls.size(), 66);
+    EXPECT_EQ(old_nulls.count(), 1);
+    EXPECT_TRUE(old_nulls[64]);
+    EXPECT_EQ(new_nulls.count(), 2);
+    EXPECT_TRUE(new_nulls[64]);
+    EXPECT_TRUE(new_nulls[65]);
 }
 
 TEST(GrowingIndexContractTest, RTreeUsesValidityForEmptyPayload) {

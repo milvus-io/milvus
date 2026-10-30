@@ -96,7 +96,7 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 	output, err := w.Close()
 	require.NoError(t, err)
 	defer output.Destroy()
-	manifest, err := packed.CommitManifestUpdates(segmentPath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{NewFiles: output})
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(segmentPath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{NewFiles: output})
 	require.NoError(t, err)
 	paths := []string{path.Join(root, "shared.delta"), path.Join(root, "own.delta")}
 	for i, file := range paths {

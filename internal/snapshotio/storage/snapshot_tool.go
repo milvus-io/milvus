@@ -189,8 +189,15 @@ func (c *snapshotFileRefCollector) addStorageV3Segment(ctx context.Context, segm
 		if walkPrefix[len(walkPrefix)-1] != '/' {
 			walkPrefix += "/"
 		}
+		indexPrefix := walkPrefix + "_index/"
 		manifestObjectCount := 0
 		if err := c.cm.WalkWithPrefix(ctx, walkPrefix, true, func(info *milvusstorage.ChunkObjectInfo) bool {
+			// Only the snapshot's explicit index list pins builds against GC.
+			// Collect those files via addIndexRefs instead of including obsolete
+			// builds from the directory walk in the export plan.
+			if strings.HasPrefix(NormalizeSnapshotObjectPath(info.FilePath), indexPrefix) {
+				return true
+			}
 			manifestObjectCount++
 			c.add(SnapshotFileRef{
 				Path:      info.FilePath,

@@ -20,11 +20,16 @@
 
 #include "common/Schema.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/ConjunctExpr.h"
+#include "exec/expression/LikeConjunctExpr.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
 #include "test_utils/GenExprProto.h"
+#include "exec/QueryContext.h"
+#include <algorithm>
 
 using namespace milvus;
 using namespace milvus::query;
@@ -824,4 +829,192 @@ TEST(NgramExpressionTest, RegexAlternationMatchesRe2) {
                              expected,
                              /*forward_to_br=*/!test_case.ngram);
     }
+}
+
+TEST(NgramExpressionTest, NativeOffsetsDoNotFetchNgram) {
+    const std::vector<std::string> rows{"abcdef", "xyz", "ab123"};
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    test::expr_index::RawFieldFiles raw_files;
+    auto field = test::expr_index::StringField(rows);
+    auto segment = CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    auto opened = test::expr_index::BuildIndex(
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    OpContext untouched;
+    OpContext* observed_pin = &untouched;
+    test::expr_index::InstallIndex(*segment,
+                                   field_id,
+                                   DataType::VARCHAR,
+                                   std::move(opened),
+                                   DataType::NONE,
+                                   &observed_pin);
+    proto::plan::GenericValue literal;
+    literal.set_string_val("ab%");
+    auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR),
+        proto::plan::OpType::Match,
+        literal);
+    exec::PhyUnaryRangeFilterExpr physical({},
+                                           filter,
+                                           "ngram-offset",
+                                           nullptr,
+                                           segment.get(),
+                                           rows.size(),
+                                           rows.size(),
+                                           0);
+    exec::QueryContext query_context(
+        "ngram-offset", segment.get(), rows.size(), MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::OffsetVector offsets{2, 1, 0, 2};
+    exec::EvalCtx context(&exec_context, &offsets);
+    VectorPtr result;
+    physical.Eval(context, result);
+    EXPECT_EQ(physical.GetExecPath(), exec::ExprExecPath::RawData);
+    EXPECT_EQ(observed_pin, &untouched);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), offsets.size());
+    TargetBitmapView bits(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_TRUE(valid[i]);
+        EXPECT_EQ(bits[i], offsets[i] != 1);
+    }
+}
+
+namespace {
+
+class NgramRefinementSegment final : public ChunkedSegmentSealedImpl {
+ public:
+    explicit NgramRefinementSegment(const SchemaPtr& schema)
+        : ChunkedSegmentSealedImpl(
+              schema, empty_index_meta, SegcoreConfig::default_config(), 0) {
+    }
+
+    mutable size_t raw_view_reads{0};
+
+ protected:
+    PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
+    chunk_string_view_impl(
+        OpContext* context,
+        FieldId field_id,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ++raw_view_reads;
+        return ChunkedSegmentSealedImpl::chunk_string_view_impl(
+            context, field_id, chunk_id, offset_len);
+    }
+};
+
+struct NgramPhase2Fixture {
+    NgramPhase2Fixture() {
+        auto schema = std::make_shared<Schema>();
+        field_id = schema->AddDebugField("text", DataType::VARCHAR, true);
+        const uint8_t validity[] = {0x7F};
+        auto field = test::expr_index::StringField(rows, true, validity);
+        segment = std::make_unique<NgramRefinementSegment>(schema);
+        segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+        auto opened = test::expr_index::BuildIndex(
+            field_id,
+            DataType::VARCHAR,
+            index::NGRAM_INDEX_TYPE,
+            {field},
+            {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+        test::expr_index::InstallIndex(
+            *segment, field_id, DataType::VARCHAR, std::move(opened));
+    }
+
+    exec::ExprPtr
+    Unary(const std::string& literal,
+          proto::plan::OpType op = proto::plan::InnerMatch) const {
+        proto::plan::GenericValue value;
+        value.set_string_val(literal);
+        auto typed = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_id, DataType::VARCHAR, {}, true), op, value);
+        return std::make_shared<exec::PhyUnaryRangeFilterExpr>(
+            std::vector<exec::ExprPtr>{},
+            typed,
+            "ngram-phase2",
+            nullptr,
+            segment.get(),
+            rows.size(),
+            rows.size(),
+            0);
+    }
+
+    void
+    Expect(const exec::ExprPtr& expression,
+           const std::vector<size_t>& hits,
+           bool fused = false) {
+        exec::QueryContext query_context(
+            "ngram-phase2", segment.get(), rows.size(), MAX_TIMESTAMP);
+        exec::ExecContext exec_context(&query_context);
+        exec::EvalCtx context(&exec_context);
+        VectorPtr result;
+        expression->Eval(context, result);
+        if (auto unary =
+                std::dynamic_pointer_cast<exec::PhyUnaryRangeFilterExpr>(
+                    expression)) {
+            EXPECT_EQ(unary->GetExecPath(), exec::ExprExecPath::ScalarIndex);
+        }
+        auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(column, nullptr);
+        ASSERT_EQ(column->size(), rows.size());
+        TargetBitmapView bits(column->GetRawData(), column->size());
+        TargetBitmapView valid(column->GetValidRawData(), column->size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            EXPECT_EQ(valid[row], fused || row != 7) << row;
+            EXPECT_EQ(bits[row] && valid[row],
+                      std::find(hits.begin(), hits.end(), row) != hits.end())
+                << row;
+        }
+    }
+
+    const std::vector<std::string> rows{"ab",
+                                        "xabx",
+                                        "中文",
+                                        "x中文y",
+                                        "abcde",
+                                        "abcd--bcde",
+                                        "ab中文",
+                                        "unused"};
+    FieldId field_id{0};
+    test::expr_index::RawFieldFiles raw_files;
+    std::unique_ptr<NgramRefinementSegment> segment;
+};
+
+}  // namespace
+
+TEST(NgramExpressionTest, InnerMatchSkipsOnlyExactCandidateRefinement) {
+    NgramPhase2Fixture fixture;
+    fixture.Expect(fixture.Unary("ab"), {0, 1, 4, 5, 6});
+    EXPECT_EQ(fixture.segment->raw_view_reads, 0);
+    fixture.Expect(fixture.Unary("中文"), {2, 3, 6});
+    EXPECT_EQ(fixture.segment->raw_view_reads, 0);
+    fixture.Expect(fixture.Unary("abcde"), {4});
+    EXPECT_GT(fixture.segment->raw_view_reads, 0);
+    fixture.segment->raw_view_reads = 0;
+    fixture.Expect(fixture.Unary("ab", proto::plan::PrefixMatch), {0, 4, 5, 6});
+    EXPECT_GT(fixture.segment->raw_view_reads, 0);
+}
+
+TEST(NgramExpressionTest, FusedInnerMatchesSkipExactCandidateRefinement) {
+    NgramPhase2Fixture fixture;
+    auto fused = std::make_shared<exec::PhyConjunctFilterExpr>(
+        std::vector<exec::ExprPtr>{fixture.Unary("ab"), fixture.Unary("中文")},
+        true,
+        nullptr);
+    fused->SetLikeIndices({0, 1});
+    fused->Reorder({0, 1, 2});
+    fixture.Expect(fused, {6}, true);
+    ASSERT_EQ(fused->GetInputsRef().size(), 3);
+    EXPECT_NE(std::dynamic_pointer_cast<exec::PhyLikeConjunctExpr>(
+                  fused->GetInputsRef().back()),
+              nullptr);
+    EXPECT_EQ(fixture.segment->raw_view_reads, 0);
 }

@@ -18,7 +18,9 @@
 
 namespace milvus {
 class Chunk;
+enum class TakePinPolicy;
 namespace detail {
+template <bool HasCandidateMask, TakePinPolicy PinPolicy>
 class RawTakeResult;
 }
 
@@ -189,6 +191,7 @@ class TakeContext final {
     // Raw preparation already proves exact unique misses. It can reuse the
     // same publication core when no metadata callback published meanwhile;
     // all other callers keep the checked public entry above.
+    template <bool HasCandidateMask, TakePinPolicy PinPolicy>
     friend class detail::RawTakeResult;
 
     struct Entry;

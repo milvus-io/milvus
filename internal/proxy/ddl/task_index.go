@@ -57,8 +57,8 @@ const (
 )
 
 // mapVectorMetricToEmbListMetric maps element-level vector metrics to EmbList-level metrics for ArrayOfVector.
-// Autoindex configs use element-level metrics (e.g., IP, L2, COSINE), but ArrayOfVector fields
-// require EmbList metrics (e.g., MaxSimIP, MaxSimL2, MaxSimCosine).
+// Autoindex configs use element-level metrics (e.g., IP, L2, COSINE), while
+// non-element-nullable ArrayOfVector defaults to EmbList metrics.
 func mapVectorMetricToEmbListMetric(metricType string) string {
 	switch strings.ToUpper(metricType) {
 	case strings.ToUpper(metric.COSINE):
@@ -307,9 +307,9 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 				// make the users' metric type first class citizen.
 				indexParamsMap[common.MetricTypeKey] = metricType
 				cit.userAutoIndexMetricTypeSpecified = true
-			} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
+			} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && !cit.fieldSchema.GetElementNullable() {
 				// When user does not specify metric, autoindex config provides element-level metrics.
-				// Map them to EmbList metrics since ArrayOfVector requires EmbList metrics.
+				// Map them to EmbList metrics for non-element-nullable ArrayOfVector.
 				if m, ok := indexParamsMap[common.MetricTypeKey]; ok {
 					indexParamsMap[common.MetricTypeKey] = mapVectorMetricToEmbListMetric(m)
 				}
@@ -391,8 +391,8 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 					return err
 				}
 			}
-			// When user does not specify metric, map autoindex config's element-level metrics to EmbList
-			if !metricTypeExist && typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
+			// For non-element-nullable ArrayOfVector, map autoindex's default element metric to EmbList.
+			if !metricTypeExist && typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) && !cit.fieldSchema.GetElementNullable() {
 				if m, ok := indexParamsMap[common.MetricTypeKey]; ok {
 					indexParamsMap[common.MetricTypeKey] = mapVectorMetricToEmbListMetric(m)
 				}
@@ -464,7 +464,7 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "int vector index does not support metric type: "+metricType)
 			}
 		} else if typeutil.IsArrayOfVectorType(cit.fieldSchema.DataType) {
-			if err := indexparamcheck.ValidateArrayOfVectorMetricType(cit.fieldSchema.ElementType, metricType); err != nil {
+			if err := indexparamcheck.ValidateArrayOfVectorMetricType(cit.fieldSchema.ElementType, cit.fieldSchema.GetElementNullable(), metricType); err != nil {
 				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", err.Error())
 			}
 		}

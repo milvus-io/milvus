@@ -255,6 +255,37 @@ func (s *SearchOptionSuite) TestWithNamespace() {
 	s.Equal(namespace, hybridReq.GetNamespace())
 }
 
+func (s *SearchOptionSuite) TestWithRLSContext() {
+	const principal = "alice"
+	vector := entity.FloatVector([]float32{0.1, 0.2})
+
+	searchReq, err := NewSearchOption("collection", 10, []entity.Vector{vector}).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(principal, searchReq.GetRlsPrincipal())
+	s.True(searchReq.GetSkipRls())
+
+	hybridReq, err := NewHybridSearchOption("collection", 10, NewAnnRequest("vector", 10, vector)).
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		HybridRequest()
+	s.Require().NoError(err)
+	s.Equal(principal, hybridReq.GetRlsPrincipal())
+	s.True(hybridReq.GetSkipRls())
+	s.Empty(hybridReq.GetRequests()[0].GetRlsPrincipal())
+	s.False(hybridReq.GetRequests()[0].GetSkipRls())
+
+	queryReq, err := NewQueryOption("collection").
+		WithRLSPrincipal(principal).
+		WithSkipRLS(true).
+		Request()
+	s.Require().NoError(err)
+	s.Equal(principal, queryReq.GetRlsPrincipal())
+	s.True(queryReq.GetSkipRls())
+}
+
 func (s *SearchOptionSuite) TestQueryOrderByFields() {
 	collName := "query_order_by"
 

@@ -252,6 +252,9 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			WithLastConfirmed(appendResult.LastConfirmedMessageID).
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
+		// Backup can explicitly replicate this response copy to align secondary
+		// positions. The broadcast persisted in the local WAL remains unreplicable.
+		message.RemoveUnreplicable(flushAllMsgs[pchannel])
 	}
 	mlog.Info(ctx, "FlushAll successfully", mlog.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
@@ -846,6 +849,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					PartitionID:     segment.GetPartitionID(),
 					ManifestVersion: manifestVersion,
 					RowNum:          rowNum,
+					Size:            req.GetStats().GetInsertBinlogSize(),
 				}},
 			})
 			if err != nil {
@@ -1926,6 +1930,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if externalSourceChanged(oldSchema, req.GetSchema()) {
 		notifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
 	}
+	// An added field may need text or JSON key stats on existing segments, and a
+	// published external source/spec makes refreshed segments ready for them.
+	notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
 	return merr.Success(), nil
 }
 
@@ -2037,6 +2044,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	resp := &internalpb.ImportResponse{
 		Status: merr.Success(),
+	}
+	if err := importutilv2.ValidateImportSchema(in.GetSchema()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
 	}
 
 	mlog.Info(ctx, "receive import request from proxy",
@@ -2271,9 +2282,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	unsupportedSchemaErr := importutilv2.ValidateImportSchema(body.GetSchema())
 
 	isBackup := importutilv2.IsBackup(options)
-	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
+	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil && unsupportedSchemaErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2345,6 +2357,10 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		// context as a terminal job instead of retrying or omitting deletes.
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
 		UpdateJobReason(sourceErr.Error())(job)
+	}
+	if unsupportedSchemaErr != nil {
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(unsupportedSchemaErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

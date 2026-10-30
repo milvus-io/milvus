@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include "folly/ScopeGuard.h"
+#include "folly/Try.h"
 
 #include <cstring>
 #include <exception>
@@ -63,18 +64,22 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
     storage::MemFileManagerImpl manager(context);
     const bool is_index_file =
         storage_namespace == storage::ArtifactStorageNamespace::Index;
-    std::shared_ptr<InputStream> input;
+    folly::Try<std::shared_ptr<InputStream>> opened;
     if (use_async_load) {
         auto metadata_lease =
             co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
         storage::ThrowIfCancelled(token, "open packed index metadata");
-        input = co_await folly::coro::co_withCancellation(
-            folly::CancellationToken{},
-            manager.OpenInputStreamAsync(files.front(), is_index_file));
+        opened =
+            co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
+                folly::CancellationToken{},
+                manager.OpenInputStreamAsync(files.front(), is_index_file)));
     } else {
-        input = manager.OpenInputStream(files.front(), is_index_file);
+        opened = folly::makeTryWith([&] {
+            return manager.OpenInputStream(files.front(), is_index_file);
+        });
     }
     storage::ThrowIfCancelled(token, "open packed index metadata");
+    auto input = std::move(opened).value();
     AssertInfo(input != nullptr, "Failed to open packed scalar index");
     if (!use_async_load) {
         co_return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
@@ -118,11 +123,10 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
 
 folly::coro::Task<IIndexReaderBasePtr>
 RunPackedIndexLoad(PackedIndexSource& source,
-                   const storage::LoadOptions& fixed_options,
+                   storage::LoadOptions options,
                    PackedPlanFn make_plan,
                    PackedFinishFn finish,
                    milvus::OpContext* context) {
-    auto options = fixed_options;
     options.op_ctx = context;
     const auto priority =
         context && context->runtime_load_priority.value_or(0) != 0

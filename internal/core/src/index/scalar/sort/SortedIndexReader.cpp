@@ -86,10 +86,14 @@ struct PackedDescriptor {
     size_t string_data{0};
     size_t posting_offsets{0};
     size_t posting_data{0};
+    size_t payload_end{0};
 };
 
+// Locate the packed sections with a constant number of reads. Persisted
+// offsets and payload contents are trusted; accessors check local byte bounds
+// when queries or auxiliary rebuilding actually consume an entry.
 PackedDescriptor
-ValidatePacked(const uint8_t* data, size_t size, size_t total_num_rows) {
+ParsePacked(const uint8_t* data, size_t size) {
     constexpr size_t kMinimum = sizeof(uint32_t) + sizeof(uint64_t);
     if (data == nullptr || size < kMinimum) {
         ThrowInfo(
@@ -103,6 +107,7 @@ ValidatePacked(const uint8_t* data, size_t size, size_t total_num_rows) {
     }
 
     PackedDescriptor result;
+    result.payload_end = magic_offset;
     result.unique_count = ReadUint32(data);
     if (result.unique_count >
         static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
@@ -116,76 +121,46 @@ ValidatePacked(const uint8_t* data, size_t size, size_t total_num_rows) {
     RequireBytes(
         result.string_offsets, offsets_bytes, magic_offset, "string offsets");
     result.string_data = result.string_offsets + offsets_bytes;
-
-    size_t cursor = result.string_data;
-    std::string_view previous;
-    bool first = true;
-    for (uint32_t i = 0; i < result.unique_count; ++i) {
-        const auto relative =
-            ReadUint32(data + result.string_offsets + i * sizeof(uint32_t));
-        if (relative != cursor - result.string_data) {
+    if (result.unique_count == 0) {
+        if (result.string_data != magic_offset) {
             ThrowInfo(DataFormatBroken,
-                      "invalid sorted string offset {} at value {}",
-                      relative,
-                      i);
+                      "sorted empty string payload has trailing bytes");
         }
-        RequireBytes(cursor, sizeof(uint32_t), magic_offset, "value length");
-        const auto length = ReadUint32(data + cursor);
-        cursor += sizeof(uint32_t);
-        RequireBytes(cursor, length, magic_offset, "value bytes");
-        const std::string_view value(
-            reinterpret_cast<const char*>(data + cursor), length);
-        if (!first && !(previous < value)) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted string values are not strictly ordered");
-        }
-        previous = value;
-        first = false;
-        cursor += length;
+        result.posting_offsets = result.string_data;
+        result.posting_data = result.string_data;
+        return result;
     }
 
-    result.posting_offsets = cursor;
+    const auto last_string = ReadUint32(data + result.string_offsets +
+                                        offsets_bytes - sizeof(uint32_t));
+    RequireBytes(
+        result.string_data, last_string, magic_offset, "last value offset");
+    const auto last_length_at = result.string_data + last_string;
+    RequireBytes(
+        last_length_at, sizeof(uint32_t), magic_offset, "last value length");
+    const auto last_length = ReadUint32(data + last_length_at);
+    const auto last_value_at = last_length_at + sizeof(uint32_t);
+    RequireBytes(last_value_at, last_length, magic_offset, "last value bytes");
+    result.posting_offsets = last_value_at + last_length;
     RequireBytes(
         result.posting_offsets, offsets_bytes, magic_offset, "posting offsets");
     result.posting_data = result.posting_offsets + offsets_bytes;
-    cursor = result.posting_data;
-    for (uint32_t i = 0; i < result.unique_count; ++i) {
-        const auto relative =
-            ReadUint32(data + result.posting_offsets + i * sizeof(uint32_t));
-        if (relative != cursor - result.posting_data) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid sorted posting offset {} at value {}",
-                      relative,
-                      i);
-        }
-        RequireBytes(cursor, sizeof(uint32_t), magic_offset, "posting length");
-        const auto count = ReadUint32(data + cursor);
-        cursor += sizeof(uint32_t);
-        const auto bytes =
-            CheckedBytes(count, sizeof(uint32_t), "posting rows");
-        RequireBytes(cursor, bytes, magic_offset, "posting rows");
-        uint32_t previous_row = 0;
-        for (uint32_t j = 0; j < count; ++j) {
-            const auto row = ReadUint32(data + cursor + j * sizeof(uint32_t));
-            if (static_cast<size_t>(row) >= total_num_rows) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string row {} exceeds count {}",
-                          row,
-                          total_num_rows);
-            }
-            if (j != 0 && row < previous_row) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string posting rows are not ordered");
-            }
-            previous_row = row;
-        }
-        cursor += bytes;
-    }
-    if (cursor != magic_offset) {
+
+    const auto last_posting = ReadUint32(data + result.posting_offsets +
+                                         offsets_bytes - sizeof(uint32_t));
+    RequireBytes(
+        result.posting_data, last_posting, magic_offset, "last posting offset");
+    const auto last_count_at = result.posting_data + last_posting;
+    RequireBytes(
+        last_count_at, sizeof(uint32_t), magic_offset, "last posting length");
+    const auto last_rows_at = last_count_at + sizeof(uint32_t);
+    const auto last_bytes = CheckedBytes(ReadUint32(data + last_count_at),
+                                         sizeof(uint32_t),
+                                         "last posting rows");
+    RequireBytes(last_rows_at, last_bytes, magic_offset, "last posting rows");
+    if (last_rows_at + last_bytes != magic_offset) {
         ThrowInfo(DataFormatBroken,
-                  "sorted string payload has {} bytes outside its sections",
-                  magic_offset > cursor ? magic_offset - cursor
-                                        : cursor - magic_offset);
+                  "sorted string payload has bytes outside its sections");
     }
     return result;
 }
@@ -193,7 +168,7 @@ ValidatePacked(const uint8_t* data, size_t size, size_t total_num_rows) {
 class HeapStringLayout final : public SortedStringLayout {
  public:
     HeapStringLayout(std::vector<std::string> values,
-                     std::vector<std::vector<uint32_t>> postings,
+                     std::vector<SortedStringPostingList> postings,
                      size_t total_num_rows)
         : values_(std::move(values)), postings_(std::move(postings)) {
         if (values_.size() != postings_.size() ||
@@ -245,14 +220,16 @@ class HeapStringLayout final : public SortedStringLayout {
     int64_t
     MemoryUsage() const override {
         size_t total = values_.capacity() * sizeof(std::string) +
-                       postings_.capacity() * sizeof(std::vector<uint32_t>);
+                       postings_.capacity() * sizeof(SortedStringPostingList);
         for (const auto& value : values_) {
             if (value.capacity() > StringSsoThreshold()) {
                 total += value.capacity() + 1;
             }
         }
         for (const auto& posting : postings_) {
-            total += posting.capacity() * sizeof(uint32_t);
+            if (posting.capacity() > kSortedStringPostingInlineCapacity) {
+                total += posting.capacity() * sizeof(uint32_t);
+            }
         }
         return ToInt64(total);
     }
@@ -264,7 +241,7 @@ class HeapStringLayout final : public SortedStringLayout {
 
  private:
     std::vector<std::string> values_;
-    std::vector<std::vector<uint32_t>> postings_;
+    std::vector<SortedStringPostingList> postings_;
 };
 
 class PackedStringLayout final : public SortedStringLayout {
@@ -273,13 +250,12 @@ class PackedStringLayout final : public SortedStringLayout {
                        const uint8_t* data,
                        size_t size,
                        size_t memory_bytes,
-                       size_t file_bytes,
-                       size_t total_num_rows)
+                       size_t file_bytes)
         : owner_(std::move(owner)),
           data_(data),
           memory_bytes_(memory_bytes),
           file_bytes_(file_bytes),
-          descriptor_(ValidatePacked(data, size, total_num_rows)) {
+          descriptor_(ParsePacked(data, size)) {
     }
 
     size_t
@@ -294,8 +270,20 @@ class PackedStringLayout final : public SortedStringLayout {
                    index);
         const auto relative = ReadUint32(data_ + descriptor_.string_offsets +
                                          index * sizeof(uint32_t));
+        RequireBytes(descriptor_.string_data,
+                     relative,
+                     descriptor_.posting_offsets,
+                     "value offset");
         const auto offset = descriptor_.string_data + relative;
+        RequireBytes(offset,
+                     sizeof(uint32_t),
+                     descriptor_.posting_offsets,
+                     "value length");
         const auto length = ReadUint32(data_ + offset);
+        RequireBytes(offset + sizeof(uint32_t),
+                     length,
+                     descriptor_.posting_offsets,
+                     "value bytes");
         return {
             reinterpret_cast<const char*>(data_ + offset + sizeof(uint32_t)),
             length};
@@ -308,8 +296,20 @@ class PackedStringLayout final : public SortedStringLayout {
                    index);
         const auto relative = ReadUint32(data_ + descriptor_.posting_offsets +
                                          index * sizeof(uint32_t));
+        RequireBytes(descriptor_.posting_data,
+                     relative,
+                     descriptor_.payload_end,
+                     "posting offset");
         const auto offset = descriptor_.posting_data + relative;
+        RequireBytes(offset,
+                     sizeof(uint32_t),
+                     descriptor_.payload_end,
+                     "posting length");
         const auto count = ReadUint32(data_ + offset);
+        RequireBytes(offset + sizeof(uint32_t),
+                     CheckedBytes(count, sizeof(uint32_t), "posting rows"),
+                     descriptor_.payload_end,
+                     "posting rows");
         return {data_ + offset + sizeof(uint32_t), count};
     }
 
@@ -377,6 +377,15 @@ PrefixRange(const SortedStringLayout& layout, std::string_view prefix) {
         }
     }
     return {start, layout.UniqueCount()};
+}
+
+void
+SetNumericRow(TargetBitmap& result, size_t row, bool value) {
+    AssertInfo(row < result.size(),
+               "sorted numeric row {} exceeds count {}",
+               row,
+               result.size());
+    result[row] = value;
 }
 
 void
@@ -472,34 +481,24 @@ SortedStringLayout::BuildOffsets(size_t total_num_rows) const {
 
 std::shared_ptr<const SortedStringLayout>
 SortedStringLayout::FromHeap(std::vector<std::string> unique_values,
-                             std::vector<std::vector<uint32_t>> posting_lists,
+                             std::vector<SortedStringPostingList> posting_lists,
                              size_t total_num_rows) {
     return std::make_shared<HeapStringLayout>(
         std::move(unique_values), std::move(posting_lists), total_num_rows);
 }
 
 std::shared_ptr<const SortedStringLayout>
-SortedStringLayout::FromPackedHeap(std::vector<uint8_t> packed,
-                                   size_t total_num_rows) {
+SortedStringLayout::FromPackedHeap(std::vector<uint8_t> packed) {
     auto owner = std::make_shared<std::vector<uint8_t>>(std::move(packed));
-    return std::make_shared<PackedStringLayout>(owner,
-                                                owner->data(),
-                                                owner->size(),
-                                                owner->capacity(),
-                                                0,
-                                                total_num_rows);
+    return std::make_shared<PackedStringLayout>(
+        owner, owner->data(), owner->size(), owner->capacity(), 0);
 }
 
 std::shared_ptr<const SortedStringLayout>
-SortedStringLayout::FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner,
-                                   size_t total_num_rows) {
+SortedStringLayout::FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner) {
     AssertInfo(owner != nullptr, "sorted string mmap owner must not be null");
-    return std::make_shared<PackedStringLayout>(owner,
-                                                owner->Data(),
-                                                owner->LogicalSize(),
-                                                0,
-                                                owner->MappedSize(),
-                                                total_num_rows);
+    return std::make_shared<PackedStringLayout>(
+        owner, owner->Data(), owner->LogicalSize(), 0, owner->MappedSize());
 }
 
 namespace sorted_reader_detail {
@@ -522,7 +521,7 @@ SortedStorageView<T>::ApplyMembership(TargetBitmap& result,
     }
     detail::VisitSortedMatches(
         data_.data, data_.data + data_.size, n, values, [&](size_t offset) {
-            result[offset] = match;
+            SetNumericRow(result, offset, match);
         });
 }
 
@@ -536,7 +535,7 @@ SortedStorageView<T>::SetEqual(TargetBitmap& result, const T& value) const {
     const auto* end = begin + data_.size;
     const auto range = std::equal_range(begin, end, IndexStructure<T>(value));
     for (auto it = range.first; it != range.second; ++it) {
-        result.set(static_cast<size_t>(it->idx_));
+        SetNumericRow(result, static_cast<size_t>(it->idx_), true);
     }
 }
 
@@ -550,7 +549,7 @@ SortedStorageView<T>::ClearEqual(TargetBitmap& result, const T& value) const {
     const auto* end = begin + data_.size;
     const auto range = std::equal_range(begin, end, IndexStructure<T>(value));
     for (auto it = range.first; it != range.second; ++it) {
-        result.reset(static_cast<size_t>(it->idx_));
+        SetNumericRow(result, static_cast<size_t>(it->idx_), false);
     }
 }
 
@@ -600,14 +599,14 @@ SortedStorageView<T>::Range(size_t count,
     if (value_lookup && static_cast<size_t>(last - first) > count / 2) {
         result = validity.clone();
         for (auto it = begin; it != first; ++it) {
-            result.reset(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), false);
         }
         for (auto it = last; it != end; ++it) {
-            result.reset(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), false);
         }
     } else {
         for (auto it = first; it != last; ++it) {
-            result.set(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), true);
         }
     }
     return result;
@@ -638,14 +637,14 @@ SortedStorageView<T>::Range(size_t count,
     if (value_lookup && static_cast<size_t>(last - first) > count / 2) {
         result = validity.clone();
         for (auto it = begin; it != first; ++it) {
-            result.reset(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), false);
         }
         for (auto it = last; it != end; ++it) {
-            result.reset(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), false);
         }
     } else {
         for (auto it = first; it != last; ++it) {
-            result.set(static_cast<size_t>(it->idx_));
+            SetNumericRow(result, static_cast<size_t>(it->idx_), true);
         }
     }
     return result;
@@ -974,8 +973,10 @@ SortedStorageView<std::string_view>::ApplyMembership(
         [&](size_t i) { return layout_->Value(i); },
         [&](size_t i) {
             const auto posting = layout_->Posting(i);
-            for (size_t j = 0; j < posting.size; ++j) {
-                result[posting.At(j)] = match;
+            if (match) {
+                SetPosting(result, posting);
+            } else {
+                ClearPosting(result, posting);
             }
         });
 }

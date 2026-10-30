@@ -35,7 +35,7 @@ func TestCommitBodyCount(t *testing.T) {
 			s.RegisterCleanup(func() { cleaned = true }, 1)
 			for i := 0; i < tc.actual; i++ {
 				require.NoError(t, s.AddNewMessage(context.Background(), 2))
-				s.AddNewMessageDoneAndKeepalive(2)
+				s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
 			}
 			// An admitted but failed append is not a logical body.
 			require.NoError(t, s.AddNewMessage(context.Background(), 3))
@@ -70,7 +70,7 @@ func TestCommitBodyCountWaitsForInflight(t *testing.T) {
 		t.Fatalf("Commit returned before body completion: %v", err)
 	default:
 	}
-	s.AddNewMessageDoneAndKeepalive(2)
+	s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
 	require.NoError(t, <-done)
 	s.CommitDone()
 }
@@ -86,7 +86,7 @@ func TestRecoveredSessionBodyCount(t *testing.T) {
 	s, err := m.GetSessionOfTxn(1)
 	require.NoError(t, err)
 	require.NoError(t, s.AddNewMessage(context.Background(), 3))
-	s.AddNewMessageDoneAndKeepalive(3)
+	s.AddNewMessageDoneAndKeepalive(3, message.MessageTypeInsert)
 	require.NoError(t, s.RequestCommitAndWait(context.Background(), 4, 2), "count includes recovered and newly appended bodies")
 	s.CommitDone()
 	m.CleanupTxnUntil(5)
@@ -94,5 +94,31 @@ func TestRecoveredSessionBodyCount(t *testing.T) {
 	case <-m.RecoverDone():
 	default:
 		t.Fatal("completed recovered txn must release the recovery barrier")
+	}
+}
+
+func TestCommitClassificationWaitsForInflightBody(t *testing.T) {
+	for _, typ := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete} {
+		t.Run(typ.String(), func(t *testing.T) {
+			metrics := metricsutil.NewTxnMetrics("classification-inflight")
+			defer metrics.Close()
+			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+			defer session.Cleanup()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			require.NoError(t, session.AddNewMessage(ctx, 11))
+			done := make(chan error, 1)
+			go func() { done <- session.RequestCommitAndWait(ctx, 12, 1) }()
+			require.Eventually(t, func() bool { return session.State() == message.TxnStateOnCommit }, time.Second, time.Millisecond)
+			select {
+			case err := <-done:
+				t.Fatalf("commit completed before body classification: %v", err)
+			default:
+			}
+			session.AddNewMessageDoneAndKeepalive(11, typ)
+			require.NoError(t, <-done)
+			require.Equal(t, typ == message.MessageTypeInsert, session.IsInsertOnly())
+			session.CommitDone()
+		})
 	}
 }

@@ -333,7 +333,7 @@ ReduceHelper::TruncateSearchResultForOneNQ(int64_t qi, int64_t topk) {
 
         bool
         operator<(const Cursor& rhs) const {
-            if (std::fabs(distance_ - rhs.distance_) >= EPSILON) {
+            if (distance_ != rhs.distance_) {
                 return distance_ < rhs.distance_;
             }
             return segment_index_ > rhs.segment_index_;

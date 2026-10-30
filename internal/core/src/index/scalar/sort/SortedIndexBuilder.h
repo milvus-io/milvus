@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -29,6 +30,7 @@
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/scalar/sort/IndexStructure.h"
+#include "index/scalar/sort/SortedStringPostingList.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::index {
@@ -71,7 +73,7 @@ class SortedStringIndexBuilder final
  private:
     SortedBuildParams params_;
 
-    std::map<std::string, std::vector<uint32_t>> postings_;
+    std::map<std::string, SortedStringPostingList, std::less<>> postings_;
     TargetBitmap validity_;
     size_t total_num_rows_{0};
 };

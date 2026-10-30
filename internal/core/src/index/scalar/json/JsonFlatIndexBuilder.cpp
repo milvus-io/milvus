@@ -232,16 +232,6 @@ JsonFlatIndexBuilder::AddBatch(
     const auto n = batch.values.size();
     CheckAppend(count_, n);
 
-    if (batch.validity) {
-        size_t invalid = 0;
-        for (size_t i = 0; i < n; ++i) {
-            invalid += batch.validity[i] ? 0 : 1;
-        }
-        AssertInfo(invalid <= null_offsets_.max_size() - null_offsets_.size(),
-                   "JSON flat null-offset count exceeds vector capacity");
-        null_offsets_.reserve(null_offsets_.size() + invalid);
-    }
-
     simdjson::padded_string document_scratch(256);
     simdjson::padded_string nested_scratch(256);
     for (size_t i = 0; i < n; ++i) {
@@ -312,6 +302,19 @@ JsonFlatIndexBuilder::AddBatch(
 storage::ArtifactPtr
 JsonFlatIndexBuilder::Build(
     const ScalarBuildInput<std::string_view>& input) && {
+    size_t total_nulls = 0;
+    for (const auto& batch : input.batches) {
+        size_t invalid = 0;
+        if (batch.validity) {
+            for (size_t i = 0; i < batch.values.size(); ++i) {
+                invalid += batch.validity[i] ? 0 : 1;
+            }
+        }
+        AssertInfo(invalid <= null_offsets_.max_size() - total_nulls,
+                   "JSON flat null-offset count exceeds vector capacity");
+        total_nulls += invalid;
+    }
+    null_offsets_.reserve(total_nulls);
     for (const auto& batch : input.batches) {
         AddBatch(batch);
     }

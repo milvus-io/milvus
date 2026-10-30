@@ -85,13 +85,17 @@ knowhere	internal/core/src/storage/artifact/FileSink.cpp
 knowhere	internal/core/src/storage/DiskFileManagerImpl.cpp
 knowhere	internal/core/src/storage/Event.cpp
 knowhere	internal/core/src/storage/Util.cpp
+arrow	internal/core/src/common/ArrayValue.h
 arrow	internal/core/src/common/ArrowDataWrapper.h
 arrow	internal/core/src/common/ChunkWriter.cpp
 arrow	internal/core/src/common/ChunkWriter.h
 arrow	internal/core/src/common/ColumnarArrayChunkBuilder.cpp
+arrow	internal/core/src/common/ColumnarArrayChunkBuilder.h
 arrow	internal/core/src/common/FieldData.cpp
 arrow	internal/core/src/common/FieldData.h
 arrow	internal/core/src/common/FieldDataInterface.h
+arrow	internal/core/src/common/FieldMeta.cpp
+arrow	internal/core/src/common/FieldMeta.h
 arrow	internal/core/src/common/init_c.cpp
 arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
@@ -197,6 +201,7 @@ milvus_storage	internal/core/src/segcore/TextColumnCache.cpp
 milvus_storage	internal/core/src/segcore/TextColumnCache.h
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.h
+milvus_storage	internal/core/src/storage/ChunkManager.cpp
 milvus_storage	internal/core/src/storage/FileManager.h
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.cpp
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h

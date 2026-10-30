@@ -12,6 +12,7 @@
 #pragma once
 
 #include <limits>
+#include <memory>
 #include <string>
 
 #include <utility>
@@ -20,6 +21,8 @@
 #include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FastMem.h"
 #include "common/OffsetMapping.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
@@ -28,6 +31,49 @@
 #include "knowhere/array_store.h"
 
 namespace milvus::query {
+
+struct FlattenedVectorArrayRows {
+    std::unique_ptr<uint8_t[]> payload;
+    int64_t element_count{0};
+    std::vector<size_t> row_offsets;
+};
+
+// Both growing storage modes expose one row object per chunk slot. Flatten
+// their compact payloads for Knowhere, optionally retaining row boundaries
+// for embedding-list search.
+template <typename Row>
+FlattenedVectorArrayRows
+FlattenVectorArrayRows(const Row* rows,
+                       int64_t row_count,
+                       bool include_row_offsets) {
+    AssertInfo(row_count >= 0 && (row_count == 0 || rows != nullptr),
+               "invalid VECTOR_ARRAY row range");
+    size_t payload_bytes = 0;
+    for (int64_t i = 0; i < row_count; ++i) {
+        payload_bytes += rows[i].byte_size();
+    }
+
+    FlattenedVectorArrayRows result;
+    result.payload = std::make_unique<uint8_t[]>(payload_bytes);
+    if (include_row_offsets) {
+        result.row_offsets.reserve(row_count + 1);
+        result.row_offsets.push_back(0);
+    }
+    auto* dst = result.payload.get();
+    for (int64_t i = 0; i < row_count; ++i) {
+        const auto row_bytes = rows[i].byte_size();
+        if (row_bytes > 0) {
+            milvus::fastmem::FastMemcpy(dst, rows[i].data(), row_bytes);
+            dst += row_bytes;
+        }
+        result.element_count += rows[i].physical_length();
+        if (include_row_offsets) {
+            result.row_offsets.push_back(result.element_count);
+        }
+    }
+    return result;
+}
+
 inline bool
 CanUseStrictGroupControls(const SearchInfo& info, int64_t nq) {
     return info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&

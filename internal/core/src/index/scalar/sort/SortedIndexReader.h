@@ -33,6 +33,7 @@
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "index/scalar/sort/IndexStructure.h"
+#include "index/scalar/sort/SortedStringPostingList.h"
 
 // Numeric and string indexes share one public reader. Their distinct persisted
 // layouts and search algorithms remain private typed storage views.
@@ -105,15 +106,14 @@ class SortedStringLayout {
 
     static std::shared_ptr<const SortedStringLayout>
     FromHeap(std::vector<std::string> unique_values,
-             std::vector<std::vector<uint32_t>> posting_lists,
+             std::vector<SortedStringPostingList> posting_lists,
              size_t total_num_rows);
 
     static std::shared_ptr<const SortedStringLayout>
-    FromPackedHeap(std::vector<uint8_t> packed, size_t total_num_rows);
+    FromPackedHeap(std::vector<uint8_t> packed);
 
     static std::shared_ptr<const SortedStringLayout>
-    FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner,
-                   size_t total_num_rows);
+    FromPackedMmap(std::shared_ptr<SortedMmapOwner> owner);
 };
 
 namespace sorted_reader_detail {

@@ -38,6 +38,26 @@ namespace {
 
 using inverted_params::IsSupportedType;
 
+template <typename T>
+size_t
+CountNullOffsets(const ScalarBuildInput<T>& input, size_t max_count) {
+    size_t total = 0;
+    for (const auto& batch : input.batches) {
+        size_t invalid = 0;
+        if (batch.validity) {
+            for (size_t i = 0; i < batch.values.size(); ++i) {
+                invalid += batch.validity[i] ? 0 : 1;
+            }
+        }
+        if (invalid > max_count - total) {
+            ThrowInfo(DataTypeInvalid,
+                      "inverted null-offset count exceeds vector capacity");
+        }
+        total += invalid;
+    }
+    return total;
+}
+
 bool
 ParseNested(const Config& params, bool fallback = false) {
     return ReadNestedConfigParam(params, "inverted").value_or(fallback);
@@ -451,18 +471,6 @@ InvertedIndexBuilder<T>::AddBatch(const ScalarBuildBatch<T>& batch) {
         }
     }
     CheckAppend(count_, n);
-    if (!params_.nested && batch.validity) {
-        size_t invalid = 0;
-        for (size_t i = 0; i < n; ++i) {
-            invalid += batch.validity[i] ? 0 : 1;
-        }
-        if (invalid > null_offsets_.max_size() - null_offsets_.size()) {
-            ThrowInfo(DataTypeInvalid,
-                      "inverted null-offset count exceeds vector capacity");
-        }
-        null_offsets_.reserve(null_offsets_.size() + invalid);
-    }
-
     if (params_.nested || !batch.validity) {
         AddContiguous(
             *engine_, batch.values.data(), n, count_, params_.single_segment);
@@ -502,6 +510,10 @@ InvertedIndexBuilder<T>::AddBatch(const ScalarBuildBatch<T>& batch) {
 template <typename T>
 storage::ArtifactPtr
 InvertedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
+    if (!params_.nested) {
+        null_offsets_.reserve(
+            CountNullOffsets(input, null_offsets_.max_size()));
+    }
     for (const auto& batch : input.batches) {
         AddBatch(batch);
     }
@@ -543,18 +555,6 @@ InvertedArrayIndexBuilder::AddBatch(const ScalarBuildBatch<ArrayView>& batch) {
                       static_cast<int>(params_.value_type));
         }
     }
-    size_t invalid = 0;
-    if (batch.validity) {
-        for (size_t i = 0; i < n; ++i) {
-            invalid += batch.validity[i] ? 0 : 1;
-        }
-    }
-    if (invalid > null_offsets_.max_size() - null_offsets_.size()) {
-        ThrowInfo(DataTypeInvalid,
-                  "inverted null-offset count exceeds vector capacity");
-    }
-    null_offsets_.reserve(null_offsets_.size() + invalid);
-
     std::vector<std::string> string_scratch;
     for (size_t i = 0; i < n; ++i) {
         const auto offset = count_ + i;
@@ -576,6 +576,7 @@ InvertedArrayIndexBuilder::AddBatch(const ScalarBuildBatch<ArrayView>& batch) {
 
 storage::ArtifactPtr
 InvertedArrayIndexBuilder::Build(const ScalarBuildInput<ArrayView>& input) && {
+    null_offsets_.reserve(CountNullOffsets(input, null_offsets_.max_size()));
     for (const auto& batch : input.batches) {
         AddBatch(batch);
     }

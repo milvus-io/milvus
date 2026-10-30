@@ -202,6 +202,15 @@ struct CellLocation {
     int64_t cell_offset = 0;
 };
 
+enum class OffsetLookupStrategy { PerOffset, BatchBinary, Bucket };
+
+struct OffsetLookupOptions {
+    OffsetLookupStrategy strategy = OffsetLookupStrategy::PerOffset;
+    // Borrow the immutable V1 index rather than rebuilding/copying it per Take.
+    int64_t bucket_order = 0;
+    const std::vector<int64_t>* bucket_cells = nullptr;
+};
+
 // The single Cell-geometry authority for one Column generation. Column
 // backends use it for segment-offset-to-Cell conversion and Take planning;
 // physical Cell details never leave the Column read implementation.
@@ -209,8 +218,10 @@ class ColumnPlanner {
  public:
     // Production Columns borrow their immutable generation metadata. The
     // rvalue overload retains ownership for standalone planners and tests.
-    explicit ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell);
-    explicit ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell);
+    explicit ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell,
+                           OffsetLookupOptions lookup_options = {});
+    explicit ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell,
+                           OffsetLookupOptions lookup_options = {});
     virtual ~ColumnPlanner() = default;
 
     CellLocation
@@ -226,6 +237,11 @@ class ColumnPlanner {
                 int64_t first,
                 int64_t count,
                 CellLocation* output) const;
+    // Return Cell ids and Cell-local offsets in input order, preserving
+    // duplicates. Backends choose the lookup algorithm independently of pin
+    // policy; pin-set deduplication must not change this positional mapping.
+    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+    LocateBatch(OffsetView offsets) const;
 
     int64_t
     CellStart(int64_t cell_id) const;
@@ -251,6 +267,7 @@ class ColumnPlanner {
     // Proven once from immutable geometry, never inferred from an offset.
     // Zero retains the general mapping for irregular or empty interior Cells.
     int64_t uniform_cell_rows_{0};
+    OffsetLookupOptions lookup_options_;
 };
 
 struct ValueView {
@@ -322,14 +339,18 @@ struct TakeItemState {
 
 // Ordered positional access over one finite offset set. The input offsets must
 // outlive the result; callers do not manage backend Cell lifetimes.
+// A candidate mask selects which input positions belong to the request. Size()
+// preserves input indexing, but only selected positions may be read, including
+// in GetOwn() output. The immutable mask must also outlive the result.
 // Reader-backed results may already contain one dense owned value array. Raw
-// results pin only the Cell used by the current borrowed access; a borrowed
-// string/JSON/array view remains valid until the next access that switches
-// Cells, GetOwn(), or result destruction. Raw borrowed access and GetOwn() must
-// complete while the OpContext passed to Take() remains alive. TakeResult is
+// CurrentCell results pin only the Cell used by the current borrowed access;
+// a view remains valid until switching Cells, GetOwn(), or result destruction.
+// Batch results retain all requested pins until result destruction, including
+// across GetOwn(). Raw borrowed access and GetOwn() must complete while the
+// OpContext passed to Take() remains alive. TakeResult is
 // not thread-safe.
 // TODO(local-format): Phase 2 will guarantee borrowed values until result
-// destruction on every backend. Reconcile Raw's Cell-switch invalidation before
+// destruction on every backend. Reconcile CurrentCell invalidation before
 // promising that lifetime; escaping values require GetOwn and its retained owner.
 class TakeResult {
  public:
@@ -538,25 +559,40 @@ class TakeResult {
     template <typename T>
     TakeItem<T>
     GetUnchecked(int64_t index) const {
-        auto state = PrepareItem(index, /*read_data=*/true);
-        TakeItem<T> item{std::nullopt, state.is_valid, state.data_skipped};
-        if (!state.is_valid || state.data_skipped) {
-            return item;
-        }
+        TakeItemState state;
+        TakeItem<T> item;
+        const auto set_value = [&](auto&& value) {
+            if (state.is_valid && !state.data_skipped) {
+                if constexpr (std::is_pointer_v<
+                                  std::remove_reference_t<decltype(value)>>) {
+                    item.value.emplace(*static_cast<const T*>(value));
+                } else {
+                    item.value.emplace(std::forward<decltype(value)>(value));
+                }
+            }
+        };
         if constexpr (std::is_same_v<T, std::string_view>) {
-            item.value.emplace(StringViewAt(index));
+            set_value(StringViewAt(index, state));
         } else if constexpr (std::is_same_v<T, Json>) {
-            item.value.emplace(JsonAt(index));
+            set_value(JsonViewAt(index, state));
         } else if constexpr (std::is_same_v<T, ArrayView>) {
-            item.value.emplace(ArrayAt(index));
+            set_value(ArrayAt(index, state));
         } else if constexpr (std::is_same_v<T, ArrayValueView>) {
-            item.value.emplace(ArrayValueAt(index));
+            set_value(ArrayValueAt(index, state));
         } else if constexpr (std::is_same_v<T, VectorArrayView>) {
-            item.value.emplace(VectorArrayAt(index));
+            set_value(VectorArrayAt(index, state));
         } else {
-            item.value.emplace(*static_cast<const T*>(FixedValueAt(index)));
+            set_value(FixedValueAt(index, state));
         }
+        item.is_valid = state.is_valid;
+        item.data_skipped = state.data_skipped;
         return item;
+    }
+
+    bool
+    PrepareValue(int64_t index, TakeItemState& state) const {
+        state = PrepareItem(index, /*read_data=*/true);
+        return state.is_valid && !state.data_skipped;
     }
 
     void
@@ -571,29 +607,38 @@ class TakeResult {
     virtual TakeItemState
     PrepareItem(int64_t index, bool read_data) const = 0;
 
+    // Data reads fill state without accessing null or skipped payloads.
     virtual const void*
-    FixedValueAt(int64_t index) const = 0;
+    FixedValueAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual std::string_view
-    StringViewAt(int64_t index) const = 0;
+    StringViewAt(int64_t index, TakeItemState& state) const = 0;
 
-    virtual Json
-    JsonAt(int64_t index) const = 0;
+    virtual std::string_view
+    JsonViewAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual ArrayView
-    ArrayAt(int64_t index) const = 0;
+    ArrayAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual ArrayValueView
-    ArrayValueAt(int64_t) const {
+    ArrayValueAt(int64_t, TakeItemState&) const {
         ThrowInfo(ErrorCode::Unsupported,
                   "take result does not contain recursive ARRAY values");
     }
 
     virtual VectorArrayView
-    VectorArrayAt(int64_t) const {
+    VectorArrayAt(int64_t, TakeItemState&) const {
         ThrowInfo(ErrorCode::Unsupported,
                   "take result does not contain VECTOR_ARRAY values");
     }
+};
+
+enum class TakePinPolicy {
+    // Raw reuses the current Cell pin; Vortex pins each file's decode working set.
+    CurrentCell,
+    // Pin all requested source Cells before reading. Borrowed results retain
+    // pins until destruction; owned decoding may release them when complete.
+    Batch,
 };
 
 struct TakeOptions {
@@ -602,6 +647,9 @@ struct TakeOptions {
     // Backend-neutral filter binding. Physical Cell/file planning and skip
     // decisions remain inside the Column implementation.
     detail::ColumnFilterPtr filter;
+    // Preserve the upstream aggregate field order for existing Take callers.
+    TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
+    const TargetBitmap* candidate_mask = nullptr;
     // Optional worker-private state; omitted by existing callers. It retains
     // source owners within a bounded budget across otherwise independent Take
     // results, never row values or expression results.
@@ -710,6 +758,11 @@ class TakeBinding {
     }
 
     bool busy_{false};
+    // Source pin strategy; owned results are independent of source pins.
+    TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
+    // Borrow the executor's candidate selection; excluded positions require
+    // neither data nor validity. This is independent of the Cell data filter.
+    const TargetBitmap* candidate_mask = nullptr;
 };
 
 enum class ScanReadMode {

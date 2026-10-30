@@ -310,6 +310,12 @@ func TestValidateSchemaEvolutionNestedArrayTypeSchema(t *testing.T) {
 		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
 	})
 
+	t.Run("reject leaf nullability change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().GetArrayElement().Nullable = true
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
 	t.Run("reject removing nested capacity", func(t *testing.T) {
 		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
 		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().TypeParams = nil

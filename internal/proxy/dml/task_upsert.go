@@ -735,13 +735,19 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				return nil, merr.WrapErrServiceInternalMsg("PATH_REPLACE operand field %q disappeared after validation", existField.GetFieldName())
 			}
 
-			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
+			if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()); structSchema != nil {
 				if upsertField != nil {
 					if plan.isPathReplace() {
-						if err := validateExistingStructPathRows(existField, plan, existIndices); err != nil {
+						// The sub-fields and elements the path does not replace keep
+						// their old values, which must re-enter in insert layout.
+						keptField, err := compactRetrievedStructField(structSchema, existField)
+						if err != nil {
 							return nil, err
 						}
-						typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+						if err := validateExistingStructPathRows(keptField, plan, existIndices); err != nil {
+							return nil, err
+						}
+						typeutil.AppendFieldDataByColumn(dstField, keptField, existIndices)
 						dstIndices := make([]int64, len(updateIdxInUpsert))
 						for i := range dstIndices {
 							dstIndices[i] = int64(i)
@@ -755,7 +761,13 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 						typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 					}
 				} else {
-					typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+					// An omitted struct keeps its old value. Query returns it in
+					// read layout, and the merged rows are validated as insert input.
+					keptField, err := compactRetrievedStructField(structSchema, existField)
+					if err != nil {
+						return nil, err
+					}
+					typeutil.AppendFieldDataByColumn(dstField, keptField, existIndices)
 				}
 				continue
 			}

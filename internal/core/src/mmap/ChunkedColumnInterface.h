@@ -20,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <variant>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
@@ -62,6 +63,7 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     using TakeItem = milvus::TakeItem<T>;
     using TakeItemState = milvus::TakeItemState;
     using TakeOptions = milvus::TakeOptions;
+    using TakePinPolicy = milvus::TakePinPolicy;
     using TakeResult = milvus::TakeResult;
     using TakeResultPtr = milvus::TakeResultPtr;
 
@@ -400,19 +402,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                   "variable length type");
     }
 
-    // TODO(local-format): Replace this JSON-only adapter with Column.Take;
-    // use Get/Access for immediate reads and GetOwn for escaping results.
-    // Preserve legacy Raw behavior until migration; Vortex is a temporary bridge.
-    virtual void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "RawJsonAt only supported for ChunkColumnInterface of Json type");
-    }
-
     virtual void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -478,14 +467,16 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
 
  protected:
     using TakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+    using TakeCellRead = std::function<Chunk*(int64_t)>;
+    using TakeCellAccess = std::variant<TakeCellPin, TakeCellRead>;
 
-    // Return a generation-stable accessor used by the default Raw Take
-    // implementation to pin one Cell at a time after Take() returns. The
-    // accessor must own the cache resources it needs; it must not capture a
-    // bare column pointer. The caller keeps op_ctx alive until borrowed access
-    // and any GetOwn() materialization are complete.
-    virtual TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const {
+    // The Raw Take accessor owns its generation, never a bare Column pointer.
+    // Batch access borrows pointers from its retained pin set; CurrentCell
+    // returns an owning pin only on a Cell change. op_ctx outlives borrowed reads.
+    virtual TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const {
         return {};
     }
 
@@ -515,6 +506,10 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         return std::nullopt;
     }
 
+    virtual void
+    ValidateArrayViewTarget(TargetType target_type) const {
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
@@ -534,7 +529,11 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         valid_array_offsets_per_chunk_.assign(chunk_pws.size(), {});
         for (size_t i = 0; i < chunk_pws.size(); ++i) {
             auto chunk = static_cast<VectorArrayChunk*>(chunk_pws[i].get());
-            auto logical_offsets = chunk->Offsets();
+            // Offsets() is the physical vector prefix sum. Null elements do
+            // not occupy payload slots, including in element-nullable chunks.
+            // Search on those fields is rejected by SearchOnSealed/Growing;
+            // this path also serves ordinary nullable-row reads.
+            auto physical_offsets = chunk->Offsets();
             auto& valid_offsets = valid_array_offsets_per_chunk_[i];
             valid_offsets.reserve(valid_count_per_chunk_[i] + 1);
             valid_offsets.push_back(0);
@@ -545,7 +544,7 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                 if (!chunk->isValid(j)) {
                     continue;
                 }
-                total += logical_offsets[j + 1] - logical_offsets[j];
+                total += physical_offsets[j + 1] - physical_offsets[j];
                 valid_offsets.push_back(total);
             }
         }
