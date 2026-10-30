@@ -104,14 +104,15 @@ func (b *versionByteBudget) recordMissedWrite(missed bool) {
 
 // vchannelPKVersionIndex tracks recent PK writes on one vchannel.
 type vchannelPKVersionIndex struct {
-	mu                sync.Mutex
-	ttl               time.Duration
-	budget            *versionByteBudget
-	retainedSinceTS   uint64
-	lastMissedWriteTS uint64
-	int64Versions     map[int64]*versionEntry
-	stringVersions    map[string]*versionEntry
-	expirations       versionMinHeap
+	mu     sync.Mutex
+	ttl    time.Duration
+	budget *versionByteBudget
+	// forgottenWriteTS is the largest commit timestamp whose exact PK record
+	// was evicted or omitted. Reads at this timestamp already include that write.
+	forgottenWriteTS uint64
+	int64Versions    map[int64]*versionEntry
+	stringVersions   map[string]*versionEntry
+	expirations      versionMinHeap
 }
 
 type versionEntry struct {
@@ -221,8 +222,7 @@ func (idx *vchannelPKVersionIndex) clear() {
 	idx.int64Versions = make(map[int64]*versionEntry)
 	idx.stringVersions = make(map[string]*versionEntry)
 	idx.expirations = nil
-	idx.retainedSinceTS = 0
-	idx.lastMissedWriteTS = 0
+	idx.forgottenWriteTS = 0
 	idx.budget.release(releasedBytes)
 }
 
@@ -246,15 +246,13 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint6
 			heap.Fix(&idx.expirations, entry.index)
 			continue
 		}
-		if commitTS < idx.retainedSinceTS {
+		if commitTS < idx.forgottenWriteTS {
 			continue
 		}
 		if !idx.budget.tryReserve(estimatedVersionEntryFixedBytes) {
-			// Once a committed write is omitted, exact conflict detection is
-			// incomplete until that write leaves every valid read window.
-			if commitTS > idx.lastMissedWriteTS {
-				idx.lastMissedWriteTS = commitTS
-			}
+			// The write is absent from the exact index. Only snapshots that
+			// include it can still be validated against the retained records.
+			idx.forgottenWriteTS = max(idx.forgottenWriteTS, commitTS)
 			missedWrite = true
 			continue
 		}
@@ -276,14 +274,12 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint6
 			heap.Fix(&idx.expirations, entry.index)
 			continue
 		}
-		if commitTS < idx.retainedSinceTS {
+		if commitTS < idx.forgottenWriteTS {
 			continue
 		}
 		estimatedBytes := estimatedVersionEntryFixedBytes + int64(len(pk))
 		if !idx.budget.tryReserve(estimatedBytes) {
-			if commitTS > idx.lastMissedWriteTS {
-				idx.lastMissedWriteTS = commitTS
-			}
+			idx.forgottenWriteTS = max(idx.forgottenWriteTS, commitTS)
 			missedWrite = true
 			continue
 		}
@@ -299,8 +295,8 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint6
 	idx.budget.recordMissedWrite(missedWrite)
 }
 
-// Advance moves retention forward without publishing a PK write. TimeTick
-// messages use it to reclaim memory and restore complete read windows while idle.
+// Advance reclaims expired records without publishing a PK write. TimeTick
+// messages do not advance the validation floor unless a record is actually evicted.
 func (idx *pkVersionIndex) Advance(currentTS uint64) {
 	idx.channels.Range(func(_, value any) bool {
 		value.(*vchannelPKVersionIndex).advance(currentTS)
@@ -350,36 +346,22 @@ func (idx *vchannelPKVersionIndex) verify(vchannel string, pks primarykey.Keys, 
 }
 
 func (idx *vchannelPKVersionIndex) verifyReadWindowLocked(readTS, commitTS uint64) error {
-	if readTS < idx.retainedSinceTS {
-		return status.NewPartialUpdateRetryable("partial update read ts %d is older than retained since ts %d", readTS, idx.retainedSinceTS)
+	if readTS < idx.forgottenWriteTS {
+		return status.NewPartialUpdateRetryable("partial update read ts %d is older than forgotten write ts %d", readTS, idx.forgottenWriteTS)
 	}
 	if commitTS < readTS {
 		return status.NewUnrecoverableError("partial update commit ts %d is older than read ts %d", commitTS, readTS)
 	}
-	if time.Duration(tsoutil.CalculateDuration(commitTS, readTS))*time.Millisecond > idx.ttl {
-		return status.NewPartialUpdateRetryable("partial update read window exceeds max age, read ts: %d, commit ts: %d, max age: %s", readTS, commitTS, idx.ttl)
-	}
-	if idx.lastMissedWriteTS != 0 {
-		return status.NewPartialUpdateRetryable("partial update version index is incomplete after missing write ts %d", idx.lastMissedWriteTS)
-	}
 	return nil
 }
 
-// advanceRetentionLocked evicts only versions older than the maximum valid
-// read window. Moving retainedSinceTS with the same cutoff preserves fail-closed
-// verification for reads whose conflict history has been discarded.
+// advanceRetentionLocked uses time only for memory reclamation. The validation
+// floor advances to actual discarded writes, not to the expiration cutoff, so
+// an unchanged snapshot remains valid while its vchannel is idle.
 func (idx *vchannelPKVersionIndex) advanceRetentionLocked(commitTS uint64) {
 	evictUntilTS := retentionCutoffTS(commitTS, idx.ttl)
-	if evictUntilTS == 0 {
-		return
-	}
-	if evictUntilTS <= idx.retainedSinceTS {
-		return
-	}
-	idx.retainedSinceTS = evictUntilTS
-	idx.sweepLocked(evictUntilTS)
-	if idx.lastMissedWriteTS != 0 && idx.lastMissedWriteTS <= evictUntilTS {
-		idx.lastMissedWriteTS = 0
+	if evictUntilTS != 0 {
+		idx.sweepLocked(evictUntilTS)
 	}
 }
 
@@ -395,6 +377,7 @@ func retentionCutoffTS(ts uint64, ttl time.Duration) uint64 {
 func (idx *vchannelPKVersionIndex) sweepLocked(evictUntilTS uint64) {
 	for idx.expirations.Len() > 0 && idx.expirations[0].commitTS <= evictUntilTS {
 		entry := heap.Pop(&idx.expirations).(*versionEntry)
+		idx.forgottenWriteTS = max(idx.forgottenWriteTS, entry.commitTS)
 		if entry.stringKey {
 			delete(idx.stringVersions, entry.stringPK)
 		} else {

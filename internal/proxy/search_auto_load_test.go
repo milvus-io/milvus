@@ -735,7 +735,7 @@ func TestDQLAutoLoadRetryEnsuresOnEveryAttempt(t *testing.T) {
 	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		if calls == 1 {
-			return false, viewerror.NewViewInvalidated("view replaced by balance")
+			return false, merr.Wrap(merr.ErrQueryViewNotReady, "view replaced by balance")
 		}
 		return false, nil
 	})
@@ -751,7 +751,7 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 	for _, want := range []error{
 		merr.ErrCollectionNotFound,
 		merr.ErrParameterInvalid,
-		viewerror.NewOnShutdownError("shutdown"),
+		merr.WrapErrServiceUnavailableMsg("shutdown"),
 		merr.WrapErrAsInputError(merr.ErrCollectionNotLoaded),
 	} {
 		calls := 0
@@ -767,7 +767,7 @@ func TestDQLAutoLoadRetryStopsOnPermanentErrorsAndCancellation(t *testing.T) {
 	err := node.retryDQL(ctx, "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		cancel()
-		return false, viewerror.NewViewNotFound("released")
+		return false, merr.Wrap(merr.ErrQueryViewNotReady, "released")
 	})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, calls)
@@ -779,7 +779,7 @@ func TestDQLViewRetryWithAutoLoadDisabled(t *testing.T) {
 	node := &Proxy{metaCache: &MetaCache{}}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
-	want := viewerror.NewViewInvalidated("released")
+	want := merr.Wrap(merr.ErrQueryViewNotReady, "released")
 	err := node.retryDQL(context.Background(), "db", "collection", nil, func(context.Context) (bool, error) {
 		calls++
 		return false, want
@@ -810,7 +810,7 @@ func TestDQLAutoLoadRetryQueryCreatesFreshTask(t *testing.T) {
 		require.EqualValues(t, 1234, qt.Request().GuaranteeTimestamp)
 		qt.Request().Expr = "changed"
 		if len(tasks) == 1 {
-			err := viewerror.NewViewInvalidated("released")
+			err := merr.Wrap(merr.ErrQueryViewNotReady, "released")
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
@@ -836,7 +836,7 @@ func TestDQLAutoLoadRetryHonorsDeadline(t *testing.T) {
 	err := node.retryDQL(ctx, "db", "collection", nil, func(ctx context.Context) (bool, error) {
 		calls++
 		<-ctx.Done()
-		return false, viewerror.NewViewInvalidated("released while request timed out")
+		return false, merr.Wrap(merr.ErrQueryViewNotReady, "released while request timed out")
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Equal(t, 1, calls)
@@ -863,7 +863,7 @@ func TestDQLAutoLoadRetryPreservesLatestReadinessTimeout(t *testing.T) {
 	executeCalls := 0
 	err := node.retryDQL(parentCtx, "db", "collection", nil, func(context.Context) (bool, error) {
 		executeCalls++
-		return false, viewerror.NewViewNotFound("collection released")
+		return false, merr.Wrap(merr.ErrQueryViewNotReady, "collection released")
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.NoError(t, parentCtx.Err())
@@ -896,7 +896,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 				if calls == 2 {
 					require.False(t, optimized)
 					require.Equal(t, mode == "recall", recall)
-					err := viewerror.NewViewInvalidated("released during extra search")
+					err := merr.Wrap(merr.ErrQueryViewNotReady, "released during extra search")
 					return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, err
 				}
 				return &milvuspb.SearchResults{Status: merr.Success()}, false, false, false, nil
@@ -946,7 +946,7 @@ func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	query := mockey.Mock((*Proxy).query).To(func(*Proxy, context.Context, *queryTask, trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		calls++
 		if calls <= 2 {
-			err := viewerror.NewViewInvalidated("retry query")
+			err := merr.Wrap(merr.ErrQueryViewNotReady, "retry query")
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil

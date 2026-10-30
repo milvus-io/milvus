@@ -469,8 +469,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	case internalpb.ImportJobState_Completed:
 		if header.GetCommitByCoordinator() {
 			// Also repair a replay of a job completed by the asynchronous producer.
-			_, err := c.RefreshDataView(ctx, job.GetCollectionID())
-			return err
+			return c.publishImportDataView(ctx, job.GetCollectionID())
 		}
 		if c.meta != nil {
 			c.meta.recomputeDataView(ctx, job.GetCollectionID())
@@ -531,7 +530,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	// durable. A subsequent Load/Refresh must not observe a pre-import DataView
 	// after GetImportProgress reports Completed. Do not wait for QueryView Up:
 	// query-node availability is a Load/Refresh obligation, not import commit.
-	if _, err := c.RefreshDataView(ctx, job.GetCollectionID()); err != nil {
+	if err := c.publishImportDataView(ctx, job.GetCollectionID()); err != nil {
 		return err
 	}
 
@@ -548,6 +547,18 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		mlog.FieldJobID(jobID),
 		mlog.Duration("jobTimeCost/total", totalDuration))
 	return nil
+}
+
+func (c *DDLCallbacks) publishImportDataView(ctx context.Context, collectionID int64) error {
+	_, err := c.RefreshDataView(ctx, collectionID)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		// RootCoord confirmed the collection is gone. Finish the durable commit
+		// without resurrecting its DataView or rolling back committed segments.
+		// Returning a retryable error here would block the broadcaster forever.
+		mlog.Info(ctx, "skip import DataView publication for deleted collection", mlog.FieldCollectionID(collectionID))
+		return nil
+	}
+	return err
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.

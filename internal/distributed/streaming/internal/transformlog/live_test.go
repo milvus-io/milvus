@@ -53,7 +53,7 @@ func TestLiveTransformRPC(t *testing.T) {
 		require.Len(t, result.Kvs, 1)
 		meta := &streamingpb.PChannelMeta{}
 		require.NoError(t, proto.Unmarshal(result.Kvs[0].Value, meta))
-		conn, err := grpc.NewClient(meta.GetNode().GetAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStreamInterceptor(interceptor.NewStreamingServiceStreamClientInterceptor()))
+		conn, err := grpc.NewClient(meta.GetNode().GetAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithStreamInterceptor(interceptor.NewServiceStreamClientInterceptor()))
 		if err != nil {
 			return nil, err
 		}

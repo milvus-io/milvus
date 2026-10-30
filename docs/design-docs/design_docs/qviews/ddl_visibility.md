@@ -184,6 +184,17 @@ Completed. The existing collection broadcast resource lock serializes these
 publications. Persistence failures retry in Committing; no QueryView Up wait is
 performed while holding this lock.
 
+If DataView reconciliation returns no version, DataCoord checks the collection
+by ID directly against RootCoord metadata, including unavailable states. Only
+Dropping, Dropped, or a nonexistent collection removes the obligation; Creating
+and Restoring still require publication. A confirmed deleted/nonexistent collection
+has no remaining DataView publication obligation: the callback skips publication
+and finishes the commit, including replay of an already Completed job. It does
+not roll back Committing jobs or recreate a deleted DataView. A live collection
+without a published version, or a metadata lookup failure, still retries. The
+check does not depend on process-local DataView drop markers and therefore also
+covers callback replay after coordinator recovery.
+
 A subsequent initial Load starts from the already published DataView. On an
 already loaded collection, clients use refresh-load to wait for serving views
 that cover the committed DataVersion. Import Completed alone is not a statement
@@ -194,3 +205,33 @@ Pending imports without a CommitImport position freeze their channel's accepted
 W; they do not block publication of another committed import. See
 [Transform start frontier](transform_start_after_timetick.md) for the constraint
 handoff from pending jobs to committed segment bases.
+
+## RestoreSnapshot target deletion
+
+A RestoreSnapshot that creates its target collection checks the authoritative
+RootCoord lifecycle before Pending registration and Executing progress. It uses
+`IsCollectionDropped`, shared with Import publication: Creating/Restoring are
+live states, while Dropping/Dropped or a missing collection ID end the restore
+obligation. Metadata lookup failures defer work; an absent DataView alone is not
+proof of deletion. Recovery makes the same check without relying on in-memory
+DataView drop markers. Recreating a collection name does not revive the old ID.
+
+If DataView publication or RootCoord completion fails after the initial check,
+the checker rechecks target deletion. This closes the retry loop when Drop races
+with publication or delete materialization. Once deletion is confirmed, the
+specific `FailJobForDroppedCollection` transition persists Failed and releases
+the source snapshot pin through the normal terminal-state path. Persistence
+failure leaves the job and pin intact for retry. Existing terminal states are
+immutable, so retries cannot double-unpin or turn an already Completed restore
+into Failed. Existing unpin-failure TTL recovery remains unchanged.
+
+Completed copy tasks still prevent ordinary timeout/task failures from aborting
+metadata publication. Confirmed target deletion is the explicit exception to
+that protection; no new job state, persisted flag, or broadcast is introduced.
+This differs from an already-durable CommitImport callback, which can finish
+successfully after its target disappears. Restore cannot make a deleted target
+available and terminates as Failed instead. Concurrent completion may win first,
+in which case the Completed result is preserved.
+
+Key packages: `internal/datacoord/{copy_segment_checker,copy_segment_meta}.go`,
+`internal/datacoord/restore_collection.go`, `internal/rootcoord/root_coord.go`.

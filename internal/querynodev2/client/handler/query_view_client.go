@@ -32,13 +32,13 @@ func newQueryViewClient(owner *clientImpl, conn lazygrpc.Conn) *queryViewClient 
 }
 
 func (qvc *queryViewClient) SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.SearchOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.SearchOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.SearchOnViewResponse, error) {
 		return client.SearchOnView(ctx, req)
 	})
 }
 
 func (qvc *queryViewClient) QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.QueryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
 		return client.QueryOnView(ctx, req)
 	})
 }
@@ -47,7 +47,6 @@ func executeViewQueryRPC[T any](
 	ctx context.Context,
 	qvc *queryViewClient,
 	nodeID int64,
-	method string,
 	call func(context.Context, viewpb.ViewQueryServiceClient) (T, error),
 ) (T, error) {
 	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -55,6 +54,10 @@ func executeViewQueryRPC[T any](
 		return zero, viewerror.NewOnShutdownError("querynode client is closing")
 	}
 	defer qvc.owner.lifetime.Done()
+	if err := ctx.Err(); err != nil {
+		var zero T
+		return zero, err
+	}
 
 	client, err := qvc.service.GetService(ctx)
 	if err != nil {
@@ -66,7 +69,6 @@ func executeViewQueryRPC[T any](
 		changed = qvc.owner.sessionChanges.Changed()
 	}
 	resp, err := call(contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, nodeID)), client)
-	err = viewerror.ConvertViewError(method, err)
 	if picker.IsErrSubConnNoExist(err) {
 		err = &viewerror.NodeSessionUnavailable{Cause: err, Changed: changed}
 	}
@@ -78,7 +80,7 @@ func (qvc *queryViewClient) close() {
 }
 
 func (qvc *queryViewClient) StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.StatisticsOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
 		return client.StatisticsOnView(ctx, req)
 	})
 }

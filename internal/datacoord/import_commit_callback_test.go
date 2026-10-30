@@ -125,6 +125,60 @@ func TestImportCommitCallbackRetriesSegmentPersistence(t *testing.T) {
 	require.Equal(t, internalpb.ImportJobState_Completed, callbacks.importMeta.GetJob(ctx, 1).GetState())
 }
 
+func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		for _, state := range []internalpb.ImportJobState{
+			internalpb.ImportJobState_Uncommitted,
+			internalpb.ImportJobState_Committing,
+			internalpb.ImportJobState_Completed,
+		} {
+			name := "runtime/" + state.String()
+			if recovered {
+				name = "recovered/" + state.String()
+			}
+			t.Run(name, func(t *testing.T) {
+				callbacks, catalog, result := newImportCommitCallbackTest(t)
+				ctx := t.Context()
+				require.NoError(t, callbacks.importMeta.UpdateJob(ctx, 1, UpdateJobState(state)))
+				_, err := callbacks.dataViewManager.OnDropCollection(ctx, 100)
+				require.NoError(t, err)
+				if recovered {
+					callbacks.importMeta, err = NewImportMeta(ctx, catalog, nil, nil)
+					require.NoError(t, err)
+					// No snapshots or in-memory drop markers survive this restart.
+					// Production requires Create/Bootstrap before ordinary recompute.
+					callbacks.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
+						func(context.Context, int64) (bool, error) { return false, nil }, nil, nil, nil,
+						dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+							return nil, nil
+						}))
+					require.NoError(t, err)
+					callbacks.meta.dataViewManager = callbacks.dataViewManager
+				}
+				lookupErr := context.DeadlineExceeded
+				callbacks.SetCollectionDroppedChecker(func(ctx context.Context, id int64) (bool, error) {
+					require.Equal(t, int64(100), id)
+					return lookupErr == nil, lookupErr
+				})
+				// A failed metadata query must not be mistaken for deletion.
+				require.ErrorIs(t, callbacks.commitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
+				if state != internalpb.ImportJobState_Completed {
+					require.Equal(t, internalpb.ImportJobState_Committing, callbacks.importMeta.GetJob(ctx, 1).GetState())
+				}
+				lookupErr = nil
+				require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+				require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result), "completed replay must also finish after drop")
+				imports, err := NewImportMeta(ctx, catalog, nil, nil)
+				require.NoError(t, err)
+				require.Equal(t, internalpb.ImportJobState_Completed, imports.GetJob(ctx, 1).GetState())
+				views, err := catalog.ListAllDataViews(ctx)
+				require.NoError(t, err)
+				require.Empty(t, views, "commit must not resurrect the deleted collection")
+			})
+		}
+	}
+}
+
 func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
 	callbacks, catalog, result := newImportCommitCallbackTest(t)
 	ctx := t.Context()

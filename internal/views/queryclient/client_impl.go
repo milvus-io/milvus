@@ -82,7 +82,8 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 }
 
 // Search implements ViewQueryClient.Search.
-func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*SearchResult, error) {
+func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
+	defer func() { err = toMilvusError(err) }()
 	// === Stage: Plan ===
 
 	// Resolve vchannels first — the provider reports the collection's shard layout;
@@ -181,7 +182,8 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (*
 }
 
 // Query implements ViewQueryClient.Query.
-func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (*QueryResult, error) {
+func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
+	defer func() { err = toMilvusError(err) }()
 	// === Stage: Plan ===
 
 	// Resolve vchannels first — the provider reports the collection's shard layout;

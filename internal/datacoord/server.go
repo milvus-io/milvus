@@ -116,6 +116,7 @@ type Server struct {
 	metaStore                           metacache.MetaStore
 	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	collectionDropped                   func(context.Context, int64) (bool, error)
 	segmentManager                      Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -521,6 +522,10 @@ func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 
 func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.CollectionRecoveryValidator) {
 	s.dataViewCollectionRecoveryValidator = validator
+}
+
+func (s *Server) SetCollectionDroppedChecker(checker func(context.Context, int64) (bool, error)) {
+	s.collectionDropped = checker
 }
 
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {

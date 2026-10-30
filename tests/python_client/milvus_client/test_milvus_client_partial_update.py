@@ -117,6 +117,43 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("string_pk", [False, True])
+    @pytest.mark.parametrize("existing_row", [False, True])
+    def test_milvus_client_partial_update_after_idle(self, string_pk, existing_row):
+        """An unchanged snapshot remains valid after the CAS history TTL expires."""
+        client = self._client()
+        name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        if string_pk:
+            schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
+        else:
+            schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=PU_DEFAULT_DIM)
+        schema.add_field("value", DataType.INT64)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong")
+        pk = "idle-pk" if string_pk else 1
+        row = {"id": pk, "vector": [1.0, 0.0, 0.0, 0.0], "value": 1}
+        try:
+            if existing_row:
+                self.upsert(client, name, [row], partial_update=True)
+            # Exceed the SN PK-version index's 30-second reclamation TTL.
+            # Do not flush or write during this interval: either could advance
+            # the query frontier and hide the idle-snapshot regression.
+            time.sleep(36)
+            update = {"id": pk, "value": 2} if existing_row else dict(row, value=2)
+            result = self.upsert(client, name, [update], partial_update=True)[0]
+            assert result["upsert_count"] == 1
+            result = self.query(client, name, filter="", output_fields=["id", "value", "vector"], limit=10)[0]
+            assert len(result) == 1
+            assert result[0]["id"] == pk
+            assert result[0]["value"] == 2
+            assert result[0]["vector"] == row["vector"]
+        finally:
+            self.drop_collection(client, name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_partial_update_with_all_datatype(self):
         """
         target: test partial update with all datatype

@@ -31,7 +31,7 @@ func (s *Server) StatisticsOnView(ctx context.Context, req *viewpb.StatisticsOnV
 	}
 	rows, err := s.provider.Statistics(ctx, req)
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, err
 	}
 	return &viewpb.StatisticsOnViewResponse{RowCount: rows}, nil
 }
@@ -50,7 +50,7 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 		result, err = s.executeSearch(ctx, req, req.GetLegacyReq(), req.GetSegmentSelection())
 	}
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, err
 	}
 	return &viewpb.SearchOnViewResponse{LegacyResults: result}, nil
 }
@@ -133,7 +133,7 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 		req.GetSegmentSelection(),
 	)
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, err
 	}
 	defer tasks.Release()
 	if len(tasks.Tasks()) == 0 {
@@ -142,7 +142,7 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 
 	result, err := s.scheduler.Query(ctx, tasks)
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, err
 	}
 	return &viewpb.QueryOnViewResponse{LegacyResults: result}, nil
 }

@@ -77,7 +77,7 @@ func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	requirePartialUpdateRetryable(t, second.state.pkVersions.VerifyTyped(
 		"v2",
 		primarykey.Keys{},
-		101,
+		100,
 		102,
 	))
 

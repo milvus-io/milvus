@@ -1492,7 +1492,7 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	if t.viewQueryClient != nil {
 		if err := t.executeByQueryView(ctx); err != nil {
 			log.Warn(ctx, "search execute by query view failed", mlog.Err(err))
-			return errors.Wrap(err, "failed to search")
+			return err
 		}
 		log.Debug(ctx, "Search Execute done.",
 			mlog.Int64("collection", t.GetCollectionID()),

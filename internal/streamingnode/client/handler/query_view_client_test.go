@@ -77,11 +77,11 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 	require.Same(t, searchResp, resp)
 }
 
-func TestHandlerClientConvertsViewQueryRPCError(t *testing.T) {
+func TestHandlerClientPreservesViewQueryRPCError(t *testing.T) {
 	viewErr := viewerror.NewViewNotFound("missing view")
 	viewQueryService := &fakeViewQueryServiceClient{
 		searchOnView: func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-			return nil, viewerror.NewGRPCStatusFromViewError(viewErr).Err()
+			return nil, viewerror.ConvertViewError(viewpb.ViewQueryService_SearchOnView_FullMethodName, viewerror.NewGRPCStatusFromViewError(viewErr).Err())
 		},
 	}
 	client := newTestHandlerClient(nil, viewQueryService, nil)
