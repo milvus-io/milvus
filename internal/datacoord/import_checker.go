@@ -847,6 +847,10 @@ func (c *importChecker) checkCommittingJob(job ImportJob) {
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {
+	if err := c.meta.abortFailedImportGroups(c.ctx, job.GetJobID()); err != nil {
+		mlog.Warn(c.ctx, "cannot reclaim failed import group", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+		return
+	}
 	c.tryFailingTasks(job)
 }
 
@@ -874,6 +878,12 @@ func (c *importChecker) tryTimeoutJob(job ImportJob) {
 		internalpb.ImportJobState_Committing:
 		// Fast path on this tick's snapshot only; UpdateJobState enforces the
 		// rule against the current state under importMeta's lock.
+		return
+	}
+	// Prepared groups alone do not prove a WAL append was attempted. The
+	// durable job marker is set only after all groups pass readiness checks.
+	// UpdateJobState also guards a timeout racing the marker write.
+	if job.GetCommitBroadcastStarted() {
 		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())

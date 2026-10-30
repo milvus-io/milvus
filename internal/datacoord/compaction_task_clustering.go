@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -135,6 +136,10 @@ func (t *clusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
+	if m, ok := t.meta.(*meta); ok && m.producerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+		t.Process()
+		return
+	}
 	// If task is in analyzing state, skip querying the DataNode — the compaction has not been
 	// submitted yet. The state transition (analyzing → pipelining) is driven by Process() /
 	// processAnalyzing(). Once the state becomes pipelining, the scheduler will move the task
@@ -474,6 +479,10 @@ func (t *clusteringCompactionTask) processStats() error {
 		existNonStats := false
 		tmpToResultSegments := make(map[int64][]int64, len(t.GetTaskProto().GetTmpSegments()))
 		for _, segmentID := range t.GetTaskProto().GetTmpSegments() {
+			if seg := t.meta.GetSegment(context.TODO(), segmentID); isEmptySegmentChangeOutput(seg) {
+				tmpToResultSegments[segmentID] = nil
+				continue
+			}
 			to, ok := t.meta.(*meta).GetCompactionTo(segmentID)
 			if !ok || to == nil {
 				select {
@@ -569,6 +578,9 @@ func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 }
 
 func (t *clusteringCompactionTask) processIndexing() error {
+	if m, ok := t.meta.(*meta); ok && (Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() || m.producerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil) {
+		return t.completeTask()
+	}
 	// wait for segment indexed
 	collectionIndexes := t.meta.GetIndexMeta().GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
 	if len(collectionIndexes) == 0 {
@@ -627,6 +639,21 @@ func (t *clusteringCompactionTask) markInputSegmentsDropped() error {
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
 func (t *clusteringCompactionTask) completeTask() error {
+	if m, ok := t.meta.(*meta); ok {
+		g, handled, err := m.stageExistingChange(m.ctx, clusteringPublicationGroup(t.GetTaskProto()))
+		if err != nil {
+			return err
+		}
+		if handled {
+			if g.State == model.SegmentChangeStateFailed || g.State == model.SegmentChangeStateAborted {
+				return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(g.FailReason))
+			}
+			if g.State != model.SegmentChangeStateCommitted {
+				return nil
+			}
+			return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+		}
+	}
 	var err error
 	// first mark result segments visible
 	if err = t.markResultSegmentsVisible(); err != nil {
@@ -700,6 +727,24 @@ func (t *clusteringCompactionTask) resetSegmentCompacting() {
 }
 
 func (t *clusteringCompactionTask) doClean() error {
+	if m, ok := t.meta.(*meta); ok {
+		g := m.producerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel())
+		if g != nil && g.State == model.SegmentChangeStateCommitted && t.GetTaskProto().GetState() != datapb.CompactionTaskState_completed {
+			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+				return err
+			}
+		}
+		if g != nil && !g.IsTerminal() {
+			g.State = model.SegmentChangeStateAborted
+			g.FailReason = "clustering task cleaned before publication"
+			if err := m.UpdateSegmentChangeGroup(m.ctx, g); err != nil {
+				return err
+			}
+			if err := m.reclaimSegmentChangeGroup(m.ctx, g); err != nil {
+				return err
+			}
+		}
+	}
 	mlog.Info(context.TODO(), "clean task", mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.String("state", t.GetTaskProto().GetState().String()))
 

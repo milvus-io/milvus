@@ -400,6 +400,10 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+	s.initSegmentChangeCleaner()
+	if cph, ok := s.compactionInspector.(*compactionInspector); ok {
+		cph.copySegmentMeta = s.copySegmentMeta
+	}
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
@@ -446,6 +450,13 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
+}
+
+func (s *Server) initSegmentChangeCleaner() {
+	s.segmentChangeInspector.cleaner = &segmentChangeCleaner{
+		mt: s.meta, importMeta: s.importMeta, copyMeta: s.copySegmentMeta,
+		refreshMeta: s.meta.externalCollectionRefreshMeta,
+	}
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
@@ -733,6 +744,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
+	// Resolve interrupted group writes before RecoverManager projects any
+	// SegmentMeta or starts its asynchronous recompute worker.
+	if err := recoveredMeta.reconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator); err != nil {
+		return err
+	}
+
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
@@ -741,15 +758,32 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	var manager dataview.Manager
 	if err := retry.Do(s.ctx, func() error {
 		var err error
+		recoveryCtx, cancel := context.WithCancel(s.ctx)
+		recovered := false
+		defer func() {
+			if !recovered {
+				cancel()
+			}
+		}()
 		manager, err = dataview.RecoverManager(
-			s.ctx,
+			recoveryCtx,
 			catalog,
 			s.dataViewCollectionRecoveryValidator,
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		// RecoverManager's general rebuild is best-effort. Group recovery
+		// requires a confirmed snapshot before exposing the recovered meta.
+		if err := recoveredMeta.reconcileSegmentChangeDataViews(s.ctx, manager); err != nil {
+			return err
+		}
+		// The successfully recovered manager lives until s.ctx is canceled.
+		recovered = true
+		return nil
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}

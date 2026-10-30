@@ -984,13 +984,12 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 			s.NoError(err)
 		}
 
-		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
-			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
-			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
-
 		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 		s.NoError(err)
+		partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
 
 		defer func() {
 			cli.Remove(context.Background(), partitionStatsFile)
@@ -1031,13 +1030,12 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 			s.NoError(err)
 		}
 
-		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
-			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
-			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
-
 		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 		s.NoError(err)
+		partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
 
 		defer func() {
 			cli.Remove(context.Background(), partitionStatsFile)

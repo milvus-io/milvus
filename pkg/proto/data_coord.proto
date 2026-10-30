@@ -1516,6 +1516,9 @@ message ImportJob {
   plan.Expr rls_check_predicate = 22;
   repeated internal.SnapshotImportL0Source snapshot_l0_sources = 23;
   internal.ImportVersion version = 24;
+  // Persisted immediately before attempting the CommitImport broadcast.
+  // A timeout or rollback must not reclaim a job whose WAL append may have begun.
+  bool commit_broadcast_started = 25;
 }
 
 enum ImportTaskStateV2 {
