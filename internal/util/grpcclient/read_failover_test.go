@@ -236,6 +236,7 @@ func TestConcurrentConnectionFailureIsShared(t *testing.T) {
 	require.ErrorIs(t, <-done, ErrConnect)
 	require.Equal(t, 1, calls)
 }
+
 func TestCloseUnblocksConnectionWaiter(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	base := &ClientBase[*mockClient]{}
