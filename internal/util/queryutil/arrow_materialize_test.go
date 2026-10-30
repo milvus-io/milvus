@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // userRecord builds what the C++ export hands over: the user columns only, with
@@ -244,6 +245,13 @@ func TestMaterializeRejectsDivergentRecordMetadata(t *testing.T) {
 	err := MaterializeArrowSelection(header(1), sel, testSchema())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "disagrees with the template")
+
+	// Materialize sends the gathered record with the template's metadata, so
+	// GatherArrowSelection must refuse the same divergence.
+	rec, err := GatherArrowSelection(sel)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Contains(t, err.Error(), "disagrees with the template")
+	require.Nil(t, rec)
 }
 
 // vectorRecord builds a one-column FloatVector record with an explicit byte

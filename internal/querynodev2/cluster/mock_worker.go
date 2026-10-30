@@ -282,6 +282,65 @@ func (_c *MockWorker_LoadSegments_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
+// MaterializeSegments provides a mock function with given fields: ctx, req
+func (_m *MockWorker) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MaterializeSegments")
+	}
+
+	var r0 *internalpb.MaterializeResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) *internalpb.MaterializeResults); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.MaterializeResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_MaterializeSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MaterializeSegments'
+type MockWorker_MaterializeSegments_Call struct {
+	*mock.Call
+}
+
+// MaterializeSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.QueryRequest
+func (_e *MockWorker_Expecter) MaterializeSegments(ctx interface{}, req interface{}) *MockWorker_MaterializeSegments_Call {
+	return &MockWorker_MaterializeSegments_Call{Call: _e.mock.On("MaterializeSegments", ctx, req)}
+}
+
+func (_c *MockWorker_MaterializeSegments_Call) Run(run func(ctx context.Context, req *querypb.QueryRequest)) *MockWorker_MaterializeSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.QueryRequest))
+	})
+	return _c
+}
+
+func (_c *MockWorker_MaterializeSegments_Call) Return(_a0 *internalpb.MaterializeResults, _a1 error) *MockWorker_MaterializeSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_MaterializeSegments_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) (*internalpb.MaterializeResults, error)) *MockWorker_MaterializeSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // QuerySegments provides a mock function with given fields: ctx, req
 func (_m *MockWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	ret := _m.Called(ctx, req)

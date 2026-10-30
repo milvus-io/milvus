@@ -58,9 +58,12 @@ type QueryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
 
-	ctx            context.Context
-	result         *milvuspb.QueryResults
-	request        *milvuspb.QueryRequest
+	ctx     context.Context
+	result  *milvuspb.QueryResults
+	request *milvuspb.QueryRequest
+	// ids, when set with a plan, are exactly the pks the plan selects (the
+	// search requery sets both); without a plan, PreExecute turns them into
+	// the request's expression. Materialize fills its result in this order.
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
@@ -883,7 +886,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	t.Limit = queryParams.limit + queryParams.offset
 
-	if t.ids != nil {
+	if t.ids != nil && t.plan == nil {
 		pkField := ""
 		for _, field := range schema.Fields {
 			if field.IsPrimaryKey {
@@ -1039,11 +1042,28 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 func (t *QueryTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
+
+	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
+	path, err := executePathQuery, error(nil)
+	if paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
+		path, err = t.executeMaterialize(ctx)
+	} else {
+		err = t.executeWorkload(ctx, t.queryShard)
+	}
+	if err == nil {
+		metrics.ProxyQueryExecuteLatency.WithLabelValues(paramtable.GetStringNodeID(), t.getQueryLabel(), path).
+			Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}
+	return err
+}
+
+// executeWorkload runs exec on every shard of the request, or on its
+// namespace's one channel.
+func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.ExecuteFunc) error {
 	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
 		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
 		mlog.String("requestType", t.getQueryLabel()))
 
-	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1053,7 +1073,7 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		CollectionID:   t.CollectionID,
 		CollectionName: t.collectionName,
 		Nq:             1,
-		Exec:           t.queryShard,
+		Exec:           exec,
 		PreferredNodes: t.preferredNodes,
 	}
 	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
@@ -1141,6 +1161,10 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
+	// A Materialize request left one result, already deduplicated and in its
+	// final order (finishMaterialize); the plain pipeline's pk reduce passes a
+	// single result through untouched, so only complement_fields and the
+	// steps below act on it -- no cross-shard reduce runs.
 	pipeline, err := NewQueryPipeline(
 		t.schema.CollectionSchema,
 		t.queryParams.limit,
@@ -1218,15 +1242,16 @@ func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery
 }
 
-func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+// shardRequest builds the per-shard request queryShard and materializeShard
+// send; skip is true when fastSkip leaves this channel out.
+func (t *QueryTask) shardRequest(nodeID int64, channel string) (req *querypb.QueryRequest, skip bool) {
 	needOverrideMvcc := false
 	mvccTs := t.MvccTimestamp
 	if len(t.channelsMvcc) > 0 {
 		mvccTs, needOverrideMvcc = t.channelsMvcc[channel]
 		// In fast mode, if there is no corresponding channel in channelsMvcc, quickly skip this query.
 		if !needOverrideMvcc && t.fastSkip {
-			return nil
+			return nil, true
 		}
 	}
 
@@ -1236,10 +1261,18 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		retrieveReq.GuaranteeTimestamp = mvccTs
 	}
 	retrieveReq.ConsistencyLevel = t.ConsistencyLevel
-	req := &querypb.QueryRequest{
+	return &querypb.QueryRequest{
 		Req:         retrieveReq,
 		DmlChannels: []string{channel},
 		Scope:       querypb.DataScope_All,
+	}, false
+}
+
+func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+	req, skip := t.shardRequest(nodeID, channel)
+	if skip {
+		return nil
 	}
 
 	log := mlog.With(mlog.Int64("collection", t.GetCollectionID()),
@@ -1248,32 +1281,50 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		mlog.String("channel", channel))
 
 	result, err := qn.Query(ctx, req)
-	if err != nil {
-		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+	if err := t.shardReplyError(ctx, log, "Query", nodeID, result.GetStatus(), err); err != nil {
 		return err
-	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn(ctx, "QueryNode is not shardLeader")
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
-		return merr.Error(result.GetStatus())
-	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn(ctx, "QueryNode query result error", mlog.Any("errorCode", result.GetStatus().GetErrorCode()), mlog.String("reason", result.GetStatus().GetReason()))
-		statusErr := merr.Error(result.GetStatus())
-		if errors.Is(statusErr, merr.ErrCollectionNotLoaded) {
-			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
-		}
-		return errors.Wrapf(statusErr, "fail to Query on QueryNode %d", nodeID)
 	}
 
 	log.Debug(ctx, "get query result")
 	t.resultBuf.Insert(result)
-	if t.actualChannelsMvcc != nil {
-		t.actualChannelsMvcc.Insert(channel, result.GetMvccTimestamp())
-	}
-	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
+	t.shardDone(nodeID, channel, result.GetMvccTimestamp(), result.GetCostAggregation())
 	return nil
+}
+
+// shardReplyError returns the error a shard's reply fails the shard with,
+// nil for a successful one: err, the call's, or the reply's status. It
+// invalidates the shard leader cache where the failure says the cached
+// leader may be stale. rpc names the call (Query, Materialize).
+func (t *QueryTask) shardReplyError(ctx context.Context, log *mlog.Logger, rpc string, nodeID int64, status *commonpb.Status, err error) error {
+	if err != nil {
+		log.Warn(ctx, "QueryNode query return error", mlog.String("rpc", rpc), mlog.Err(err))
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		return err
+	}
+	if status.GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+		log.Warn(ctx, "QueryNode is not shardLeader", mlog.String("rpc", rpc))
+		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		return merr.Error(status)
+	}
+	if status.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn(ctx, "QueryNode query result error", mlog.String("rpc", rpc),
+			mlog.Any("errorCode", status.GetErrorCode()), mlog.String("reason", status.GetReason()))
+		statusErr := merr.Error(status)
+		if errors.Is(statusErr, merr.ErrCollectionNotLoaded) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
+		return merr.Wrapf(statusErr, "fail to %s on QueryNode %d", rpc, nodeID)
+	}
+	return nil
+}
+
+// shardDone applies a shard's successful reply's side effects: the channel's
+// MVCC timestamp and the node's cost.
+func (t *QueryTask) shardDone(nodeID int64, channel string, mvcc uint64, cost *internalpb.CostAggregation) {
+	if t.actualChannelsMvcc != nil {
+		t.actualChannelsMvcc.Insert(channel, mvcc)
+	}
+	t.lb.UpdateCostMetrics(nodeID, cost)
 }
 
 // IDs2Expr converts ids slices to bool expresion with specified field name

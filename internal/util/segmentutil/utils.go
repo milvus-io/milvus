@@ -74,3 +74,26 @@ func MergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 
 	return result
 }
+
+// AggregateWorkerCosts is the cost a delegator reports for its channel from
+// its workers' replies, each read with cost (the worker it came from and its
+// cost): MergeRequestCost of every worker's cost when allWorkers, else of
+// localNodeID's only, with TotalRelatedDataSize summed over every worker. It
+// never returns nil.
+func AggregateWorkerCosts[R any](replies []R, cost func(R) (int64, *internalpb.CostAggregation), localNodeID int64, allWorkers bool) *internalpb.CostAggregation {
+	costs := make([]*internalpb.CostAggregation, 0, len(replies))
+	var relatedDataSize int64
+	for _, r := range replies {
+		source, c := cost(r)
+		relatedDataSize += c.GetTotalRelatedDataSize()
+		if allWorkers || source == localNodeID {
+			costs = append(costs, c)
+		}
+	}
+	out := MergeRequestCost(costs)
+	if out == nil {
+		out = &internalpb.CostAggregation{}
+	}
+	out.TotalRelatedDataSize = relatedDataSize
+	return out
+}

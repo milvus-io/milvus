@@ -87,6 +87,10 @@ func (w *LocalWorker) QueryStreamSegments(ctx context.Context, req *querypb.Quer
 	return w.node.queryStreamSegments(ctx, req, srv)
 }
 
+func (w *LocalWorker) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	return w.node.MaterializeSegments(ctx, req)
+}
+
 func (w *LocalWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return w.node.QuerySegments(ctx, req)
 }

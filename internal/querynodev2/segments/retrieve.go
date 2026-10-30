@@ -60,15 +60,33 @@ func ReleaseRecords(results []RetrieveSegmentResult) {
 	}
 }
 
+// RetrieveOption adjusts one Retrieve.
+type RetrieveOption func(*retrieveOptions)
+
+type retrieveOptions struct {
+	forceArrow bool
+}
+
+// WithArrowTransport makes the retrieve take the Arrow path whatever
+// common.interface.zeroCopy says: a Materialize retrieve, whose reply is
+// Arrow (shouldUseArrowTransport).
+func WithArrowTransport() RetrieveOption {
+	return func(o *retrieveOptions) { o.forceArrow = true }
+}
+
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
+func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest, opts ...RetrieveOption) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
+	var o retrieveOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 
 	plan.SetIgnoreNonPk(shouldEnableIgnoreNonPk(req, len(segments), plan.ShouldIgnoreNonPk()))
 	// A local, not a field on the shared plan type: nothing outside this
 	// function reads it, and it is never passed to C.
-	useArrow := shouldUseArrowTransport(req, plan)
+	useArrow := shouldUseArrowTransport(req, plan, o.forceArrow)
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -191,12 +209,17 @@ func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShou
 // which no writer ever sets -- createCntPlan sets planpb.QueryPlanNode.IsCount
 // instead, and is itself referenced only by its own unit test -- so it was dead
 // code twice over.
-func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan) bool {
+func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan, forceArrow bool) bool {
 	// Same switch as the IgnoreNonPk Arrow path (ignore_non_pk_ops.go): both are
 	// the "hand Arrow across the CGO boundary instead of protobuf" interface, so
 	// they share one operator-facing knob rather than accumulating one per call
 	// site.
-	if !paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.GetAsBool() {
+	//
+	// forceArrow (Materialize) always takes the Arrow path: its reply is
+	// Arrow, and the proxy only sends it requests the Arrow export carries
+	// (design doc 20261019 section 4). zeroCopy keeps gating only the Query
+	// path.
+	if !forceArrow && !paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.GetAsBool() {
 		return false
 	}
 	hasAggregation := len(req.GetReq().GetGroupByFieldIds()) > 0 ||
@@ -270,7 +293,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 }
 
 // retrieve will retrieve all the validate target segments
-func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, []Segment, error) {
+func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, opts ...RetrieveOption) ([]RetrieveSegmentResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
@@ -296,7 +319,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 		return nil, retrieveSegments, err
 	}
 
-	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req, opts...)
 	return result, retrieveSegments, err
 }
 

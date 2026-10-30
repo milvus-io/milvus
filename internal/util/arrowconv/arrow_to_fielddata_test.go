@@ -531,6 +531,31 @@ func TestArrowFieldsToProto_BinaryVector_DimFallback(t *testing.T) {
 	assert.Equal(t, []byte{0xFF, 0x00, 0x0F, 0xF0}, result[0].GetVectors().GetBinaryVector())
 }
 
+// TestArrowFieldsToProto_Int8Vector_DimFallback: an Int8Vector's dim is its
+// byte width (one byte per element) when the schema carries none.
+func TestArrowFieldsToProto_Int8Vector_DimFallback(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	dim := 4
+	rec := buildTestRecordWithFieldIDs(
+		pool,
+		[]arrow.Field{{Name: "vec", Type: &arrow.FixedSizeBinaryType{ByteWidth: dim}}},
+		[]int64{110},
+		func(bs []array.Builder) {
+			b := bs[0].(*array.FixedSizeBinaryBuilder)
+			b.Append([]byte{1, 2, 3, 4})
+		},
+	)
+	defer rec.Release()
+
+	result, err := ArrowFieldsToProto(rec, schemaMap(
+		&schemapb.FieldSchema{FieldID: 110, Name: "vec", DataType: schemapb.DataType_Int8Vector},
+	))
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, int64(dim), result[0].GetVectors().GetDim())
+	assert.Equal(t, []byte{1, 2, 3, 4}, result[0].GetVectors().GetInt8Vector())
+}
+
 // TestArrowFieldsToProto_StringOwnedAfterRelease verifies that converted
 // string data is owned by Go and remains valid after the Arrow record is
 // released. Before the fix, arr.Value() returned a zero-copy view into the
