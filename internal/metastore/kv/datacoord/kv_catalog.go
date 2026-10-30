@@ -511,6 +511,12 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
+func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
+	key := buildChannelRemovePath(channel)
+	v, err := kc.MetaKv.Load(ctx, key)
+	return err == nil && v == NonRemoveFlagTomestone
+}
+
 // DropChannel removes the channel removal flag of a dropped channel.
 func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)

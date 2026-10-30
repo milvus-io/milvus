@@ -905,6 +905,16 @@ func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func Test_ChannelExists_SaveError(t *testing.T) {
+	txn := mocks.NewMetaKv(t)
+	txn.EXPECT().
+		Load(mock.Anything, mock.Anything).
+		Return("", errors.New("mock error"))
+
+	catalog := NewCatalog(txn, rootPath, "")
+	assert.False(t, catalog.ChannelExists(context.TODO(), "test_channel_1"))
+}
+
 func Test_RemoveDroppedChannelFlags(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	flags := map[string]string{

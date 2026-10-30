@@ -2208,11 +2208,10 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 }
 
 // batchSaveDropSegments saves the dropped segments of a channel, then deletes
-// the channel's removal-flag key. Nothing reads that key once the channel is
-// dropped (GC asks RootCoord whether the collection still exists), so it is
-// deleted instead of being rewritten to "removed" and leaking forever. A
-// failure after the segments are saved is retried by RootCoord, which re-sends
-// DropVirtualChannel until it succeeds.
+// the channel's removal-flag key. A missing flag reads as a dropped channel,
+// so the flag is deleted instead of being rewritten to "removed" and leaking
+// forever. A failure after the segments are saved is retried by RootCoord,
+// which re-sends DropVirtualChannel until it succeeds.
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
