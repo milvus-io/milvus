@@ -24,7 +24,7 @@ query, get, count, iterators, scalar indexes, partition and clustering keys,
 bulk import, compaction, load, release, and adding scalar fields. `search`,
 `hybrid_search` and `search_iterator` return one error.
 
-Most of the change is removing checks. Two things are more than that:
+Most of the change is removing checks. Two changes go further:
 
 - DataCoord asks "is this segment indexed" in two places with one filter,
   and with no vector field that filter waits forever. It is split into two
@@ -37,7 +37,7 @@ Most of the change is removing checks. Two things are more than that:
   collections get a smaller segment size target (Section 4).
 
 Phase 2, converting a collection between zero and non-zero vector fields,
-waits for a use case.
+is deferred until a use case needs it.
 
 ## Background
 
@@ -68,7 +68,7 @@ would bring:
   merged again.
 - Old segments would have no data for the new vector field.
 
-Phase 2 can take these on when something needs it.
+They are deferred to Phase 2.
 
 ## 2. What changes
 
@@ -104,10 +104,11 @@ With the predicate in place, the behaviour changes are:
   supported` on every search entry. Today four different messages cover this
   case.
 
-Everything else is a check that assumed a vector exists and is wrong at zero:
-two Proxy drop checks, a REST insert check, a pymilvus check, the DiskANN
-segment size rule, and an import reader that loops forever on a file with no
-matching column. Appendix A lists each with its file and line.
+The remaining changes are checks that assumed at least one vector field and
+misbehave at zero: two Proxy drop checks, a REST insert check, a pymilvus
+check, the DiskANN segment size rule, and an import reader that loops forever
+on a file with no matching column. Appendix A lists each with its file and
+line.
 
 ## 3. Index readiness
 
@@ -143,12 +144,8 @@ gain is that a published segment never falls back to brute-force scalar
 filtering. Segments below `minSegmentNumRowsToEnableIndex` are exempt as
 before.
 
-This split follows xiaofan-luan's review of 2026-10-10, which asked for
-the impact on publication delay, small segments and index failures to be
-evaluated. The delay and the small-segment exemption are covered above.
-Two consequences for vector collections remain, and they are the reason
-`forceAllIndexReady` was opt-in. They are listed here for that review to
-confirm the trade-off:
+Two further consequences for vector collections are the reason
+`forceAllIndexReady` is opt-in today. They are part of the trade-off:
 
 - A scalar index whose build fails for good keeps the compaction output
   invisible. With the segment change staging design, the group goes to
@@ -168,9 +165,9 @@ the row count as a side effect. 1 GB holds about 350 k rows at dim 768 and
 2 M rows at dim 128. Without a vector field, 1 GB of `int64 + int32` is 44 M
 rows.
 
-Three things run per segment on a single thread, and at 44 M rows they are
-slow. Measured on one 44 M-row segment against eight 5.5 M-row segments with
-the same data (aarch64, details in Appendix B):
+Three operations run per segment on a single thread and become slow at 44 M
+rows. Measured on one 44 M-row segment against eight 5.5 M-row segments with
+the same data (aarch64, Appendix B.1):
 
 | Per-segment work | 1 × 44 M | 8 × 5.5 M |
 |---|---:|---:|
@@ -182,15 +179,15 @@ The third cost, replaying deletes when the segment is loaded, was measured
 on x86 only: loading the 44 M-row segment with 6.34 M deleted keys takes
 93 s with an `int64` key and 381 s with a `varchar` key.
 
-Query latency and memory do not depend on segment count (Appendix B).
+Query latency and memory do not depend on segment count (Appendix B.1).
 
-The delete stall is the one that matters. The delegator does not advance a
-channel's tsafe until a delete is applied to every affected segment, and a
-strong-consistency query fails once the lag passes 3 s. Inside a sealed
-segment each primary key was looked up with its own binary search over the
-sorted primary-key column. Once that column is bigger than the cache, each
-lookup is about 25 cache misses: 6–13 µs per `int64` key and about 45 µs per
-`varchar` key.
+Of the three, the delete stall affects availability and the other two only
+add latency. The delegator does not advance a channel's tsafe until a delete
+is applied to every affected segment, and a strong-consistency query fails
+once the lag passes 3 s. Inside a sealed segment each primary key was looked
+up with its own binary search over the sorted primary-key column. Once that
+column is bigger than the cache, each lookup is about 25 cache misses: 6–13 µs
+per `int64` key and about 45 µs per `varchar` key.
 
 ### 4.2 Deletes: fixed in segcore (PR #54543, a dependency)
 
@@ -232,50 +229,59 @@ writer and the import code do not change. There is no proto change.
 
 A collection whose estimated row is at least 268 B (`maxSize / maxRows`)
 keeps its current target. That covers every float vector with dim > 61. For
-`int64 + int32` the target is 112 MB.
+`int64 + int32` the estimate is 28 B and the target 112 MB.
 
-**`maxRows` is a byte target, not a row count.** The parameter sets the
-target through the estimated row width, and each path then measures bytes in
-its own unit: import and compaction count binlog bytes, the StreamingNode
-seal counts the bytes of the insert messages. For `int64 + int32` a binlog
-row is about 11 B and an insert row 12 B, against the 28 B estimate. Measured
-with the 112 MB target (Appendix B): import keeps its own split and writes
-segments of 5.6–12.6 M rows, compaction outputs stay at or below 4.8 M rows,
-and growing segments seal at 0.6–2.9 M rows. The rows per segment are
-therefore `maxRows × rowWidth(c) / (bytes per row in that path)`, up to 3×
-`maxRows` on the import path for this schema. This is accepted: the
+The estimate counts the RowID and Timestamp columns once. The schema that
+RootCoord stores and hands to DataCoord and the StreamingNode already carries
+them as two `int64` fields, so the helper subtracts those before adding the
+fixed 16 B.
+
+#### Rows per segment
+
+`maxRows` sets a byte target through the estimated row width; no path counts
+rows. Each path measures bytes in its own unit: import and compaction count
+binlog bytes, the StreamingNode seal counts the bytes of the insert messages.
+For `int64 + int32` a binlog row is about 11 B and an insert row 12 B,
+against the 28 B estimate, so a segment holds
+`maxRows × rowWidth(c) / (bytes per row in that path)` rows. Measured with
+the 112 MB target (Appendix B.2):
+
+| Path | Rows per segment |
+|---|---:|
+| Import (keeps its own file split) | 5.6–12.6 M |
+| Compaction output | ≤ 4.8 M |
+| Growing segment at seal | 0.6–2.9 M |
+
+The import path reaches 3× `maxRows` for this schema. This is accepted: the
 per-segment costs the target bounds were measured at these sizes and are
 within budget, and the same byte rule on both sides is what keeps compaction
-from oscillating (next paragraph).
+from oscillating (below). A row count enforced as such would need the
+planner's fullness test, the writer's split and import assignment to count
+rows as well (Section 7).
 
-The estimate counts the RowID and Timestamp columns exactly once. The schema
-RootCoord stores and hands to DataCoord and the StreamingNode carries them as
-two `int64` fields, so the helper subtracts them before adding the fixed
-16 B overhead; the first measurement on 2026-10-23 counted them twice
-(44 B per row, a 176 MB target) and was redone.
-A row count enforced as such would need the planner's fullness test, the
-writer's split and import assignment to count rows as well (Section 7).
+#### Which schemas the target covers
 
-**What the target covers.** The estimate rounds variable-length fields up: a
-`varchar` counts as `min(max_length, 256)` (`common.estimate.varCharLengthAvg`),
-and JSON, Array, Text and Geometry count as 512 B
-(`common.estimate.dynamicFieldLengthAvg`). So the target only takes effect
-for schemas made of fixed-width fields and `varchar` fields with a short
-declared `max_length`. A `varchar` primary key declared with
-`max_length ≥ 252`, or any JSON or Array field, pushes the estimate over
-268 B and leaves the collection at `maxSize`, even if its real rows are 40 B
-wide (a 16-byte key, 26 M rows per GB). This is why the delete path is fixed
-in segcore and not by the target. The target is kept for the schemas it does
-cover and for the two costs above, and `maxRows=0` turns it off.
+The estimate rounds variable-length fields up: a `varchar` counts as
+`min(max_length, 256)` (`common.estimate.varCharLengthAvg`), and JSON, Array,
+Text and Geometry count as 512 B (`common.estimate.dynamicFieldLengthAvg`).
+So the target takes effect only for schemas made of fixed-width fields and
+`varchar` fields with a short declared `max_length`. A `varchar` primary key
+declared with `max_length ≥ 252`, or any JSON or Array field, pushes the
+estimate over 268 B and leaves the collection at `maxSize`, even if its real
+rows are 40 B wide (a 16-byte key, 26 M rows per GB). This is why the delete
+path is fixed in segcore and not by the target. The target is kept for the
+schemas it does cover and for the two costs above, and `maxRows=0` turns it
+off.
 
-**It does not cause repeated re-compaction.** The planner's classification
-and the writer compare bytes against the same `expectedSize(c)`, so an output
-the writer fills is "full" to the planner and is not picked again. A
-simulation of both planners over 80 trigger intervals confirms it: write
-amplification is 0.9–1.6 and no full output is merged again, for row widths
-from 13 B to 300 B, for estimates from 0.43× to 30× the real width, and
-across a schema change. Capping rows only at the writer, without changing the
-planner's target, gives a write amplification of 70.
+#### No repeated re-compaction
+
+The planner's classification and the writer compare bytes against the same
+`expectedSize(c)`, so an output the writer fills is "full" to the planner and
+is not picked again. A simulation of both planners over 80 trigger intervals
+confirms it: write amplification is 0.9–1.6 and no full output is merged
+again, for row widths from 13 B to 300 B, for estimates from 0.43× to 30× the
+real width, and across a schema change. Capping rows only at the writer,
+without changing the planner's target, gives a write amplification of 70.
 
 Adding a scalar field raises `rowWidth`. Segments that were full under the
 old target are merged once, the same as when an operator raises `maxSize`.
@@ -329,7 +335,7 @@ old target are merged once, the same as when an operator raises `maxSize`.
 
 - **An explicit table type or proto flag.** Every client and tool would have
   to learn it, and with the Phase 1 rule the schema already carries the
-  property. Not needed.
+  property, so it is not needed.
 - **Bytes and rows as two fullness dimensions inside the planner.** It
   produces the same plans as the size target in every simulated interval,
   and it touches knapsack, both planners, the writer, import and the proto.
@@ -339,8 +345,8 @@ old target are merged once, the same as when an operator raises `maxSize`.
   splits by rows while the planner still judges fullness by bytes.
 - **No row target, since PR #54543 removes the availability problem.** Index
   build and load replay are still serial per segment, and the target costs
-  nothing outside `getExpectedSegmentSize` and the seal limitation. It can be
-  turned off with `maxRows=0`. Kept.
+  nothing outside `getExpectedSegmentSize` and the seal limitation, and
+  `maxRows=0` turns it off. The target is kept.
 
 ## 8. Follow-ups
 
@@ -375,13 +381,16 @@ evolution rows, which are from `3df0cbcdd68`.
 
 ## Appendix B. Measurements
 
-Measured on a single-node standalone with autocompaction off and one shard,
-on aarch64 (20 cores, master `036bef9e9f`) and on an x86 AMD Ryzen 9 7945HX
-(master `179225cd09`). Schema `int64` pk + `int32` (+ the 1 B placeholder
-vector of today's workaround), 44 M rows.
+All runs: single-node standalone unless stated, one shard, 44 M rows of
+`int64` pk + `int32`. Two machines: aarch64 (20 cores) and x86 (AMD Ryzen 9
+7945HX).
 
-Delete and index build, one 44 M-row segment against eight 5.5 M-row
-segments (aarch64):
+### B.1 Before this change: one segment against eight
+
+Master `036bef9e9f` (aarch64) and `179225cd09` (x86), before PR #54543, with
+the 1 B placeholder vector of today's workaround, autocompaction off. One
+44 M-row segment against eight 5.5 M-row segments with the same data
+(aarch64):
 
 | Operation | 1 × 44 M | 8 × 5.5 M |
 |---|---:|---:|
@@ -392,6 +401,10 @@ segments (aarch64):
 | `INVERTED` build on `int32` | 28.6 s | 8.5 s (parallel) |
 | Load RSS delta | +5.3 GB | +5.3 GB |
 | Point / filter / count query | 2–4 ms | 2–4 ms |
+
+With a `varchar` key, the 10 % expression delete on the one 44 M-row segment
+was rejected by the query result size limit, and a 1 % expression delete on
+the eight segments stalled 2.7 s.
 
 On x86 the same deletes cost 11–12.5 µs per `int64` key. A CPU profile of a
 1.5 M-key delete attributes 81–85 % of `ChunkedSegmentSealedImpl::Delete` to
@@ -407,36 +420,40 @@ Streaming insert of the narrow schema seals at 4.85–4.9 M rows (137 MB)
 against a 123 MB seal threshold. The wire size per row (26 B) is lower than
 `MemorySize` (29.6 B), the same ratio that applies to `maxSize` today.
 
-**Phase-1 stack, 2026-10-28 (aarch64, same machine).** Branch
-`nonvec-phase1-enable` at `5ee87283ba` on master `3f0e3b9a77` (PR #54543 is
-in master). Collection `int64` pk + `int32`, no vector field, 44 M rows
-imported from one parquet file, auto compaction on, `maxRows` 4 M, size
-target 112 MB.
+### B.2 Phase-1 stack, `int64` primary key
 
-| Step | Result |
-|---|---:|
-| Import (48 s), segments after sort compaction | 5 segments: 12.59 M, 10.42 M, 8.39 M, 7.00 M, 5.60 M rows (59–133 MiB of binlog each, 11 B per row) |
-| `INVERTED` on `int32`, 44 M rows | 10.6 s (28.6 s on one 44 M segment, 8.5 s on eight) |
-| Load with no index | 3.7 s, RSS +4.6 GB (+5.3 GB before) |
-| Delete 1 % by expression, tsafe stall | 0.17 s (3.8 s before) |
-| Delete 10 % by expression, tsafe stall | 1.32 s (28.6 s before) |
-| Delete 10 % by pk list, 44 requests of 100 k, stall | 0.06 s (24 s before) |
-| Delete-ratio compaction after 20 % deleted | ran within 2 min, outputs visible; 8 segments, compaction outputs 0.96–4.79 M rows, the untouched 10.42 M import segment kept |
-| Release and load again, 9.24 M deletes replayed | 3.5 s |
-| Point / filter / count query | 1–4 ms throughout |
-| `search`, `hybrid_search`, add vector field | rejected with the unified error; adding a scalar field succeeds |
+Branch `nonvec-phase1-enable` at `5ee87283ba` on master `3f0e3b9a77` (PR
+#54543 is in master), aarch64. No vector field, 44 M rows imported from one
+parquet file, auto compaction on, `maxRows` 4 M, size target 112 MB. The last
+column repeats the one-segment value from B.1 where that step was measured
+there.
 
-Growing segments of the same schema seal at 0.6–2.9 M rows (112 MB × 0.12
-seal proportion, counted in 12 B insert rows, x86 standalone); on a 10 M-row
+| Step | Phase-1 stack | B.1, 1 × 44 M |
+|---|---:|---:|
+| Import (48 s), segments after sort compaction | 5 segments: 12.59 M, 10.42 M, 8.39 M, 7.00 M, 5.60 M rows (59–133 MiB of binlog each, 11 B per row) | |
+| `INVERTED` on `int32`, 44 M rows | 10.6 s | 28.6 s |
+| Load with no index | 3.7 s, RSS +4.6 GB | RSS +5.3 GB |
+| Delete 1 % by expression, tsafe stall | 0.17 s | 3.8 s |
+| Delete 10 % by expression, tsafe stall | 1.32 s | 28.6 s |
+| Delete 10 % by pk list, 44 requests of 100 k, stall | 0.06 s | 24 s |
+| Delete-ratio compaction after 20 % deleted | ran within 2 min, outputs visible; 8 segments, outputs 0.96–4.79 M rows, the untouched 10.42 M import segment kept | |
+| Release and load again, 9.24 M deletes replayed | 3.5 s | |
+| Point / filter / count query | 1–4 ms throughout | 2–4 ms |
+| `search`, `hybrid_search`, add vector field | rejected with the unified error; adding a scalar field succeeds | |
+
+Growing segments of the same schema (x86 standalone) seal at 0.6–2.9 M rows
+(112 MB × 0.12 seal proportion, counted in 12 B insert rows); on a 10 M-row
 insert the compaction outputs stayed at or below 3.45 M rows.
 
-**Varchar primary key, same stack and machine (2026-10-28).** 44 M rows with
-a 16-character zero-padded `varchar` pk and an `int32`, imported from one
-parquet file. With `max_length` 256 the estimate is 276 B per row, above the
-268 B threshold, so the target stays at 1 GB: import writes 2 segments of
-24.85 M and 19.15 M rows (241 MiB and 186 MiB of binlog). With `max_length`
-32 the estimate is 52 B and the target 208 MB: import writes 8 segments of
-4.67–6.54 M rows (45–63 MiB each), compaction outputs after the deletes are
+### B.3 Phase-1 stack, `varchar` primary key
+
+Same branch and machine as B.2. 44 M rows with a 16-character zero-padded
+`varchar` pk and an `int32`, imported from one parquet file. With
+`max_length` 256 the estimate is 276 B per row, above the 268 B threshold, so
+the target stays at 1 GB: import writes 2 segments of 24.85 M and 19.15 M
+rows (241 MiB and 186 MiB of binlog). With `max_length` 32 the estimate is
+52 B and the target 208 MB: import writes 8 segments of 4.67–6.54 M rows
+(45–63 MiB each), and the compaction outputs after the deletes are
 3.74–5.14 M rows.
 
 | Step | `max_length` 256 (no cap) | `max_length` 32 (208 MB) |
@@ -450,16 +467,13 @@ parquet file. With `max_length` 256 the estimate is 276 B per row, above the
 | Release and load again, 9.24 M deletes | 4.9 s | 3.5 s |
 | Point / count query | 1–4 ms | 1–3 ms |
 
-Before PR #54543 the same 10 % expression delete on one 44 M-row varchar
-segment was rejected by the query result size limit and a 1 % delete on eight
-segments stalled 2.7 s (Section 3.1).
+### B.4 Distributed deployment and gate flip
 
-**Distributed deployment and gate flip (2026-10-28, x86).** The same branch
-run as five processes (mixcoord, proxy, querynode, datanode, streamingnode
-on Pulsar): create, insert, load with no index, query, delete, scalar index,
-manual compaction with visible outputs, and the `search` / add-vector-field
-rejections behave as in standalone. With a vectorless collection loaded,
-every role was restarted one at a time with
+Same branch, x86, run as five processes (mixcoord, proxy, querynode,
+datanode, streamingnode on Pulsar): create, insert, load with no index,
+query, delete, scalar index, manual compaction with visible outputs, and the
+`search` / add-vector-field rejections behave as in standalone. With a
+vectorless collection loaded, every role was restarted one at a time with
 `common.enableCollectionWithoutVector=false`: the existing collection kept
 serving count, insert, get, delete, filter queries and a release-and-load
 cycle, a new vectorless `CreateCollection` was rejected with
@@ -469,6 +483,6 @@ the vectorless create.
 
 ## References
 
-- Review comments on PR #53983 (xiaofan-luan, 2026-10-10) and review feedback from Li Liu (2026-10-21, phase split)
+- Review comments on PR #53983: xiaofan-luan (2026-10-10, asked for the publication delay, small-segment and index-failure impact of the readiness split in Section 3) and Li Liu (2026-10-21, phase split)
 - PR #54543 `enhance: merge sorted delete batches against the sorted primary-key column`
 - Druid `maxRowsPerSegment` (5 M), TiKV region (96 MB or 960 k keys), Elasticsearch shard guidance (≤ 200 M documents): comparable systems cap both bytes and rows per unit.
