@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"maps"
+	"math"
 	"sort"
 	satomic "sync/atomic"
 	"testing"
@@ -93,6 +95,10 @@ func (h *spyCompactionInspector) checkAndSetSegmentStating(channel string, segme
 // isFull return true if the task pool is full
 func (h *spyCompactionInspector) isFull() bool {
 	return false
+}
+
+func (h *spyCompactionInspector) getRemainingCapacity() int {
+	return -1
 }
 
 func (h *spyCompactionInspector) start() {}
@@ -2318,6 +2324,11 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.inspector = NewMockCompactionInspector(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.versionManager = NewMockVersionManager(s.T())
+	// Subtests rebuild the fixture, so stop the trigger being replaced: a
+	// deferred retry it armed would otherwise fire on mocks whose test is over.
+	if s.tr != nil {
+		s.tr.stop()
+	}
 	s.tr = newCompactionTrigger(
 		s.meta,
 		s.inspector,
@@ -2328,11 +2339,16 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.tr.testingOnly = true
 }
 
+func (s *CompactionTriggerSuite) TearDownTest() {
+	s.tr.stop()
+}
+
 func (s *CompactionTriggerSuite) TestHandleSignal() {
 	s.Run("getCompaction_failed", func() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		tr.handleSignal(&compactionSignal{
@@ -2349,6 +2365,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
@@ -2377,6 +2394,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Properties: map[string]string{
@@ -2406,6 +2424,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		// s.allocator.EXPECT().AllocID(mock.Anything).Return(20000, nil)
 		start := int64(20000)
@@ -2533,6 +2552,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(nil, errors.New("mocked"))
 		err := tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -2545,6 +2565,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.allocator.EXPECT().AllocTimestamp(mock.Anything).Return(10000, nil)
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
@@ -2565,6 +2586,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 			Schema: schema,
 			Properties: map[string]string{
@@ -2582,6 +2604,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		defer s.SetupTest()
 		tr := s.tr
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		start := int64(20000)
 		s.allocator.EXPECT().AllocN(mock.Anything).RunAndReturn(func(i int64) (int64, int64, error) {
 			return start, start + i, nil
@@ -2660,6 +2683,7 @@ func (s *CompactionTriggerSuite) TestGlobalSignalContinuesPastSkippedCollection(
 		addEnabledCollection()
 
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(skipped, nil)
 		enabledLookups := 0
 		s.handler.EXPECT().GetCollection(mock.Anything, enabledCollectionID).
@@ -2736,6 +2760,7 @@ func (s *CompactionTriggerSuite) TestCollectionScopedSignalKeepsEarlyReturn() {
 		defer pt.Reset(pt.DataCoordCfg.IndexBasedCompaction.Key)
 
 		s.inspector.EXPECT().isFull().Return(false)
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(coll, nil)
 		return s.tr.handleSignal(NewCompactionSignal().
 			WithCollectionID(s.collectionID).
@@ -2797,6 +2822,7 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 				{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
 			}},
 		}, nil).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.tr.allocator = newMockAllocator(s.T())
 	}
 
@@ -2807,6 +2833,14 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 		segment.PartitionID = s.partitionID + 1
 		segment.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
 		s.meta.segments.SetSegment(7, segment)
+		// Every group is prepared, its collection looked up, before any plan
+		// is made, so the second group costs a lookup; only planning stops.
+		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+			ID: s.collectionID,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+			}},
+		}, nil).Once()
 		// The inspector is full once one task is submitted.
 		submitted := 0
 		s.inspector.EXPECT().isFull().RunAndReturn(func() bool { return submitted >= 1 })
@@ -3598,6 +3632,10 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 
 func Test_compactionTrigger_ShouldCompactExpiryWithTTLField(t *testing.T) {
 	trigger := &compactionTrigger{}
+	// The boundaries below assume the configured quantile applies exactly.
+	jitter := Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	defer Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, jitter)
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 	ts := time.Now()
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -3905,6 +3943,7 @@ func TestHasTooManyDeletions(t *testing.T) {
 		Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetValue(),
 		Params.DataCoordCfg.SingleCompactionRatioThreshold.Key:  Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue(),
 		Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key: Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetValue(),
+		Params.DataCoordCfg.SingleCompactionThresholdJitter.Key: Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue(),
 	}
 	defer func() {
 		for k, v := range saveKeys {
@@ -3914,6 +3953,7 @@ func TestHasTooManyDeletions(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "10")
 	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
 	Params.Save(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key, "1024")
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 
 	cases := []struct {
 		name    string
@@ -3973,4 +4013,443 @@ func TestHasTooManyDeletions(t *testing.T) {
 			assert.Equal(t, tc.want, hasTooManyDeletions(segment))
 		})
 	}
+}
+
+// The TTL-field expiration is jittered in time by (multiplier-1) x the width
+// of the quantile step, so same-aged segments do not expire into compaction
+// simultaneously, at the default jitter.
+func Test_compactionTrigger_ShouldCompactExpiryWithTTLField_Jitter(t *testing.T) {
+	trigger := &compactionTrigger{}
+	for _, item := range []*paramtable.ParamItem{
+		&Params.DataCoordCfg.SingleCompactionRatioThreshold,
+		&Params.DataCoordCfg.SingleCompactionThresholdJitter,
+	} {
+		origin := item.GetValue()
+		defer Params.Save(item.Key, origin)
+	}
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0.25")
+
+	// Quantiles one hour apart: the jitter delays the first quantile's
+	// expiration by up to 15 minutes.
+	ts := time.Now()
+	newSegment := func(id int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:             id,
+			NumOfRows:      100,
+			ExpirQuantiles: []int64{ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), ts.Add(2 * time.Hour).UnixMicro(), ts.Add(3 * time.Hour).UnixMicro(), ts.Add(4 * time.Hour).UnixMicro()},
+		}}
+	}
+	var late, early int64
+	for id := int64(1); id < 10000 && (late == 0 || early == 0); id++ {
+		switch m := singleCompactionThresholdMultiplier(id); {
+		case m >= 1.2 && late == 0:
+			late = id
+		case m < 1.05 && early == 0:
+			early = id
+		}
+	}
+	// Five minutes past the first quantile: the lightly jittered segment has
+	// expired, the heavily jittered one has not.
+	ct := &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(5 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(early)))
+	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+	// Twenty minutes past, both have.
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(20 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+
+	// Fewer rows with a positive TTL than quantile slots: the slots past them
+	// hold the never-expire sentinel. The jitter must not measure a step
+	// against it, or the expiration is pushed out of reach.
+	sentinel := func(id int64, quantiles ...int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, NumOfRows: 100, ExpirQuantiles: quantiles}}
+	}
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	// With a real lower neighbor the jitter falls back to the step below.
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.4")
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Hour + 5*time.Minute))}
+	assert.False(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(time.Hour + 20*time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct,
+		sentinel(late, ts.UnixMicro(), ts.Add(time.Hour).UnixMicro(), math.MaxInt64, math.MaxInt64, math.MaxInt64)))
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "0.2")
+
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+	ct = &compactTime{startTime: tsoutil.ComposeTSByTime(ts.Add(5 * time.Minute))}
+	assert.True(t, trigger.ShouldCompactExpiryWithTTLField(ct, newSegment(late)))
+}
+
+// Expired-entities candidates are retention, not delete-driven accumulation,
+// so a steady delete stream cannot starve TTL cleanup.
+func Test_compactionTrigger_ExpiryIsRetentionClass(t *testing.T) {
+	trigger := &compactionTrigger{}
+	origin := Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	defer Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, origin)
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
+
+	ts := time.Now()
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              1,
+		NumOfRows:       100,
+		CommitTimestamp: tsoutil.ComposeTSByTime(ts.Add(-2 * time.Hour)),
+	}}
+	ct := &compactTime{
+		startTime:  tsoutil.ComposeTSByTime(ts),
+		expireTime: tsoutil.ComposeTSByTime(ts.Add(-time.Hour)),
+	}
+	assert.Equal(t, singleReasonRetention, trigger.singleCompactionReason(segment, ct))
+}
+
+// A collection-scoped signal plans no single compaction: the planner is
+// handed an admission with nothing eligible, so neither a rewrite nor a merge
+// of those segments happens before the next global round.
+func Test_compactionTrigger_TargetedSignalPlansNoSingleCompaction(t *testing.T) {
+	assert.True(t, NewCompactionSignal().isGlobal())
+	assert.False(t, NewCompactionSignal().WithCollectionID(1).isGlobal())
+
+	trigger := &compactionTrigger{}
+	none := newSingleAdmission(nil, 0, nil)
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 100}}
+	isSingle, heldBack := none.single(trigger, segment, &compactTime{})
+	assert.False(t, isSingle)
+	assert.False(t, heldBack)
+
+	eligible := []*singleCandidate{newSingleCandidate(segment, singleReasonAccumulation)}
+	deferred := newSingleAdmission(nil, 1, eligible)
+	isSingle, heldBack = deferred.single(trigger, segment, &compactTime{})
+	assert.False(t, isSingle)
+	assert.True(t, heldBack)
+
+	admitted := newSingleAdmission(eligible, 0, eligible)
+	isSingle, heldBack = admitted.single(trigger, segment, &compactTime{})
+	assert.True(t, isSingle)
+	assert.False(t, heldBack)
+}
+
+// With the global loop not running (auto compaction disabled globally while a
+// collection enables it), collection-scoped signals plan single compaction
+// themselves; while it runs, only the global round does.
+func Test_compactionTrigger_SingleCompactionWithoutGlobalLoop(t *testing.T) {
+	paramtable.Init()
+	key := Params.DataCoordCfg.EnableAutoCompaction.Key
+	saved := Params.DataCoordCfg.EnableAutoCompaction.GetValue()
+	t.Cleanup(func() { Params.Save(key, saved) })
+
+	collectionSignal := NewCompactionSignal().WithCollectionID(1)
+
+	Params.Save(key, "false")
+	trigger := newCompactionTrigger(nil, nil, nil, nil, nil)
+	trigger.globalTrigger = time.NewTicker(time.Hour)
+	defer trigger.globalTrigger.Stop()
+	trigger.schedule() // returns at once: the global loop does not start
+	assert.True(t, trigger.plansSingleCompaction(collectionSignal))
+	assert.True(t, trigger.plansSingleCompaction(NewCompactionSignal()))
+
+	Params.Save(key, "true")
+	trigger = newCompactionTrigger(nil, nil, nil, nil, nil)
+	trigger.globalTrigger = time.NewTicker(time.Hour)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		trigger.schedule()
+	}()
+	assert.Eventually(t, trigger.globalLoopRunning.Load, 5*time.Second, 10*time.Millisecond)
+	assert.False(t, trigger.plansSingleCompaction(collectionSignal))
+	assert.True(t, trigger.plansSingleCompaction(NewCompactionSignal()))
+	trigger.closeCh.Close()
+	<-done
+	assert.True(t, trigger.plansSingleCompaction(collectionSignal), "the flag clears when the loop exits")
+}
+
+// The jittered deleted-rows ratio is capped at 1, so a fully deleted segment
+// qualifies even when the configured threshold times the segment's multiplier
+// exceeds 1.
+func TestHasTooManyDeletionsRatioCappedAtOne(t *testing.T) {
+	saveKeys := map[string]string{
+		Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key:  Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetValue(),
+		Params.DataCoordCfg.SingleCompactionRatioThreshold.Key:  Params.DataCoordCfg.SingleCompactionRatioThreshold.GetValue(),
+		Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key: Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetValue(),
+		Params.DataCoordCfg.SingleCompactionThresholdJitter.Key: Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue(),
+	}
+	defer func() {
+		for k, v := range saveKeys {
+			Params.Save(k, v)
+		}
+	}()
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.Key, "10")
+	Params.Save(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.Key, "1024")
+	Params.Save(Params.DataCoordCfg.SingleCompactionRatioThreshold.Key, "1")
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0.25")
+	require.Greater(t, singleCompactionThresholdMultiplier(1), 1.0)
+
+	// Every row deleted, in a few small deltalogs: only the ratio can fire.
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 1, NumOfRows: 100,
+		Stats: &datapb.Statistics{DeleteNumRows: 100, DeltaBinlogCount: 2, DeltaBinlogSize: 64},
+	}}
+	assert.True(t, hasTooManyDeletions(segment))
+	segment.Stats.DeleteNumRows = 99
+	assert.False(t, hasTooManyDeletions(segment), "below the capped threshold")
+}
+
+// The jittered expired-entities ratio is capped at 1 as well, so a segment
+// whose rows have all expired is a retention candidate at ratio threshold 1.
+func Test_compactionTrigger_ExpiryRatioCappedAtOne(t *testing.T) {
+	trigger := &compactionTrigger{}
+	for item, value := range map[*paramtable.ParamItem]string{
+		&Params.DataCoordCfg.SingleCompactionRatioThreshold:  "1",
+		&Params.DataCoordCfg.SingleCompactionThresholdJitter: "0.25",
+	} {
+		key, saved := item.Key, item.GetValue()
+		Params.Save(key, value)
+		t.Cleanup(func() { Params.Save(key, saved) })
+	}
+	require.Greater(t, singleCompactionThresholdMultiplier(1), 1.0)
+
+	ts := time.Now()
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:              1,
+		NumOfRows:       100,
+		CommitTimestamp: tsoutil.ComposeTSByTime(ts.Add(-2 * time.Hour)),
+	}}
+	ct := &compactTime{
+		startTime:  tsoutil.ComposeTSByTime(ts),
+		expireTime: tsoutil.ComposeTSByTime(ts.Add(-time.Hour)),
+	}
+	assert.Equal(t, singleReasonRetention, trigger.singleCompactionReason(segment, ct))
+}
+
+// When no global round runs, a collection-scoped round that deferred single
+// compaction candidates arms one retry for the collection: a plain signal
+// sent after the global cadence, re-armed if it cannot be queued, canceled
+// when the trigger stops.
+func Test_compactionTrigger_DeferredRetrySignalsCollection(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	t.Cleanup(func() { pt.Reset(pt.DataCoordCfg.EnableAutoCompaction.Key) })
+	trigger := newCompactionTrigger(nil, nil, newMockAllocator(t), nil, nil)
+
+	pendingRetries := func() map[int64]*time.Timer {
+		trigger.deferredRetryMu.Lock()
+		defer trigger.deferredRetryMu.Unlock()
+		return maps.Clone(trigger.deferredRetries)
+	}
+
+	// One retry per collection is pending at a time, and it waits for the
+	// global cadence rather than firing at once.
+	trigger.armDeferredRetry(7)
+	trigger.armDeferredRetry(7)
+	pending := pendingRetries()
+	require.Len(t, pending, 1)
+	require.True(t, pending[7].Stop(), "the retry is still waiting")
+
+	trigger.fireDeferredRetry(7)
+	select {
+	case signal := <-trigger.signals:
+		assert.EqualValues(t, 7, signal.collectionID)
+		assert.False(t, signal.isForce)
+		assert.False(t, signal.isGlobal())
+		assert.Empty(t, signal.segmentIDs)
+	default:
+		t.Fatal("the retry sent no signal")
+	}
+	assert.Empty(t, pendingRetries())
+
+	// A retry that cannot be queued is armed again rather than dropped.
+	for len(trigger.signals) < cap(trigger.signals) {
+		trigger.signals <- NewCompactionSignal()
+	}
+	trigger.fireDeferredRetry(7)
+	assert.Contains(t, pendingRetries(), int64(7))
+
+	// Stopping the trigger cancels the pending retries and arms no new one.
+	trigger.stop()
+	assert.Empty(t, pendingRetries())
+	trigger.armDeferredRetry(8)
+	assert.Empty(t, pendingRetries())
+}
+
+// With auto compaction disabled globally and enabled on the collection, no
+// global round runs and the collection's own signals plan single compaction
+// through admission. The candidates a round defers are retried by the trigger
+// once the bucket has refilled, so they are compacted even if the collection
+// never flushes again.
+func (s *CompactionTriggerSuite) TestCollectionSignalRetriesDeferredWithoutGlobalLoop() {
+	const mb = 1024 * 1024
+	pt := paramtable.Get()
+	for key, value := range map[string]string{
+		pt.DataCoordCfg.EnableAutoCompaction.Key:                   "false",
+		pt.DataCoordCfg.IndexBasedCompaction.Key:                   "false",
+		pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key: "1",
+		pt.DataCoordCfg.SegmentMaxSize.Key:                         "100",
+		// Every segment qualifies for single compaction and exceeds the
+		// 100MB target size, so each one becomes its own plan.
+		pt.DataCoordCfg.SingleCompactionRatioThreshold.Key:    "0",
+		pt.DataCoordCfg.SingleCompactionThresholdJitter.Key:   "0",
+		pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key:   "2",
+		pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key: "60",
+	} {
+		pt.Save(key, value)
+		s.T().Cleanup(func() { pt.Reset(key) })
+	}
+	resetSingleCompactionAdmitterForTest()
+	s.T().Cleanup(resetSingleCompactionAdmitterForTest)
+	for _, segment := range s.meta.segments.GetSegments() {
+		updated := segment.Clone()
+		updated.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		updated.Stats = storage.BuildStatsFromFieldBinlogs(updated.GetBinlogs(), updated.GetStatslogs(), updated.GetBm25Statslogs(), updated.GetDeltalogs())
+		s.meta.segments.SetSegment(updated.GetID(), updated)
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+		ID: s.collectionID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		}},
+		Properties: map[string]string{common.CollectionAutoCompactionKey: "true"},
+	}, nil)
+	s.tr.allocator = newMockAllocator(s.T())
+	s.inspector.EXPECT().isFull().Return(false)
+	s.inspector.EXPECT().getRemainingCapacity().Return(-1)
+	submitted := 0
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).RunAndReturn(func(*datapb.CompactionTask) error {
+		submitted++
+		return nil
+	})
+	pendingRetry := func() bool {
+		s.tr.deferredRetryMu.Lock()
+		defer s.tr.deferredRetryMu.Unlock()
+		_, pending := s.tr.deferredRetries[s.collectionID]
+		return pending
+	}
+
+	s.NoError(s.tr.handleSignal(NewCompactionSignal().
+		WithCollectionID(s.collectionID).
+		WithPartitionID(s.partitionID).
+		WithChannel(s.channel)))
+	s.Equal(2, submitted, "the budget admits two of the six eligible segments")
+	s.True(pendingRetry(), "a retry is armed for the deferred candidates")
+
+	// The retry fires once the bucket has refilled; no flush is involved.
+	resetSingleCompactionAdmitterForTest()
+	s.tr.fireDeferredRetry(s.collectionID)
+	s.False(pendingRetry())
+	var retry *compactionSignal
+	select {
+	case retry = <-s.tr.signals:
+	default:
+		s.FailNow("the retry sent no signal")
+	}
+	s.Equal(s.collectionID, retry.collectionID)
+	s.False(retry.isForce)
+	s.Empty(retry.segmentIDs)
+	s.NoError(s.tr.handleSignal(retry))
+	s.Equal(4, submitted, "the retry round admits the next two")
+	s.True(pendingRetry(), "two candidates are still deferred, so the next retry is armed")
+}
+
+// A deferred retry that reaches the worker while the inspector is full must
+// not be lost: the round returns before admission, so the retry is re-armed
+// for when the inspector has room again.
+func (s *CompactionTriggerSuite) TestDeferredRetryReArmedWhenInspectorFull() {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	s.T().Cleanup(func() { pt.Reset(pt.DataCoordCfg.EnableAutoCompaction.Key) })
+	pendingRetry := func() bool {
+		s.tr.deferredRetryMu.Lock()
+		defer s.tr.deferredRetryMu.Unlock()
+		_, pending := s.tr.deferredRetries[s.collectionID]
+		return pending
+	}
+
+	s.tr.allocator = newMockAllocator(s.T())
+	s.tr.armDeferredRetry(s.collectionID)
+	s.tr.fireDeferredRetry(s.collectionID)
+	s.False(pendingRetry(), "firing consumes the pending retry")
+	var retry *compactionSignal
+	select {
+	case retry = <-s.tr.signals:
+	default:
+		s.FailNow("the retry sent no signal")
+	}
+
+	// The inspector is full: the retry round returns at once, before it
+	// looks at any candidate, and arms the next retry instead of dropping it.
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	s.NoError(s.tr.handleSignal(retry))
+	s.True(pendingRetry(), "the retry is re-armed while the inspector is full")
+
+	// A global signal under the same back-pressure arms nothing: the global
+	// loop itself is the retry.
+	s.tr.deferredRetryMu.Lock()
+	s.tr.deferredRetries[s.collectionID].Stop()
+	delete(s.tr.deferredRetries, s.collectionID)
+	s.tr.deferredRetryMu.Unlock()
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+	s.False(pendingRetry())
+}
+
+// Admitted candidates whose plans the queue refuses give their tokens back
+// and are retried, so a collection-scoped round without a global loop does
+// not lose them to a transient enqueue failure.
+func (s *CompactionTriggerSuite) TestCollectionSignalRetriesRefundedCandidates() {
+	const mb = 1024 * 1024
+	pt := paramtable.Get()
+	for key, value := range map[string]string{
+		pt.DataCoordCfg.EnableAutoCompaction.Key:                   "false",
+		pt.DataCoordCfg.IndexBasedCompaction.Key:                   "false",
+		pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key: "1",
+		pt.DataCoordCfg.SegmentMaxSize.Key:                         "100",
+		pt.DataCoordCfg.SingleCompactionRatioThreshold.Key:         "0",
+		pt.DataCoordCfg.SingleCompactionThresholdJitter.Key:        "0",
+		// The budget covers all six eligible segments, so nothing is deferred
+		// and only the refund can arm the retry.
+		pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key:   "10",
+		pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key: "60",
+	} {
+		pt.Save(key, value)
+		s.T().Cleanup(func() { pt.Reset(key) })
+	}
+	resetSingleCompactionAdmitterForTest()
+	s.T().Cleanup(resetSingleCompactionAdmitterForTest)
+	for _, segment := range s.meta.segments.GetSegments() {
+		updated := segment.Clone()
+		updated.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		updated.Stats = storage.BuildStatsFromFieldBinlogs(updated.GetBinlogs(), updated.GetStatslogs(), updated.GetBm25Statslogs(), updated.GetDeltalogs())
+		s.meta.segments.SetSegment(updated.GetID(), updated)
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+		ID: s.collectionID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		}},
+		Properties: map[string]string{common.CollectionAutoCompactionKey: "true"},
+	}, nil)
+	s.tr.allocator = newMockAllocator(s.T())
+	s.inspector.EXPECT().isFull().Return(false)
+	s.inspector.EXPECT().getRemainingCapacity().Return(-1)
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(errors.New("queue refused the plan"))
+	pendingRetry := func() bool {
+		s.tr.deferredRetryMu.Lock()
+		defer s.tr.deferredRetryMu.Unlock()
+		_, pending := s.tr.deferredRetries[s.collectionID]
+		return pending
+	}
+	admitter := getSingleCompactionAdmitter()
+	tokens := func() float64 {
+		admitter.mu.Lock()
+		defer admitter.mu.Unlock()
+		return admitter.tokens
+	}
+
+	s.NoError(s.tr.handleSignal(NewCompactionSignal().
+		WithCollectionID(s.collectionID).
+		WithPartitionID(s.partitionID).
+		WithChannel(s.channel)))
+	s.Equal(10.0, tokens(), "every admitted candidate that missed the queue gave its token back")
+	s.True(pendingRetry(), "the refunded candidates are retried")
 }
