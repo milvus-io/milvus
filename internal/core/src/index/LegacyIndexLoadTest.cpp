@@ -1702,8 +1702,9 @@ class LegacyEmptyEmbListArtifact final : public storage::Artifact {
     Serialize(storage::FileSink& sink) const override {
         const std::vector<size_t> offsets{0};
         std::vector<uint8_t> payload(
-            detail::GetEmptyEmbeddingListPayloadSize(offsets.size()));
-        detail::EncodeEmptyEmbeddingListPayload(
+            ::milvus::index::detail::GetEmptyEmbeddingListPayloadSize(
+                offsets.size()));
+        ::milvus::index::detail::EncodeEmptyEmbeddingListPayload(
             payload.data(), 4, ToValidDataCount(offsets.size()), offsets);
         sink.WriteEntry(
             EMPTY_EMB_LIST_OFFSETS_KEY, payload.data(), payload.size());
