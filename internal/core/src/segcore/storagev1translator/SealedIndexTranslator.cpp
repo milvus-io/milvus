@@ -104,7 +104,8 @@ SealedIndexTranslator::SealedIndexTranslator(
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
-        if (use_shared_memory_overhead_group) {
+        if (use_shared_memory_overhead_group &&
+            !index_load_info_.load_resource_request.has_value()) {
             const auto max_task_overhead =
                 stream_load_info->positioned_max_task_transient_bytes;
             auto memory_group =
@@ -156,10 +157,16 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-SealedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+milvus::cachinglayer::LoadingResourceUsage
+SealedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
+    const auto memory_overhead = load_resource_request_.max_memory_cost -
+                                 load_resource_request_.final_memory_cost;
+    const auto shared_memory =
+        meta_.loading_overhead_config ? memory_overhead : 0;
     // this is an estimation, error could be up to 20%.
     // Preserve the historical 2x disk safety margin for temporary file growth
     // during writes. final_disk_cost is already counted as loaded resource, so
@@ -168,10 +175,10 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
                 load_resource_request_.final_memory_cost,
                 load_resource_request_.final_disk_cost),
             milvus::cachinglayer::ResourceUsage(
-                load_resource_request_.max_memory_cost -
-                    load_resource_request_.final_memory_cost,
+                memory_overhead - shared_memory,
                 load_resource_request_.max_disk_cost * 2 -
-                    load_resource_request_.final_disk_cost)};
+                    load_resource_request_.final_disk_cost),
+            milvus::cachinglayer::ResourceUsage(shared_memory, 0)};
 }
 
 const std::string&
