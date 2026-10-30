@@ -211,6 +211,8 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		if outputFieldName == "*" {
 			userRequestedPkFieldExplicitly = true
 			for fieldName, field := range allFieldNameMap {
+				// "*" means all retrievable fields; non-retrievable fields
+				// (BM25 function outputs) are skipped instead of rejected.
 				if schema.CanRetrieveRawFieldData(field) {
 					resultFieldNameMap[fieldName] = true
 					userOutputFieldsMap[fieldName] = true
@@ -256,7 +258,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
-					return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("not allowed to retrieve raw data of field %s", outputFieldName)
+					return nil, nil, nil, nil, false, merr.WrapErrParameterInvalidMsg("not allowed to retrieve raw data of field %s: it is the output of a BM25 function, whose raw sparse vector is not loaded for retrieval; it can only be used as a search field", outputFieldName)
 				}
 				resultFieldNameMap[outputFieldName] = true
 				userOutputFieldsMap[outputFieldName] = true
