@@ -608,11 +608,21 @@ closure; destruction and reconstruction for the same logical Segment are
 serialized. Detached old work cannot install a metadata snapshot or remove the newly
 created instance.
 
-`OnDropped` is invoked exactly once after the View's release obligations are
-complete. Other Views or query handles may still own shared resources; their
-lifetime is independent. If release starts exclusive resource destruction, its
-required cleanup is completed before acknowledging that release. There are no
-native waits or callback waits while holding the handler's shard mutex.
+`OnDropped` is invoked exactly once after this View's queries and preparation
+operations have finished and its references have been released. For every
+SegmentResource owner detached by this release, an unshared or already-closing
+owner must finish physical destruction before the callback. Waiting joins that
+concrete incarnation, including when a new binding arrived during closure; it
+never looks up a replacement by SegmentID. A still-live owner taken over by
+another View or its active query may remain resident and does not delay this
+callback. The final consumer establishes Closing under the resource lock before
+waiting, so a later binding cannot extend that incarnation's release obligation.
+
+This completion promise is at whole-SegmentResource granularity. It does not
+require synchronous pruning of obsolete fields, indexes or cached ReadStates
+inside a segment still shared by other Views. Those remain under the existing
+reconciliation policy. No native waits or callback waits hold the handler's
+shard mutex or occupy a scheduler worker.
 
 QueryNode is stateless. After restart, Coordinator-pushed requirements rebuild
 bindings and resources using exact schema/load identities and full metadata

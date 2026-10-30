@@ -9,14 +9,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func registerQueryViewServers(grpcServer *grpc.Server, segMgr qnview.SegmentManager, serverID int64) {
+func registerQueryViewServers(grpcServer *grpc.Server, segMgr qnview.SegmentManager, serverID int64) *qnview.QNQueryViewHandler {
 	queryViewHandler := qnview.NewQNQueryViewHandler(segMgr)
 	registerQueryViewSyncHandler(grpcServer, queryViewHandler)
 	registerQueryViewQueryServer(grpcServer, queryViewHandler, serverID)
+	return queryViewHandler
 }
 
 func (s *Server) registerQueryViewServers() {
-	registerQueryViewServers(s.grpcServer, &lazyQNSegmentManager{
+	queryViewHandler := registerQueryViewServers(s.grpcServer, &lazyQNSegmentManager{
 		scheduler: nodescheduler.Get(),
 		build: func() qnview.SegmentManager {
 			qnImpl, ok := s.querynode.(*qn.QueryNode)
@@ -32,4 +33,7 @@ func (s *Server) registerQueryViewServers() {
 			)
 		},
 	}, paramtable.GetNodeID())
+	if node, ok := s.querynode.(*qn.QueryNode); ok {
+		node.SetQueryViewHandler(queryViewHandler)
+	}
 }

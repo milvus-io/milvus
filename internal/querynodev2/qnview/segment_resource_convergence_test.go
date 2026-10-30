@@ -270,10 +270,11 @@ func TestSegmentResourceQueryWaitCancellationReleasesPins(t *testing.T) {
 			result <- err
 		}()
 		<-entered
-		f.drop(t, req)
+		dropped := f.beginDrop(req)
 		require.Zero(t, f.releases.Load(), "pending query owns the instance after its View exits")
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled)
+		awaitShutdown(t, dropped)
 		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
 	})
 }
@@ -353,9 +354,10 @@ func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
 		query, err := f.manager.AcquireSealedSegmentHandles(t.Context(), healthy.Key, healthy.View, 100)
 		require.NoError(t, err)
 		query[0].Release()
-		f.drop(t, first)
+		dropped := f.beginDrop(first)
 		require.Zero(t, f.releases.Load(), "failure cannot destroy a resource borrowed by an executing query")
 		held[0].Release()
+		awaitShutdown(t, dropped)
 		require.Eventually(t, func() bool { return f.releases.Load() == 1 }, 5*time.Second, time.Millisecond)
 		// Reconstruction uses a fresh registration even for the same SegmentID.
 		replacement := f.acquire(3, 1, 1)

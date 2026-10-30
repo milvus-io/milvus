@@ -102,12 +102,13 @@ func (f *resourceSchedulingFixture) addBinding(schema int32) *segmentBinding {
 	ctx, cancel := context.WithCancel(f.r.ctx)
 	f.t.Cleanup(cancel)
 	v := &viewResources{
-		ctx: ctx, cancel: cancel, req: req, dependenciesDone: make(chan struct{}),
+		ctx: ctx, cancel: cancel, req: req, dependenciesDone: make(chan struct{}), cleanupDone: make(chan struct{}),
 		collection: &fakeCollectionRuntimeGuard{schemaVersion: int64(schema), schema: &schemapb.CollectionSchema{Version: schema}}, buffer: &fakeTransformLogGuard{},
 	}
 	close(v.dependenciesDone)
 	b := &segmentBinding{resource: f.r, view: v, partitionID: 10}
 	v.bindings = map[int64]*segmentBinding{f.r.id: b}
+	f.r.manager.drain.Add(1) // This fixture directly admits a prepared View.
 	f.r.manager.views[req.Key] = v
 	f.r.bindings = append(f.r.bindings, b)
 	return b

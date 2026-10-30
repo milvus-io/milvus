@@ -21,8 +21,10 @@ import (
 )
 
 type Buffer struct {
-	streamMu sync.Mutex
-	streams  wal.TransformLogStreamManager
+	closeOnce sync.Once
+	unwatch   func()
+	streamMu  sync.Mutex
+	streams   wal.TransformLogStreamManager
 
 	mu                sync.Mutex
 	streamsByPChannel map[string]*streamState
@@ -68,10 +70,10 @@ func NewConfigured(ctx context.Context, streams wal.TransformLogStreamManager) *
 	watcher := config.NewHandler(fmt.Sprintf("query-transform-drain-%p", b), refresh)
 	params.Watch(params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.Key, watcher)
 	refresh(nil)
-	context.AfterFunc(ctx, func() {
+	b.unwatch = func() {
 		params.Unwatch(params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency.Key, watcher)
-		b.closeDrain()
-	})
+	}
+	context.AfterFunc(ctx, b.Close)
 	return b
 }
 
@@ -83,6 +85,17 @@ func (b *Buffer) resizeDrainLocked(concurrency int) {
 		go b.drainWorker()
 	}
 	b.drainReady.Broadcast()
+}
+
+// Close retires the pool and its config watcher. The owner must first release
+// all view guards and segment registrations, which stop transport and application.
+func (b *Buffer) Close() {
+	b.closeOnce.Do(func() {
+		if b.unwatch != nil {
+			b.unwatch()
+		}
+		b.closeDrain()
+	})
 }
 
 func (b *Buffer) closeDrain() {

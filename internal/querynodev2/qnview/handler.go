@@ -56,6 +56,10 @@ type QNQueryViewHandler struct {
 	shards         map[qviews.ShardID]*qnShardView
 	segMgr         SegmentManager
 	localOptimizer optimizer.LocalOptimizer
+	stopping       bool
+	closeOnce      sync.Once
+	closing        chan struct{}
+	closed         chan struct{}
 }
 
 // NewQNQueryViewHandler creates a new QNQueryViewHandler.
@@ -64,6 +68,8 @@ func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 		shards:         make(map[qviews.ShardID]*qnShardView),
 		segMgr:         segMgr,
 		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		closing:        make(chan struct{}),
+		closed:         make(chan struct{}),
 	}
 }
 
@@ -95,8 +101,9 @@ func (h *QNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *qnShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &qnShardView{
-			views:  make(map[qviews.QueryViewVersion]*qnViewEntry),
-			segMgr: h.segMgr,
+			views:    make(map[qviews.QueryViewVersion]*qnViewEntry),
+			segMgr:   h.segMgr,
+			stopping: h.stopping,
 			onEmpty: func(emptyShard *qnShardView) {
 				h.mu.Lock()
 				defer h.mu.Unlock()
