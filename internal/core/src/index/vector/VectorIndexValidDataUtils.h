@@ -416,9 +416,10 @@ NullableMmapOptions(const IdMapMmapFlags& flags,
 inline knowhere::LoadOptions
 MakeNullableLoadInput(const ValidDataView& valid_data,
                       const IdMapMmapFlags& mmap_flags = {},
-                      const std::string& mmap_path_prefix = {}) {
+                      const std::string& mmap_path_prefix = {},
+                      bool embedding_list = false) {
     if (!valid_data.found) {
-        return {};
+        return {.embedding_list = embedding_list};
     }
     ValidatePersistedValidDataCount(valid_data.count);
     if (valid_data.count > 0 && valid_data.bitmap == nullptr) {
@@ -429,7 +430,8 @@ MakeNullableLoadInput(const ValidDataView& valid_data,
     return {knowhere::ValidityView{valid_data.bitmap,
                                    GetValidDataBitmapSize(valid_data.count),
                                    ToValidDataCount(valid_data.count)},
-            NullableMmapOptions(mmap_flags, mmap_path_prefix)};
+            NullableMmapOptions(mmap_flags, mmap_path_prefix),
+            embedding_list};
 }
 
 inline ValidDataView
