@@ -552,7 +552,6 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	defer sp.End()
 	t.partitionIDsSet = typeutil.NewConcurrentSet[UniqueID]()
 	log := mlog.With(mlog.Int64("collID", t.GetCollectionID()), mlog.String("collName", t.collectionName))
-	placeholderLog := newSearchPlaceholderLog()
 
 	// Old SDK hybrid callers pass only singular group_by_field; output must
 	// downgrade plural→singular the same way the non-advanced path does.
@@ -643,7 +642,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 				"search iterator v2 is not supported for hybrid search")
 		}
 
-		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId(), placeholderLog)
+		convertedPlaceholder, placeholderType, err := t.convertPlaceholderIfNeeded(subReq.GetPlaceholderGroup(), queryInfo.GetQueryFieldId())
 		if err != nil {
 			return err
 		}
@@ -820,7 +819,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
-	logSearchPlaceholders(ctx, log, t.request, t.queryInfos, placeholderLog)
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 
 	return nil
 }
@@ -957,7 +956,6 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	defer sp.End()
 
 	log := mlog.With(mlog.Int64("collID", t.GetCollectionID()), mlog.String("collName", t.collectionName))
-	placeholderLog := newSearchPlaceholderLog()
 
 	// Old SDK: group_by_field only, no group_by_fields, no agg → output as singular.
 	_, errGroupByField := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, t.request.GetSearchParams())
@@ -1146,7 +1144,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	}
 	// Convert placeholder group vector type if needed (e.g., fp32 -> fp16/bf16)
 	var placeholderType commonpb.PlaceholderType
-	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId, placeholderLog)
+	t.PlaceholderGroup, placeholderType, err = t.convertPlaceholderIfNeeded(t.request.GetPlaceholderGroup(), t.FieldId)
 	if err != nil {
 		return err
 	}
@@ -1217,7 +1215,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
-	logSearchPlaceholders(ctx, log, t.request, t.queryInfos, placeholderLog)
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
@@ -1253,14 +1251,10 @@ func (t *SearchTask) skipRequeryByNamespacePartitionMode() bool {
 
 // convertPlaceholderIfNeeded converts fp32 vectors to fp16/bf16 if the target field uses lower precision.
 // Returns converted bytes and the original placeholder type (before any conversion).
-func (t *SearchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64, preview *searchPlaceholderStringer) ([]byte, commonpb.PlaceholderType, error) {
+func (t *SearchTask) convertPlaceholderIfNeeded(phgBytes []byte, fieldID int64) ([]byte, commonpb.PlaceholderType, error) {
 	field := typeutil.GetFieldByID(t.schema.CollectionSchema, fieldID)
 	if field == nil {
-		preview.capture(nil)
 		return phgBytes, 0, nil
-	}
-	if preview != nil {
-		return convertPlaceholderGroup(phgBytes, field, preview.capture)
 	}
 	return ConvertPlaceholderGroup(phgBytes, field)
 }

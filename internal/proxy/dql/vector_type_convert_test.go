@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -504,33 +503,4 @@ func TestConvertPlaceholderGroupIntegration(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, phgBytes, convertedBytes) // Should be unchanged
 	})
-}
-
-func TestConvertPlaceholderGroupCapturesOriginalPreview(t *testing.T) {
-	original := []float32{1.234567, -2.345678}
-	data := createFloat32PlaceholderGroup([][]float32{original, {3, 4}})
-	for _, target := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
-		t.Run(target.String(), func(t *testing.T) {
-			field := &schemapb.FieldSchema{DataType: target}
-			preview := &searchPlaceholderStringer{}
-			converted, kind, err := convertPlaceholderGroup(data, field, preview.capture)
-			require.NoError(t, err)
-			assert.Equal(t, commonpb.PlaceholderType_FloatVector, kind)
-			want, wantKind, wantErr := ConvertPlaceholderGroup(data, field)
-			require.NoError(t, wantErr)
-			assert.Equal(t, want, converted)
-			assert.Equal(t, wantKind, kind)
-			require.Len(t, preview.groups, 1)
-			require.Len(t, preview.groups[0], 1)
-			assert.Equal(t, commonpb.PlaceholderType_FloatVector, preview.groups[0][0].kind)
-			assert.Equal(t, 2, preview.groups[0][0].nq)
-			assert.Equal(t, typeutil.Float32ArrayToBytes(original), preview.groups[0][0].first)
-		})
-	}
-
-	preview := &searchPlaceholderStringer{}
-	field := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
-	_, _, err := convertPlaceholderGroup([]byte{0xff}, field, preview.capture)
-	require.Error(t, err)
-	assert.Empty(t, preview.groups)
 }
