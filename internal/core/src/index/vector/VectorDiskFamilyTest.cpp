@@ -18,6 +18,7 @@
 
 #ifdef BUILD_DISK_ANN
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,9 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorDiskArtifact.h"
+#include "index/vector/VectorDiskBuilder.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -428,6 +432,101 @@ TEST(VectorDiskFamilyTest, MmapCapabilityAndSearch) {
     const bool native_mmap =
         KnowhereMmapSupported(knowhere::IndexEnum::INDEX_DISKANN);
     RunOrdinaryDiskSearch<float>(native_mmap);
+}
+
+TEST(VectorDiskFamilyTest, NullableBuildPreservesRowMapping) {
+    constexpr int64_t logical_rows = kRows + 5;
+    const std::array<int64_t, 5> null_rows{0, 1, 2, 503, 1004};
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(logical_rows), 0);
+    for (int64_t row = 0; row < logical_rows; ++row) {
+        if (std::find(null_rows.begin(), null_rows.end(), row) ==
+            null_rows.end()) {
+            bitmap[row / 8] |= uint8_t{1} << (row % 8);
+        }
+    }
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_nullable_XXXXXX", "nullable disk test");
+    const auto raw_path = files->Path() + "/raw";
+    const auto validity_path = files->Path() + "/validity";
+    const auto values = MakeRows<float>();
+    ASSERT_NO_FATAL_FAILURE(WriteRaw(raw_path, values, kRows, kDim));
+    {
+        std::ofstream stream(validity_path, std::ios::binary);
+        ASSERT_TRUE(stream.good());
+        const auto wire_count = ToValidDataCount(logical_rows);
+        stream.write(reinterpret_cast<const char*>(&wire_count),
+                     sizeof(wire_count));
+        stream.write(reinterpret_cast<const char*>(bitmap.data()),
+                     bitmap.size());
+        ASSERT_TRUE(stream.good());
+    }
+
+    // Retain the actual engine handle to inspect its mapping before any load
+    // can reconstruct it. The alias still creates the normal DiskANN node.
+    using NativeIndex = knowhere::Index<knowhere::IndexNode>;
+    static std::weak_ptr<NativeIndex> captured;
+    constexpr const char* index_type = "MILVUS_TEST_NULLABLE_DISK_BUILD";
+    static const auto& registration =
+        knowhere::IndexFactory::Instance().Register<knowhere::fp32>(
+            index_type,
+            [](const int32_t& version, const knowhere::Object& object) {
+                // Select the open-source node when DISKANN is registered by
+                // another engine in the local build.
+                const auto& features =
+                    knowhere::IndexFactory::GetIndexFeatures();
+                const auto diskann_type =
+                    features.count("DISKANN_DEPRECATED") != 0
+                        ? "DISKANN_DEPRECATED"
+                        : knowhere::IndexEnum::INDEX_DISKANN;
+                auto created =
+                    knowhere::IndexFactory::Instance().Create<knowhere::fp32>(
+                        diskann_type, version, object);
+                AssertInfo(created.has_value(), "failed to create test index");
+                auto target = captured.lock();
+                AssertInfo(target != nullptr, "test index capture is missing");
+                *target = created.value();
+                return created.value();
+            },
+            knowhere::feature::FLOAT32 | knowhere::feature::DISK);
+    static_cast<void>(registration);
+    auto native_index = std::make_shared<NativeIndex>();
+    captured = native_index;
+    Config params{{METRIC_TYPE, "L2"},
+                  {DIM_KEY, kDim},
+                  {DISK_ANN_MAX_DEGREE, 24},
+                  {DISK_ANN_SEARCH_LIST_SIZE, 56},
+                  {DISK_ANN_PQ_CODE_BUDGET, 0.001},
+                  {DISK_ANN_BUILD_DRAM_BUDGET, 2},
+                  {DISK_ANN_THREADS_NUM, 2}};
+    VectorDiskBuilder<float> builder(
+        DataType::NONE,
+        index_type,
+        "L2",
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        kDim,
+        params,
+        files->Path());
+    auto artifact = std::move(builder).Build(
+        {.raw_path = raw_path, .validity_path = validity_path});
+    ASSERT_NE(artifact, nullptr);
+    ASSERT_NE(native_index->Node(), nullptr);
+    const auto& id_map = native_index->Node()->GetIdMap();
+    ASSERT_TRUE(id_map.IsEnabled());
+    ASSERT_EQ(id_map.OutCount(), logical_rows);
+    ASSERT_EQ(id_map.InCount(), kRows);
+    int64_t compact_id = 0;
+    for (int64_t row = 0; row < logical_rows; ++row) {
+        const bool valid = std::find(null_rows.begin(), null_rows.end(), row) ==
+                           null_rows.end();
+        EXPECT_EQ(id_map.IsValidOutId(row), valid);
+        if (valid) {
+            EXPECT_EQ(id_map.MapInToOut(compact_id), row);
+            EXPECT_EQ(id_map.MapOutToIn(row), compact_id);
+            ++compact_id;
+        } else {
+            EXPECT_EQ(id_map.MapOutToIn(row), -1);
+        }
+    }
 }
 
 TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {

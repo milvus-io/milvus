@@ -459,7 +459,16 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
                 input_paths.push_back(*input.scalar_info_path);
             }
             file_manager_->SetInputFiles(std::move(input_paths));
-            const auto status = engine_->native_index.Build({}, config);
+            DatasetPtr dataset;
+            if (validity.present && !embedding_list) {
+                // Vectors are read from raw_path; the dataset supplies the
+                // original row mapping before the engine builds its index.
+                dataset = GenDataset(raw.rows, engine_->Dim(), nullptr);
+                dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                    validity.bytes.data() + sizeof(uint64_t),
+                    validity.total_count));
+            }
+            const auto status = engine_->native_index.Build(dataset, config);
             file_manager_->RethrowFirstFailure();
             if (status != knowhere::Status::success) {
                 ThrowInfo(KnowhereBuildStatusToErrorCode(status),
