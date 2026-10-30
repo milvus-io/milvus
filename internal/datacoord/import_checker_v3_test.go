@@ -84,13 +84,29 @@ func TestCalculateImportV3TaskSlots(t *testing.T) {
 	// The import (final merge) charge uses the same model and expansion factor:
 	// fanIn 16 readers at 2R each plus the 3R merge and the 32 MiB writer
 	// buffer is 1.2 * 592 MiB, which charges ceil(710.4/160) = 5 slots.
-	require.Equal(t, int64(5), calculateImportTaskV3Slot(mem, 160*mib, 32*mib, 16))
+	require.Equal(t, int64(5), calculateImportTaskV3Slot(mem, 160*mib, 32*mib, 0, 16))
+	// TEXT columns stage their LOB writer buffers beside the converted batch.
+	// 8 columns x the 16 MiB flush threshold raise the footprint to 1.2 * 720
+	// MiB, which charges ceil(864/160) = 6 slots.
+	require.Equal(t, int64(6), calculateImportTaskV3Slot(mem, 160*mib, 32*mib, 128*mib, 16))
 	require.Equal(t, int64(1), calculateImportV3Slots(1, 160*mib))
 	require.Equal(t, int64(2), calculateImportV3Slots(160*mib+1, 160*mib))
 	// The slot helper must not divide by zero when the configured per-slot
 	// memory limit is invalid; paramtable validation remains the primary guard.
 	require.Equal(t, int64(1), calculateImportV3Slots(1, 0))
 	require.Equal(t, int64(1), calculateImportV3Slots(1, -1))
+}
+
+func TestTextWriterBuffer(t *testing.T) {
+	cfg := importV3Config{textFlushThresholdBytes: 16 * 1024 * 1024}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{DataType: schemapb.DataType_Text},
+		{DataType: schemapb.DataType_VarChar},
+		{DataType: schemapb.DataType_Text},
+	}}
+	require.Equal(t, int64(2*16*1024*1024), textWriterBuffer(cfg, schema))
+	require.Zero(t, textWriterBuffer(cfg, nil))
+	require.Zero(t, textWriterBuffer(cfg, &schemapb.CollectionSchema{}))
 }
 
 func TestEffectiveImportV3FanIn(t *testing.T) {
@@ -136,7 +152,7 @@ func TestCreateImportV3TaskWritesPendingWithoutSegment(t *testing.T) {
 	require.Equal(t, int64(4), p.GetPartitionId())
 	require.Len(t, p.GetFragments(), 1)
 	require.Equal(t, "f0", p.GetFragments()[0].GetPath())
-	require.Equal(t, int64(1), importSlot(len(p.GetFragments()), getImportV3Config()))
+	require.Equal(t, int64(1), importSlot(len(p.GetFragments()), getImportV3Config(), job.GetSchema()))
 	// Planning creates no segment record.
 	require.Nil(t, meta.GetSegment(ctx, 100))
 }

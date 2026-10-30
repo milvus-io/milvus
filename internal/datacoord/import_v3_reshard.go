@@ -227,10 +227,10 @@ func calculateReshardTaskSlot(mem reshardmem.Model, memoryPerSlot, buckets, buck
 // the node's own slot unit: the model's ImportWorkingSet -- one fragment reader
 // per merge input (2*ReadBuffer each, the buffer DataNode hands the reader via
 // storage.WithBufferSize), the merge's own output batch and final transform
-// (3*ReadBuffer, MergeExecutor.BatchSize == ImportBaseBufferSize) and the
-// segment writer's buffer (writerBuffer, WriterSpec.V2.BufferSize), all scaled
-// by the same expansion factor the reshard charge uses -- divided by the memory
-// one node slot represents.
+// (3*ReadBuffer, MergeExecutor.BatchSize == ImportBaseBufferSize), the segment
+// writer's buffer (writerBuffer, WriterSpec.V2.BufferSize) and the per-TEXT-column
+// LOB writer buffers (textWriterBuffer), all scaled by the same expansion factor
+// the reshard charge uses -- divided by the memory one node slot represents.
 //
 // The per-reader term is deliberately an over-estimate. The reader is handed
 // readBuffer, but its real footprint is bounded by milvus-storage's own
@@ -244,6 +244,6 @@ func calculateReshardTaskSlot(mem reshardmem.Model, memoryPerSlot, buckets, buck
 // Import V3 can use directly because it never handles L0) so a high fan-in stops
 // charging more than one segment's worth of readers; re-measure and only then
 // decide whether to keep this conservative over-estimate.
-func calculateImportTaskV3Slot(mem reshardmem.Model, memoryPerSlot, writerBuffer int64, fanIn int) int64 {
-	return calculateImportV3Slots(mem.ImportWorkingSet(writerBuffer, fanIn), memoryPerSlot)
+func calculateImportTaskV3Slot(mem reshardmem.Model, memoryPerSlot, writerBuffer, textWriterBuffer int64, fanIn int) int64 {
+	return calculateImportV3Slots(mem.ImportWorkingSet(writerBuffer, textWriterBuffer, fanIn), memoryPerSlot)
 }
