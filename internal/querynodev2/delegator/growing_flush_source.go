@@ -250,10 +250,15 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 		p.observeRetainedMetricsLocked()
 		return nil
 	}
+	// bytes only feeds the retained-bytes gauge.
+	var bytes int64
+	if !metrics.QueryNodeGrowingSourceRetainedBytes.Suppressed() {
+		bytes = segmentMemSize(segment)
+	}
 	p.retained[segmentID] = &retainedGrowingFlushSource{
 		segment:      segment,
 		targetOffset: targetOffset,
-		bytes:        segmentMemSize(segment),
+		bytes:        bytes,
 	}
 	p.observeRetainedMetricsLocked()
 	return nil
@@ -563,6 +568,10 @@ func (p *delegatorGrowingSourceProvider) currentOffset(segment segments.Segment)
 }
 
 func (p *delegatorGrowingSourceProvider) observeRetainedMetricsLocked() {
+	if metrics.QueryNodeGrowingSourceRetainedBytes.Suppressed() &&
+		metrics.QueryNodeGrowingSourceRetainedSegments.Suppressed() {
+		return
+	}
 	if len(p.retained) == 0 {
 		p.deleteRetainedMetricsLocked()
 		return

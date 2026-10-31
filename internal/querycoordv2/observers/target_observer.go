@@ -669,6 +669,9 @@ func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.Le
 }
 
 func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context, collectionID int64) {
+	if metrics.QueryCoordCurrentTargetAllReplicasCheckpointUnixSeconds.Suppressed() {
+		return
+	}
 	channels := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 	if len(channels) == 0 {
 		return
