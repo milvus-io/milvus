@@ -12,7 +12,9 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include "common/Utils.h"
@@ -1495,6 +1497,97 @@ createAndInsertGroups(int64_t numGroups,
     }
     return table;
 }
+
+std::unique_ptr<milvus::exec::HashTable>
+createVarcharHashTable() {
+    std::vector<milvus::exec::Accumulator> accumulators;
+    std::vector<std::unique_ptr<milvus::exec::VectorHasher>> hashers;
+    hashers.push_back(
+        milvus::exec::VectorHasher::create(milvus::DataType::VARCHAR, 0));
+    return std::make_unique<milvus::exec::HashTable>(std::move(hashers),
+                                                     accumulators);
+}
+
+// A std::nullopt value becomes a NULL key.
+milvus::RowVectorPtr
+makeVarcharInput(const std::vector<std::optional<std::string>>& values) {
+    auto column = std::make_shared<milvus::ColumnVector>(
+        milvus::DataType::VARCHAR,
+        static_cast<milvus::vector_size_t>(values.size()));
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (values[i].has_value()) {
+            column->SetValueAt<std::string>(i, *values[i]);
+        } else {
+            column->nullAt(i);
+        }
+    }
+    std::vector<milvus::VectorPtr> children = {column};
+    return std::make_shared<milvus::RowVector>(children);
+}
+
+void
+probeVarcharValues(milvus::exec::HashTable& table,
+                   const std::vector<std::optional<std::string>>& values,
+                   milvus::exec::HashLookup& lookup) {
+    auto input = makeVarcharInput(values);
+    table.prepareForGroupProbe(lookup, input);
+    table.groupProbe(lookup);
+}
+
+// Reads the key stored in a group row. std::nullopt means a NULL key.
+std::optional<std::string>
+storedVarcharKey(const milvus::exec::HashTable& table, const char* group) {
+    const auto& column = table.rows()->columnAt(0);
+    if (milvus::exec::RowContainer::isNullAt(
+            group, column.nullByte(), column.nullMask())) {
+        return std::nullopt;
+    }
+    return *milvus::exec::RowContainer::strAt(group, column.offset());
+}
+
+// Keys longer than the std::string small-buffer size, so they live on the
+// heap. All keys share a long prefix and differ only at the end.
+std::string
+longVarcharKey(int64_t id) {
+    constexpr size_t kLength = 256;
+    auto key = std::string(kLength, 'p');
+    const auto suffix = std::to_string(id);
+    key.replace(kLength - suffix.size(), suffix.size(), suffix);
+    return key;
+}
+
+// Keys with the same signature land on the same tag in the same bucket.
+uint64_t
+bucketAndTagSignature(const milvus::exec::HashTable& table, uint64_t hash) {
+    return (static_cast<uint64_t>(table.bucketOffset(hash)) << 8) |
+           milvus::exec::HashTable::hashTag(hash);
+}
+
+std::vector<std::string>
+findVarcharKeysWithSameProbeSignature(milvus::exec::HashTable& table,
+                                      size_t count) {
+    constexpr int32_t kCandidateCount = 1 << 16;
+    std::vector<std::optional<std::string>> candidates(kCandidateCount);
+    for (int32_t i = 0; i < kCandidateCount; ++i) {
+        candidates[i] = longVarcharKey(i);
+    }
+
+    auto input = makeVarcharInput(candidates);
+    milvus::exec::HashLookup lookup(table.hashers());
+    table.prepareForGroupProbe(lookup, input);
+
+    std::unordered_map<uint64_t, std::vector<std::string>> keysBySignature;
+    keysBySignature.reserve(kCandidateCount);
+    for (int32_t i = 0; i < kCandidateCount; ++i) {
+        const auto signature = bucketAndTagSignature(table, lookup.hashes_[i]);
+        auto& keys = keysBySignature[signature];
+        keys.push_back(*candidates[i]);
+        if (keys.size() == count) {
+            return keys;
+        }
+    }
+    return {};
+}
 }  // namespace
 
 TEST(HashTableProbePipelineTest, TestDuplicateKeysWithinBatch) {
@@ -1582,6 +1675,133 @@ TEST(HashTableProbePipelineTest, TestRefreshesStaleSameTagCandidate) {
     ASSERT_EQ(reprobe.hits_.size(), 2);
     EXPECT_EQ(reprobe.hits_[0], groupA);
     EXPECT_EQ(reprobe.hits_[1], lookup.hits_[0]);
+}
+
+TEST(HashTableVarcharKeyTest, TestLongKeysNullsAndDuplicates) {
+    auto table = createVarcharHashTable();
+    const auto keyA = longVarcharKey(1);
+    const auto keyB = longVarcharKey(2);
+    const std::vector<std::optional<std::string>> values = {keyA,
+                                                            std::nullopt,
+                                                            keyB,
+                                                            keyA,
+                                                            std::string(),
+                                                            std::nullopt,
+                                                            keyB,
+                                                            std::string()};
+
+    milvus::exec::HashLookup lookup(table->hashers());
+    probeVarcharValues(*table, values, lookup);
+
+    // Groups: keyA, NULL, keyB, empty string.
+    ASSERT_EQ(table->rows()->allRows().size(), 4);
+    EXPECT_EQ(lookup.newGroups_,
+              (std::vector<milvus::vector_size_t>{0, 1, 2, 4}));
+    const auto& hits = lookup.hits_;
+    ASSERT_EQ(hits.size(), values.size());
+    EXPECT_EQ(hits[3], hits[0]);
+    EXPECT_EQ(hits[5], hits[1]);
+    EXPECT_EQ(hits[6], hits[2]);
+    EXPECT_EQ(hits[7], hits[4]);
+    // The empty string is a value, not NULL.
+    EXPECT_NE(hits[4], hits[1]);
+    for (size_t i = 0; i < values.size(); ++i) {
+        EXPECT_EQ(storedVarcharKey(*table, hits[i]), values[i]) << i;
+    }
+
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeVarcharValues(*table, values, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    EXPECT_EQ(reprobe.hits_, lookup.hits_);
+}
+
+TEST(HashTableVarcharKeyTest, TestDifferentKeysWithSameBucketAndTag) {
+    auto table = createVarcharHashTable();
+    milvus::exec::HashLookup init(table->hashers());
+    probeVarcharValues(*table, {}, init);
+    const auto keys = findVarcharKeysWithSameProbeSignature(*table, 3);
+    ASSERT_EQ(keys.size(), 3);
+
+    // Every probe lands on the same tag in the same bucket, so only the full
+    // key comparison can tell the groups apart.
+    const std::vector<std::optional<std::string>> values = {
+        keys[0], keys[1], keys[0], keys[2], keys[1], keys[2]};
+    milvus::exec::HashLookup lookup(table->hashers());
+    probeVarcharValues(*table, values, lookup);
+
+    // Recheck with the table the probe used, which groupProbe may have
+    // allocated or resized. If the keys no longer collide, this test stops
+    // covering the full key comparison.
+    for (size_t i = 1; i < values.size(); ++i) {
+        ASSERT_EQ(bucketAndTagSignature(*table, lookup.hashes_[i]),
+                  bucketAndTagSignature(*table, lookup.hashes_[0]))
+            << i;
+    }
+
+    ASSERT_EQ(table->rows()->allRows().size(), 3);
+    EXPECT_EQ(lookup.newGroups_, (std::vector<milvus::vector_size_t>{0, 1, 3}));
+    const auto& hits = lookup.hits_;
+    ASSERT_EQ(hits.size(), values.size());
+    EXPECT_NE(hits[0], hits[1]);
+    EXPECT_NE(hits[0], hits[3]);
+    EXPECT_NE(hits[1], hits[3]);
+    EXPECT_EQ(hits[2], hits[0]);
+    EXPECT_EQ(hits[4], hits[1]);
+    EXPECT_EQ(hits[5], hits[3]);
+    for (size_t i = 0; i < values.size(); ++i) {
+        EXPECT_EQ(storedVarcharKey(*table, hits[i]), values[i]) << i;
+    }
+
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeVarcharValues(*table, {keys[2], keys[1], keys[0]}, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    ASSERT_EQ(reprobe.hits_.size(), 3);
+    EXPECT_EQ(reprobe.hits_[0], hits[3]);
+    EXPECT_EQ(reprobe.hits_[1], hits[1]);
+    EXPECT_EQ(reprobe.hits_[2], hits[0]);
+}
+
+TEST(HashTableVarcharKeyTest, TestStoredKeysOutliveInputBatches) {
+    constexpr int32_t kBatchSize = 1000;
+    constexpr int32_t kNumBatches = 5;
+    auto table = createVarcharHashTable();
+    std::vector<char*> groups;
+    for (int32_t batch = 0; batch < kNumBatches; ++batch) {
+        std::vector<std::optional<std::string>> values;
+        for (int32_t i = 0; i < kBatchSize; ++i) {
+            values.push_back(longVarcharKey(batch * kBatchSize + i));
+        }
+        auto input = makeVarcharInput(values);
+        milvus::exec::HashLookup lookup(table->hashers());
+        table->prepareForGroupProbe(lookup, input);
+        table->groupProbe(lookup);
+        ASSERT_EQ(lookup.newGroups_.size(), kBatchSize);
+        groups.insert(groups.end(), lookup.hits_.begin(), lookup.hits_.end());
+
+        // Overwrite the batch before it is released. A stored key that
+        // pointed into the input would change with it.
+        auto column =
+            std::dynamic_pointer_cast<milvus::ColumnVector>(input->child(0));
+        ASSERT_NE(column, nullptr);
+        for (int32_t i = 0; i < kBatchSize; ++i) {
+            column->SetValueAt<std::string>(i, std::string(256, 'x'));
+        }
+    }
+
+    ASSERT_EQ(table->rows()->allRows().size(), kBatchSize * kNumBatches);
+    for (size_t i = 0; i < groups.size(); ++i) {
+        EXPECT_EQ(storedVarcharKey(*table, groups[i]), longVarcharKey(i)) << i;
+    }
+
+    // Probe every key again from one new batch. Each must find its group.
+    std::vector<std::optional<std::string>> all;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        all.push_back(longVarcharKey(i));
+    }
+    milvus::exec::HashLookup reprobe(table->hashers());
+    probeVarcharValues(*table, all, reprobe);
+    EXPECT_TRUE(reprobe.newGroups_.empty());
+    EXPECT_EQ(reprobe.hits_, groups);
 }
 
 TEST(HashTableProbePipelineTest, TestScalarTails) {

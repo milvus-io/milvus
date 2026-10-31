@@ -55,7 +55,7 @@ VectorHasher::hashValues(const ColumnVectorPtr& column_data,
                     mix ? milvus::bits::hashMix(result[row_idx], kNullHash)
                         : kNullHash;
             } else {
-                T raw_value = column_data->ValueAt<T>(row_idx);
+                const T& raw_value = column_data->ValueAtRef<T>(row_idx);
                 uint64_t hash_value = kNullHash;
                 if constexpr (std::is_floating_point_v<T>) {
                     hash_value = milvus::NaNAwareHash<T>()(raw_value);
