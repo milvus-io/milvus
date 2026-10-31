@@ -1027,6 +1027,11 @@ func (s *mockMixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	panic("implement me")
 }
 
+// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+func (s *mockMixCoord) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
+	panic("implement me")
+}
+
 // AddFileResource add file resource to datacoord
 func (s *mockMixCoord) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
 	panic("implement me")

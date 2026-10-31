@@ -991,6 +991,12 @@ dataCoord:
       enabled: true # Enable garbage collection for LOB (TEXT column) files
       safetyWindow: 3600 # Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.
       checkInterval: 1800 # Interval for LOB GC check in seconds. Default 30 minutes.
+  pkindex:
+    gc:
+      interval: 3600 # The interval at which data coord runs garbage collection for primary key index files, unit: second.
+      grace: 86400 # Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.
+      manifestRetainVersions: 8 # The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.
+      manifestRetainDuration: 3600 # Garbage collection keeps every primary key index manifest version written within this time, unit: second.
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
