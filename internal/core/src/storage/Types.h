@@ -110,6 +110,24 @@ struct IndexMeta {
     std::string index_file_prefix;
 };
 
+inline constexpr uint32_t kTalonStageLoadOpen = 1U << 0;
+inline constexpr uint32_t kTalonStagesAll = UINT32_MAX;
+
+// Routing policy stays in Milvus; connection settings remain in FS properties.
+struct TalonReadConfig {
+    uint32_t mode = 0;
+    uint32_t enabled_stages = 0;
+    bool enable_for_external_table = false;
+};
+
+inline bool
+TalonStageEnabled(const uint32_t enabled_stages, const uint32_t stage) {
+    // Normalize the absent field from legacy producers before testing the bit.
+    const uint32_t mask =
+        enabled_stages == 0 ? kTalonStagesAll : enabled_stages;
+    return (mask & stage) != 0;
+}
+
 struct StorageConfig {
     std::string address = "localhost:9000";
     std::string bucket_name = "a-bucket";
@@ -132,6 +150,7 @@ struct StorageConfig {
     std::string tls_min_version = "";
     bool use_crc32c_checksum = false;
     uint32_t talon_mode = 0;
+    uint32_t talon_enabled_stages = 0;
     uint32_t talon_small_read_threshold = 0;
     std::string talon_coordinator = "";
     uint32_t talon_block_size = 0;

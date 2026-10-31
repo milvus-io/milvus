@@ -51,6 +51,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestCreateStorageConfigTalonStages(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mode   string
+		stages string
+		want   uint32
+		mask   uint32
+	}{
+		{name: "all_reads", mode: "1", stages: "all", want: 1, mask: ^uint32(0)},
+		{name: "small_reads", mode: "2", stages: "all", want: 2, mask: ^uint32(0)},
+		{name: "load_open_only", mode: "1", stages: "load_open", want: 1, mask: 1},
+		{name: "load_open_small_reads", mode: "2", stages: "load_open", want: 2, mask: 1},
+		{name: "disabled", mode: "0", stages: "all", want: 0, mask: ^uint32(0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			require.NoError(t, params.Save("common.storage.talon.mode", tc.mode))
+			require.NoError(t, params.Save("common.storage.talon.enabledStages", tc.stages))
+			require.NoError(t, params.Save("common.storage.talon.enableForExternalTable", "true"))
+			for _, storageType := range []string{"remote", "local"} {
+				require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
+				config := createStorageConfig()
+				assert.Equal(t, tc.want, config.GetTalonMode(), storageType)
+				assert.Equal(t, tc.mask, config.GetTalonEnabledStages(), storageType)
+				assert.True(t, config.GetTalonEnableForExternalTable())
+				assert.Equal(t, tc.mode, params.CommonCfg.StorageTalonMode.GetValue())
+				assert.Equal(t, tc.want, packed.CreateStorageConfig().GetTalonMode())
+				assert.Equal(t, tc.mask, packed.CreateStorageConfig().GetTalonEnabledStages())
+			}
+		})
+	}
+}
+
 func TestGetLocalDiskUsage(t *testing.T) {
 	duf := &diskUsageFetcher{
 		usage: atomic.NewInt64(0),
