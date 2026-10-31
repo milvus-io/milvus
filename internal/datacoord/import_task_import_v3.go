@@ -84,7 +84,7 @@ func (t *importTaskV3) GetTaskState() taskcommon.State {
 func (t *importTaskV3) GetTaskNodeID() int64 { return t.GetNodeID() }
 func (t *importTaskV3) GetTaskSlot() int64 {
 	if job := t.importMeta.GetJob(context.TODO(), t.GetJobID()); job != nil {
-		return importSlot(len(t.task.Load().GetFragments()), getImportV3Config())
+		return importSlot(len(t.task.Load().GetFragments()), getImportV3Config(), job.GetSchema())
 	}
 	return 1
 }
