@@ -61,6 +61,33 @@ func shouldPanic(t *testing.T, name string, f func()) {
 	t.Errorf("%s should have panicked", name)
 }
 
+func TestExprCacheConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	params := proxyConfig{}
+	params.init(base)
+	require.True(t, params.ExprParseCacheEnabled.GetAsBool())
+	require.NoError(t, base.Save(params.ExprParseCacheEnabled.Key, "false"))
+	require.False(t, params.ExprParseCacheEnabled.GetAsBool())
+
+	for _, tc := range []struct {
+		item     *ParamItem
+		fallback int
+	}{
+		{&params.ExprParseCacheMaxEntries, 1024},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			require.Equal(t, tc.fallback, tc.item.GetAsInt())
+			require.NoError(t, base.Save(tc.item.Key, "2"))
+			require.Equal(t, 2, tc.item.GetAsInt())
+			for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+				require.NoError(t, base.Save(tc.item.Key, invalid))
+				require.Equal(t, tc.fallback, tc.item.GetAsInt(), invalid)
+			}
+		})
+	}
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
