@@ -66,9 +66,10 @@ type Executor struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
-	executingTasks    *typeutil.ConcurrentSet[string] // task index
-	channelTaskNum    atomic.Int32                    // channel task pool counter
-	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	executingTasks    *typeutil.ConcurrentSet[string]       // task index
+	executingActions  *typeutil.ConcurrentMap[string, Task] // worker-local RPC ownership
+	channelTaskNum    atomic.Int32                          // channel task pool counter
+	nonChannelTaskNum atomic.Int32                          // non-channel task pool counter
 
 	collectionInfoSingleflight conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
@@ -91,7 +92,8 @@ func NewExecutor(nodeID int64,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		executingTasks: typeutil.NewConcurrentSet[string](),
+		executingTasks:   typeutil.NewConcurrentSet[string](),
+		executingActions: typeutil.NewConcurrentMap[string, Task](),
 	}
 }
 
@@ -152,11 +154,17 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		return false
 	}
 
+	if !ex.reserveActionResources(task, step) {
+		ex.executingTasks.Remove(task.Index())
+		return false
+	}
+
 	_, isChannel := task.Actions()[step].(*ChannelAction)
 	if isChannel {
 		cur := ex.channelTaskNum.Inc()
 		if cur > ex.GetChannelTaskCap() {
 			ex.channelTaskNum.Dec()
+			ex.releaseActionResources(task, step)
 			ex.executingTasks.Remove(task.Index())
 			mlog.Debug(context.TODO(), "channel task rejected: pool full",
 				mlog.Int32("current", cur),
@@ -167,6 +175,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		cur := ex.nonChannelTaskNum.Inc()
 		if cur > ex.GetNonChannelTaskCap() {
 			ex.nonChannelTaskNum.Dec()
+			ex.releaseActionResources(task, step)
 			ex.executingTasks.Remove(task.Index())
 			mlog.Debug(context.TODO(), "non-channel task rejected: pool full",
 				mlog.Int32("current", cur),
@@ -208,6 +217,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 			mlog.Err(task.Err()))
 	}
 
+	ex.releaseActionResources(task, step)
 	ex.executingTasks.Remove(task.Index())
 	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
 		ex.channelTaskNum.Dec()
