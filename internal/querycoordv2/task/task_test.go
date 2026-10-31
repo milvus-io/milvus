@@ -240,6 +240,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 				},
 			}, nil)
 	}
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -442,6 +443,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -557,6 +559,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -855,6 +858,7 @@ func (suite *TaskSuite) TestSegmentTaskWaitsDistAfterLoadRPC() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{{CollectionID: suite.collection}}, nil)
 	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
 		{
@@ -1036,6 +1040,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -1170,6 +1175,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -1324,6 +1330,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
@@ -2538,6 +2545,7 @@ func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
 			},
 		}, nil
 	})
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
 		{
 			CollectionID: suite.collection,
