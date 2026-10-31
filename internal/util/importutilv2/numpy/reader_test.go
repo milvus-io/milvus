@@ -632,3 +632,43 @@ func TestNumpyCreateReadersError(t *testing.T) {
 func TestNumpyReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
+
+func TestNumpyRejectsStructFields(t *testing.T) {
+	ctx := context.Background()
+	for _, elementNullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("element_nullable=%t", elementNullable), func(t *testing.T) {
+			// The mock has no expectations: the schema check must fail before
+			// any file is opened.
+			cm := mocks.NewChunkManager(t)
+			schema := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+					FieldID: 101, Name: "s", Nullable: true,
+					Fields: []*schemapb.FieldSchema{{
+						FieldID: 102, Name: "s[arr]", DataType: schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int64, ElementNullable: elementNullable,
+					}},
+				}},
+			}
+			wantMsg := "numpy import does not support struct field 's'; use JSON, CSV or Parquet files"
+
+			err := ValidateSchema(schema)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), wantMsg)
+
+			_, err = NewReader(ctx, cm, schema, []string{"pk.npy"}, 100)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), wantMsg)
+
+			_, _, _, err = NumRowsAndBytes(ctx, cm, schema, []string{"pk.npy"})
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), wantMsg)
+		})
+	}
+
+	assert.NoError(t, ValidateSchema(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}))
+}

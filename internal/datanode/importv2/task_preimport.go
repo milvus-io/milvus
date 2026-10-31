@@ -247,7 +247,7 @@ func (t *PreImportTask) readFileStat(reader importutilv2.Reader, fileIdx int) er
 		if err != nil {
 			return err
 		}
-		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		err = NormalizeStructArrayFields(t.GetSchema(), data)
 		if err != nil {
 			return err
 		}
