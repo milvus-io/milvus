@@ -20,16 +20,23 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
+	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
@@ -186,254 +193,296 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	})
 }
 
-func (s *SearchIteratorSuite) TestNext() {
-	ctx := context.Background()
-	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+func iteratorPage(ids []int64, scores []float32, token string, timestamp uint64, version string) *milvuspb.SearchResults {
+	bound := float32(0)
+	if len(scores) > 0 {
+		bound = scores[len(scores)-1]
+	}
+	status := merr.Success()
+	if version != "" {
+		status.ExtraInfo = map[string]string{IteratorSearchCursorVersionKey: version, IteratorSearchLastPKTypeKey: "int64"}
+		if len(ids) > 0 {
+			status.ExtraInfo[IteratorSearchLastPKKey] = strconv.FormatInt(ids[len(ids)-1], 10)
+		}
+	}
+	return &milvuspb.SearchResults{
+		Status: status, SessionTs: timestamp,
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1, TopK: int64(len(ids)), Topks: []int64{int64(len(ids))}, Scores: scores,
+			Ids:                     &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+			SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{Token: token, LastBound: bound},
+		},
+	}
+}
 
-	token := fmt.Sprintf("iter_token_%s", s.randString(8))
+func (s *SearchIteratorSuite) iteratorSearchCalls() int {
+	count := 0
+	for _, call := range s.mock.Calls {
+		if call.Method == "Search" {
+			count++
+		}
+	}
+	return count
+}
 
+func (s *SearchIteratorSuite) describeIterator(schema *entity.Schema) {
 	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionID: 1,
-		Schema:       s.schema.ProtoMessage(),
+		CollectionID: 1, Schema: schema.ProtoMessage(),
 	}, nil).Once()
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
+}
 
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1},
-						},
-					},
-				},
-				Scores:  make([]float32, 1),
-				Topks:   []int64{1},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token: token,
-				},
-			},
-		}, nil
-	}).Once()
-
-	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
-		return rand.Float32()
-	}))))
+func (s *SearchIteratorSuite) TestFirstPageSnapshotAndCursor() {
+	ctx := context.Background()
+	initialCalls := s.iteratorSearchCalls()
+	s.describeIterator(s.schema)
+	opt := NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(2)
+	original, err := opt.SearchOption().Request()
 	s.Require().NoError(err)
-	s.Require().NotNil(iter)
-
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1},
-						},
-					},
-				},
-				Scores:  []float32{0.5},
-				Topks:   []int64{1},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token:     token,
-					LastBound: 0.5,
-				},
-			},
-		}, nil
+	original = proto.Clone(original).(*milvuspb.SearchRequest)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal("2", searchIteratorParam(req, "topk"))
+		s.Equal("2", searchIteratorParam(req, IteratorSearchBatchSizeKey))
+		s.Equal("2", searchIteratorParam(req, IteratorSearchCursorVersionKey))
+		s.Zero(req.GetGuaranteeTimestamp())
+		return iteratorPage([]int64{math.MinInt64, math.MaxInt64}, []float32{1, 1}, "token", 12345, "2"), nil
 	}).Once()
-
-	rs, err := iter.Next(ctx)
-	s.NoError(err)
-	s.EqualValues(1, rs.IDs.Len())
-
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchIDKey, token))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchLastBoundKey, "0.5"))
-
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{},
-						},
-					},
-				},
-				Scores:  []float32{},
-				Topks:   []int64{0},
-				Recalls: []float32{1.0},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token:     token,
-					LastBound: 0.5,
-				},
-			},
-		}, nil
+	iter, err := s.client.SearchIterator(ctx, opt)
+	s.Require().NoError(err)
+	after, err := opt.SearchOption().Request()
+	s.Require().NoError(err)
+	sort.Slice(original.SearchParams, func(i, j int) bool { return original.SearchParams[i].Key < original.SearchParams[j].Key })
+	sort.Slice(after.SearchParams, func(i, j int) bool { return after.SearchParams[i].Key < after.SearchParams[j].Key })
+	s.True(proto.Equal(original, after), "iterator must not mutate caller options")
+	opt.WithBatchSize(99).WithFilter("ID > 0")
+	first, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal(2, first.Len())
+	s.Equal([]int64{math.MinInt64, math.MaxInt64}, first.IDs.(*column.ColumnInt64).Data())
+	s.Equal(initialCalls+1, s.iteratorSearchCalls())
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal(uint64(12345), req.GetGuaranteeTimestamp())
+		s.Equal("2", searchIteratorParam(req, IteratorSearchBatchSizeKey))
+		s.Equal("", req.GetDsl())
+		s.Equal("token", searchIteratorParam(req, IteratorSearchIDKey))
+		s.Equal("1", searchIteratorParam(req, IteratorSearchLastBoundKey))
+		s.Equal("int64", searchIteratorParam(req, IteratorSearchLastPKTypeKey))
+		s.Equal(strconv.FormatInt(math.MaxInt64, 10), searchIteratorParam(req, IteratorSearchLastPKKey))
+		return iteratorPage([]int64{5}, []float32{2}, "token", 0, "2"), nil
 	}).Once()
+	second, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal(1, second.Len())
+	s.Equal(uint64(12345), iter.(*searchIteratorV2).request.GetGuaranteeTimestamp())
+}
 
+func (s *SearchIteratorSuite) TestDuplicatePKsAcrossScoresDoNotConsumeLimit() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	for _, page := range []*milvuspb.SearchResults{
+		iteratorPage([]int64{1}, []float32{0}, "token", 12345, "2"),
+		iteratorPage([]int64{1}, []float32{1}, "token", 12345, "2"),
+		iteratorPage([]int64{2}, []float32{2}, "token", 12345, "2"),
+	} {
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(page, nil).Once()
+	}
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).
+		WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(1).WithIteratorLimit(2))
+	s.Require().NoError(err)
+	first, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal([]int64{1}, first.IDs.(*column.ColumnInt64).Data())
+	second, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal([]int64{2}, second.IDs.(*column.ColumnInt64).Data())
+	s.Equal("2", searchIteratorParam(iter.(*searchIteratorV2).request, IteratorSearchLastBoundKey))
 	_, err = iter.Next(ctx)
-	s.Error(err)
 	s.ErrorIs(err, io.EOF)
 }
 
-func (s *SearchIteratorSuite) TestNextWithLimit() {
-	ctx := context.Background()
-	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-
-	token := fmt.Sprintf("iter_token_%s", s.randString(8))
-
-	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionID: 1,
-		Schema:       s.schema.ProtoMessage(),
-	}, nil).Once()
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1},
-						},
-					},
-				},
-				Scores:  make([]float32, 1),
-				Topks:   []int64{5},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token: token,
-				},
-			},
-		}, nil
-	}).Once()
-
-	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
-		return rand.Float32()
-	}))).WithIteratorLimit(6).WithBatchSize(5))
+func (s *SearchIteratorSuite) TestDistinctRowsPreserveNullableAndDynamicFields() {
+	values := column.NewColumnInt64("nullable", nil)
+	values.SetNullable(true)
+	s.Require().NoError(values.AppendValue(int64(11)))
+	s.Require().NoError(values.AppendNull())
+	s.Require().NoError(values.AppendValue(int64(33)))
+	json := column.NewColumnJSONBytes("$meta", [][]byte{[]byte(`{"tag":"a"}`), []byte(`{"tag":"b"}`), []byte(`{"tag":"c"}`)})
+	input := ResultSet{ResultCount: 3, IDs: column.NewColumnInt64("ID", []int64{1, 2, 1}),
+		Scores: []float32{0, 1, 2}, Fields: DataSet{values, column.NewColumnDynamic(json, "tag")}}
+	result, keys, err := distinctIteratorResults(input, map[any]struct{}{int64(1): {}})
 	s.Require().NoError(err)
-	s.Require().NotNil(iter)
+	s.Equal([]int64{2}, result.IDs.(*column.ColumnInt64).Data())
+	s.Equal([]float32{1}, result.Scores)
+	s.Equal(1, result.Len())
+	null, err := result.Fields[0].IsNull(0)
+	s.Require().NoError(err)
+	s.True(null)
+	tag, err := result.Fields[1].Get(0)
+	s.Require().NoError(err)
+	s.Equal(`"b"`, tag)
+	s.Len(keys, 1)
+	s.Equal(3, input.Fields[0].Len())
+}
 
-	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		s.Equal(collectionName, sr.GetCollectionName())
-		checkSearchParam := func(kvs []*commonpb.KeyValuePair, key string, value string) bool {
-			for _, kv := range kvs {
-				if kv.GetKey() == key && kv.GetValue() == value {
-					return true
-				}
-			}
-			return false
-		}
-
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorKey, "true"))
-		s.True(checkSearchParam(sr.GetSearchParams(), IteratorSearchV2Key, "true"))
-		return &milvuspb.SearchResults{
-			Status: merr.Success(),
-			Results: &schemapb.SearchResultData{
-				NumQueries: 1,
-				TopK:       1,
-				FieldsData: []*schemapb.FieldData{
-					s.getInt64FieldData("ID", []int64{1, 2, 3, 4, 5}),
-				},
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1, 2, 3, 4, 5},
-						},
-					},
-				},
-				Scores:  []float32{0.5, 0.4, 0.3, 0.2, 0.1},
-				Topks:   []int64{5},
-				Recalls: []float32{1},
-				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
-					Token:     token,
-					LastBound: 0.5,
-				},
-			},
-		}, nil
-	}).Times(2)
-
-	rs, err := iter.Next(ctx)
-	s.NoError(err)
-	s.EqualValues(5, rs.IDs.Len(), "first batch, return all results")
-
-	rs, err = iter.Next(ctx)
-	s.NoError(err)
-	s.EqualValues(1, rs.IDs.Len(), "second batch, return sliced results")
-
+func (s *SearchIteratorSuite) TestVarcharCursor() {
+	ctx := context.Background()
+	initialCalls := s.iteratorSearchCalls()
+	schema := entity.NewSchema().WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("Vector").WithDataType(entity.FieldTypeFloatVector).WithDim(1))
+	s.describeIterator(schema)
+	lastPK := "a\"b\\c\n中文"
+	page := iteratorPage(nil, []float32{1}, "token", 999, "2")
+	page.Results.Topks = []int64{1}
+	page.Results.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{lastPK}}}}
+	page.Status.ExtraInfo[IteratorSearchLastPKTypeKey] = "varchar"
+	page.Status.ExtraInfo[IteratorSearchLastPKKey] = lastPK
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(page, nil).Once()
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(1))
+	s.Require().NoError(err)
 	_, err = iter.Next(ctx)
-	s.Error(err)
-	s.ErrorIs(err, io.EOF, "limit reached, return EOF")
+	s.Require().NoError(err)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal(lastPK, searchIteratorParam(req, IteratorSearchLastPKKey))
+		s.Equal("varchar", searchIteratorParam(req, IteratorSearchLastPKTypeKey))
+		empty := iteratorPage(nil, nil, "token", 0, "2")
+		empty.Results.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{}}}
+		delete(empty.Status.ExtraInfo, IteratorSearchLastPKTypeKey)
+		return empty, nil
+	}).Once()
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+	s.Equal(initialCalls+2, s.iteratorSearchCalls())
+}
+
+func (s *SearchIteratorSuite) TestLegacyV2() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{1, 2}, []float32{1, 2}, "token", 999, ""), nil).Once()
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(2))
+	s.Require().NoError(err)
+	_, err = iter.Next(ctx)
+	s.Require().NoError(err)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal(uint64(999), req.GetGuaranteeTimestamp())
+		s.Equal("2", searchIteratorParam(req, IteratorSearchLastBoundKey))
+		s.Empty(searchIteratorParam(req, IteratorSearchLastPKKey))
+		s.Empty(searchIteratorParam(req, IteratorSearchCursorVersionKey))
+		return iteratorPage(nil, nil, "token", 0, ""), nil
+	}).Once()
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+}
+
+func (s *SearchIteratorSuite) TestLegacyMissingSnapshot() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{1}, []float32{1}, "token", 0, ""), nil).Once()
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithBatchSize(1))
+	s.Require().NoError(err)
+	_, err = iter.Next(ctx)
+	s.Require().NoError(err)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Zero(req.GetGuaranteeTimestamp())
+		return iteratorPage(nil, nil, "token", 0, ""), nil
+	}).Once()
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+}
+
+func (s *SearchIteratorSuite) TestLimitsAndEmpty() {
+	ctx := context.Background()
+	s.Run("finite_limit", func() {
+		s.describeIterator(s.schema)
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{1, 2}, []float32{1, 2}, "token", 123, "2"), nil).Once()
+		iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(2).WithIteratorLimit(3))
+		s.Require().NoError(err)
+		first, err := iter.Next(ctx)
+		s.Require().NoError(err)
+		s.Equal(2, first.Len())
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{3, 4}, []float32{3, 4}, "token", 0, "2"), nil).Once()
+		last, err := iter.Next(ctx)
+		s.Require().NoError(err)
+		s.Equal(1, last.Len())
+		_, err = iter.Next(ctx)
+		s.ErrorIs(err, io.EOF)
+	})
+	s.Run("initial_empty", func() {
+		s.describeIterator(s.schema)
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage(nil, nil, "empty", 123, "2"), nil).Once()
+		iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2"))
+		s.Require().NoError(err)
+		_, err = iter.Next(ctx)
+		s.ErrorIs(err, io.EOF)
+		_, err = iter.Next(ctx)
+		s.ErrorIs(err, io.EOF)
+	})
+	s.Run("zero_limit", func() {
+		iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithIteratorLimit(0))
+		s.Require().NoError(err)
+		_, err = iter.Next(ctx)
+		s.ErrorIs(err, io.EOF)
+	})
+}
+
+func (s *SearchIteratorSuite) TestFailedPagesDoNotAdvance() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{1}, []float32{1}, "token", 123, "2"), nil).Once()
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2").WithBatchSize(1))
+	s.Require().NoError(err)
+	_, err = iter.Next(ctx)
+	s.Require().NoError(err)
+	private := iter.(*searchIteratorV2)
+	before := proto.Clone(private.request).(*milvuspb.SearchRequest)
+	badCursor := iteratorPage([]int64{2}, []float32{2}, "token", 0, "2")
+	badCursor.Status.ExtraInfo[IteratorSearchLastPKKey] = "3"
+	badType := iteratorPage([]int64{2}, []float32{2}, "token", 0, "2")
+	badType.Status.ExtraInfo[IteratorSearchLastPKTypeKey] = "varchar"
+	badShape := iteratorPage([]int64{2}, []float32{2}, "token", 0, "2")
+	badShape.Results.Scores = nil
+	badField := iteratorPage([]int64{2}, []float32{2}, "token", 0, "2")
+	badField.Results.FieldsData = []*schemapb.FieldData{{FieldName: "ID", Type: schemapb.DataType_Int64}}
+	badScore := iteratorPage([]int64{2}, []float32{float32(math.NaN())}, "token", 0, "2")
+	missingPK := iteratorPage([]int64{2}, []float32{2}, "token", 0, "2")
+	delete(missingPK.Status.ExtraInfo, IteratorSearchLastPKKey)
+	for _, page := range []*milvuspb.SearchResults{
+		iteratorPage([]int64{2}, []float32{2}, "token", 0, ""),
+		iteratorPage([]int64{2}, []float32{2}, "token", 0, "3"),
+		iteratorPage([]int64{2}, []float32{2}, "changed-token", 0, "2"),
+		badCursor, badType, badShape, badField, badScore, missingPK,
+	} {
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(page, nil).Once()
+		_, err = iter.Next(ctx)
+		s.Require().Error(err)
+		s.True(proto.Equal(before, private.request), "failure must not advance request cursor")
+	}
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, status.Error(codes.Canceled, "temporary transport failure")).Once()
+	_, err = iter.Next(ctx)
+	s.Require().Error(err)
+	s.True(proto.Equal(before, private.request))
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.True(proto.Equal(before, req), "retry must request the same page")
+		return iteratorPage([]int64{2}, []float32{2}, "token", 0, "2"), nil
+	}).Once()
+	page, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal(int64(2), page.IDs.(*column.ColumnInt64).Data()[0])
+}
+
+func (s *SearchIteratorSuite) TestNegotiationViolations() {
+	ctx := context.Background()
+	for _, page := range []*milvuspb.SearchResults{
+		iteratorPage([]int64{1}, []float32{1}, "token", 0, "2"),
+		iteratorPage([]int64{1}, []float32{1}, "token", 123, "3"),
+		iteratorPage([]int64{1}, []float32{1}, "", 123, "2"),
+	} {
+		s.describeIterator(s.schema)
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(page, nil).Once()
+		_, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "2"))
+		s.Require().Error(err)
+		s.NotErrorIs(err, ErrServerVersionIncompatible, "malformed PK metadata is a protocol error, not legacy fallback")
+	}
 }
 
 func TestSearchIterator(t *testing.T) {
@@ -747,4 +796,61 @@ func (s *QueryIteratorSuite) TestQueryIteratorWithFilter() {
 
 func TestQueryIterator(t *testing.T) {
 	suite.Run(t, new(QueryIteratorSuite))
+}
+
+func (s *SearchIteratorSuite) TestManualLegacyContinuation() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	token := "4ea6247d-4b47-4e95-a65c-3bca62bbf7c1"
+	opt := NewSearchIteratorOption("coll", entity.FloatVector{1}).WithBatchSize(1).WithIteratorLimit(1).
+		WithSearchParam(IteratorSearchIDKey, token).WithSearchParam(IteratorSearchLastBoundKey, "0.5")
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal(token, searchIteratorParam(req, IteratorSearchIDKey))
+		s.Equal("0.5", searchIteratorParam(req, IteratorSearchLastBoundKey))
+		s.Empty(searchIteratorParam(req, IteratorSearchCursorVersionKey))
+		s.Empty(searchIteratorParam(req, IteratorSearchLastPKTypeKey))
+		return iteratorPage([]int64{2}, []float32{0.7}, token, 123, ""), nil
+	}).Once()
+	iter, err := s.client.SearchIterator(ctx, opt)
+	s.Require().NoError(err)
+	page, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal(int64(2), page.IDs.(*column.ColumnInt64).Data()[0])
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+}
+
+func (s *SearchIteratorSuite) TestDefaultDistanceModeAndUnsupportedRequestVersion() {
+	ctx := context.Background()
+	s.describeIterator(s.schema)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Equal("2", searchIteratorParam(req, "topk"))
+		s.Empty(searchIteratorParam(req, IteratorSearchCursorVersionKey))
+		return iteratorPage([]int64{1, 2}, []float32{0.9, 0.8}, "token", 123, ""), nil
+	}).Once()
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithBatchSize(2).WithIteratorLimit(2))
+	s.Require().NoError(err)
+	page, err := iter.Next(ctx)
+	s.Require().NoError(err)
+	s.Equal(2, page.Len())
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+	_, err = s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}).WithSearchParam(IteratorSearchCursorVersionKey, "3"))
+	s.Require().Error(err)
+	s.describeIterator(s.schema)
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(iteratorPage([]int64{1}, []float32{0.9}, "token", 123, "2"), nil).Once()
+	_, err = s.client.SearchIterator(ctx, NewSearchIteratorOption("coll", entity.FloatVector{1}))
+	s.Require().Error(err)
+}
+
+func (s *SearchIteratorSuite) TestExplicitPKModeRejectsPartialLegacyContinuation() {
+	callsBefore := len(s.mock.Calls)
+	opt := NewSearchIteratorOption("coll", entity.FloatVector{1}).
+		WithSearchParam(IteratorSearchCursorVersionKey, "2").
+		WithSearchParam(IteratorSearchIDKey, "4ea6247d-4b47-4e95-a65c-3bca62bbf7c1").
+		WithSearchParam(IteratorSearchLastBoundKey, "0.5")
+	_, err := s.client.SearchIterator(context.Background(), opt)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "complete typed cursor")
+	s.Equal(callsBefore, len(s.mock.Calls), "input rejection must not send another RPC")
 }
