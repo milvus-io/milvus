@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestPkStatsCollector(t *testing.T) {
@@ -274,4 +275,106 @@ func TestBm25StatsCollector_DigestEndToEnd(t *testing.T) {
 	// Test with empty stats
 	_, err := collector.Digest(1, 2, 3, "/tmp", 10, alloc, writer)
 	assert.NoError(t, err)
+}
+
+func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	collect := func(t *testing.T, collector *PkStatsCollector, n int) {
+		arrowSchema := arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.PrimitiveTypes.Int64}}, nil)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+		defer builder.Release()
+		pkBuilder := builder.Field(0).(*array.Int64Builder)
+		for i := 0; i < n; i++ {
+			pkBuilder.Append(int64(i))
+		}
+		record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{100: 0})
+		defer record.Release()
+		require.NoError(t, collector.Collect(record))
+	}
+	digest := func(t *testing.T, collector *PkStatsCollector, rowNum int64) *PrimaryKeyStats {
+		var blobs []*Blob
+		writer := func(b []*Blob) error {
+			blobs = append(blobs, b...)
+			return nil
+		}
+		_, err := collector.Digest(1, 1, 2, "/tmp", rowNum, allocator.NewLocalAllocator(1, 100), writer)
+		require.NoError(t, err)
+		stats, err := DeserializeStats(blobs)
+		require.NoError(t, err)
+		require.Len(t, stats, 1)
+		return stats[0]
+	}
+	int64Key := func(v int64) []byte {
+		b := make([]byte, 8)
+		common.Endian.PutUint64(b, uint64(v))
+		return b
+	}
+
+	t.Run("blocked bloom filter is sized by collected rows", func(t *testing.T) {
+		config := DefaultPkStatsConfig(100000)
+		config.UseDeferredBloomFilter = true
+		collector, err := NewPkStatsCollector(1, schema, 100000, &config)
+		require.NoError(t, err)
+
+		collect(t, collector, 10)
+		stats := digest(t, collector, 10)
+
+		require.Equal(t, bloomfilter.BlockedBF, stats.BFType)
+		fp := config.MaxBloomFalsePositive
+		require.Equal(t, bloomfilter.NewBloomFilterWithType(10, fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
+		require.Less(t, stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(100000, fp, bloomfilter.BlockBFName).Cap())
+		for i := int64(0); i < 10; i++ {
+			require.True(t, stats.BF.Test(int64Key(i)))
+		}
+		require.Equal(t, int64(0), stats.MinPk.GetValue())
+		require.Equal(t, int64(9), stats.MaxPk.GetValue())
+	})
+
+	t.Run("collect large batch with deferred bloom filter", func(t *testing.T) {
+		config := DefaultPkStatsConfig(1000000)
+		config.BloomFilterType = bloomfilter.BlockBFName
+		config.UseDeferredBloomFilter = true
+		collector, err := NewPkStatsCollector(1, schema, 1000000, &config)
+		require.NoError(t, err)
+		collect(t, collector, 100000)
+		stats := digest(t, collector, 100000)
+		require.Equal(t, bloomfilter.NewBloomFilterWithType(100000, config.MaxBloomFalsePositive, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
+		for i := int64(0); i < 100000; i++ {
+			require.True(t, stats.BF.Test(int64Key(i)))
+		}
+	})
+
+	t.Run("basic bloom filter ignores the flag", func(t *testing.T) {
+		collector, err := NewPkStatsCollector(1, schema, 1, &PkStatsConfig{
+			Capacity: 1024, BloomFilterType: bloomfilter.BasicBFName, MaxBloomFalsePositive: 0.25,
+			UseDeferredBloomFilter: true,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, collector.pkstats.ReserveSpace4BF(100000))
+		require.Equal(t, bloomfilter.BasicBF, collector.pkstats.BFType)
+		require.Equal(t, bloomfilter.NewBloomFilterWithType(1024, 0.25, bloomfilter.BasicBFName).Cap(), collector.pkstats.BF.Cap())
+	})
+
+	t.Run("digest without rows fails", func(t *testing.T) {
+		config := DefaultPkStatsConfig(100)
+		config.UseDeferredBloomFilter = true
+		collector, err := NewPkStatsCollector(1, schema, 100, &config)
+		require.NoError(t, err)
+
+		_, err = collector.Digest(1, 1, 2, "/tmp", 0, allocator.NewLocalAllocator(1, 100), func([]*Blob) error { return nil })
+
+		require.Error(t, err)
+	})
+}
+
+func TestDefaultPkStatsConfig(t *testing.T) {
+	config := DefaultPkStatsConfig(100)
+
+	require.Equal(t, int64(100), config.Capacity)
+	require.Equal(t, paramtable.Get().CommonCfg.BloomFilterType.GetValue(), config.BloomFilterType)
+	require.Equal(t, paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(), config.MaxBloomFalsePositive)
+	require.False(t, config.UseDeferredBloomFilter)
 }

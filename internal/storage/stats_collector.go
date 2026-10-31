@@ -60,6 +60,9 @@ func (c *PkStatsCollector) Collect(r Record) error {
 	}
 
 	rows := r.Len()
+	if err := c.pkstats.ReserveSpace4BF(int64(rows)); err != nil {
+		return err
+	}
 	for i := 0; i < rows; i++ {
 		switch schemapb.DataType(c.pkstats.PkType) {
 		case schemapb.DataType_Int64:
