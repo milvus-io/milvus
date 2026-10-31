@@ -158,8 +158,8 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 	case planpb.AggregateOp_count:
 		// count aggregation always returns Int64
 		return schemapb.DataType_Int64, nil
-	case planpb.AggregateOp_avg:
-		// avg aggregation always returns Double
+	case planpb.AggregateOp_avg, planpb.AggregateOp_m2:
+		// avg and m2 always return Double
 		return schemapb.DataType_Double, nil
 	case planpb.AggregateOp_min, planpb.AggregateOp_max:
 		// min/max keep the original field type
@@ -213,7 +213,14 @@ func (reducer *GroupAggReducer) prepareLayout() (*aggregationLayout, error) {
 	}
 
 	// Add types for aggregates
-	for _, agg := range reducer.aggregates {
+	for idx, agg := range reducer.aggregates {
+		if agg.GetOp() == planpb.AggregateOp_m2 && (idx < 2 ||
+			reducer.aggregates[idx-2].GetOp() != planpb.AggregateOp_sum ||
+			reducer.aggregates[idx-1].GetOp() != planpb.AggregateOp_count ||
+			reducer.aggregates[idx-2].GetFieldId() != agg.GetFieldId() ||
+			reducer.aggregates[idx-1].GetFieldId() != agg.GetFieldId()) {
+			return nil, merr.WrapErrServiceInternalMsg("m2 aggregate %d must follow sum and count of field %d", idx, agg.GetFieldId())
+		}
 		var expectedType schemapb.DataType
 		if agg.GetOp() == planpb.AggregateOp_count {
 			// count aggregation always returns Int64
@@ -330,8 +337,8 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 			rows[idx] = NewRow(fieldValues)
 		}
 		for r := 1; r < len(rows); r++ {
-			for c := 0; c < outputColumnCount; c++ {
-				rows[0].UpdateFieldValue(rows[r], c, aggs[c])
+			if err := rows[0].Merge(rows[r], 0, aggs); err != nil {
+				return nil, err
 			}
 		}
 		AssembleSingleRow(outputColumnCount, rows[0], reducedResult.fieldDatas)

@@ -3,7 +3,7 @@ Test Query Aggregation (GROUP BY + Aggregation Functions)
 
 This module tests the Query Aggregation feature which supports:
 - GROUP BY on scalar fields (single or multiple columns)
-- Aggregation functions: COUNT, SUM, MIN, MAX, AVG
+- Aggregation functions: COUNT, SUM, MIN, MAX, AVG, VAR_POP, VAR_SAMP, STDDEV_POP, STDDEV_SAMP
 - Supported data types: Int8/16/32/64, Float, Double, VarChar, Timestamptz
 - Not supported: JSON, Array, Vector fields
 
@@ -337,6 +337,40 @@ class TestQueryAggregationSharedV2(TestMilvusClientV2Base):
             assert abs(result["avg(c4)"] - expected["avg_c4"]) < 0.01, f"AVG(c4) mismatch for c1={c1_value}"
 
         log.info("test_single_group_by_multiple_aggregations passed")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("func", ["var_pop", "var_samp", "stddev_pop", "stddev_samp"])
+    def test_variance_aggregation(self, func):
+        """
+        target: test var_pop, var_samp, stddev_pop and stddev_samp
+        method: query nullable Int16 c2, Double c4 and Float c9 grouped by c1, then globally with a filter
+        expected: matches pandas var/std with ddof 0 (pop) or 1 (samp), NULLs ignored
+        """
+        client = self._client()
+        fields = [self.c2_field_name, self.c4_field_name, self.c9_field_name]
+        outputs = [f"{func}({f})" for f in fields]
+        ddof = 1 if func.endswith("samp") else 0
+        method = "std" if func.startswith("stddev") else "var"
+        grouped = getattr(self.datas.groupby(self.c1_field_name)[fields], method)(ddof=ddof)
+        filtered = getattr(self.datas[self.datas[self.c3_field_name] >= 500][fields], method)(ddof=ddof)
+
+        results, _ = self.query(
+            client,
+            self.collection_name,
+            group_by_fields=[self.c1_field_name],
+            output_fields=[self.c1_field_name, *outputs],
+        )
+        assert len(results) == len(grouped)
+        cases = [(r, grouped.loc[r[self.c1_field_name]]) for r in results]
+        results, _ = self.query(
+            client, self.collection_name, filter="c3 >= 500", group_by_fields=[], output_fields=outputs
+        )
+        cases.append((results[0], filtered))
+        for result, expected in cases:
+            for field, output in zip(fields, outputs):
+                assert abs(result[output] - expected[field]) <= 1e-6 * max(1.0, abs(expected[field])), (
+                    f"{output}: {result[output]} != {expected[field]}"
+                )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_group_by_with_filter(self):
@@ -1494,6 +1528,78 @@ class TestQueryAggregationIndependentV2(TestMilvusClientV2Base):
 
     Note: Nullable field aggregation is now covered by the shared collection tests.
     """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_variance_null_and_small_groups(self):
+        """
+        target: test variance NULL rules across a sealed and a growing segment
+        method: group a = [1, 2, 3, NULL] split over both segments, b = [5], c = [NULL],
+                Int64 i above 2^53, mixed with count and avg in 1 request
+        expected: var_pop(a) = 2/3, var_samp(a) = 1, sample functions NULL for b,
+                  all NULL for c, unsupported VarChar input rejected
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("pk", DataType.INT64, is_primary=True)
+        schema.add_field("c1", DataType.VARCHAR, max_length=100)
+        schema.add_field("d", DataType.DOUBLE, nullable=True)
+        schema.add_field("i", DataType.INT64)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=8)
+        self.create_collection(client, collection_name, schema=schema)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vec", metric_type="L2", index_type="FLAT", params={})
+        self.create_index(client, collection_name, index_params=index_params)
+        base = 2**53
+        values = [
+            ("a", 1.0, base),
+            ("a", 2.0, base + 8),
+            ("a", 3.0, base + 16),
+            ("a", None, base + 24),
+            ("b", 5.0, 7),
+            ("c", None, 9),
+        ]
+        rows = [{"pk": k, "c1": c1, "d": d, "i": i, "vec": [0.1] * 8} for k, (c1, d, i) in enumerate(values)]
+        self.insert(client, collection_name, data=rows[:2])
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+        self.insert(client, collection_name, data=rows[2:])
+
+        outputs = [
+            "c1",
+            "count(d)",
+            "avg(i)",
+            "var_pop(d)",
+            "var_samp(d)",
+            "stddev_pop(d)",
+            "stddev_samp(d)",
+            "var_pop(i)",
+        ]
+        results, _ = self.query(
+            client, collection_name, group_by_fields=["c1"], output_fields=outputs, consistency_level="Strong"
+        )
+        expected = {
+            "a": [3, base + 12.0, 2 / 3, 1.0, (2 / 3) ** 0.5, 1.0, 80.0],
+            "b": [1, 7.0, 0.0, None, 0.0, None, 0.0],
+            "c": [0, 9.0, None, None, None, None, 0.0],
+        }
+        assert sorted(r["c1"] for r in results) == sorted(expected)
+        for r in results:
+            for output, want in zip(outputs[1:], expected[r["c1"]]):
+                got = r[output]
+                ok = got is None if want is None else abs(got - want) < 1e-9
+                assert ok, f"{r['c1']} {output}: {got} != {want}"
+
+        error = {ct.err_code: 65535, ct.err_msg: "aggregation operator var_pop does not support data type VarChar"}
+        self.query(
+            client,
+            collection_name,
+            group_by_fields=[],
+            output_fields=["var_pop(c1)"],
+            check_task=CheckTasks.err_res,
+            check_items=error,
+        )
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_unsupported_json_type(self):
