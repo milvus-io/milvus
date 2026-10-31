@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -136,6 +137,10 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		return err
 	}
 	defer retrievePlan.Delete()
+	// record the calc_distance flag once from the already-parsed plan so the
+	// segments layer picks the right transport without re-unmarshalling the
+	// serialized expr plan (see segments.shouldUseArrowTransport).
+	retrievePlan.SetReturnDistance(t.plan.GetQuery().GetCalcDistance().GetReturnDistance())
 	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), t.plan)
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
@@ -201,6 +206,41 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	// ReleaseRecords above has not run yet. No-op on the protobuf path.
 	if err := queryutil.MaterializeArrowSelection(reducedResult, arrowSelection, t.collection.Schema()); err != nil {
 		return err
+	}
+
+	// calc_distance: compute the per-row distance column on the reduced result
+	// and append it as a synthetic field. The reference vector and metric are
+	// carried in the plan by the proxy.
+	calcDistanceSpec := t.plan.GetQuery().GetCalcDistance()
+	if calcDistanceSpec != nil && calcDistanceSpec.GetReturnDistance() &&
+		typeutil.GetSizeOfIDs(reducedResult.GetIds()) > 0 {
+		if len(calcDistanceSpec.GetRefVectors()) != 1 {
+			return merr.WrapErrServiceInternalMsg("calc_distance: expected exactly one reference vector, got %d", len(calcDistanceSpec.GetRefVectors()))
+		}
+		vectorField := typeutil.GetFieldByID(t.collection.Schema(), calcDistanceSpec.GetVectorFieldId())
+		if vectorField == nil {
+			return merr.WrapErrServiceInternalMsg("calc_distance: vector field %d not found in schema", calcDistanceSpec.GetVectorFieldId())
+		}
+		// fieldDim is only needed for fixed-dimension dense types; sparse
+		// vectors carry their own dimension per row.
+		var fieldDim int64
+		if calcDistanceSpec.GetRefVectorType() != schemapb.DataType_SparseFloatVector {
+			fieldDim, err = typeutil.GetDim(vectorField)
+			if err != nil {
+				return err
+			}
+		}
+		if err := calcDistanceColumn(reducedResult,
+			calcDistanceSpec.GetRefVectors()[0],
+			calcDistanceSpec.GetRefVectorType(),
+			calcDistanceSpec.GetMetricType(),
+			calcDistanceSpec.GetVectorFieldId(),
+			calcDistanceSpec.GetDistanceOutputName(),
+			t.req.GetReq().GetOutputFieldsId(),
+			fieldDim,
+		); err != nil {
+			return err
+		}
 	}
 
 	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {

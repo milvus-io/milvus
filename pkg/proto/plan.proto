@@ -382,7 +382,23 @@ message QueryPlanNode {
   repeated Aggregate aggregates = 5;
   repeated OrderByField order_by_fields = 6;  // ORDER BY specifications
   optional QueryIteratorCursor query_iterator_cursor = 7;
+  // calc_distance: the whole distance spec in one message so the plan node
+  // does not accumulate one flat field per property. Absent when the
+  // calc_distance query param is not requested.
+  optional CalcDistanceSpec calc_distance = 8;
 };
+
+// CalcDistanceSpec carries the reference vector, metric, target field and
+// output naming for the distance column `query()` returns via the
+// `calc_distance` query param.
+message CalcDistanceSpec {
+  repeated bytes ref_vectors = 1;       // canonical encoding per ref_vector_type; v1: length 1
+  string metric_type = 2;               // distance metric
+  int64 vector_field_id = 3;            // target vector field
+  bool return_distance = 4;             // true when calc_distance is requested
+  string distance_output_name = 5;      // resolved output column name
+  schema.DataType ref_vector_type = 6;  // target field type, fixes ref_vectors encoding
+}
 
 message QueryIteratorCursor {
   optional int64 last_int_pk = 1;
