@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -27,12 +28,17 @@ import (
 )
 
 var (
-	exprCache   = expirable.NewLRU[string, any](1024, nil, time.Minute*10)
+	exprCache   = expirable.NewLRU[string, exprCacheEntry](1024, nil, time.Minute*10)
 	trueLiteral = &ExprWithType{
 		dataType: schemapb.DataType_Bool,
 		expr:     alwaysTrueExpr(),
 	}
 )
+
+func init() {
+	metrics.ProxyExprCacheLen = func() int { return exprCache.Len() }
+	metrics.ProxyExprCacheEstimatedSize = exprCacheEstimatedBytes
+}
 
 type ExprParams struct {
 	UseJSONStats bool
@@ -104,7 +110,7 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	val, ok := exprCache.Get(exprStr)
 	if ok {
-		switch v := val.(type) {
+		switch v := val.value.(type) {
 		case planparserv2.IExprContext:
 			return v, nil
 		case error:
@@ -117,7 +123,7 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	// Note that the errors will be cached, too.
 	defer func() {
 		if err != nil {
-			exprCache.Add(exprStr, err)
+			exprCache.Add(exprStr, newExprCacheErrorEntry(exprStr, err))
 		}
 	}()
 	exprNormal := convertHanToASCII(exprStr)
@@ -145,11 +151,16 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 		return
 	}
 
+	entry := exprCacheEntry{
+		value:          ast,
+		estimatedBytes: estimateExprCacheBytes(exprStr, inputStream, parser.GetTokenStream().(*antlr.CommonTokenStream)),
+	}
+
 	// lexer & parser won't be used by this thread, can be put into pool.
 	putLexer(lexer)
 	putParser(parser)
 
-	exprCache.Add(exprStr, ast)
+	exprCache.Add(exprStr, entry)
 	return
 }
 
