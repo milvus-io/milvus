@@ -2869,49 +2869,62 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 }
 
 func TestServerHandler_GetCollectionRetry(t *testing.T) {
-	newHandler := func(b broker.Broker) *ServerHandler {
+	newHandler := func() *ServerHandler {
 		m := &meta{metaStore: metacache.NewMetaStore(nil)}
-		return newServerHandler(&Server{broker: b, meta: m})
+		return newServerHandler(&Server{broker: &broker.MockBroker{}, meta: m})
 	}
 
+	// Internal loading uses DescribeCollectionInternal directly so Restoring
+	// collections remain visible; public HasCollection intentionally hides them.
 	t.Run("dropped collection is not retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).
+			Return(nil, merr.ErrCollectionNotFound).Build()
+		defer describe.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 
 	t.Run("transient error is retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		calls := 0
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).To(
+			func(_ *broker.MockBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				calls++
+				if calls == 1 {
+					return nil, merr.ErrServiceUnavailable
+				}
+				return &milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), CollectionID: collectionID,
+				}, nil
+			}).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.NoError(t, err)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
+		require.NoError(t, err)
+		require.NotNil(t, coll)
 		assert.Equal(t, int64(1), coll.ID)
+		assert.Equal(t, 2, describe.Times())
+		assert.Equal(t, 1, partitions.Times())
 	})
 
 	t.Run("collection gone from the cache after load", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), CollectionID: 1,
+		}, nil).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 		// GC drops the collection between the load and the read.
 		dropAfterAdd := mockey.Mock((*meta).AddCollection).Return().Build()
 		defer dropAfterAdd.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 }
