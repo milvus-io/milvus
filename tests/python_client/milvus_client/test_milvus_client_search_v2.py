@@ -976,12 +976,15 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                 "nq": default_nq,
                 "pk_name": ct.default_primary_key_field_name,
                 "metric": "COSINE",
-                "limit": default_limit,
             },
         )
 
-        # verify the search results are de-duplicated
+        # Milvus does not enforce primary key uniqueness. When two rows that share
+        # a PK both land in a segment's top-K, the merge path de-duplicates them and
+        # can legitimately return fewer than `limit` hits (see #54925), so only the
+        # upper bound and uniqueness are guaranteed here.
         for i in range(default_nq):
+            assert len(search_res[i].ids) <= default_limit
             assert len(search_res[i].ids) == len(set(search_res[i].ids))
 
     @pytest.mark.tags(CaseLabel.L2)
