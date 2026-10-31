@@ -129,57 +129,68 @@ class BuildSessionTest : public ::testing::Test {
 };
 
 TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
-    for (auto purpose : {BuildPurpose::ScalarIndex, BuildPurpose::TextIndex}) {
-        for (bool external_enabled : {false, true}) {
-            const bool text = purpose == BuildPurpose::TextIndex;
-            auto info = BuildInfo(
-                text ? schemapb::DataType::Text : schemapb::DataType::VarChar,
-                "INVERTED",
-                1,
-                3);
-            if (text) {
-                auto* analyzer = info.mutable_field_schema()->add_type_params();
-                analyzer->set_key("enable_analyzer");
-                analyzer->set_value("true");
-            } else {
-                auto* max_length =
-                    info.mutable_field_schema()->add_type_params();
-                max_length->set_key("max_length");
-                max_length->set_value("256");
+    for (const uint32_t stages : {uint32_t{0}, uint32_t{1}, UINT32_MAX}) {
+        for (auto purpose :
+             {BuildPurpose::ScalarIndex, BuildPurpose::TextIndex}) {
+            for (bool external_enabled : {false, true}) {
+                const bool text = purpose == BuildPurpose::TextIndex;
+                auto info = BuildInfo(text ? schemapb::DataType::Text
+                                           : schemapb::DataType::VarChar,
+                                      "INVERTED",
+                                      1,
+                                      3);
+                if (text) {
+                    auto* analyzer =
+                        info.mutable_field_schema()->add_type_params();
+                    analyzer->set_key("enable_analyzer");
+                    analyzer->set_value("true");
+                } else {
+                    auto* max_length =
+                        info.mutable_field_schema()->add_type_params();
+                    max_length->set_key("max_length");
+                    max_length->set_value("256");
+                }
+                info.set_manifest("manifest-for-configuration");
+                auto* config = info.mutable_storage_config();
+                config->set_talon_mode(2);
+                config->set_talon_enabled_stages(stages);
+                config->set_talon_small_read_threshold(123);
+                config->set_talon_coordinator("coordinator:1234");
+                config->set_talon_block_size(456);
+                config->set_talon_max_idle_per_addr(7);
+                config->set_talon_enable_for_external_table(external_enabled);
+                auto prepared = AdaptBuildIndexInfo(info, purpose);
+                EXPECT_EQ(prepared.request.value_type,
+                          text ? DataType::TEXT : DataType::VARCHAR);
+                const auto props =
+                    prepared.file_manager_context.loon_ffi_properties;
+                ASSERT_NE(props, nullptr);
+                for (const auto& [key, value] :
+                     std::vector<std::pair<const char*, uint32_t>>{
+                         {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD, 123},
+                         {PROPERTY_FS_TALON_BLOCK_SIZE, 456},
+                         {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, 7},
+                         {PROPERTY_FS_TALON_MODE, 0}}) {
+                    auto actual =
+                        milvus_storage::api::GetValue<uint32_t>(*props, key);
+                    ASSERT_TRUE(actual.ok()) << key;
+                    EXPECT_EQ(*actual, value) << key;
+                }
+                auto coordinator = milvus_storage::api::GetValue<std::string>(
+                    *props, PROPERTY_FS_TALON_COORDINATOR);
+                ASSERT_TRUE(coordinator.ok());
+                EXPECT_EQ(*coordinator, "coordinator:1234");
+                auto external = milvus_storage::api::GetValue<std::string>(
+                    *props, "milvus.talon.external_mode");
+                ASSERT_TRUE(external.ok());
+                EXPECT_EQ(*external,
+                          external_enabled && stages != 1 ? "2" : "0");
+                EXPECT_EQ(
+                    props->count(std::string(PROPERTY_READER_OPEN_PREFIX) +
+                                 PROPERTY_FS_TALON_MODE),
+                    0);
+                EXPECT_EQ(props->count("milvus.talon.external_open_mode"), 0);
             }
-            info.set_manifest("manifest-for-configuration");
-            auto* config = info.mutable_storage_config();
-            config->set_talon_mode(2);
-            config->set_talon_small_read_threshold(123);
-            config->set_talon_coordinator("coordinator:1234");
-            config->set_talon_block_size(456);
-            config->set_talon_max_idle_per_addr(7);
-            config->set_talon_enable_for_external_table(external_enabled);
-            auto prepared = AdaptBuildIndexInfo(info, purpose);
-            EXPECT_EQ(prepared.request.value_type,
-                      text ? DataType::TEXT : DataType::VARCHAR);
-            const auto props =
-                prepared.file_manager_context.loon_ffi_properties;
-            ASSERT_NE(props, nullptr);
-            for (const auto& [key, value] :
-                 std::vector<std::pair<const char*, uint32_t>>{
-                     {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD, 123},
-                     {PROPERTY_FS_TALON_BLOCK_SIZE, 456},
-                     {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, 7},
-                     {PROPERTY_FS_TALON_MODE, 0}}) {
-                auto actual =
-                    milvus_storage::api::GetValue<uint32_t>(*props, key);
-                ASSERT_TRUE(actual.ok()) << key;
-                EXPECT_EQ(*actual, value) << key;
-            }
-            auto coordinator = milvus_storage::api::GetValue<std::string>(
-                *props, PROPERTY_FS_TALON_COORDINATOR);
-            ASSERT_TRUE(coordinator.ok());
-            EXPECT_EQ(*coordinator, "coordinator:1234");
-            auto external = milvus_storage::api::GetValue<std::string>(
-                *props, "milvus.talon.external_mode");
-            ASSERT_TRUE(external.ok());
-            EXPECT_EQ(*external, external_enabled ? "2" : "0");
         }
     }
 }
