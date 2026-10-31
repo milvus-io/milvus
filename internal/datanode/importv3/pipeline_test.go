@@ -460,7 +460,7 @@ func TestWriteReshardFragmentReportsDecodedLogicalBytes(t *testing.T) {
 	// the two assertions below cannot tell the metrics apart.
 	require.NotEqual(t, int64(999), logicalBytes)
 	spec := &writeSpec{req: req, plan: plan, fragmentSchema: tempSchema, bufferSize: 16 * 1024 * 1024}
-	outcome, err := writeFragment(spec, nil, 0, 0, group, 7)
+	outcome, err := writeFragment(context.Background(), spec, nil, 0, 0, group, 7)
 	require.NoError(t, err)
 	require.Equal(t, logicalBytes, outcome.descriptor.GetLogicalBytes())
 	require.NotEqual(t, int64(999), outcome.descriptor.GetLogicalBytes())
