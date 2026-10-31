@@ -378,6 +378,33 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         });
     }
 
+    TakeCellSource
+    MakeTakeCellSource(milvus::OpContext* op_ctx) const override {
+        auto owner = slot_;
+        auto* slot = owner.get();
+        return {// identity owns this generation for every raw-capture callback.
+                std::move(owner),
+                [slot, op_ctx](const std::vector<int64_t>& ids) {
+                    auto accessor = slot->PinCellsDirect(op_ctx, ids);
+                    TakeCellCohort cohort;
+                    cohort.lease = accessor;
+                    cohort.cells.reserve(ids.size());
+                    for (auto id : ids) {
+                        auto* chunk = accessor->get_cell_of(id);
+                        cohort.cells.emplace_back(id, chunk);
+                        cohort.bytes += chunk->Size();
+                    }
+                    return cohort;
+                },
+                [](void* cell) { return static_cast<Chunk*>(cell); },
+                [slot](int64_t id) {
+                    const auto bytes = slot->size_of_cell(id);
+                    return static_cast<size_t>(
+                        std::max<int64_t>(0, bytes.memory_bytes) +
+                        std::max<int64_t>(0, bytes.file_bytes));
+                }};
+    }
+
     std::vector<PinWrapper<Chunk*>>
     GetAllChunks(milvus::OpContext* op_ctx) const override {
         auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));

@@ -461,11 +461,24 @@ class Expr : public std::enable_shared_from_this<Expr> {
     SetFeatureRecorder(FeatureRecorder* recorder) {
     }
 
+    // Bind optional worker-private positional-read state after compilation.
+    // This changes neither expression selection nor predicate semantics.
+    // Ordinary sequential/offset callers leave it unset and retain their
+    // existing read policy. Composite expressions share one worker budget.
+    virtual void
+    SetOffsetTakeContext(const std::shared_ptr<TakeContext>& context) {
+        offset_take_context_ = context;
+        for (const auto& input : inputs_) {
+            input->SetOffsetTakeContext(context);
+        }
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     milvus::OpContext* op_ctx_;
+    std::shared_ptr<TakeContext> offset_take_context_;
 
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
@@ -982,6 +995,29 @@ class SegmentExpr : public Expr {
             BindColumnFilter(skip_func, std::move(resources.second));
     }
 
+    TakeBinding*
+    EnsureDataTakeBinding(TargetType target_type) {
+        const DataTakeBindingKey key{data_take_column_.get(),
+                                     data_take_filter_.get(),
+                                     op_ctx_,
+                                     offset_take_context_.get(),
+                                     target_type};
+        if (!(key == data_take_binding_key_)) {
+            AssertInfo(data_take_binding_ == nullptr ||
+                           !data_take_binding_->HasActiveInput(),
+                       "cannot replace an active take binding");
+            auto binding = data_take_column_->CreateTakeBinding(
+                op_ctx_,
+                TakeBindingOptions{
+                    target_type, data_take_filter_, offset_take_context_});
+            data_take_binding_ = std::move(binding);
+            // Cache unsupported as well. It retains ordinary Take fallback,
+            // rather than repeatedly probing this fixed backend each batch.
+            data_take_binding_key_ = key;
+        }
+        return data_take_binding_.get();
+    }
+
     detail::ColumnFilterPtr
     BindColumnFilter(const SkipChunkFn& skip_func,
                      FieldSkipMetricsView view) const {
@@ -993,7 +1029,8 @@ class SegmentExpr : public Expr {
             [skip_func = skip_func, view = std::move(view)](int64_t cell_id) {
                 return skip_func(view, cell_id);
             },
-            !CanUseSkipFilter(is_nullable_, null_rejecting_));
+            !CanUseSkipFilter(is_nullable_, null_rejecting_),
+            true);
     }
 
     template <typename T>
@@ -1470,6 +1507,98 @@ class SegmentExpr : public Expr {
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    batch_size);
 
+        // Retain batched predicate execution, not only batched lookup. The
+        // reader owns/lends the complete batch through this callback, including
+        // readers whose single-lane Gather otherwise reuses temporary bytes.
+        if (offset_take_context_ != nullptr) {
+            folly::small_vector<int64_t, 64> selected;
+            selected.reserve(batch_size);
+            for (size_t lane = 0; lane < batch_size; ++lane) {
+                if (!has_candidate_mask || (*candidate_mask)[lane]) {
+                    selected.push_back((*input)[lane]);
+                }
+            }
+            // Expr offsets are int32, whereas the typed index reader accepts
+            // int64. Keep this explicit widening; never reinterpret the input.
+            const auto& requested = selected;
+            size_t logical = 0;
+            int64_t expected_lane = 0;
+            auto advance_inactive = [&] {
+                const auto begin = logical;
+                while (logical < batch_size && has_candidate_mask &&
+                       !(*candidate_mask)[logical]) {
+                    ++logical;
+                }
+                if (logical != begin) {
+                    evaluate_batch.template operator()<FilterType::random>(
+                        nullptr,
+                        ValidityView{},
+                        nullptr,
+                        static_cast<int>(logical - begin),
+                        res + begin,
+                        valid_res + begin,
+                        values...);
+                }
+            };
+            value_reader->GatherViews(
+                requested.data(),
+                requested.size(),
+                [&](int64_t first,
+                    const index_value_t<T>* batch,
+                    ValidityView valid,
+                    int64_t count) {
+                    AssertInfo(first == expected_lane && count > 0 && batch &&
+                                   count <= requested.size() - first,
+                               "value batch must emit ordered lanes");
+                    FixedVector<T> owning_values;
+                    const T* data;
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        owning_values.reserve(count);
+                        for (int64_t lane = 0; lane < count; ++lane) {
+                            owning_values.emplace_back(batch[lane]);
+                        }
+                        data = owning_values.data();
+                    } else {
+                        data = batch;
+                    }
+                    for (int64_t begin = 0; begin < count;) {
+                        advance_inactive();
+                        const bool known = !valid || valid[begin];
+                        auto end = begin + 1;
+                        while (end < count &&
+                               (!has_candidate_mask ||
+                                (*candidate_mask)[logical + end - begin]) &&
+                               (!valid || valid[end]) == known) {
+                            ++end;
+                        }
+                        if (!known) {
+                            for (auto lane = begin; lane < end; ++lane) {
+                                res[logical + lane - begin] =
+                                    valid_res[logical + lane - begin] = false;
+                            }
+                        }
+                        // No predicate is run on an absent index value; the
+                        // null-data call still advances the original cursor.
+                        evaluate_batch.template operator()<FilterType::random>(
+                            known ? data + begin : nullptr,
+                            ValidityView{},
+                            nullptr,
+                            static_cast<int>(end - begin),
+                            res + logical,
+                            valid_res + logical,
+                            values...);
+                        logical += end - begin;
+                        begin = end;
+                    }
+                    expected_lane += count;
+                });
+            advance_inactive();
+            AssertInfo(
+                logical == batch_size && expected_lane == requested.size(),
+                "value Gather omitted a requested lane");
+            return batch_size;
+        }
+
         // A scalar index is one logical index chunk for the whole segment,
         // while SkipIndex statistics remain partitioned by the original data
         // chunks. Once raw field data is dropped, this path cannot recover an
@@ -1935,24 +2064,37 @@ class SegmentExpr : public Expr {
         if (input->empty()) {
             return 0;
         }
-        const bool has_candidate_mask =
+        const bool mask_present =
             candidate_mask != nullptr && !candidate_mask->empty();
-        AssertInfo(
-            !has_candidate_mask || candidate_mask->size() == input->size(),
-            "candidate mask size {} does not match Take input {}",
-            candidate_mask == nullptr ? 0 : candidate_mask->size(),
-            input->size());
+        AssertInfo(!mask_present || candidate_mask->size() == input->size(),
+                   "candidate mask size {} does not match Take input {}",
+                   candidate_mask == nullptr ? 0 : candidate_mask->size(),
+                   input->size());
+        const bool has_candidate_mask = mask_present && !candidate_mask->all();
         if (has_candidate_mask && candidate_mask->none()) {
-            for (size_t i = 0; i < input->size(); ++i) {
-                func.template operator()<FilterType::random>(nullptr,
-                                                             ValidityView{},
-                                                             nullptr,
-                                                             1,
-                                                             res + i,
-                                                             valid_res + i,
-                                                             values...);
-            }
+            func.template operator()<FilterType::random>(
+                nullptr,
+                ValidityView{},
+                nullptr,
+                static_cast<int>(input->size()),
+                res,
+                valid_res,
+                values...);
             return input->size();
+        }
+        // Reusable bindings currently accept dense offset inputs. Compact only
+        // that opt-in path; ordinary Take passes the original positional mask
+        // through the upstream API without an offset copy.
+        const bool compact_candidates =
+            has_candidate_mask && offset_take_context_ != nullptr;
+        folly::small_vector<int32_t, 64> selected_offsets;
+        if (compact_candidates) {
+            selected_offsets.reserve(input->size());
+            for (size_t i = 0; i < input->size(); ++i) {
+                if ((*candidate_mask)[i]) {
+                    selected_offsets.push_back((*input)[i]);
+                }
+            }
         }
         EnsureDataTakeResources(skip_func);
         if (data_take_column_ == nullptr) {
@@ -1960,15 +2102,34 @@ class SegmentExpr : public Expr {
         }
         const auto nullable = data_take_column_->IsNullable();
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            input->data(), static_cast<int64_t>(input->size()));
-        auto take = data_take_column_->Take(
-            op_ctx_,
-            ChunkedColumnInterface::TakeOptions{
-                input_view,
-                DataTargetType<T>(),
-                data_take_filter_,
-                TakePinPolicy::CurrentCell,
-                has_candidate_mask ? candidate_mask : nullptr});
+            compact_candidates ? selected_offsets.data() : input->data(),
+            static_cast<int64_t>(compact_candidates ? selected_offsets.size()
+                                                    : input->size()));
+        // The lease ends before selected_offsets goes out of scope, including
+        // on kernel/reader failure. Ordinary callers keep immutable fresh Take
+        // results; only explicitly contextual offset execution opts into reuse.
+        std::optional<TakeBinding::InputLease> input_lease;
+        ChunkedColumnInterface::TakeResultPtr fresh_take;
+        const TakeResult* take = nullptr;
+        if (offset_take_context_ != nullptr) {
+            if (auto* binding = EnsureDataTakeBinding(DataTargetType<T>())) {
+                input_lease.emplace(binding->Bind(input_view));
+                take = &input_lease->Result();
+            }
+        }
+        if (take == nullptr) {
+            fresh_take = data_take_column_->Take(
+                op_ctx_,
+                ChunkedColumnInterface::TakeOptions{
+                    input_view,
+                    DataTargetType<T>(),
+                    data_take_filter_,
+                    TakePinPolicy::CurrentCell,
+                    has_candidate_mask && !compact_candidates ? candidate_mask
+                                                              : nullptr,
+                    offset_take_context_});
+            take = fresh_take.get();
+        }
         if (take == nullptr) {
             return -1;
         }
@@ -1992,6 +2153,89 @@ class SegmentExpr : public Expr {
                 valid_res,
                 values...);
             return owned.size;
+        }
+
+        if (offset_take_context_ != nullptr) {
+            // Consume a packed batch through the ORIGINAL random-input kernel.
+            // In particular, do not substitute the sequential SIMD arithmetic
+            // kernel, whose overflow behavior can differ. Raw string views
+            // remain borrowed and their pin cohorts live through this callback.
+            size_t logical = 0;
+            const auto advance_inactive = [&] {
+                const auto begin = logical;
+                while (logical < input->size() && !(*candidate_mask)[logical]) {
+                    ++logical;
+                }
+                if (begin != logical) {
+                    func.template operator()<FilterType::random>(
+                        nullptr,
+                        ValidityView{},
+                        nullptr,
+                        static_cast<int>(logical - begin),
+                        res + begin,
+                        valid_res + begin,
+                        values...);
+                }
+            };
+            take->template VisitViews<T>(
+                32,
+                [&](const T* data,
+                    ValidityView valid,
+                    const bool* skipped,
+                    int64_t first,
+                    int64_t count) {
+                    if (!has_candidate_mask && skipped == nullptr) {
+                        func.template operator()<FilterType::random>(
+                            data,
+                            valid,
+                            nullptr,
+                            static_cast<int>(count),
+                            res + first,
+                            valid_res + first,
+                            values...);
+                        return;
+                    }
+                    for (int64_t begin = 0; begin < count;) {
+                        if (has_candidate_mask) {
+                            advance_inactive();
+                        }
+                        const bool skip = skipped != nullptr && skipped[begin];
+                        auto end = begin + 1;
+                        while (end < count &&
+                               (!has_candidate_mask ||
+                                (*candidate_mask)[logical + end - begin]) &&
+                               (skipped == nullptr || skipped[end] == skip)) {
+                            ++end;
+                        }
+                        const auto output =
+                            has_candidate_mask ? logical : first + begin;
+                        if (skip) {
+                            ApplyValidData(valid.Subview(begin),
+                                           res + output,
+                                           valid_res + output,
+                                           end - begin);
+                        }
+                        func.template operator()<FilterType::random>(
+                            skip ? nullptr : data + begin,
+                            valid.Subview(begin),
+                            nullptr,
+                            static_cast<int>(end - begin),
+                            res + output,
+                            valid_res + output,
+                            values...);
+                        if (has_candidate_mask) {
+                            logical += end - begin;
+                        }
+                        begin = end;
+                    }
+                },
+                true);
+            if (has_candidate_mask) {
+                advance_inactive();
+                AssertInfo(logical == input->size(),
+                           "packed Take omitted active candidate positions");
+            }
+            return input->size();
         }
 
         const auto items = take->template Access<T>();
@@ -4364,6 +4608,20 @@ class SegmentExpr : public Expr {
     bool data_take_resources_initialized_{false};
     std::shared_ptr<ChunkedColumnInterface> data_take_column_{nullptr};
     detail::ColumnFilterPtr data_take_filter_{nullptr};
+    struct DataTakeBindingKey {
+        const ChunkedColumnInterface* column{nullptr};
+        const detail::ColumnFilter* filter{nullptr};
+        const milvus::OpContext* op_context{nullptr};
+        const TakeContext* take_context{nullptr};
+        TargetType target_type{TargetType::None};
+
+        bool
+        operator==(const DataTakeBindingKey&) const = default;
+    };
+    DataTakeBindingKey data_take_binding_key_;
+    // Declared after the captured resources so its source/configuration are
+    // released first. No input lease survives an evaluation call or ExecContext.
+    std::unique_ptr<TakeBinding> data_take_binding_;
 
     // Unified cache for all index paths (ScalarIndex, PkIndex, TextIndex, JsonStats).
     // Populated once per segment, then sliced per batch via SliceCachedResult().
