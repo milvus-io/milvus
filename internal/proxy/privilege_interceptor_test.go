@@ -356,6 +356,56 @@ func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 	})
 }
 
+// Any user may list and cancel their own running requests. The privileges
+// reach other users' requests, so a caller without one is let through but
+// held to their own requests, and only for these two calls.
+func TestPrivilegeInterceptorRunningRequests(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_ops", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_ops", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCancelRequests.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_watch", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("olive", "role_ops"),
+				funcutil.EncodeUserRoleCache("wes", "role_watch"),
+			},
+		}, nil
+	}
+	_, err := initMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	list := &milvuspb.ListRunningRequestsRequest{}
+	cancel := &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}}
+	for _, tc := range []struct {
+		user              string
+		req               any
+		heldToOwnRequests bool
+	}{
+		{"olive", list, false},
+		{"olive", cancel, false},
+		{"wes", list, false},
+		{"wes", cancel, true},
+		{"pat", list, true},
+		{"pat", cancel, true},
+	} {
+		ctx, err := PrivilegeInterceptor(GetContext(context.Background(), tc.user+":pwd"), tc.req)
+		require.NoError(t, err, "%s %T", tc.user, tc.req)
+		assert.Equal(t, tc.heldToOwnRequests, ownRequestsOnly(ctx), "%s %T", tc.user, tc.req)
+	}
+
+	// the exemption is for these two calls only
+	_, err = PrivilegeInterceptor(GetContext(context.Background(), "pat:pwd"), &milvuspb.CreateDatabaseRequest{DbName: "x"})
+	assert.Error(t, err)
+}
+
 // TestPrivilegeInterceptorDatabaseLevel covers the database-level half of the
 // #50678 fix using the issue's original reproducer (AlterDatabase). A
 // database-level privilege is scoped to the db the request targets, so a grant

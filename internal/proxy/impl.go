@@ -2608,6 +2608,11 @@ func GetCollectionRateSubLabel(req any) string {
 
 // Search searches the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	// Register the request before anything else so that it is listable and
+	// cancellable for its whole lifetime, including the retries below.
+	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2671,6 +2676,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 	if err != nil {
 		rsp.Status = merr.Status(err)
+	}
+	if rsp != nil {
+		rsp.Status = statusIfCanceled(ctx, rsp.Status)
 	}
 	return rsp, nil
 }
@@ -2882,6 +2890,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2920,6 +2931,9 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
+	}
+	if rsp != nil {
+		rsp.Status = statusIfCanceled(ctx, rsp.Status)
 	}
 	return rsp, err
 }
@@ -3669,6 +3683,9 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
+	defer node.unregisterRequest(entry)
+
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
@@ -3723,6 +3740,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	}
 
 	if err != nil || !merr.Ok(res.Status) {
+		if res != nil {
+			res.Status = statusIfCanceled(ctx, res.Status)
+		}
 		return res, err
 	}
 
