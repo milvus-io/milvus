@@ -1530,17 +1530,48 @@ func TestMeta_UpdateVersion(t *testing.T) {
 }
 
 func TestMeta_FinishTask(t *testing.T) {
-	m := updateSegmentIndexMeta(t)
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	m, err := newIndexMeta(ctx, catalog, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegmentIndex(ctx, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segID,
+		IndexID:      indexID,
+		BuildID:      buildID,
+	}))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: 1024,
-			FailReason:     "",
-		})
-		assert.NoError(t, err)
+		multiplier := &paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier
+		previous := multiplier.SwapTempValue("3")
+		t.Cleanup(func() { multiplier.SwapTempValue(previous) })
+
+		for _, tc := range []struct {
+			name                          string
+			serialized, memSize, expected uint64
+		}{
+			{name: "missing memory", serialized: 1024, expected: 3072},
+			{name: "reported memory", serialized: 1024, memSize: 4096, expected: 4096},
+			{name: "zero sizes"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				require.NoError(t, m.FinishTask(&workerpb.IndexTaskInfo{
+					BuildID:        buildID,
+					State:          commonpb.IndexState_Finished,
+					IndexFileKeys:  []string{"file1", "file2"},
+					SerializedSize: tc.serialized,
+					MemSize:        tc.memSize,
+				}))
+				finished, ok := m.GetIndexJob(buildID)
+				require.True(t, ok)
+				assert.Equal(t, tc.expected, finished.IndexMemSize)
+
+				persisted, err := catalog.ListSegmentIndexes(ctx, collID)
+				require.NoError(t, err)
+				require.Len(t, persisted, 1)
+				assert.Equal(t, tc.expected, persisted[0].IndexMemSize)
+			})
+		}
 	})
 
 	t.Run("fail", func(t *testing.T) {

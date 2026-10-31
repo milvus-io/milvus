@@ -179,6 +179,15 @@ func newIndexMeta(ctx context.Context, catalog metastore.DataCoordCatalog, colle
 	return mt, nil
 }
 
+// estimateIndexMemSize preserves reported sizes and estimates missing statistics
+// consistently during completion and recovery.
+func estimateIndexMemSize(memSize, serializedSize uint64) uint64 {
+	if memSize > 0 {
+		return memSize
+	}
+	return serializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
+}
+
 // reloadFromKV loads meta from KV storage
 func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 	record := timerecord.NewTimeRecorder("indexMeta-reloadFromKV")
@@ -220,9 +229,7 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 		}
 		for _, segIdxes := range collectionSegIdxes {
 			for _, segIdx := range segIdxes {
-				if segIdx.IndexMemSize == 0 {
-					segIdx.IndexMemSize = segIdx.IndexSerializedSize * paramtable.Get().DataCoordCfg.IndexMemSizeEstimateMultiplier.GetAsUint64()
-				}
+				segIdx.IndexMemSize = estimateIndexMemSize(segIdx.IndexMemSize, segIdx.IndexSerializedSize)
 				indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 				if ok {
 					indexes.Insert(segIdx.IndexID, segIdx)
@@ -352,7 +359,7 @@ func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskIn
 	updated.IndexFileKeys = common.CloneStringList(taskInfo.GetIndexFileKeys())
 	updated.FailReason = taskInfo.GetFailReason()
 	updated.IndexSerializedSize = taskInfo.GetSerializedSize()
-	updated.IndexMemSize = taskInfo.GetMemSize()
+	updated.IndexMemSize = estimateIndexMemSize(taskInfo.GetMemSize(), updated.IndexSerializedSize)
 	updated.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 	updated.FinishedUTCTime = uint64(time.Now().Unix())
 	updated.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
