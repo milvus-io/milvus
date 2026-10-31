@@ -1,9 +1,11 @@
 package kvfactory
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -33,8 +35,10 @@ func CloseEtcdClient() {
 	clientCreator.mu.Lock()
 	defer clientCreator.mu.Unlock()
 	if clientCreator.client != nil {
+		// Close reports context.Canceled when the client was already closed,
+		// which is harmless during shutdown.
 		err := clientCreator.client.Close()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}
