@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"unicode/utf8"
 
 	"github.com/samber/lo"
 
@@ -28,6 +29,9 @@ type ValidateUtil struct {
 	checkMaxLen   bool
 	checkOverflow bool
 	checkMaxCap   bool
+	// storedFields name the fields whose rows were read back from storage
+	// rather than supplied by the request; see WithStoredFields.
+	storedFields typeutil.Set[string]
 }
 
 // MaxJSONDepth is simdjson DOM's maximum node depth. A container at the
@@ -85,6 +89,17 @@ func WithOverflowCheck() ValidateOption {
 func WithMaxCapCheck() ValidateOption {
 	return func(v *ValidateUtil) {
 		v.checkMaxCap = true
+	}
+}
+
+// WithStoredFields names the fields whose rows were read back from storage
+// rather than supplied by the request, as a partial upsert does for the fields
+// its request omits. Those rows were admitted when they were written, so the
+// JSON document check does not re-judge them: a row stored before the check
+// existed must not make an update that leaves the field untouched fail.
+func WithStoredFields(names ...string) ValidateOption {
+	return func(v *ValidateUtil) {
+		v.storedFields = typeutil.NewSet(names...)
 	}
 }
 
@@ -1099,6 +1114,28 @@ func (v *ValidateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 					field.GetFieldName(), maxLength)
 				return merr.WrapErrParameterInvalid("valid length json string", "length exceeds max length", msg)
 			}
+		}
+	}
+
+	// Every non-null row must hold one JSON document. The storage and index
+	// layers parse these bytes with simdjson, which rejects malformed JSON and
+	// invalid UTF-8, and an empty row has no document at all, so admitting such
+	// a row only defers the failure to query or index build time.
+	if v.storedFields.Contain(field.GetFieldName()) {
+		return nil
+	}
+	validData := typeutil.GetFieldDataValidData(field)
+	// Nullable rows may arrive compact (one entry per non-null row) or expanded
+	// (one entry per row, with placeholders for null rows); only the expanded
+	// form needs the bitmap to skip the placeholders.
+	expanded := len(validData) > 0 && len(jsonArray) == len(validData)
+	for i, s := range jsonArray {
+		if expanded && !validData[i] {
+			continue
+		}
+		if !json.Valid(s) || !utf8.Valid(s) {
+			return merr.WrapErrParameterInvalidMsg("json field '%s' holds an invalid JSON document at data index %d (length %d)",
+				field.GetFieldName(), i, len(s))
 		}
 	}
 	return nil
