@@ -33,7 +33,8 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		panic("write on a wal that is not in read-write mode")
 	}
 	pb := msg.IntoMessageProto()
-	r := w.p.Write(ctx,
+	r := w.p.Write(
+		ctx,
 		&wp.WriteMessage{
 			Payload:    pb.Payload,
 			Properties: pb.Properties,
@@ -90,8 +91,14 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 }
 
 func (w *walImpl) Close() {
-	closeWriterErr := w.p.Close(context.Background())
-	if closeWriterErr != nil {
-		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))
+	ctx := context.Background()
+	if w.p != nil {
+		if err := w.p.Close(ctx); err != nil {
+			w.Log().Warn(ctx, "close woodpecker writer err", mlog.Err(err))
+		}
+		return
+	}
+	if err := w.l.Close(ctx); err != nil {
+		w.Log().Warn(ctx, "close woodpecker log handle err", mlog.Err(err))
 	}
 }
