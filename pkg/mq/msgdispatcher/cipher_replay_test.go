@@ -265,13 +265,15 @@ func testStreamingReplay(t *testing.T) {
 				<-retryStarted
 			}
 			input := make(chan *msgstream.ConsumeMsgPack, 2)
+			terminalErr := errors.New("terminal stream error after cipher retry")
+			streamErrors := make(chan error, 2)
 			stream := msgstream.NewMockMsgStream(t)
 			stream.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			stream.EXPECT().Chan().Return((<-chan *msgstream.ConsumeMsgPack)(input))
 			stream.EXPECT().GetUnmarshalDispatcher().Return(adaptor.UnmashalerDispatcher)
 			stream.EXPECT().Close().Return()
 			factory := &msgstream.MockMqFactory{NewMsgStreamFunc: func(context.Context) (msgstream.MsgStream, error) {
-				return stream, nil
+				return &testTerminalMsgStream{MsgStream: stream, err: terminalErr}, nil
 			}}
 			dispatcher, err := NewDispatcher(context.Background(), factory, 1, "pchannel_0", nil,
 				common.SubscriptionPositionEarliest, 0, false)
@@ -281,7 +283,12 @@ func testStreamingReplay(t *testing.T) {
 			outputs := make(map[int]<-chan *MsgPack)
 			for _, id := range []int{1, 2} {
 				vchannel := fmt.Sprintf("pchannel_0_%dv0", id)
-				outputs[id], err = manager.Add(context.Background(), &StreamConfig{VChannel: vchannel})
+				outputs[id], err = manager.Add(context.Background(), &StreamConfig{
+					VChannel: vchannel,
+					OnStreamError: func(err error) {
+						streamErrors <- err
+					},
+				})
 				require.NoError(t, err)
 				target, _ := manager.registeredTargets.Get(vchannel)
 				dispatcher.AddTarget(target)
@@ -294,6 +301,9 @@ func testStreamingReplay(t *testing.T) {
 			for i, stored := range [][]byte{dropped, live} {
 				input <- consumeReplayMessage(t, restore(stored, int64(40+i)))
 			}
+			// A closed upstream must still drain the retained pack after cipher
+			// recovery and resume, then report its terminal error to the target.
+			close(input)
 			dispatcher.Handle(start)
 			select {
 			case <-retryStarted:
@@ -331,6 +341,18 @@ func testStreamingReplay(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("remaining subscriber did not resume")
 				}
+			}
+			select {
+			case err := <-streamErrors:
+				require.ErrorIs(t, err, terminalErr)
+			case <-time.After(5 * time.Second):
+				t.Fatal("terminal stream error was not reported after cipher retry")
+			}
+			select {
+			case _, ok := <-outputs[remaining]:
+				require.False(t, ok, "the remaining target must close after draining pending messages")
+			case <-time.After(5 * time.Second):
+				t.Fatal("remaining target did not close")
 			}
 		})
 	}
