@@ -289,19 +289,8 @@ func (it *queryIterator) fetchNextBatch(ctx context.Context) (ResultSet, error) 
 			return err
 		}
 
-		columns, err := it.client.parseSearchResult(it.schema, resp.GetOutputFields(), resp.GetFieldsData(), 0, 0, -1)
-		if err != nil {
-			return err
-		}
-		resultSet = ResultSet{
-			sch:    it.schema,
-			Fields: columns,
-		}
-		if len(columns) > 0 {
-			resultSet.ResultCount = columns[0].Len()
-		}
-
-		return nil
+		resultSet, err = it.client.parseQueryResult(it.schema, resp.GetOutputFields(), resp)
+		return err
 	})
 
 	return resultSet, err
