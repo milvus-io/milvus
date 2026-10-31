@@ -512,6 +512,11 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		if _, ok := indexParamsMap[k]; ok {
 			continue
 		}
+		// The struct sub-field origin marker is a schema-internal key; keep it
+		// out of index meta, DescribeIndex and the index build parameters.
+		if k == common.StructSubFieldAddedKey {
+			continue
+		}
 		cit.newTypeParams = append(cit.newTypeParams, &commonpb.KeyValuePair{Key: k, Value: v})
 	}
 

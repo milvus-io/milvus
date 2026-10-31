@@ -110,6 +110,15 @@ enum class VortexColumnGroupLocalFormat {
     Raw,
 };
 
+// Rejects building struct offsets for a segment that stores none of the
+// struct's current sub-fields but does store fields written after the struct
+// was created; see the definition for the rule.
+void
+CheckStructProviderNotDropped(const Schema& schema,
+                              const SegmentLoadInfo& load_info,
+                              const std::string& struct_name,
+                              int64_t segment_id);
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
 
@@ -1904,6 +1913,26 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                         const SchemaPtr& target_schema,
                                         RuntimeResourceState& runtime);
 
+    static std::optional<FieldId>
+    SelectStructElementOffsetsSource(
+        const RuntimeResourceState& runtime,
+        const Schema& schema,
+        const SegmentLoadInfo& load_info,
+        const std::string& struct_name,
+        const std::unordered_set<FieldId>& newly_loaded_fields,
+        const std::unordered_set<FieldId>& excluded_fields);
+
+    static void
+    BuildStructElementOffsets(
+        RuntimeResourceState& runtime,
+        const SchemaPtr& schema_snapshot,
+        const SegmentLoadInfo& segment_load_info,
+        const std::unordered_set<FieldId>& affected_fields,
+        milvus::OpContext* op_ctx,
+        const std::unordered_set<FieldId>& newly_loaded_fields = {},
+        const std::unordered_set<FieldId>& excluded_fields = {},
+        bool rebuild_all = false);
+
     void
     RegisterStructElementOffsetsForField(const FieldMeta& field_meta,
                                          RuntimeResourceState& runtime,
@@ -2379,6 +2408,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SchemaPtr
     TestGetSchemaSnapshot() const {
         return CapturePublishedState()->schema;
+    }
+
+    // Runs the check that rejects building struct offsets for a segment whose
+    // stored sub-fields of the struct were all dropped.
+    static void
+    TestCheckStructProviderNotDropped(const Schema& schema,
+                                      const SegmentLoadInfo& load_info,
+                                      const std::string& struct_name) {
+        CheckStructProviderNotDropped(schema, load_info, struct_name, 0);
     }
 
     bool

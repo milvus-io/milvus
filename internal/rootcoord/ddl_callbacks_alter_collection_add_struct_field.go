@@ -56,6 +56,11 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err := normalizeAndCheckAddedStructField(structArrayField); err != nil {
 		return err
 	}
+	// Sub-fields of a whole struct added here are original sub-fields of that
+	// struct: they get no origin marker, and users cannot supply one.
+	if err := rejectStructSubFieldOriginMarkers([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
+		return err
+	}
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
 		return errors.Wrap(err, "failed to check struct array field schema")
 	}
@@ -134,31 +139,46 @@ func normalizeAndCheckAddedStructField(structArrayField *schemapb.StructArrayFie
 		if isReservedStructFieldName(originalName) {
 			return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", originalName)
 		}
-		if field.GetIsPrimaryKey() {
-			return merr.WrapErrParameterInvalidMsg("primary key is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetAutoID() {
-			return merr.WrapErrParameterInvalidMsg("autoID is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetIsPartitionKey() {
-			return merr.WrapErrParameterInvalidMsg("partition key is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetIsClusteringKey() {
-			return merr.WrapErrParameterInvalidMsg("clustering key is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetDefaultValue() != nil {
-			return merr.WrapErrParameterInvalidMsg("default value is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetIsFunctionOutput() {
-			return merr.WrapErrParameterInvalidMsg("function output is not supported for struct field, field name = %s", originalName)
-		}
-		if field.GetExternalField() != "" {
-			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", originalName)
+		if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
+			return err
 		}
 		field.Nullable = true
 		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			field.TypeSchema.Nullable = true
 		}
+	}
+	return nil
+}
+
+func validateAddedStructSubFieldProperties(originalName string, field *schemapb.FieldSchema) error {
+	if field.GetIsPrimaryKey() {
+		return merr.WrapErrParameterInvalidMsg("primary key is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetAutoID() {
+		return merr.WrapErrParameterInvalidMsg("autoID is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetIsDynamic() {
+		return merr.WrapErrParameterInvalidMsg("dynamic field is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetIsPartitionKey() {
+		return merr.WrapErrParameterInvalidMsg("partition key is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetIsClusteringKey() {
+		return merr.WrapErrParameterInvalidMsg("clustering key is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetIsFunctionOutput() {
+		return merr.WrapErrParameterInvalidMsg("function output is not supported for struct field, field name = %s", originalName)
+	}
+	if field.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", originalName)
+	}
+	// Same rule as at collection creation: the Vortex local format does not
+	// serve vector fields, ArrayOfVector included.
+	if err := validateLocalFormat(field); err != nil {
+		return err
 	}
 	return nil
 }

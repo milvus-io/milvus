@@ -96,6 +96,26 @@ ReadNext(CPackedReader c_packed_reader,
 CStatus
 CloseReader(CPackedReader c_packed_reader);
 
+/**
+ * @brief Read the PARQUET:field_id of every column stored in each packed file.
+ *        Only the parquet footer of each file is read, once per file.
+ *
+ * @param paths The packed files, resolved the same way as NewPackedReader*.
+ * @param c_storage_config The storage config to resolve the filesystem with,
+ *        or NULL for the default filesystem (as NewPackedReader).
+ * @param field_ids Output, malloc'ed: the field ids of all files, concatenated
+ *        in path order. The caller frees it with free().
+ * @param field_counts Output, malloc'ed, num_paths entries: the number of field
+ *        ids of each file. The caller frees it with free().
+ */
+CStatus
+GetPackedFileFieldIDs(char** paths,
+                      int64_t num_paths,
+                      const CStorageConfig* c_storage_config,
+                      CPluginContext* c_plugin_context,
+                      int64_t** field_ids,
+                      int64_t** field_counts);
+
 #ifdef __cplusplus
 }
 #endif
