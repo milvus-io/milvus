@@ -511,10 +511,18 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
-func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
+// ChannelExists reports whether the channel marker is active. Missing keys are
+// treated as absent; other lookup failures are returned to the caller.
+func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
 	key := buildChannelRemovePath(channel)
 	v, err := kc.MetaKv.Load(ctx, key)
-	return err == nil && v == NonRemoveFlagTomestone
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, merr.Wrapf(err, "failed to load channel marker %s", channel)
+	}
+	return v == NonRemoveFlagTomestone, nil
 }
 
 // DropChannel removes the channel removal flag of a dropped channel.

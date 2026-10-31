@@ -196,7 +196,8 @@ type DataCoordCatalog interface {
 	// DropChannel deletes it when the channel is dropped. A missing flag reads as
 	// a dropped channel.
 	MarkChannelAdded(ctx context.Context, channel string) error
-	ChannelExists(ctx context.Context, channel string) bool
+	// ChannelExists returns lookup errors separately from an absent channel.
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	DropChannel(ctx context.Context, channel string) error
 	// RemoveDroppedChannelFlags deletes the flags older versions left behind as
 	// "removed" for dropped channels and returns how many were deleted.
