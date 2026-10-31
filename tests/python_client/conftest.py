@@ -120,6 +120,13 @@ def pytest_addoption(parser):
         default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80",
         help="vllm rerank endpoint",
     )
+    parser.addoption(
+        "--snapshot_function_mock_endpoint", default="", help="FN-14 mock base URL reachable from Milvus Pods"
+    )
+    parser.addoption(
+        "--snapshot_function_mock_control_endpoint", default="", help="FN-14 mock base URL reachable from pytest"
+    )
+
     # L3 test options for alter function tests
     parser.addoption(
         "--tei_endpoint_2", action="store", default="", help="second tei embedding endpoint for alter tests"
