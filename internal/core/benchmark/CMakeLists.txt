@@ -24,3 +24,18 @@ install(TARGETS fastmem_benchmark DESTINATION benchmark)
 add_executable(sorted_int64_lookup_benchmark SortedInt64LookupBenchmark.cpp)
 target_include_directories(sorted_int64_lookup_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
 install(TARGETS sorted_int64_lookup_benchmark DESTINATION benchmark)
+
+# Bitmap range filters over heap Roaring postings; links the core library.
+add_executable(bitmap_range_benchmark BitmapRangeBenchmark.cpp)
+target_include_directories(bitmap_range_benchmark PRIVATE
+    ${CMAKE_HOME_DIRECTORY}/src
+    ${CMAKE_HOME_DIRECTORY}/src/thirdparty
+    ${KNOWHERE_INCLUDE_DIR}
+    ${MILVUS_STORAGE_INCLUDE_DIR}
+    ${milvus-common_INCLUDE_DIRS})
+target_link_libraries(bitmap_range_benchmark PRIVATE milvus_core milvus_conan_deps benchmark::benchmark)
+if (LINUX)
+    # Same XXH symbol collision as the unit-test binaries, see unittest/CMakeLists.txt.
+    target_link_options(bitmap_range_benchmark PRIVATE "LINKER:--allow-multiple-definition")
+endif ()
+install(TARGETS bitmap_range_benchmark DESTINATION benchmark)
