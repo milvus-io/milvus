@@ -12,6 +12,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <mutex>
+#include <vector>
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -23,8 +25,17 @@
 
 namespace milvus::segcore {
 
+class SealedFieldLayout;
+class LoadScope;
+
 class Collection {
  public:
+    explicit Collection(SchemaPtr schema) : schema_(std::move(schema)) {
+    }
+
+    std::shared_ptr<const SealedFieldLayout>
+    GetSealedFieldLayout(const LoadScope& scope);
+
     explicit Collection(const milvus::proto::schema::CollectionSchema* schema);
     explicit Collection(const std::string_view schema_proto);
     explicit Collection(const void* collection_proto, const int64_t length);
@@ -76,6 +87,8 @@ class Collection {
     }
 
  private:
+    std::mutex layouts_mutex_;
+    std::vector<std::weak_ptr<const SealedFieldLayout>> layouts_;
     std::string collection_name_;
     SchemaPtr schema_;
     std::shared_mutex schema_mutex_;

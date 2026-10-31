@@ -402,7 +402,10 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
-		it.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "fake finished index success")
+		if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "fake finished index success"); err != nil {
+			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
+			return
+		}
 		return
 	}
 
