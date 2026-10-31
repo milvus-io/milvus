@@ -2821,7 +2821,9 @@ type proxyConfig struct {
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
-	HybridSearchRequeryPolicy ParamItem `refreshable:"true"`
+	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
+	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
+	SearchPlaceholderLogMaxBytes  ParamItem `refreshable:"true"`
 }
 
 func positiveProxyLimitFormatter(defaultValue string) func(string) string {
@@ -3515,6 +3517,32 @@ Disabled if the value is less or equal to 0.`,
 		Export:       true,
 	}
 	p.QueryNodePoolingSize.Init(base.mgr)
+
+	p.SearchPlaceholderLogRateLimit = ParamItem{
+		Key:          "proxy.searchPlaceholderLogRateLimit",
+		Version:      "3.0.6",
+		Doc:          "The maximum number of search placeholder preview info log entries per second per Proxy process, shared by Search and HybridSearch. One entry covers one request. Values <= 0 disable logging.",
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.SearchPlaceholderLogRateLimit.Init(base.mgr)
+
+	const defaultSearchPlaceholderLogMaxBytes = "16384"
+	p.SearchPlaceholderLogMaxBytes = ParamItem{
+		Key:          "proxy.searchPlaceholderLogMaxBytes",
+		Version:      "3.0.6",
+		Doc:          "Maximum bytes in the combined search placeholder preview per log entry, including summaries, quoted text and truncation markers, before the log encoder escapes the field. Each placeholder shows only the first query. Invalid or non-positive values use the default of 16384 bytes.",
+		DefaultValue: defaultSearchPlaceholderLogMaxBytes,
+		Export:       false,
+		Formatter: func(value string) string {
+			size, err := strconv.Atoi(value)
+			if err != nil || size <= 0 {
+				return defaultSearchPlaceholderLogMaxBytes
+			}
+			return value
+		},
+	}
+	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
