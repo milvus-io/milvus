@@ -85,6 +85,30 @@ func (bs *TxnInsertResultBuffers) Build(msg message.MutableMessage) *messagespb.
 	return builder.build()
 }
 
+// BuildComplete merges buffered insert results for a txn commit message, but
+// only when every body of the transaction contributed one: the number of
+// buffered results must equal bodyCnt, the body count the commit carries. It
+// returns nil when bodyCnt is 0 (unknown) or when results are missing, for
+// example after a restart emptied the buffer while the transaction itself
+// survived. A caller that records the result must not record a partial one,
+// which would answer a later retry with missing primary keys.
+func (bs *TxnInsertResultBuffers) BuildComplete(msg message.MutableMessage, bodyCnt uint64) *messagespb.IdempotentInsertResult {
+	key, hasTxnKey := keyOfTxnMessage(msg)
+	if !hasTxnKey || bodyCnt == 0 {
+		return nil
+	}
+	currentTimeTick, hasCurrentTimeTick := bs.vchannelTimeTick(key.vchannel)
+
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	bs.clearExpiredLocked(key.vchannel, currentTimeTick, hasCurrentTimeTick)
+	builder := bs.builders[key.vchannel][key.txnID]
+	if builder == nil || uint64(len(builder.insertResults)) != bodyCnt {
+		return nil
+	}
+	return builder.build()
+}
+
 // Remove drops buffered insert results for a transaction.
 func (bs *TxnInsertResultBuffers) Remove(msg message.MutableMessage) {
 	key, hasTxnKey := keyOfTxnMessage(msg)

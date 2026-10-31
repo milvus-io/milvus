@@ -42,6 +42,23 @@ func TestTxnInsertResultBuffersDropsEmptyVChannel(t *testing.T) {
 	require.Empty(t, buffers.builders, "an empty vchannel buffer must be dropped so the map does not leak one entry per vchannel")
 }
 
+// BuildComplete merges only when every body contributed: a partial merge would
+// answer a later retry with missing primary keys.
+func TestTxnInsertResultBuffersBuildCompleteRequiresEveryBody(t *testing.T) {
+	buffers := NewTxnInsertResultBuffers(nil, nil)
+	msg := newTestTxnMessage(t, "v1", 1)
+	buffers.Add(msg, intIDsResult([]uint32{0}, 100), 0)
+
+	require.Nil(t, buffers.BuildComplete(msg, 2), "one of two bodies is buffered")
+	require.Nil(t, buffers.BuildComplete(msg, 0), "an unknown body count cannot prove completeness")
+	require.Nil(t, buffers.BuildComplete(newTestTxnMessage(t, "v1", 2), 1), "nothing is buffered for this txn")
+
+	buffers.Add(msg, intIDsResult([]uint32{1}, 101), 0)
+	merged := buffers.BuildComplete(msg, 2)
+	require.NotNil(t, merged)
+	require.ElementsMatch(t, []int64{100, 101}, merged.GetIds().GetIntId().GetData())
+}
+
 func TestTxnInsertResultBuffersRemoveVChannel(t *testing.T) {
 	buffers := NewTxnInsertResultBuffers(nil, nil)
 	msg1 := newTestTxnMessage(t, "v1", 1)

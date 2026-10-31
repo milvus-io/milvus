@@ -95,6 +95,40 @@ func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	require.Equal(t, BeginDecisionOwner, window.Begin("a", nil).Decision)
 }
 
+// A replicated write is recorded without an inflight phase: the window never
+// decides whether it appends, it only remembers the result so that a client
+// retry after a promotion answers with the source cluster's primary keys.
+func TestWindowRecordServesLaterDuplicate(t *testing.T) {
+	window := NewWindow(WindowConfig{})
+
+	evicted := window.Record("key-1", CommitResult{CommitTimeTick: 100}, nil)
+	require.Zero(t, evicted)
+	require.Equal(t, 0, window.InflightLen())
+	require.Equal(t, 1, window.Len())
+
+	duplicate := window.Begin("key-1", nil)
+	require.Equal(t, BeginDecisionDuplicate, duplicate.Decision)
+	require.NotNil(t, duplicate.Entry)
+	assert.Equal(t, "key-1", duplicate.Entry.IdempotencyKey)
+	assert.Equal(t, uint64(100), duplicate.Entry.SourceTimeTick)
+}
+
+// Recording a key the window already holds replaces the entry: the source
+// cluster evicted the key and a client legally reused it, so the newer write is
+// the one a retry must see. Bytes and commit order carry the key once, or a
+// later eviction would delete the live entry while refunding nothing.
+func TestWindowRecordSameKeyLastWins(t *testing.T) {
+	window := NewWindow(WindowConfig{})
+	window.Record("key-1", CommitResult{CommitTimeTick: 100}, nil)
+	bytesOnce := window.bytes
+	require.Positive(t, bytesOnce)
+
+	window.Record("key-1", CommitResult{CommitTimeTick: 200}, nil)
+	require.Equal(t, uint64(200), window.Begin("key-1", nil).Entry.SourceTimeTick)
+	require.Equal(t, bytesOnce, window.bytes)
+	require.Equal(t, []IdempotencyKey{"key-1"}, window.commitOrder)
+}
+
 func TestIdempotencyWindowSameKeyAlwaysDuplicate(t *testing.T) {
 	window := NewWindow(WindowConfig{})
 
