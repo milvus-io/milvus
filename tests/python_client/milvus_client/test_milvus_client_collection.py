@@ -3269,6 +3269,49 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after search, but got {load_state['state']}"
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_load_partition_recovers_unloaded_growing_data(self):
+        """Recover inserts/deletes written before loading a partition, without flushing."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        p1, p2 = cf.gen_unique_str("p1"), cf.gen_unique_str("p2")
+        self.create_collection(client, collection_name, 4, consistency_level="Strong")
+        try:
+            client.create_partition(collection_name, p1)
+            client.create_partition(collection_name, p2)
+            client.release_collection(collection_name)
+            client.load_partitions(collection_name, [p1])
+            client.insert(collection_name,
+                          [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(5)],
+                          partition_name=p1)
+            client.insert(collection_name,
+                          [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(10, 15)],
+                          partition_name=p2)
+            client.delete(collection_name, ids=[10])
+
+            def read_ids(partitions=None):
+                kwargs = {"partition_names": partitions} if partitions is not None else {}
+                rows = client.query(collection_name, filter="id >= 0", output_fields=["id"],
+                                    consistency_level="Strong", timeout=120, **kwargs)
+                return {row["id"] for row in rows}
+
+            assert read_ids() == set(range(5))
+            client.load_partitions(collection_name, [p2])
+            assert read_ids([p2]) == {11, 12, 13, 14}
+            assert read_ids() == set(range(5)) | {11, 12, 13, 14}
+            client.release_partitions(collection_name, [p1])
+            assert read_ids() == {11, 12, 13, 14}
+            self.query(client, collection_name, filter="id >= 0", partition_names=[p1],
+                       check_task=CheckTasks.err_res, check_items={ct.err_code: 201, ct.err_msg: "partition not loaded"})
+            client.insert(collection_name, [{"id": 5, "vector": [1.0, 0.0, 0.0, 0.0]}], partition_name=p1)
+            client.delete(collection_name, ids=[0])
+            client.load_partitions(collection_name, [p1])
+            assert read_ids([p1]) == {1, 2, 3, 4, 5}
+            client.flush(collection_name)
+            assert read_ids() == {1, 2, 3, 4, 5, 11, 12, 13, 14}
+        finally:
+            self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_collection_load_release_comprehensive(self):
         """
