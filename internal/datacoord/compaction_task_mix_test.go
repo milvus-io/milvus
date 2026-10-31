@@ -318,3 +318,29 @@ func (s *MixCompactionTaskSuite) TestQueryTaskOnWorker() {
 	s.Equal(taskcommon.Retry, t1.GetTaskState())
 	s.Equal("DataNode reported compaction timeout", t1.GetTaskProto().GetFailReason())
 }
+
+func (s *MixCompactionTaskSuite) TestRecordIntegrityFailureIsTerminal() {
+	for _, kind := range []datapb.CompactionType{datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction} {
+		s.Run(kind.String(), func() {
+			meta := NewMockCompactionMeta(s.T())
+			cluster := session.NewMockCluster(s.T())
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID: 11, NodeID: 22, Type: kind, State: datapb.CompactionTaskState_executing,
+			}, nil, meta, newMockVersionManager())
+			// Literal wire fixture: protects the DataNode -> DataCoord contract,
+			// not just local errors.Is identity matching.
+			cluster.EXPECT().QueryCompaction(int64(22), mock.Anything).Return(&datapb.CompactionPlanResult{
+				PlanID: 11, Type: kind, State: datapb.CompactionTaskState_failed,
+				FailStatus: &commonpb.Status{Code: 1009, Retriable: false, Reason: "field 101: non-nullable column contains nulls"},
+			}, nil).Once()
+			meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
+			task.QueryTaskOnWorker(cluster)
+			s.Equal(taskcommon.Failed, task.GetTaskState())
+			s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+			s.Contains(task.GetTaskProto().GetFailReason(), "code=1009, retriable=false")
+			s.True(task.Process())
+			s.EqualValues(0, task.GetTaskProto().GetRetryTimes())
+			s.Empty(task.GetTaskProto().GetResultSegments())
+		})
+	}
+}
