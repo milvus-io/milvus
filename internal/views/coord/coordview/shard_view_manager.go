@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -42,6 +43,7 @@ type ShardViewManager struct {
 	eventSubmitter   dirtyViewEventSubmitter
 	observe          func(qviews.ShardID, *ShardViewManager, *ShardStats)
 	onReleasedEmpty  func(qviews.ShardID, *ShardViewManager)
+	prepareBackoff   preparationBackoff
 	releaseRequested bool
 	closed           bool // Failed recovery: ignore late sync callbacks.
 
@@ -497,6 +499,10 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		}
 		return err
 	}
+	if source != nil {
+		// Published-schema recovery is a separate availability obligation.
+		m.prepareBackoff.notBefore = time.Time{}
+	}
 	qv := m.nextQueryVersion(newDV)
 	builder.SetQueryVersion(qv)
 	view.Meta.Version.QueryVersion = qv
@@ -522,6 +528,12 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 			(source == nil && (m.publishedSchema == nil || schema != *m.publishedSchema))
 		if !replace {
 			continue
+		}
+		// A delayed target has not registered sync callbacks yet. Node loss or
+		// evacuation can therefore arrive as a replacement placement first.
+		// Let a changed worker set proceed without the old placement's wait.
+		if preparationNodesChanged(preparing, view) {
+			m.prepareBackoff.notBefore = time.Time{}
 		}
 		key := m.keyForStateMachine(preparing)
 		before := preparing.State()
@@ -635,6 +647,7 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 			return
 		}
 		sm.completePreparation(nil)
+		m.prepareBackoff.onUp(sm.Version())
 		m.downOlderUpView(sm)
 		m.refreshNewestUpLocked()
 		m.advanceUnrecoverableToDropping()
@@ -771,6 +784,9 @@ func (m *ShardViewManager) consumeDirtyEventLocked() dirtyViewEvent {
 		shardID:  m.shardID,
 		persists: m.pendingPersists,
 	}
+	if !m.releaseRequested && m.preparingView != nil {
+		event.notBefore = m.prepareBackoff.notBefore
+	}
 	for _, entry := range m.pendingSyncs {
 		version := entry.sm.Version()
 		for _, view := range entry.views {
@@ -814,6 +830,10 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		before := sm.State()
 		resourceProgress := sm.reportMakesProgress(resp)
 		sm.OnNodeStateReported(resp)
+		if (before == qviews.QueryViewStatePreparing || before == qviews.QueryViewStateReady) &&
+			sm.State() == qviews.QueryViewStateUnrecoverable {
+			m.prepareBackoff.onFailure(version, time.Now())
+		}
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewReportAppliedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
 				CollectionID: m.collectionIDForStateMachine(sm),
@@ -871,6 +891,15 @@ func (m *ShardViewManager) makeOnQueryNodeLost(version qviews.QueryViewVersion) 
 		before := sm.State()
 		qvobserve.Observe(m.ctx, qvobserve.CoordQueryNodeLostDetectedEvent{Node: node})
 		sm.OnQueryNodeLost(node)
+		preparingOnLostNode := false
+		if m.preparingView != nil {
+			_, preparingOnLostNode = m.preparingView.qnStates[node.ID]
+		}
+		if preparingOnLostNode || (before != sm.State() && sm.State() == qviews.QueryViewStateUnrecoverable) {
+			// A failed node requires immediate placement recovery. Preserve the
+			// failure history, but do not wait on the previous placement's delay.
+			m.prepareBackoff.notBefore = time.Time{}
+		}
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewQueryNodeLostAppliedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{
 				CollectionID: m.collectionIDForStateMachine(sm),

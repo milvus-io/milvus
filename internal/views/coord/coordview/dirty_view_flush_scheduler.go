@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -18,7 +19,10 @@ import (
 // dirtyViewEvent is one immutable shard-scoped set of external effects emitted
 // by ShardViewManager after an in-memory state transition.
 type dirtyViewEvent struct {
-	shardID      qviews.ShardID
+	shardID qviews.ShardID
+	// notBefore is authoritative for the current shard preparation. A later
+	// Release or node-loss event clears it, even when merging pending effects.
+	notBefore    time.Time
 	persists     []*viewpb.QueryViewOfShard
 	syncs        []syncer.SyncView
 	afterPersist []func()
@@ -35,6 +39,7 @@ func (e dirtyViewEvent) empty() bool {
 }
 
 type pendingDirtyViewEvent struct {
+	notBefore    time.Time
 	persists     map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
 	syncs        map[dirtyViewSyncKey]syncer.SyncView
 	afterPersist []func()
@@ -53,6 +58,7 @@ func newPendingDirtyViewEvent() *pendingDirtyViewEvent {
 }
 
 func (e *pendingDirtyViewEvent) merge(event dirtyViewEvent) {
+	e.notBefore = event.notBefore
 	for _, view := range event.persists {
 		e.persists[queryViewKeyFromProto(view)] = view
 	}
@@ -89,6 +95,7 @@ type DirtyViewFlushScheduler struct {
 
 	mu          sync.Mutex
 	pending     map[qviews.ShardID]*pendingDirtyViewEvent
+	delayed     map[qviews.ShardID]*dirtyViewDelayTask
 	ready       map[qviews.ShardID]struct{}
 	readyOps    int
 	inflight    map[qviews.ShardID]struct{}
@@ -135,6 +142,7 @@ func newDirtyViewFlushScheduler(
 		maxTxnOps:     maxTxnOps,
 		nodeScheduler: nodeScheduler,
 		pending:       make(map[qviews.ShardID]*pendingDirtyViewEvent),
+		delayed:       make(map[qviews.ShardID]*dirtyViewDelayTask),
 		ready:         make(map[qviews.ShardID]struct{}),
 		inflight:      make(map[qviews.ShardID]struct{}),
 		held:          make(map[qviews.ShardID]struct{}),
@@ -202,6 +210,7 @@ func (s *DirtyViewFlushScheduler) Submit(event dirtyViewEvent) {
 	}
 	if s.batchDepth > 0 {
 		s.removeReadyLocked(event.shardID)
+		s.cancelDelayLocked(event.shardID)
 		s.held[event.shardID] = struct{}{}
 	} else {
 		s.markReadyLocked(event.shardID)
@@ -442,7 +451,11 @@ func (s *DirtyViewFlushScheduler) Close() {
 	clear(s.ready)
 	s.readyOps = 0
 	clear(s.held)
-	handles := make([]nodescheduler.TaskHandle, 0, len(s.tasks))
+	handles := make([]nodescheduler.TaskHandle, 0, len(s.tasks)+len(s.delayed))
+	for _, task := range s.delayed {
+		handles = append(handles, task.handle)
+	}
+	clear(s.delayed)
 	for _, handle := range s.tasks {
 		handles = append(handles, handle)
 	}
@@ -465,9 +478,6 @@ func (s *DirtyViewFlushScheduler) signalLocked() {
 }
 
 func (s *DirtyViewFlushScheduler) markReadyLocked(shardID qviews.ShardID) {
-	if _, ok := s.ready[shardID]; ok {
-		return
-	}
 	if _, ok := s.inflight[shardID]; ok {
 		return
 	}
@@ -478,8 +488,57 @@ func (s *DirtyViewFlushScheduler) markReadyLocked(shardID qviews.ShardID) {
 	if event == nil {
 		return
 	}
+	if event.notBefore.After(time.Now()) {
+		s.removeReadyLocked(shardID)
+		if task := s.delayed[shardID]; task != nil && task.notBefore.Equal(event.notBefore) {
+			return
+		}
+		s.cancelDelayLocked(shardID)
+		task := &dirtyViewDelayTask{scheduler: s, shardID: shardID, notBefore: event.notBefore}
+		s.delayed[shardID] = task
+		task.handle = s.nodeScheduler.Submit(task)
+		return
+	}
+	s.cancelDelayLocked(shardID)
+	if _, ok := s.ready[shardID]; ok {
+		return
+	}
 	s.ready[shardID] = struct{}{}
 	s.readyOps += event.operationCount()
+}
+
+// Delaying a lane never claims its effects: newer transitions can still merge
+// and supersede the deadline. Replacement Preparing and old-view cleanup stay
+// together, preserving resource handover and persist-before-sync ordering.
+type dirtyViewDelayTask struct {
+	scheduler *DirtyViewFlushScheduler
+	shardID   qviews.ShardID
+	notBefore time.Time
+	handle    nodescheduler.TaskHandle
+}
+
+func (t *dirtyViewDelayTask) Execute(ctx context.Context) error {
+	s := t.scheduler
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || ctx.Err() != nil || s.delayed[t.shardID] != t {
+		return nil
+	}
+	if time.Now().Before(t.notBefore) {
+		return nodescheduler.DelayUntil(t.notBefore)
+	}
+	delete(s.delayed, t.shardID)
+	s.markReadyLocked(t.shardID)
+	s.scheduleReadyTasksLocked()
+	s.signalLocked()
+	return nil
+}
+
+func (s *DirtyViewFlushScheduler) cancelDelayLocked(shardID qviews.ShardID) {
+	if task := s.delayed[shardID]; task != nil {
+		delete(s.delayed, shardID)
+		task.handle.Cancel()
+	}
 }
 
 func (s *DirtyViewFlushScheduler) removeReadyLocked(shardID qviews.ShardID) {

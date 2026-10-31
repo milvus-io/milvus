@@ -32,6 +32,7 @@ replica. It is responsible for:
 3. Creating response and QueryNode-loss callbacks for node synchronization.
 4. Publishing per-shard placement statistics.
 5. Emitting one immutable shard-scoped dirty event after each state operation.
+6. Maintaining ephemeral preparation-failure backoff across replacement Views.
 
 The manager does not perform ETCD or node-sync I/O itself. All managers owned by
 one `ShardViewRegistry` share one `DirtyViewFlushScheduler`. The scheduler merges
@@ -356,7 +357,53 @@ remains an injected resource-manager contract.
    Dropping. Register the replacement and collect both effects in one event.
 6. Update pointers and stats, submit the event under the lock, then unlock.
 
-### 4.8 RequestRelease
+### 4.8 Preparation publication backoff
+
+`AddPreparing` still accepts the target synchronously: it validates the request,
+retains the exact DataView and LoadInfo references, allocates QueryVersion,
+updates the in-memory state and publishes Preparing statistics. It does not
+sleep or return a retry error because of backoff. Balancer can observe the
+in-flight target immediately and does not need a separate failure counter.
+
+Each ShardViewManager owns an in-memory preparation backoff under `m.mu`:
+last failed View version, current retry interval, and earliest publication time.
+An actual worker report that transitions Preparing/Ready to Unrecoverable
+advances the interval from 100 ms exponentially up to 5 s. Duplicate reports,
+older failed versions, administrative preemption and Release do not count.
+Accepting a replacement, advancing DataVersion, or reporting partial readiness
+does not reset the history. A succeeding View newer than the last failure
+reaching Up resets it; an older published-schema View reaching Up does not.
+Manager removal discards the history, and recovery starts without a persisted
+backoff record. No wire or catalog fields are added.
+
+While a preparation exists, dirty events carry the manager's publication
+`notBefore`. Pending-event merging uses the latest event's deadline, not the
+maximum deadline. Explicit Release clears it. A QueryNode-loss callback affecting
+preparation, replacement of a Preparing target with a different QN set, and
+published-schema placement recovery also clear the deadline to
+avoid delaying availability recovery, without erasing failure history.
+
+DirtyViewFlushScheduler keeps a future-dated shard lane pending and schedules
+one cancellable wake task for it. The wake task returns
+`nodescheduler.DelayUntil(notBefore)` until due, then enables ordinary batch
+claiming. Newer events can replace/cancel that wake task. The delayed lane owns
+no worker and cannot block other ready shards. The replacement's Preparing and
+its associated old-view cleanup remain in the same lane; the scheduler never
+releases old resources ahead of that replacement merely to implement backoff.
+The existing persist-before-sync sequence and per-shard serialization remain.
+Flush includes delayed lanes; Close cancels and waits for wake tasks as well as
+ordinary flush tasks. Unrecoverable persistence/sync failures retain the existing
+fatal-error contract; they are not converted into retryable scheduling delays.
+
+NodeScheduler keeps runnable tasks in FIFO order and delayed tasks in a min-heap
+ordered by requested deadline (FIFO for equal deadlines). A single reusable timer
+promotes due tasks to the runnable queue. Insert/remove costs O(log N), and queued
+cancellation removes its entry directly using the stored heap index. Workers do
+not scan delayed tasks or sleep waiting for them. A running task remains owned
+until Execute returns, even when cancelled. Wrapped deadline errors retain their
+deadline; existing bare/marked `ErrDelay` callers retain the 100 ms default.
+
+### 4.9 RequestRelease
 
 - Mark the manager as explicitly released. Ordinary QueryView cleanup does not
   make an empty manager eligible for registry removal.
