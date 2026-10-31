@@ -1,6 +1,5 @@
 import json
 import sys
-import time
 import uuid
 
 import pytest
@@ -184,22 +183,10 @@ class TestBase(Base):
 
         return schema_payload, full_data
 
-    def wait_collection_load_completed(self, name):
-        t0 = time.time()
-        timeout = 60
-        while True and time.time() - t0 < timeout:
-            rsp = self.collection_client.collection_describe(name)
-            if "data" in rsp and "load" in rsp["data"] and rsp["data"]["load"] == "LoadStateLoaded":
-                break
-            else:
-                time.sleep(5)
+    def wait_collection_load_completed(self, name, timeout=60):
+        return self.collection_client.wait_load_completed(name, timeout=timeout)
 
-    def wait_load_completed(self, collection_name, db_name="default", timeout=5):
-        t0 = time.time()
-        while True and time.time() - t0 < timeout:
-            rsp = self.collection_client.collection_describe(collection_name, db_name=db_name)
-            if "data" in rsp and "load" in rsp["data"] and rsp["data"]["load"] == "LoadStateLoaded":
-                logger.info(f"collection {collection_name} load completed in {time.time() - t0} seconds")
-                break
-            else:
-                time.sleep(1)
+    def wait_load_completed(self, collection_name, db_name="default", timeout=60):
+        # Raises AssertionError with the last describe response when the load does not
+        # finish in time; see CollectionClient.wait_load_completed.
+        return self.collection_client.wait_load_completed(collection_name, db_name=db_name, timeout=timeout)
