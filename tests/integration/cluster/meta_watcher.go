@@ -27,10 +27,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	qvcatalog "github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // MetaWatcher to observe meta data of milvus cluster
@@ -58,9 +60,32 @@ func (watcher *EtcdMetaWatcher) ShowSegments(collectionID int64) ([]*datapb.Segm
 	})
 }
 
+// ShowReplicas reads desired replica identities from the latest persisted load
+// version. Worker placement is owned by QueryViews and is not part of this result.
 func (watcher *EtcdMetaWatcher) ShowReplicas() ([]*querypb.Replica, error) {
-	metaBasePath := path.Join(watcher.rootPath, "/meta/querycoord-replica/")
-	return listReplicas(watcher.etcdCli, metaBasePath)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	storage := etcdkv.NewEtcdKV(watcher.etcdCli, path.Join(watcher.rootPath, "meta"))
+	records, err := qvcatalog.NewCollectionLoadInfoCatalog(storage).List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[int64]*viewpb.CollectionLoadConfig)
+	for _, info := range records {
+		if info.GetVersion() > latest[info.GetCollectionID()].GetVersion() {
+			latest[info.GetCollectionID()] = info
+		}
+	}
+	var replicas []*querypb.Replica
+	for _, info := range latest {
+		for _, replica := range info.GetReplicas() {
+			replicas = append(replicas, &querypb.Replica{
+				ID: replica.GetReplicaId(), CollectionID: info.GetCollectionID(), ResourceGroup: replica.GetResourceGroupName(),
+			})
+		}
+	}
+	sort.Slice(replicas, func(i, j int) bool { return replicas[i].GetID() < replicas[j].GetID() })
+	return replicas, nil
 }
 
 //=================== Below largely copied from birdwatcher ========================
@@ -160,29 +185,8 @@ func getSegmentBinlogs(cli *clientv3.Client, rootPath string, segment *datapb.Se
 	return binlogs, deltalogs, statslogs, nil
 }
 
-func listReplicas(cli *clientv3.Client, prefix string) ([]*querypb.Replica, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-	defer cancel()
-	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
-	if err != nil {
-		return nil, err
-	}
-
-	replicas := make([]*querypb.Replica, 0, len(resp.Kvs))
-	for _, kv := range resp.Kvs {
-		replica := &querypb.Replica{}
-		if err := proto.Unmarshal(kv.Value, replica); err != nil {
-			mlog.Warn(context.TODO(), "failed to unmarshal replica info", mlog.Err(err))
-			continue
-		}
-		replicas = append(replicas, replica)
-	}
-
-	return replicas, nil
-}
-
 func PrettyReplica(replica *querypb.Replica) string {
 	res := fmt.Sprintf("ReplicaID: %d CollectionID: %d\n", replica.ID, replica.CollectionID)
-	res = res + fmt.Sprintf("Nodes:%v\n", replica.Nodes)
+	res = res + fmt.Sprintf("ResourceGroup:%s\n", replica.ResourceGroup)
 	return res
 }

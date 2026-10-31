@@ -12,8 +12,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -188,19 +188,29 @@ func TestQueryViewReleaseCancellationAndReconcileError(t *testing.T) {
 
 func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 	s := newReleaseTestServer(t)
-	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+	deps := loadmgrtest.Dependencies(t)
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), deps)
+	require.NoError(t, err)
+	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 100, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 1}}}))
+	version := store.GetConfigVersion(100)
+	s.qviewsRuntime.loadConfigStore = store
 	removed := make(chan struct{}, 1)
-	patch := mockey.Mock((*loadmgr.CollectionLoadManager).ReleaseCollection).To(func(_ *loadmgr.CollectionLoadManager, _ context.Context, _ *messagespb.DropLoadConfigMessageHeader) error {
-		removed <- struct{}{}
-		return nil
-	}).Build()
-	defer patch.UnPatch()
+	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(store, func(int64) { removed <- struct{}{} }, nil)
+	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+	previousCache := meta.GlobalFailedLoadCache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+	t.Cleanup(func() { meta.GlobalFailedLoadCache = previousCache })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- s.dropLoadConfigV2AckCallback(ctx, buildDropLoadConfigBroadcastResult(100)) }()
 	<-removed
+	require.False(t, store.Contains(100), "release must stop planning before waiting for cleanup")
+	_, err = store.GetLoadInfo(ctx, 100, version)
+	require.NoError(t, err, "node cleanup still needs the historical load requirements")
+	records, err := deps.Catalog.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
 	select {
 	case err := <-done:
 		t.Fatalf("ack completed before node cleanup: %v", err)
@@ -208,6 +218,11 @@ func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 	}
 	require.NoError(t, manager.RequestRelease(ctx))
 	require.NoError(t, <-done)
+	records, err = deps.Catalog.List(ctx)
+	require.NoError(t, err)
+	require.Empty(t, records, "ACK must follow durable removal of all load versions")
+	_, err = store.GetLoadInfo(ctx, 100, version)
+	require.Error(t, err)
 }
 
 func TestQueryViewRepeatedReleaseWaitsWithoutLoadConfig(t *testing.T) {
