@@ -301,13 +301,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
-				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionUnaryClientInterceptorWithGetter(c.GetNodeID),
 				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
-				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionStreamClientInterceptorWithGetter(c.GetNodeID),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -342,13 +342,13 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
 				mlog.UnaryClientInterceptor(),
 				interceptor.ClusterInjectionUnaryClientInterceptor(),
-				interceptor.ServerIDInjectionUnaryClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionUnaryClientInterceptorWithGetter(c.GetNodeID),
 				interceptor.IdempotencyKeyPropagationUnaryClientInterceptor(),
 			)),
 			grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(
 				mlog.StreamClientInterceptor(),
 				interceptor.ClusterInjectionStreamClientInterceptor(),
-				interceptor.ServerIDInjectionStreamClientInterceptor(c.GetNodeID()),
+				interceptor.ServerIDInjectionStreamClientInterceptorWithGetter(c.GetNodeID),
 			)),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
