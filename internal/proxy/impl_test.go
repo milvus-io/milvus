@@ -1491,6 +1491,92 @@ func TestProxyDescribeCollection(t *testing.T) {
 	})
 }
 
+func TestProxyBatchDescribeCollection(t *testing.T) {
+	ctx := context.Background()
+	node := &Proxy{}
+
+	// The per-collection describe answers a known name or ID, and fails
+	// everything else the way DescribeCollection reports a missing collection.
+	var described []*milvuspb.DescribeCollectionRequest
+	mockDescribe := mockey.Mock((*Proxy).DescribeCollection).To(
+		func(_ *Proxy, _ context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			described = append(described, req)
+			switch {
+			case req.GetCollectionName() == "docs" || req.GetCollectionID() == 100:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionName: "docs", CollectionID: 100}, nil
+			case req.GetCollectionID() == 999:
+				return nil, errors.New("rpc failed")
+			default:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID()))}, nil
+			}
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	t.Run("by ID", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:       "db1",
+			CollectionID: []int64{100, 200},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 2)
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, "docs", resp.GetResponses()[0].GetCollectionName())
+		// One missing collection does not fail the others.
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[1].GetStatus()), merr.ErrCollectionNotFound)
+
+		require.Len(t, described, 2)
+		for i, id := range []int64{100, 200} {
+			assert.Equal(t, "db1", described[i].GetDbName())
+			assert.Equal(t, id, described[i].GetCollectionID())
+			assert.Empty(t, described[i].GetCollectionName())
+		}
+	})
+
+	t.Run("by name", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:         "db1",
+			CollectionName: []string{"docs"},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Equal(t, int64(100), resp.GetResponses()[0].GetCollectionID())
+		require.Len(t, described, 1)
+		assert.Equal(t, "docs", described[0].GetCollectionName())
+		assert.Zero(t, described[0].GetCollectionID())
+	})
+
+	t.Run("a failed describe is reported under its ID", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionID: []int64{999},
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Error(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, int64(999), resp.GetResponses()[0].GetCollectionID())
+	})
+
+	t.Run("neither names nor IDs", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{DbName: "db1"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterMissing)
+	})
+
+	t.Run("both names and IDs", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionName: []string{"docs"},
+			CollectionID:   []int64{100},
+		})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.Empty(t, described)
+	})
+}
+
 func TestProxy_AllocTimestamp(t *testing.T) {
 	t.Run("proxy unhealthy", func(t *testing.T) {
 		node := &Proxy{}
