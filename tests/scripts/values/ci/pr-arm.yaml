@@ -8,9 +8,6 @@ extraConfigFiles:
       fileResource:
         mode:
           proxy: sync
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
 
 metrics:
   serviceMonitor:

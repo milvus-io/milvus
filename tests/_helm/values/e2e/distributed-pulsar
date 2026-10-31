@@ -76,9 +76,6 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
     grpc:
       client:
         compressionEnabled: true
