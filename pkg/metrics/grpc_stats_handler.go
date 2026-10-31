@@ -75,6 +75,12 @@ func attachStats(ctx context.Context, stats *RPCStats) context.Context {
 	return context.WithValue(ctx, milvusStatsKey{}, stats)
 }
 
+// WithIndependentRPCStats isolates mutable Search metadata for an in-process
+// subrequest. It does not emit transport byte metrics: no new RPC was sent.
+func WithIndependentRPCStats(ctx context.Context) context.Context {
+	return attachStats(ctx, &RPCStats{})
+}
+
 func GetStats(ctx context.Context) *RPCStats {
 	stats, ok := ctx.Value(milvusStatsKey{}).(*RPCStats)
 	if !ok {

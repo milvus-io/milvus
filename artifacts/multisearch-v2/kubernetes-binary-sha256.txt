@@ -1,0 +1,2 @@
+627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36  proxy-d74565788-d7mq5:/milvus/bin/milvus
+627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36  proxy-d74565788-w5tnm:/milvus/bin/milvus
