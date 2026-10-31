@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -69,6 +70,15 @@ type Executor struct {
 	executingTasks    *typeutil.ConcurrentSet[string] // task index
 	channelTaskNum    atomic.Int32                    // channel task pool counter
 	nonChannelTaskNum atomic.Int32                    // non-channel task pool counter
+	pacer             loadPacer                       // per-node cap on segment loads in flight
+	// dispatch, set by the scheduler before Start, dispatches this node
+	// again. The pacer wakes it when a slot frees after it held a load back,
+	// so a queued load does not wait for the next dispatch tick: the cap
+	// bounds loads in flight, not loads per tick. At most one wake is
+	// pending; the periodic dispatch tick remains the backstop.
+	dispatch func()
+	wakeCh   chan struct{}
+	stopOnce sync.Once
 
 	collectionInfoSingleflight conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
@@ -84,6 +94,7 @@ func NewExecutor(nodeID int64,
 	return &Executor{
 		nodeID:    nodeID,
 		doneCh:    make(chan struct{}),
+		wakeCh:    make(chan struct{}, 1),
 		meta:      meta,
 		dist:      dist,
 		broker:    broker,
@@ -96,10 +107,60 @@ func NewExecutor(nodeID int64,
 }
 
 func (ex *Executor) Start(ctx context.Context) {
+	if ex.dispatch == nil {
+		return
+	}
+	ex.wg.Add(1)
+	go func() {
+		defer ex.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ex.doneCh:
+				return
+			case <-ex.wakeCh:
+				ex.dispatch()
+			}
+		}
+	}()
 }
 
 func (ex *Executor) Stop() {
+	ex.stopOnce.Do(func() { close(ex.doneCh) })
 	ex.wg.Wait()
+}
+
+// cpuNum is the node's CPU count, 0 if not reported yet.
+func (ex *Executor) cpuNum() int {
+	if ex.nodeMgr == nil {
+		return 0
+	}
+	if info := ex.nodeMgr.Get(ex.nodeID); info != nil {
+		return int(info.CPUNum())
+	}
+	return 0
+}
+
+// segmentBytes is QueryCoord's estimate of the segment's size for the
+// pacer, 0 if the segment is not in the target.
+func (ex *Executor) segmentBytes(task Task, segmentID int64) float64 {
+	if ex.targetMgr == nil {
+		return 0
+	}
+	info := ex.targetMgr.GetSealedSegment(task.Context(), task.CollectionID(), segmentID, meta.NextTargetFirst)
+	if info == nil {
+		return 0
+	}
+	return SegmentBytes(&meta.Segment{SegmentInfo: info})
+}
+
+// wake dispatches the node again, once, as soon as the dispatcher is free.
+func (ex *Executor) wake() {
+	select {
+	case ex.wakeCh <- struct{}{}:
+	default:
+	}
 }
 
 func (ex *Executor) GetTotalTaskExecutionCap() int32 {
@@ -175,6 +236,22 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		}
 	}
 
+	// Pace segment loads per node: a load over the cap waits here in
+	// QueryCoord, where no deadline is armed yet.
+	pacerCfg := getLoadPacerConfig()
+	paced := false
+	var pacedBytes float64
+	if sa, ok := task.Actions()[step].(*SegmentAction); ok && pacerCfg.enabled && sa.Type() == ActionTypeGrow {
+		pacedBytes = ex.segmentBytes(task, sa.SegmentID)
+		if !ex.pacer.tryAcquire(pacerCfg, ex.cpuNum(), pacedBytes, task.(*SegmentTask).timeout) {
+			metrics.QueryCoordLoadPacerWaitTotal.WithLabelValues(fmt.Sprint(ex.nodeID)).Inc()
+			ex.nonChannelTaskNum.Dec()
+			ex.executingTasks.Remove(task.Index())
+			return false
+		}
+		paced = true
+	}
+
 	// Only now is this step actually admitted to run: it cleared the wait
 	// queue and the executor's capacity gates above. Arm a fresh deadline for
 	// this step here (no-op if already armed for it) so time spent queued or
@@ -187,7 +264,16 @@ func (ex *Executor) Execute(task Task, step int) bool {
 		mlog.Info(context.TODO(), "execute the action of task")
 		switch task.Actions()[step].(type) {
 		case *SegmentAction:
+			start := time.Now()
 			ex.executeSegmentAction(task.(*SegmentTask), step)
+			if paced {
+				ex.pacer.release(pacerCfg, pacedBytes, time.Since(start), task.(*SegmentTask).timeout)
+				metrics.QueryCoordLoadPacerBandwidth.WithLabelValues(fmt.Sprint(ex.nodeID)).Set(ex.pacer.Bandwidth())
+				metrics.QueryCoordLoadPacerInflightBytes.WithLabelValues(fmt.Sprint(ex.nodeID)).Set(ex.pacer.InflightBytes())
+				if !pacerCfg.waitForTick && ex.pacer.takeHeld() {
+					ex.wake()
+				}
+			}
 
 		case *ChannelAction:
 			ex.executeDmChannelAction(task.(*ChannelTask), step)
