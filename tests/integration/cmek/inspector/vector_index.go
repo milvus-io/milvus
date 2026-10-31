@@ -78,8 +78,8 @@ func LocateVectorIndex(ctx context.Context, client types.MixCoordClient, segment
 		if segment.GetCollectionID() != collectionID {
 			return nil, fmt.Errorf("segment %d belongs to collection %d, want %d", segment.GetID(), segment.GetCollectionID(), collectionID)
 		}
-		if segment.GetStorageVersion() != storage.StorageV2 {
-			return nil, fmt.Errorf("segment %d reported storage version %d, want %d", segment.GetID(), segment.GetStorageVersion(), storage.StorageV2)
+		if segment.GetStorageVersion() != storage.StorageV3 {
+			return nil, fmt.Errorf("segment %d reported storage version %d, want %d", segment.GetID(), segment.GetStorageVersion(), storage.StorageV3)
 		}
 		segmentIDs = append(segmentIDs, segment.GetID())
 		byID[segment.GetID()] = segment

@@ -18,7 +18,6 @@ package importv2
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 
 	"github.com/samber/lo"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -49,8 +49,7 @@ type ImportV3BinlogSuite struct {
 }
 
 func (s *ImportV3BinlogSuite) SetupSuite() {
-	// The source collection lives in this same cluster and is read back through
-	// the legacy per-field binlog reader, so the cluster stays on Storage V2.
+	// Both the source and imported segments use the cluster's StorageV3 default.
 	configureImportV3Gate(&s.MiniClusterSuite)
 	s.MiniClusterSuite.SetupSuite()
 }
@@ -59,9 +58,6 @@ func (s *ImportV3BinlogSuite) TestBinlogImportV3() {
 	const dim = 128
 
 	source := s.PrepareSourceCollection(dim, &DMLGroup{insertRowNums: []int{500, 500, 500}})
-	collectionID := source.collectionID
-	partitionID := source.partitionID
-	segmentIDs := source.SegmentIDs
 	insertedIDs := source.insertedIDs
 
 	c := s.Cluster
@@ -95,11 +91,7 @@ func (s *ImportV3BinlogSuite) TestBinlogImportV3() {
 	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	files := make([]*internalpb.ImportFile, 0, len(segmentIDs))
-	for _, segmentID := range segmentIDs {
-		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
-			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
-	}
+	files := []*internalpb.ImportFile{{Paths: []string{source.snapshotURI}}}
 
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
@@ -107,7 +99,7 @@ func (s *ImportV3BinlogSuite) TestBinlogImportV3() {
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
 			{Key: "backup", Value: "true"},
-			{Key: importutilv2.StorageVersion, Value: strconv.Itoa(source.storageVersion)},
+			{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
@@ -124,7 +116,9 @@ func (s *ImportV3BinlogSuite) TestBinlogImportV3() {
 	flushed, ok := lo.Find(segments, func(segment *datapb.SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed
 	})
-	s.True(ok)
+	s.Require().True(ok)
+	s.EqualValues(storage.StorageV3, flushed.GetStorageVersion())
+	s.NotEmpty(flushed.GetManifestPath())
 	// A backup import materializes the source timestamps, so the produced
 	// segment's position must match the source collection's timestamp bounds.
 	s.Equal(source.l1MinTs, flushed.GetStartPosition().GetTimestamp(),
