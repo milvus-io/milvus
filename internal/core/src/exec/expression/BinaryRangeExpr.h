@@ -190,7 +190,8 @@ struct BinaryRangeElementFuncForJson {
 template <typename ValueType,
           bool lower_inclusive,
           bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
+          FilterType filter_type = FilterType::sequential,
+          typename ArrayType = milvus::ArrayView>
 struct BinaryRangeElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -199,7 +200,7 @@ struct BinaryRangeElementFuncForArray {
     operator()(const ValueType& val1,
                const ValueType& val2,
                int index,
-               const milvus::ArrayView* src,
+               const ArrayType* src,
                ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
@@ -222,12 +223,13 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (index >= src[offset].length()) {
+            if (!HasArrayElementAt(src[offset], index)) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data_unchecked<GetType>(index);
+            auto value =
+                src[offset].template get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {

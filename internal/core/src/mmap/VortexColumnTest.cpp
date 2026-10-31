@@ -20,6 +20,7 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
@@ -2110,6 +2111,117 @@ BulkArrayValues(const VortexColumn& column,
     return values;
 }
 
+// Every ArrayValueView read path of a native-list column: a full data scan,
+// a take with repeated and unordered offsets, per-chunk views (whole chunk and
+// a sub-range) and per-chunk views by offsets. check_row(view, row) asserts a
+// valid row. NULL rows must come back invalid; scans and chunk views also
+// return a NULL view for them, while take results carry no value.
+template <typename CheckRow>
+void
+CheckArrayValueViewReads(const VortexColumn& column,
+                         const std::vector<int64_t>& take_offsets,
+                         const std::function<bool(int64_t)>& row_valid,
+                         CheckRow&& check_row) {
+    using TargetType = ChunkedColumnInterface::TargetType;
+    const auto rows = static_cast<int64_t>(column.NumRows());
+    const auto check = [&](const ArrayValueView& view,
+                           bool valid,
+                           int64_t row,
+                           const std::string& path,
+                           bool null_view = true) {
+        SCOPED_TRACE(path + " row " + std::to_string(row));
+        EXPECT_EQ(valid, row_valid(row));
+        if (row_valid(row)) {
+            check_row(view, row);
+        } else if (null_view) {
+            EXPECT_TRUE(view.is_null());
+        }
+    };
+
+    auto cursor = column.Scan(nullptr,
+                              ChunkedColumnInterface::ScanOptions::ForData(
+                                  0, TargetType::ArrayValueView));
+    ASSERT_NE(cursor, nullptr);
+    int64_t scanned = 0;
+    while (scanned < rows) {
+        ChunkedColumnInterface::ScanBatch batch;
+        ASSERT_TRUE(
+            cursor->Next(rows - scanned,
+                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                         &batch));
+        ASSERT_GT(batch.size, 0);
+        ASSERT_EQ(batch.row_id_start, scanned);
+        ASSERT_EQ(batch.values.target_type, TargetType::ArrayValueView);
+        const auto* values = batch.values.data_as<ArrayValueView>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            const auto valid = !batch.validity || batch.validity[i];
+            check(values[i], valid, batch.row_id_start + i, "scan");
+        }
+        scanned += batch.size;
+    }
+    EXPECT_EQ(scanned, rows);
+
+    auto take = column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    take_offsets.data(), take_offsets.size()),
+                                TargetType::ArrayValueView});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(take_offsets.size()));
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto valid = take->IsValid(i);
+        const auto item = take->Get<ArrayValueView>(i);
+        EXPECT_EQ(item.value.has_value(), valid);
+        check(valid ? *item.value : ArrayValueView{},
+              valid,
+              take_offsets[i],
+              "take",
+              false);
+    }
+
+    int64_t chunk_start = 0;
+    for (int64_t chunk = 0; chunk < column.num_chunks(); ++chunk) {
+        const auto chunk_rows = column.chunk_row_nums(chunk);
+        auto views = column.ArrayValueViews(nullptr, chunk, std::nullopt);
+        ASSERT_EQ(views.get().first.size(), chunk_rows);
+        for (int64_t i = 0; i < chunk_rows; ++i) {
+            const auto valid = !views.get().second || views.get().second[i];
+            check(views.get().first[i], valid, chunk_start + i, "chunk views");
+        }
+        if (chunk_rows > 1) {
+            auto sub = column.ArrayValueViews(
+                nullptr,
+                chunk,
+                std::make_pair<int64_t, int64_t>(1, chunk_rows - 1));
+            ASSERT_EQ(sub.get().first.size(), chunk_rows - 1);
+            for (int64_t i = 0; i < chunk_rows - 1; ++i) {
+                const auto valid = !sub.get().second || sub.get().second[i];
+                check(sub.get().first[i],
+                      valid,
+                      chunk_start + 1 + i,
+                      "chunk sub-range views");
+            }
+        }
+        FixedVector<int32_t> local;
+        for (int64_t i = chunk_rows - 1; i >= 0; --i) {
+            local.push_back(static_cast<int32_t>(i));
+        }
+        local.push_back(0);
+        auto by_offsets =
+            column.ArrayValueViewsByOffsets(nullptr, chunk, local);
+        ASSERT_EQ(by_offsets.get().first.size(), local.size());
+        for (size_t i = 0; i < local.size(); ++i) {
+            check(by_offsets.get().first[i],
+                  by_offsets.get().second[i],
+                  chunk_start + local[i],
+                  "views by offsets",
+                  false);
+        }
+        chunk_start += chunk_rows;
+    }
+    EXPECT_EQ(chunk_start, rows);
+}
+
 }  // namespace
 
 // Single-level element-nullable Array<Int64> stored as a native Arrow list,
@@ -2204,8 +2316,11 @@ TEST(VortexColumnTest, ElementNullableArrayScanAndTake) {
         check_row(values[i].View(), offsets[i]);
     }
 
-    // Expression access to a field with null elements is rejected at this
-    // layer, with the same error ChunkedArrayColumn raises.
+    CheckArrayValueViewReads(
+        column, offsets, [](int64_t row) { return row != 2; }, check_row);
+
+    // The legacy ArrayView cannot carry element validity: rejected with the
+    // same error ChunkedArrayColumn raises.
     const auto take = [&](ChunkedColumnInterface::TargetType target) {
         column.Take(nullptr,
                     ChunkedColumnInterface::TakeOptions{
@@ -2215,34 +2330,14 @@ TEST(VortexColumnTest, ElementNullableArrayScanAndTake) {
     };
     ExpectNotImplemented(
         [&] {
-            column.Scan(
-                nullptr,
-                ChunkedColumnInterface::ScanOptions::ForData(
-                    0, ChunkedColumnInterface::TargetType::ArrayValueView));
-        },
-        "ArrayValueView scan");
-    ExpectNotImplemented(
-        [&] {
             column.Scan(nullptr,
                         ChunkedColumnInterface::ScanOptions::ForData(
                             0, ChunkedColumnInterface::TargetType::ArrayView));
         },
         "ArrayView scan");
     ExpectNotImplemented(
-        [&] { take(ChunkedColumnInterface::TargetType::ArrayValueView); },
-        "ArrayValueView take");
-    ExpectNotImplemented(
         [&] { take(ChunkedColumnInterface::TargetType::ArrayView); },
         "ArrayView take");
-    ExpectNotImplemented(
-        [&] { column.ArrayValueViews(nullptr, 0, std::nullopt); },
-        "ArrayValueViews");
-    ExpectNotImplemented(
-        [&] {
-            column.ArrayValueViewsByOffsets(
-                nullptr, 1, FixedVector<int32_t>{0});
-        },
-        "ArrayValueViewsByOffsets");
     ExpectNotImplemented([&] { column.ArrayViews(nullptr, 0, std::nullopt); },
                          "ArrayViews");
     ExpectNotImplemented(
@@ -2351,27 +2446,15 @@ TEST(VortexColumnTest, NestedArrayValidityAtEveryLevel) {
         check_row(values[i].View(), offsets[i]);
     }
 
+    CheckArrayValueViewReads(
+        column, offsets, [](int64_t row) { return row != 1; }, check_row);
     ExpectNotImplemented(
         [&] {
-            column.Scan(
-                nullptr,
-                ChunkedColumnInterface::ScanOptions::ForData(
-                    0, ChunkedColumnInterface::TargetType::ArrayValueView));
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::ArrayView));
         },
-        "ArrayValueView scan");
-    ExpectNotImplemented(
-        [&] {
-            column.Take(
-                nullptr,
-                ChunkedColumnInterface::TakeOptions{
-                    ChunkedColumnInterface::OffsetView::From(offsets.data(),
-                                                             offsets.size()),
-                    ChunkedColumnInterface::TargetType::ArrayValueView});
-        },
-        "ArrayValueView take");
-    ExpectNotImplemented(
-        [&] { column.ArrayValueViews(nullptr, 0, std::nullopt); },
-        "ArrayValueViews");
+        "ArrayView scan");
 
     std::filesystem::remove_all(dir);
 }

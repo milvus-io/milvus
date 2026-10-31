@@ -6474,6 +6474,54 @@ func TestGeneratePlaceholderGroupStructArrayField(t *testing.T) {
 	assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, group.GetPlaceholders()[0].GetType())
 }
 
+// buildStructVectorOnlyTestSchema keeps the struct of buildStructArrayTestSchema
+// and drops the top-level vector, so the only vector is a struct sub-field.
+func buildStructVectorOnlyTestSchema() *schemapb.CollectionSchema {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = schema.Fields[:1]
+	return schema
+}
+
+func TestGeneratePlaceholderGroupDefaultAnnsField(t *testing.T) {
+	body := `{"data": [[0.1,0.2,0.3,0.4]]}`
+	placeholderType := func(t *testing.T, data []byte) commonpb.PlaceholderType {
+		group := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(data, group))
+		require.Len(t, group.GetPlaceholders(), 1)
+		require.Len(t, group.GetPlaceholders()[0].GetValues(), 1)
+		assert.Len(t, group.GetPlaceholders()[0].GetValues()[0], 16)
+		return group.GetPlaceholders()[0].GetType()
+	}
+
+	t.Run("struct_vector_only", func(t *testing.T) {
+		data, err := generatePlaceholderGroup(context.Background(), body, buildStructVectorOnlyTestSchema(), "")
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, placeholderType(t, data))
+	})
+
+	t.Run("top_level_vector_only", func(t *testing.T) {
+		schema := buildStructArrayTestSchema()
+		schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
+		data, err := generatePlaceholderGroup(context.Background(), body, schema, "")
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, placeholderType(t, data))
+	})
+
+	t.Run("top_level_and_struct_vector", func(t *testing.T) {
+		_, err := generatePlaceholderGroup(context.Background(), body, buildStructArrayTestSchema(), "")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "search without annsField, but already found multiple vector fields: [vec, sub_vec,,,]")
+	})
+
+	t.Run("no_vector", func(t *testing.T) {
+		schema := buildStructVectorOnlyTestSchema()
+		schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
+		_, err := generatePlaceholderGroup(context.Background(), body, schema, "")
+		assert.ErrorIs(t, err, merr.ErrFieldNotFound)
+		assert.ErrorContains(t, err, "cannot find a vector field")
+	})
+}
+
 func TestStructArrayFieldDataErrorPaths(t *testing.T) {
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 
