@@ -430,6 +430,7 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
+	EnableCollectionWithoutVector        ParamItem `refreshable:"true"`
 
 	StoragePathPrefix                   ParamItem `refreshable:"false"`
 	StorageZstdConcurrency              ParamItem `refreshable:"false"`
@@ -1430,6 +1431,17 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableGrowingSourceFlush.Init(base.mgr)
+
+	p.EnableCollectionWithoutVector = ParamItem{
+		Key:          "common.enableCollectionWithoutVector",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether CreateCollection accepts a schema with no vector field. Such a collection supports
+every operation except search, and a vector field cannot be added to it later.
+Keep it false during a rolling upgrade until every proxy and coordinator runs a version with this feature.`,
+		Export: true,
+	}
+	p.EnableCollectionWithoutVector.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -6295,6 +6307,7 @@ type dataCoordConfig struct {
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxRows                 ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -6604,6 +6617,21 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
 
+	p.SegmentMaxRows = ParamItem{
+		Key:          "dataCoord.segment.maxRows",
+		Version:      "3.0.0",
+		DefaultValue: "4000000",
+		Doc: `Caps the per-collection segment size target at maxRows x estimated row size of the schema:
+the target becomes min(maxSize, maxRows x estimated row size), for sealing, compaction and import alike.
+It is a byte target derived from a row count, not a row limit: each path measures bytes in its own unit
+(binlog bytes for import and compaction, insert message bytes for sealing), so the rows per segment are
+maxRows x estimated row size / bytes per row in that path. It only takes effect for collections whose
+estimated row is narrower than maxSize / maxRows, such as collections without a vector field or with
+low-dimensional vectors. 0 disables it.`,
+		Export: true,
+	}
+	p.SegmentMaxRows.Init(base.mgr)
+
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
@@ -6712,9 +6740,10 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 	p.DVForceAllIndexReady = ParamItem{
 		Key:          "dataCoord.dataview.forceAllIndexReady",
 		Version:      "2.6.2",
-		DefaultValue: "false",
-		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
-		Export:       false,
+		DefaultValue: "true",
+		Doc: "Deprecated: a compaction output always waits for every index defined on the collection, scalar and vector, " +
+			"before it replaces its parents in the query view. The key is kept so existing configurations stay recognized and is ignored.",
+		Export: false,
 	}
 	p.DVForceAllIndexReady.Init(base.mgr)
 

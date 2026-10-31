@@ -76,7 +76,52 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 }
 
-func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
+// FilterInHandoffReadySegments returns the flushed or dropped segments that may
+// replace their parents in the query view: every index defined for their
+// collection in index meta, scalar and vector, is built on them. A collection
+// with no index defined has nothing to wait for and all its segments are
+// returned. This is the readiness rule for compaction outputs, for the
+// serving frontier behind DescribeIndex, and for retiring compacted parents
+// in garbage collection.
+func FilterInHandoffReadySegments(ctx context.Context, handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {
+	return filterIndexedSegments(ctx, handler, mt, true, func(coll *collectionInfo) []int64 {
+		indexes := mt.indexMeta.GetIndexesForCollection(coll.ID, "")
+		fieldIDs := typeutil.NewUniqueSet()
+		for _, index := range indexes {
+			fieldIDs.Insert(index.FieldID)
+		}
+		return fieldIDs.Collect()
+	}, segments...)
+}
+
+// FilterInCompactionInputReadySegments returns the flushed or dropped segments
+// that may be fed into another compaction: every vector field of their
+// collection has a built index on them. Scalar indexes are not part of the
+// rule, because each compaction output rebuilds them and waiting for them on
+// the input side only delays the compaction. A collection with no vector
+// field has nothing to wait for and all its segments are returned. With
+// skipNoIndexCollection, a collection with no index defined at all is not
+// filtered either (force compaction and target reconciliation use this).
+func FilterInCompactionInputReadySegments(ctx context.Context, handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
+	return filterIndexedSegments(ctx, handler, mt, skipNoIndexCollection, func(coll *collectionInfo) []int64 {
+		var fieldIDs []int64
+		for _, field := range coll.Schema.GetFields() {
+			if typeutil.IsVectorType(field.GetDataType()) {
+				fieldIDs = append(fieldIDs, field.GetFieldID())
+			}
+		}
+		return fieldIDs
+	}, segments...)
+}
+
+// filterIndexedSegments keeps the flushed or dropped segments of each
+// collection on which every field returned by targetFields has a finished
+// index. An empty target set means nothing to wait for. With
+// skipNoIndexCollection, a collection with no index defined is not filtered
+// and its schema is not fetched.
+func filterIndexedSegments(ctx context.Context, handler Handler, mt *meta, skipNoIndexCollection bool,
+	targetFields func(coll *collectionInfo) []int64, segments ...*SegmentInfo,
+) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -89,11 +134,17 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 		return segment.GetCollectionID()
 	})
 
+	flushedOrDropped := func(segmentList []*SegmentInfo) []*SegmentInfo {
+		return lo.Filter(segmentList, func(segment *SegmentInfo, _ int) bool {
+			return isFlushState(segment.GetState()) || segment.GetState() == commonpb.SegmentState_Dropped
+		})
+	}
+
 	ret := make([]*SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
-		// No segments will be filtered if there are no indices in the collection.
+		// nothing to wait for when the collection has no index at all
 		if skipNoIndexCollection && !mt.indexMeta.HasIndex(collection) {
-			ret = append(ret, segmentList...)
+			ret = append(ret, flushedOrDropped(segmentList)...)
 			continue
 		}
 
@@ -106,27 +157,18 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 			continue
 		}
 
-		// get vector field id
-		var targetFieldIds []int64
-		// wait all vector datatype fields only
-		for _, field := range coll.Schema.GetFields() {
-			if typeutil.IsVectorType(field.GetDataType()) {
-				targetFieldIds = append(targetFieldIds, field.GetFieldID())
-			}
+		targetFieldIds := targetFields(coll)
+		if len(targetFieldIds) == 0 {
+			// nothing to wait for
+			ret = append(ret, flushedOrDropped(segmentList)...)
+			continue
 		}
 
-		// include all scalar fields with index
-		if paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			indices := mt.indexMeta.GetIndexesForCollection(collection, "")
-			for _, index := range indices {
-				targetFieldIds = append(targetFieldIds, index.FieldID)
-			}
-		}
 		segmentIDs := lo.Map(segmentList, func(seg *SegmentInfo, _ int) UniqueID {
 			return seg.GetID()
 		})
 
-		// get indexed segments which finish build index on all vector field
+		// get indexed segments which finish build index on all target fields
 		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, targetFieldIds)
 		if len(indexed) > 0 {
 			indexedSet := typeutil.NewUniqueSet(indexed...)

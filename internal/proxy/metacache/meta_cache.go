@@ -316,7 +316,7 @@ func (s *SchemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 	if !hasPrimaryKey {
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain primary key field %s", names, s.PkField.GetName())
 	}
-	if !hasVector {
+	if !hasVector && typeutil.HasVectorField(s.CollectionSchema) {
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain vector field", names)
 	}
 	if partitionKeyField != nil && !hasPartitionKey {

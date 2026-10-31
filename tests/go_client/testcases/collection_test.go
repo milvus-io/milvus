@@ -658,7 +658,6 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
 	noneField := entity.NewField().WithName("none").WithDataType(entity.FieldTypeNone)
 	invalidFields := []invalidFieldsStruct{
-		{fields: []*entity.Field{pkField}, errMsg: "schema does not contain vector field"},
 		{fields: []*entity.Field{vecField}, errMsg: "primary key is not specified"},
 		{fields: []*entity.Field{pkField, pkField2, vecField}, errMsg: "there are more than one primary key"},
 		{fields: []*entity.Field{pkField, vecField, noneField}, errMsg: "data type None is not valid"},
@@ -679,6 +678,30 @@ func TestCreateCollectionInvalidFields(t *testing.T) {
 }
 
 // create autoID or not collection with non-int64 and non-varchar field
+// A collection may be created without a vector field; it supports every
+// operation except search.
+func TestCreateCollectionWithoutVectorField(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	collName := common.GenRandomString(prefix, 6)
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	scalarField := entity.NewField().WithName(common.DefaultInt32FieldName).WithDataType(entity.FieldTypeInt32)
+	schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(scalarField)
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	coll, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	common.CheckErr(t, err, true)
+	require.Len(t, coll.Schema.Fields, 2)
+	for _, field := range coll.Schema.Fields {
+		require.NotContains(t, []entity.FieldType{entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector, entity.FieldTypeSparseVector}, field.DataType)
+	}
+
+	err = mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+	common.CheckErr(t, err, true)
+}
+
 func TestCreateCollectionInvalidAutoPkField(t *testing.T) {
 	t.Parallel()
 
@@ -1144,7 +1167,7 @@ func TestCreateCollectionInvalid(t *testing.T) {
 	}
 	vecField := entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(8)
 	mSchemaErrs := []mSchemaErr{
-		{schema: nil, errMsg: "schema does not contain vector field"},
+		{schema: nil, errMsg: "collection name should not be empty"},
 		{schema: entity.NewSchema().WithField(vecField), errMsg: "primary key is not specified"}, // no pk field
 		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField()), errMsg: "primary key is not specified"},
 		{schema: entity.NewSchema().WithField(vecField).WithField(entity.NewField().WithIsPrimaryKey(true)), errMsg: "the data type of primary key should be Int64 or VarChar"},

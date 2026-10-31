@@ -138,7 +138,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
 	// case 1: action == nil
@@ -795,7 +795,7 @@ func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyAdd(t *testing.T) {
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	inputFieldBytes, err := proto.Marshal(&schemapb.FieldSchema{
 		Name:     "text_input",
@@ -854,7 +854,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddRejectsStructFieldNameConflicts(t *
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName:                 dbName,
@@ -1014,7 +1014,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 	varcharFieldSchema := &schemapb.FieldSchema{
 		Name:     "text_input",
 		DataType: schemapb.DataType_VarChar,

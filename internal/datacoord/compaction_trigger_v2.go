@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type CompactionTriggerType int8
@@ -890,14 +891,20 @@ func (m *CompactionTriggerManager) SubmitBumpSchemaVersionViewToScheduler(ctx co
 	)
 }
 
+// getExpectedSegmentSize is the segment size target of a collection in bytes,
+// read by every DataCoord size consumer: the compaction planners, force merge,
+// clustering, import assignment and CompactionPlan.max_size. It is maxSize, or
+// the DiskANN size when every dense vector field has a disk index, capped at
+// dataCoord.segment.maxRows rows of the schema's estimated row width so that a
+// narrow-row collection (no vector field, or a low-dimensional one) does not
+// put tens of millions of rows into one segment.
 func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
-	allDiskIndex := meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema)
-	if allDiskIndex {
+	baseSize := Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	if meta != nil && meta.indexMeta != nil && meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema) {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+		baseSize = Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
-	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	return typeutil.RowCappedSegmentSize(baseSize, typeutil.EstimateRowWidth(schema), Params.DataCoordCfg.SegmentMaxRows.GetAsInt64())
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
