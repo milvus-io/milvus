@@ -492,7 +492,7 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 	require.False(t, updated.GetIsImporting())
 }
 
-func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *testing.T) {
+func TestCommitSegmentManifestWritesDifferentSegmentsInParallel(t *testing.T) {
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
 	basePaths := map[int64]string{
@@ -529,15 +529,14 @@ func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *tes
 		}(segmentID, basePath)
 	}
 
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		require.FailNow(t, "first catalog write did not start")
-	}
-	select {
-	case <-entered:
-		require.FailNow(t, "different segment entered catalog write while segMu was held")
-	case <-time.After(200 * time.Millisecond):
+	// Each commit holds only its own segment's writer lock, so the catalog
+	// write of one segment does not wait for another's.
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "a catalog write waited for the write of a different segment")
+		}
 	}
 	close(release)
 	for range basePaths {
@@ -1350,17 +1349,17 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 // serialize against MarkIndexAsDeleted via indexMeta.fieldIndexLock — and every
 // index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted, RemoveIndex) holds
 // that lock's WRITE side across an etcd round trip. The install used to run the
-// gauge update inside the commit's segMu critical section, so one concurrent
-// DDL made the commit hold segMu for up to the etcd request timeout, stalling
-// every GetSegment/SelectSegments/SaveBinlogPaths. The fix defers the
-// fieldIndexLock-guarded gauge until after segMu is released (still under the
-// buildID key lock).
+// gauge update inside the commit's segment lock critical section, so one
+// concurrent DDL made the commit hold it for up to the etcd request timeout,
+// stalling every writer of the segment. The fix defers the
+// fieldIndexLock-guarded gauge until after the writer lock is released (still
+// under the buildID key lock).
 //
-// In the style of TestCommitSegmentManifestTakesKeyLockBeforeSegMu, this
+// In the style of TestCommitSegmentManifestTakesKeyLockBeforeSegmentLock, this
 // asserts the invariant rather than racing a window: hold fieldIndexLock's
-// write side, let the commit park on the deferred gauge, and check that segMu
-// is free and publication already completed.
-func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
+// write side, let the commit park on the deferred gauge, and check that the
+// segment's writer lock is free and publication already completed.
+func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegmentLock(t *testing.T) {
 	withSegmentIndexManifestWrites(t, true)
 	newFakeManifestStore(t)
 	ctx := context.TODO()
@@ -1422,19 +1421,15 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	}
 
 	// The load-bearing assertion. Parked on fieldIndexLock, the commit must
-	// hold no segMu; otherwise every segment reader queues behind the DDL's
-	// etcd round trip for its whole duration.
-	acquired := m.segMu.TryLock()
+	// hold no writer lock of the segment; otherwise every writer of the
+	// segment queues behind the DDL's etcd round trip for its whole duration.
+	acquired := m.getSegmentLocks().TryLock(restartSegID)
 	if acquired {
-		m.segMu.Unlock()
+		m.getSegmentLocks().Unlock(restartSegID)
 	}
-	var publishedManifest string
-	if acquired {
-		// segMu is provably free, so reading through it cannot hang; the
-		// pointer must already have advanced, proving the commit finished its
-		// entire publication section before waiting on fieldIndexLock.
-		publishedManifest = m.GetSegment(ctx, restartSegID).GetManifestPath()
-	}
+	// The pointer must already have advanced, proving the commit finished its
+	// entire publication section before waiting on fieldIndexLock.
+	publishedManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
 	m.indexMeta.fieldIndexLock.Unlock()
 
 	select {
@@ -1445,7 +1440,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	}
 
 	require.True(t, acquired,
-		"commit is holding segMu while blocked on fieldIndexLock: a concurrent index DDL would stall every segment reader")
+		"commit is holding the segment writer lock while blocked on fieldIndexLock: a concurrent index DDL would stall the segment's writers")
 	assert.NotEqual(t, baseManifest, publishedManifest,
 		"publication must complete before the commit waits on fieldIndexLock")
 }
@@ -1485,7 +1480,7 @@ func TestCommitSegmentManifestReplaceBlocksIndexCreationUntilPublished(t *testin
 	).Build()
 	defer commit.UnPatch()
 
-	// Park the commit inside its segMu publication section (blocked in the
+	// Park the commit inside its writer-lock publication section (blocked in the
 	// catalog write). At that point it holds fieldIndexLock's read side, which
 	// the fix keeps through the pointer advance.
 	enteredCatalog := make(chan struct{})

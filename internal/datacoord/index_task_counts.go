@@ -36,7 +36,7 @@ var indexTaskMetricStates = [...]indexpb.JobState{
 type indexTaskStateCounts [len(indexTaskMetricStates)]int64
 
 // indexTaskCounts uses a short, memory-only lock independent of fieldIndexLock.
-// Manifest installs can update it under segMu without waiting for index DDL
+// Manifest installs can update it under a segment writer lock without waiting for index DDL
 // persistence. It adds no per-build objects or pointers.
 // Raw counts include orphaned/dropped field indexes, but exclude deleted
 // tasks. Keeping them allows index DDL to adjust totals without visiting builds.

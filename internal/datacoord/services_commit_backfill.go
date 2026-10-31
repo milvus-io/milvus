@@ -108,8 +108,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 
 	// Split the units into the two dispatch paths and apply them directly:
 	// every V2 column-group upsert in bounded batches of UpdateSegmentsInfo
-	// (each batch one catalog transaction holding segMu for at most
-	// maxBackfillCommitBatch records), and the V3 manifest commits in bounded
+	// (each batch one catalog transaction holding the writer locks of at most
+	// maxBackfillCommitBatch segments), and the V3 manifest commits in bounded
 	// batches of CommitSegmentManifests (each batch one all-or-nothing catalog
 	// transaction). A failed batch does not cancel later batches; per-segment
 	// statuses reflect batch-level outcomes.
@@ -127,9 +127,9 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 	// V2 dispatch: bounded UpdateSegmentsInfo batches, gated by the schema fence
 	// re-check. On mismatch the schema moved after the fast-fail, so the whole
 	// result (V2 and V3 alike) is stale and nothing is applied. Batching bounds
-	// the segMu hold time of each AlterSegments, matching the old broadcast cap
-	// of maxItemsPerBroadcast so a large V2 result cannot block flush/compaction
-	// meta writes for the whole commit.
+	// the segment writer locks each AlterSegments holds, matching the old
+	// broadcast cap of maxItemsPerBroadcast so a large V2 result cannot block
+	// flush/compaction meta writes of its segments for the whole commit.
 	for start := 0; start < len(v2Units); start += maxBackfillCommitBatch {
 		end := start + maxBackfillCommitBatch
 		if end > len(v2Units) {
@@ -422,7 +422,7 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 	// storage per V3 delta entry (the replay/conflict pre-check). Run it with
 	// bounded concurrency so a large result does not pay the object-storage
 	// latency serially, while preserving the deterministic per-segment order in
-	// the returned units and statuses. Meta reads (GetSegment) take segMu.RLock;
+	// the returned units and statuses. Meta reads (GetSegment) take no lock;
 	// the per-segment body appends nothing to shared slices. errgroup.SetLimit
 	// bounds the live goroutine count, so a result with hundreds of thousands of
 	// segments does not park one goroutine per segment.

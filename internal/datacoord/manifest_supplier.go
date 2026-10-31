@@ -25,7 +25,7 @@ import (
 // GetPublishedManifestPaths snapshots current segment manifest descriptors across
 // all collections, including unloaded ones. It enumerates live segment references,
 // not snapshot references (snapshot-protected dropped segments are filtered out).
-// Callers resolve/stat descriptors only after releasing segMu.
+// Callers resolve/stat descriptors after the read.
 func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -36,8 +36,6 @@ func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error
 	if s.meta == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("DataCoord metadata unavailable")
 	}
-	s.meta.segMu.RLock()
-	defer s.meta.segMu.RUnlock()
 	manifests := make([]string, 0)
 	for _, segment := range s.meta.segments.GetSegments() {
 		if err := ctx.Err(); err != nil {
@@ -47,7 +45,7 @@ func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error
 			continue
 		}
 		// Growing/Flushing and L0 segments can already have published manifests.
-		// The resolver rejects the version-zero placeholder outside this lock.
+		// The resolver rejects the version-zero placeholder after the read.
 		manifests = append(manifests, segment.GetManifestPath())
 	}
 	return manifests, nil

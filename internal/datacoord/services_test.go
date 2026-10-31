@@ -5052,9 +5052,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	})
 
 	// A large V2 result is dispatched in bounded UpdateSegmentsInfo batches
-	// (each holding segMu for at most maxBackfillCommitBatch records) instead of
-	// one unbounded call, so a big result cannot block flush/compaction meta
-	// writes for the whole commit.
+	// (each holding the writer locks of at most maxBackfillCommitBatch
+	// segments) instead of one unbounded call, so a big result cannot block
+	// flush/compaction meta writes for the whole commit.
 	t.Run("v2_batched_update_segments_info", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)

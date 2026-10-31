@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
@@ -94,6 +95,14 @@ type MetaStore interface {
 	PutSegment(segment *datapb.SegmentInfo)
 	RemoveSegment(segmentID int64)
 	LoadSegments(segments []*datapb.SegmentInfo)
+	// ApplySegments installs puts and removes removes as one write: a read of
+	// several segments observes all of it or none of it, and a point read sees
+	// the segments it keeps or adds before those it retires or removes. hook,
+	// if not nil, runs before the write becomes visible to such reads.
+	ApplySegments(puts []*datapb.SegmentInfo, removes []int64, hook func())
+	// ViewCollection runs read while no segment write of collectionID is in
+	// flight. read must only use GetSegment.
+	ViewCollection(collectionID int64, read func())
 
 	// Collections — write
 	PutCollection(info *CollectionInfo)
@@ -121,13 +130,11 @@ type MetaStore interface {
 }
 
 type metaStore struct {
+	// mu guards collections and checkpoints; segments has its own locking.
 	mu      sync.RWMutex
 	catalog metastore.DataCoordCatalog
 
-	// Segment storage + indexes
-	segments   map[int64]*datapb.SegmentInfo
-	segCollIdx map[int64]map[int64]struct{}
-	segChanIdx map[string]map[int64]struct{}
+	segments atomic.Pointer[segmentTable]
 
 	// Collection storage
 	collections map[int64]*CollectionInfo
@@ -139,14 +146,13 @@ type metaStore struct {
 // NewMetaStore creates an empty, ready-to-use MetaStore that owns the
 // given catalog.
 func NewMetaStore(catalog metastore.DataCoordCatalog) MetaStore {
-	return &metaStore{
+	s := &metaStore{
 		catalog:     catalog,
-		segments:    make(map[int64]*datapb.SegmentInfo),
-		segCollIdx:  make(map[int64]map[int64]struct{}),
-		segChanIdx:  make(map[string]map[int64]struct{}),
 		collections: make(map[int64]*CollectionInfo),
 		checkpoints: make(map[string]*msgpb.MsgPosition),
 	}
+	s.segments.Store(newSegmentTable())
+	return s
 }
 
 // InternalCatalog returns the catalog for sub-meta initialization.
@@ -160,60 +166,27 @@ func (s *metaStore) InternalCatalog() metastore.DataCoordCatalog {
 // --- Segment read methods ---
 
 func (s *metaStore) GetSegment(segmentID int64) (*datapb.SegmentInfo, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	seg, ok := s.segments[segmentID]
-	return seg, ok
+	return s.segments.Load().get(segmentID)
 }
 
 func (s *metaStore) GetSegmentsByIDs(segmentIDs []int64) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[int64]*datapb.SegmentInfo, len(segmentIDs))
-	for _, id := range segmentIDs {
-		if seg, ok := s.segments[id]; ok {
-			result[id] = seg
-		}
-	}
-	return result
+	return s.segments.Load().byIDs(segmentIDs)
 }
 
 func (s *metaStore) GetAllSegments() map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[int64]*datapb.SegmentInfo, len(s.segments))
-	for id, seg := range s.segments {
-		result[id] = seg
-	}
-	return result
+	return s.segments.Load().all()
 }
 
 func (s *metaStore) GetSegments(collectionID int64) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids, ok := s.segCollIdx[collectionID]
-	if !ok {
-		return nil
-	}
-	result := make(map[int64]*datapb.SegmentInfo, len(ids))
-	for id := range ids {
-		result[id] = s.segments[id]
-	}
-	return result
+	return s.segments.Load().collection(collectionID)
 }
 
 func (s *metaStore) GetSegmentsByChannel(channel string) map[int64]*datapb.SegmentInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ids, ok := s.segChanIdx[channel]
-	if !ok {
-		return nil
-	}
-	result := make(map[int64]*datapb.SegmentInfo, len(ids))
-	for id := range ids {
-		result[id] = s.segments[id]
-	}
-	return result
+	return s.segments.Load().channel(channel)
+}
+
+func (s *metaStore) ViewCollection(collectionID int64, read func()) {
+	s.segments.Load().view(collectionID, read)
 }
 
 // --- Segment write methods (in-memory) ---
@@ -221,86 +194,23 @@ func (s *metaStore) GetSegmentsByChannel(channel string) map[int64]*datapb.Segme
 // PutSegment inserts or replaces a segment and emits the matching
 // DataCoordNumSegments change.
 func (s *metaStore) PutSegment(segment *datapb.SegmentInfo) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.putSegmentLocked(segment)
+	s.segments.Load().apply([]*datapb.SegmentInfo{segment}, nil, nil, true)
 }
 
 // RemoveSegment deletes a segment and decrements DataCoordNumSegments.
 func (s *metaStore) RemoveSegment(segmentID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old, ok := s.segments[segmentID]
-	if !ok {
-		return
-	}
-	s.removeSegmentIndexes(segmentID, old)
-	delete(s.segments, segmentID)
-	labels := segMetricLabels(old)
-	metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Dec()
+	s.segments.Load().apply(nil, []int64{segmentID}, nil, true)
 }
 
-// putSegmentLocked is the single write path that keeps DataCoordNumSegments
-// in sync with the in-memory segments. Caller must hold s.mu.
-func (s *metaStore) putSegmentLocked(segment *datapb.SegmentInfo) {
-	id := segment.GetID()
-	if old, exists := s.segments[id]; exists {
-		s.emitSegmentMetricTransition(old, segment)
-		s.removeSegmentIndexes(id, old)
-	} else {
-		labels := segMetricLabels(segment)
-		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Inc()
-	}
-	s.segments[id] = segment
-	s.addSegmentIndexes(id, segment)
+func (s *metaStore) ApplySegments(puts []*datapb.SegmentInfo, removes []int64, hook func()) {
+	s.segments.Load().apply(puts, removes, hook, true)
 }
 
 func (s *metaStore) LoadSegments(segments []*datapb.SegmentInfo) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, seg := range segments {
-		id := seg.GetID()
-		if old, exists := s.segments[id]; exists {
-			s.removeSegmentIndexes(id, old)
-		}
-		s.segments[id] = seg
-		s.addSegmentIndexes(id, seg)
-	}
+	s.segments.Load().apply(segments, nil, nil, false)
 }
 
-func (s *metaStore) addSegmentIndexes(id int64, seg *datapb.SegmentInfo) {
-	collID := seg.GetCollectionID()
-	if s.segCollIdx[collID] == nil {
-		s.segCollIdx[collID] = make(map[int64]struct{})
-	}
-	s.segCollIdx[collID][id] = struct{}{}
-
-	ch := seg.GetInsertChannel()
-	if s.segChanIdx[ch] == nil {
-		s.segChanIdx[ch] = make(map[int64]struct{})
-	}
-	s.segChanIdx[ch][id] = struct{}{}
-}
-
-func (s *metaStore) removeSegmentIndexes(id int64, seg *datapb.SegmentInfo) {
-	collID := seg.GetCollectionID()
-	if ids, ok := s.segCollIdx[collID]; ok {
-		delete(ids, id)
-		if len(ids) == 0 {
-			delete(s.segCollIdx, collID)
-		}
-	}
-
-	ch := seg.GetInsertChannel()
-	if ids, ok := s.segChanIdx[ch]; ok {
-		delete(ids, id)
-		if len(ids) == 0 {
-			delete(s.segChanIdx, ch)
-		}
-	}
-}
-
-func (s *metaStore) emitSegmentMetricTransition(old, updated *datapb.SegmentInfo) {
+func segmentMetricTransition(old, updated *datapb.SegmentInfo) {
 	oldLabels := segMetricLabels(old)
 	newLabels := segMetricLabels(updated)
 	if oldLabels != newLabels {
@@ -615,10 +525,8 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 	// behind -- and if the catalog's collection set shrank in between, those
 	// orphans stay resolvable to QueryCoord forever. Start from empty so each
 	// attempt reflects exactly what the catalog holds now.
+	s.segments.Store(newSegmentTable())
 	s.mu.Lock()
-	s.segments = make(map[int64]*datapb.SegmentInfo)
-	s.segCollIdx = make(map[int64]map[int64]struct{})
-	s.segChanIdx = make(map[string]map[int64]struct{})
 	s.checkpoints = make(map[string]*msgpb.MsgPosition)
 	s.mu.Unlock()
 
@@ -673,9 +581,7 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 
 	s.emitCheckpointMetrics()
 
-	s.mu.RLock()
-	numSegments := len(s.segments)
-	s.mu.RUnlock()
+	numSegments := s.segments.Load().len()
 
 	mlog.Info(ctx, "metaStore LoadFromCatalog done",
 		mlog.Int("numSegments", numSegments),
@@ -685,11 +591,8 @@ func (s *metaStore) LoadFromCatalog(ctx context.Context, collectionIDs []int64, 
 }
 
 func (s *metaStore) emitSegmentMetrics() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	metrics.DataCoordNumSegments.Reset()
-	for _, segment := range s.segments {
+	s.segments.Load().rangeAll(func(segment *datapb.SegmentInfo) {
 		labels := segMetricLabels(segment)
 		metrics.DataCoordNumSegments.WithLabelValues(labels[:]...).Inc()
 
@@ -705,7 +608,7 @@ func (s *metaStore) emitSegmentMetrics() {
 
 			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
 		}
-	}
+	})
 }
 
 func (s *metaStore) emitCheckpointMetrics() {
