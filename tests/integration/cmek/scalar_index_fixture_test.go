@@ -185,6 +185,7 @@ type scalarIndexSuite struct {
 	ezID     int64
 }
 
+// V2/V3 below identify scalar-index artifact formats; both use StorageV3 segments.
 type ScalarIndexV2Suite struct {
 	scalarIndexSuite
 }
@@ -202,7 +203,7 @@ func (s *scalarIndexSuite) setup(c campaign) {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
 	s.WithMilvusConfig("dataCoord.targetScalarIndexVersion", strconv.Itoa(int(c.engineVersion)))
 	s.WithMilvusConfig("dataCoord.forceRebuildScalarSegmentIndex", "true")
-	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
+	s.WithMilvusConfig("common.storage.useLoonFFI", "true")
 	s.SetupSuite()
 
 	ctx := s.Cluster.GetContext()
@@ -303,7 +304,8 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 		flush.GetCollFlushTs()[collectionName], s.dbName, collectionName)
 	segments := s.sealedSegments(collectionName)
 	for _, segment := range segments {
-		s.Require().Equal(storage.StorageV2, segment.GetStorageVersion(), "segment %d", segment.GetID())
+		s.Require().Equal(storage.StorageV3, segment.GetStorageVersion(), "segment %d", segment.GetID())
+		s.Require().NotEmpty(segment.GetManifestPath())
 	}
 	vectorIndex, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName: s.dbName, CollectionName: collectionName, FieldName: fixtureVectorName,
@@ -331,7 +333,8 @@ func (s *scalarIndexSuite) runCell(cell scalarCell) {
 
 	segments = s.sealedSegments(collectionName)
 	for _, segment := range segments {
-		s.Require().Equal(storage.StorageV2, segment.GetStorageVersion(), "segment %d", segment.GetID())
+		s.Require().Equal(storage.StorageV3, segment.GetStorageVersion(), "segment %d", segment.GetID())
+		s.Require().NotEmpty(segment.GetManifestPath())
 	}
 	var objects []inspector.Object
 	var lastLocateErr error
