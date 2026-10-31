@@ -42,6 +42,10 @@ func mergeSortMultipleSegments(ctx context.Context,
 	log := mlog.With(mlog.Int64("planID", plan.GetPlanID()))
 
 	writerSchema := plan.GetSchema()
+	validator, err := storage.NewRecordValidator(writerSchema)
+	if err != nil {
+		return nil, err
+	}
 
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
@@ -91,7 +95,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			return nil, err
 		}
 		reader = newMaterializedRecordReader(reader, materializer)
-		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
+		segmentReaders[i] = validator.WrapReader(wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp()))
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithStorageConfig(compactionParams.StorageConfig))
@@ -136,7 +140,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 		log.Warn(ctx, "compaction only support int64 and varchar pk field")
 	}
 
-	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, writer, predicate, sortByFields); err != nil {
+	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, writerSchema, segmentReaders, validator.WrapWriter(writer), predicate, sortByFields); err != nil {
 		// segmentReaders[i] is built from binlogs[i], so the reader index the
 		// error names, when it names one, indexes into this list.
 		segmentIDs := make([]int64, len(binlogs))

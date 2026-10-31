@@ -210,6 +210,10 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	phaseStart := time.Now()
 
 	writerSchema := t.plan.GetSchema()
+	validator, err := storage.NewRecordValidator(writerSchema)
+	if err != nil {
+		return nil, err
+	}
 
 	writerOpts := []storage.RwOption{
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
@@ -342,8 +346,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 
 	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	defer rr.Close()
-	rrs := []storage.RecordReader{rr}
-	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
+	rrs := []storage.RecordReader{validator.WrapReader(rr)}
+	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, validator.WrapWriter(srw), predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn(ctx, "sort failed", mlog.Err(err))
 		srw.Close()
@@ -516,10 +520,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err != nil {
 		log.Warn(t.ctx, "failed to sort segment",
 			mlog.Err(err))
-		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
-		}, nil
+		// Let the executor carry the original code and retriability in
+		// FailStatus. Returning failed,nil here silently discarded both.
+		return nil, merr.Wrap(err, "sort compaction")
 	}
 	sortSegmentCost := time.Since(stepStart)
 	targetSegemntID := res.GetSegments()[0].GetSegmentID()
