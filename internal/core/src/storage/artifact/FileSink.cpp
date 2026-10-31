@@ -351,7 +351,12 @@ class V1DiskSink::Impl {
         const auto max_size =
             static_cast<uintmax_t>(std::numeric_limits<int64_t>::max());
         const auto disk_bytes = static_cast<uintmax_t>(disk_size);
-        const auto raw_bytes = static_cast<uintmax_t>(raw_size);
+        // Raw index entries are already counted by AddFileMeta. Text logs
+        // bypass that registration and contribute their raw bytes here.
+        const auto raw_bytes =
+            storage_namespace == ArtifactStorageNamespace::TextLog
+                ? static_cast<uintmax_t>(raw_size)
+                : 0;
         AssertInfo(disk_bytes <= max_size && raw_bytes <= max_size - disk_bytes,
                    "artifact serialized size overflow");
         const auto disk_and_raw = disk_bytes + raw_bytes;
