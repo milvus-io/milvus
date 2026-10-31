@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -460,9 +461,9 @@ func (s *L0CompactionTaskSuite) TestSaveSegmentMetaUpdatesLatestDataViewWithoutV
 	// projection. The L0 manifest bump (3 -> 4) hard-triggers compact_version
 	// +1 even though the membership is unchanged (a Manifest-version change
 	// has no dedicated counter).
-	segments, err := meta.loadableProjection(ctx, 1)
+	segments, err := meta.loadableProjection(ctx, 1, nil)
 	s.Require().NoError(err)
-	_, err = meta.dataViewManager.RecomputeNow(ctx, 1, func(_ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+	_, err = meta.dataViewManager.RecomputeNow(ctx, 1, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return segments, nil
 	})
 	s.Require().NoError(err)

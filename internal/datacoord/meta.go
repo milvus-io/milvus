@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -3051,56 +3050,6 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return nil, retErr
 	}
 	return newSegments, nil
-}
-
-// loadableProjection computes the loadable Segment projection of a Collection
-// from SegmentMeta, the single loadable criterion shared by Recompute,
-// recovery rebuild and bootstrap. A segment is loadable iff it is flushed
-// (Flushing or Flushed - growing/sealed segments stay on the streaming side,
-// matching handler.go's GetQueryVChanPositions classification), healthy (not
-// Dropped/NotExist), visible or already published by Flush, not importing, and
-// not an L0 delta segment, and has a data footprint (a non-empty binlog set or a StorageV3
-// manifest path). The Manifest version is parsed from the segment's manifest
-// path (0 when absent). The SegmentMeta snapshot is taken under segMu.RLock;
-// manifest path parsing runs outside the lock (pure string ops on the
-// snapshot). Callers must hold the DataView Collection lock (lock order:
-// DataView -> segMu).
-func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]dataview.LoadableSegment, error) {
-	segments := m.SelectSegments(ctx, WithCollection(collectionID))
-	loadable := make([]dataview.LoadableSegment, 0, len(segments))
-	for _, segment := range segments {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 ||
-			segment.GetIsImporting() ||
-			(segment.GetIsInvisible() && segment.GetSealedAtDataVersion() == nil) ||
-			!isSegmentHealthy(segment) ||
-			!isFlushState(segment.GetState()) {
-			continue
-		}
-		if len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "" {
-			// No data footprint: not loadable (matches GetQueryVChanPositions).
-			continue
-		}
-		manifestVersion := int64(0)
-		if segment.GetManifestPath() != "" {
-			var err error
-			_, manifestVersion, err = packed.UnmarshalManifestPath(segment.GetManifestPath())
-			if err != nil {
-				return nil, merr.WrapErrStorage(err, "failed to parse Manifest path for Segment %d", segment.GetID())
-			}
-		}
-		loadable = append(loadable, dataview.LoadableSegment{
-			PartitionStatsVersion:       segment.GetPartitionStatsVersion(),
-			SchemaVersion:               segment.GetSchemaVersion(),
-			SegmentID:                   segment.GetID(),
-			VChannel:                    segment.GetInsertChannel(),
-			PartitionID:                 segment.GetPartitionID(),
-			ManifestVersion:             manifestVersion,
-			TransformStartAfterTimetick: segmentTransformStart(segment),
-			RowNum:                      segment.GetNumOfRows(),
-			Size:                        segment.GetStats().GetInsertBinlogSize(),
-		})
-	}
-	return loadable, nil
 }
 
 // recomputeDataView requests an asynchronous DataView snapshot reconciliation

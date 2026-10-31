@@ -1063,6 +1063,11 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		}
 	}
 
+	// A Dropped parent can still be the published QueryView frontier. Keep
+	// its descendants too: intermediate lineage is needed to flatten a later
+	// sort/merge before replacing that frontier. Snapshot once per sweep.
+	protected := gc.dataViewCompactionProtection(all)
+
 	droppedCompactTo := make(map[int64]*SegmentInfo)
 	for id := range drops {
 		if to, ok := compactTo[id]; ok {
@@ -1121,6 +1126,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		gc.ackSignal(signal)
 
+		if _, referenced := protected[segmentID]; referenced {
+			continue
+		}
+
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
 			log.Info(ctx, "skip GC segment since collection is paused", mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 			continue
@@ -1154,6 +1163,38 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		gc.recycleDroppedSegment(ctx, io, segmentID, segment)
 	}
+}
+
+// dataViewCompactionProtection retains both the published bases and the
+// intermediate metadata needed to relate current leaves to those bases. Once
+// the latest and all retained Views move past a base, its old ancestry is no
+// longer protected. This is O(segments + lineage edges), once per GC sweep.
+func (gc *garbageCollector) dataViewCompactionProtection(segments []*SegmentInfo) map[int64]struct{} {
+	if gc.meta.dataViewManager == nil {
+		return nil
+	}
+	protected := gc.meta.dataViewManager.ReferencedSegments()
+	children := make(map[int64][]int64)
+	for _, segment := range segments {
+		for _, parent := range segment.GetCompactionFrom() {
+			children[parent] = append(children[parent], segment.GetID())
+		}
+	}
+	queue := make([]int64, 0, len(protected))
+	for id := range protected {
+		queue = append(queue, id)
+	}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, child := range children[id] {
+			if _, seen := protected[child]; !seen {
+				protected[child] = struct{}{}
+				queue = append(queue, child)
+			}
+		}
+	}
+	return protected
 }
 
 // recycleDroppedSegment marks its index tasks deleted before removing a

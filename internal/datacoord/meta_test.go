@@ -6322,7 +6322,7 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 			VChannels:     []string{"ch-1"},
 		})
 		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 			return []dataviewpkg.LoadableSegment{
 				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
 				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
@@ -6345,15 +6345,12 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	// reconcile drives the same loadable projection the async recompute queue
 	// worker would run after the SegmentMeta mutation commits.
 	reconcile := func(t *testing.T, meta *meta, manager dataviewpkg.Manager) {
-		segments, err := meta.loadableProjection(ctx, 100)
-		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-			return segments, nil
-		})
+		_, err := manager.RecomputeNow(ctx, 100, meta.loadableProjection)
 		require.NoError(t, err)
 	}
 	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 		SegmentID: 3,
+		IsSorted:  true,
 		NumOfRows: 100,
 		InsertLogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
@@ -6446,8 +6443,8 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: 3,
-			NumOfRows: 100,
 			IsSorted:  true,
+			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{LogID: 3}},
@@ -6497,7 +6494,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	manager := dataviewpkg.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, SchemaVersion: 1, VChannels: []string{"ch-1"}})
 	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
 	})
 	require.NoError(t, err)
@@ -6512,6 +6509,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 			Schema:        &schemapb.CollectionSchema{Version: 1},
 		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: to,
+			IsSorted:  true,
 			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
@@ -6527,11 +6525,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	require.NoError(t, compact(1, 2))
 	require.NoError(t, compact(2, 3))
 
-	segmentsProjection, err := meta.loadableProjection(ctx, 100)
-	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-		return segmentsProjection, nil
-	})
+	_, err = manager.RecomputeNow(ctx, 100, meta.loadableProjection)
 	require.NoError(t, err)
 
 	ref, err := manager.Latest(ctx, 100)

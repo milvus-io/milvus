@@ -97,7 +97,7 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 	// Compaction may retire the source before SN retries. The original version
 	// must survive, and a retry must not put the source back into membership.
 	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(ctx, UpdateStatusOperator(10, commonpb.SegmentState_Dropped)))
-	_, err = recovered.RecomputeNow(ctx, 100, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+	_, err = recovered.RecomputeNow(ctx, 100, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return []dataview.LoadableSegment{{SegmentID: 20, VChannel: "ch1", PartitionID: 10, RowNum: 10}}, nil
 	})
 	require.NoError(s.T(), err)

@@ -28,5 +28,6 @@ func (s *DDLCallbacks) dropIndexV2Callback(ctx context.Context, result message.B
 	if err := s.meta.indexMeta.MarkIndexAsDeleted(ctx, header.GetCollectionId(), header.GetIndexIds()); err != nil {
 		return err
 	}
+	s.meta.recomputeDataView(ctx, header.GetCollectionId())
 	return qvresource.PublishIndexes(ctx, header.GetCollectionId())
 }

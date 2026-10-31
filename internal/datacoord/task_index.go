@@ -144,6 +144,9 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 		return err
 	}
 	it.SetState(state, failReason)
+	if state == indexpb.JobState_JobStateFinished {
+		it.meta.recomputeDataView(it.meta.ctx, it.CollectionID)
+	}
 	return nil
 }
 
@@ -165,6 +168,9 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		if err := it.meta.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
+	}
+	if !published && result.GetState() == commonpb.IndexState_Finished {
+		it.meta.recomputeDataView(it.meta.ctx, it.CollectionID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil
