@@ -64,6 +64,7 @@ const (
 	NumpyFileExt   = ".npy"
 	ParquetFileExt = ".parquet"
 	CSVFileExt     = ".csv"
+	LanceFileExt   = ".lance"
 )
 
 // FileType is the reader format of an import file, derived from its path suffix
@@ -79,6 +80,7 @@ const (
 	FileTypeParquet
 	FileTypeCsv
 	FileTypeBackupBinlog
+	FileTypeLance
 )
 
 func (t FileType) String() string {
@@ -93,6 +95,7 @@ func (t FileType) String() string {
 		return "Parquet"
 	case FileTypeCsv:
 		return "Csv"
+	case FileTypeLance: return "Lance"
 	case FileTypeBackupBinlog:
 		return "BackupBinlog"
 	default:
@@ -147,6 +150,11 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 			return FileTypeUnspecified, merr.WrapErrImportFailed("for CSV import, accepts only one file")
 		}
 		return FileTypeCsv, nil
+	case LanceFileExt:
+		if len(file.GetPaths()) != 1 {
+			return FileTypeUnspecified, merr.WrapErrImportFailed("for Lance import, accepts only one file")
+		}
+		return FileTypeLance, nil
 	}
 	return FileTypeUnspecified, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
 }
