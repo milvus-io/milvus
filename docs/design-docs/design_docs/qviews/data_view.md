@@ -41,7 +41,8 @@ type LoadableSegment struct {
 The manager does not query SegmentMeta or infer state, level, visibility,
 importing, indexes, manifest versions, delete frontiers, or compaction lineage.
 The projection function supplied to `Recompute` is the single source of
-membership: it reads the current SegmentMeta and returns the loadable Segments.
+membership: it reads the current SegmentMeta and the borrowed previous committed
+snapshot, and returns the complete loadable Segment frontier.
 Within one snapshot it keeps a Segment ID in only one VChannel/Partition:
 re-adding it at the same location with the same Manifest version is a no-op, a
 higher Manifest version updates it, and a lower version is a data-integrity
@@ -255,13 +256,54 @@ construction (`NewManager(catalog, project)` / `RecoverManager(..., project)`)
 and the worker starts with the manager: it is bounded by the constructor's ctx
 for `RecoverManager` and by the process lifetime for `NewManager`.
 
-The projection runs under the Collection lock and reads SegmentMeta only: it is
+The projection runs under the Collection lock and reads SegmentMeta plus the
+previous committed snapshot supplied by the manager: it is
 non-blocking and must not re-enter the Manager. It resolves the loadable
-membership - `Flushed`, non-L0, non-importing, visible Segments with a data
-footprint - including each Segment's Manifest version parsed from its
-SegmentMeta. A projection that reports a Manifest version lower than the stored
+membership, including each Segment's Manifest version parsed from SegmentMeta.
+Ordinary Flush retains its existing contract. Compaction admission follows the
+frontier rules below. A projection that reports a Manifest version lower than the stored
 one is a data-integrity error (monotonicity); zero preserves the stored
 version.
+
+## Compaction admission and recovery frontier
+
+A compaction result joins DataView only after sorting has completed when sort
+compaction is enabled (external collections remain exempt), and every configured
+IndexID is Finished. Scalar indexes and multiple JSON-path indexes on one field
+all participate. Small/no-training indexes use the scheduler's explicit Finished
+state; this does not require an index file when the builder intentionally skips
+training. A collection without indexes has no index prerequisite.
+
+The producer flattens the legacy query-recovery lineage selection before
+publishing a snapshot. It selects a complete, non-overlapping frontier, retaining
+parents while any replacement output is unready. Dropped parents remain eligible
+only when retired by compaction. An unready intermediate may be traversed through
+its complete ready ancestry, but cannot itself enter DataView. Thus a Mix output
+can continue through Sort without being made query-visible first. M:N replacements
+and successive sort branches switch only when their selected frontier covers the
+whole input set without ancestor/descendant overlap. Empty outputs retire their
+inputs without waiting for nonexistent data or indexes.
+
+The previous committed DataView supplies already-admitted Segment IDs. Those
+segments remain admitted when later CreateIndex/DropIndex changes requirements;
+publication must not regress to an older ancestor frontier. The same snapshot is
+supplied during recovery and schema certification. An unready result with no
+complete available ancestor frontier makes projection fail closed, preserving the
+last complete DataView rather than publishing partial data or an unready leaf.
+
+Physical compaction can still retire parent SegmentMeta before query admission.
+Dropped-segment GC snapshots all retained DataView references once per sweep and
+protects both those bases and their descendant metadata: intermediate lineage is
+needed to relate current leaves to a retained base. After DataView version GC and
+all live references move forward, old bases and their intermediate lineage become
+eligible for the existing physical GC checks. This also protects unloaded
+collections whose latest DataView still selects parents.
+
+Compaction completion and manifest publication trigger reconciliation. Index
+completion without a manifest artifact (including small/no-training builds) and
+index removal also trigger it. The whole selected frontier and its Manifest
+versions enter one new CompactVersion; there is no per-output publication and no
+new persistent compaction publication group.
 
 ## Manager API
 

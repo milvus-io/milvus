@@ -797,7 +797,7 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	manager, err := dataview.RecoverManager(ctx, meta.catalog.(dataview.Catalog), func(context.Context, int64) (bool, error) { return true, nil }, meta.loadableProjection, nil, nil)
 	require.NoError(t, err)
 	meta.dataViewManager = manager
-	loadable, err := meta.loadableProjection(ctx, collectionID)
+	loadable, err := meta.loadableProjection(ctx, collectionID, nil)
 	require.NoError(t, err)
 	_, err = manager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{
 		CollectionID: collectionID, VChannels: []string{"index-publication-vchannel"}, Segments: loadable,

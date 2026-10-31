@@ -88,7 +88,7 @@ func TestLoadableProjectionKeepsPublishedSortInputs(t *testing.T) {
 		}
 		metadata.segments.SetSegment(id, NewSegmentInfo(info))
 	}
-	projection, err := metadata.loadableProjection(context.Background(), 100)
+	projection, err := metadata.loadableProjection(context.Background(), 100, nil)
 	require.NoError(t, err)
 	require.Len(t, projection, 1)
 	require.Equal(t, int64(1), projection[0].SegmentID, "published Flush input stays queryable until its replacement retires it")

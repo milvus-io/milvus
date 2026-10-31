@@ -247,9 +247,8 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 
 // loadableSegmentOf converts a segment into the DataView loadable projection,
 // parsing the latest Manifest version from its ManifestPath (0 for non-V3
-// segments). Manifest path parsing is pure string I/O and runs outside segMu;
-// the caller guarantees the manifest lock is held for the member so the version
-// cannot be advanced concurrently.
+// segments). The caller supplies an immutable SegmentMeta snapshot. Group
+// publication additionally holds the member manifest lock through its commit.
 func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {
 	manifestVersion := int64(0)
 	if seg.GetManifestPath() != "" {
@@ -260,12 +259,15 @@ func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {
 		manifestVersion = mv
 	}
 	return dataview.LoadableSegment{
-		SegmentID:       seg.GetID(),
-		VChannel:        seg.GetInsertChannel(),
-		PartitionID:     seg.GetPartitionID(),
-		ManifestVersion: manifestVersion,
-		RowNum:          seg.GetNumOfRows(),
-		Size:            seg.GetStats().GetInsertBinlogSize(),
+		PartitionStatsVersion:       seg.GetPartitionStatsVersion(),
+		SchemaVersion:               seg.GetSchemaVersion(),
+		TransformStartAfterTimetick: segmentTransformStart(seg),
+		SegmentID:                   seg.GetID(),
+		VChannel:                    seg.GetInsertChannel(),
+		PartitionID:                 seg.GetPartitionID(),
+		ManifestVersion:             manifestVersion,
+		RowNum:                      seg.GetNumOfRows(),
+		Size:                        seg.GetStats().GetInsertBinlogSize(),
 	}, nil
 }
 

@@ -48,9 +48,10 @@ type CollectionRecoveryValidator func(ctx context.Context, collectionID int64) (
 // Projector computes the loadable Segment projection of a Collection from its
 // SegmentMeta. It is injected by the Coordinator (datacoord) and must be
 // callable while the Collection's DataView lock is held: it reads SegmentMeta
-// only (no DataView calls, no catalog writes), is non-blocking, and must not
+// and the borrowed previous snapshot (nil at bootstrap), without mutating it.
+// It performs no DataView calls or catalog writes, is non-blocking, and must not
 // re-enter the Manager.
-type Projector func(ctx context.Context, collectionID int64) ([]LoadableSegment, error)
+type Projector func(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]LoadableSegment, error)
 
 // FrontierProjector supplies conservative migration inputs for snapshots which
 // predate persisted W/A. Native snapshots never use this legacy projection.
@@ -105,6 +106,8 @@ type Manager interface {
 
 	Latest(ctx context.Context, collectionID int64) (DataViewRef, error)
 	Get(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (DataViewRef, error)
+	// ReferencedSegments snapshots the IDs in retained DataViews for one GC sweep.
+	ReferencedSegments() map[int64]struct{}
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
@@ -445,7 +448,7 @@ func RecoverManager(
 			// empty channels and channels without loadable segments are
 			// present (recomputeNow could only discover shards from
 			// projected segments).
-			segments, err := project(ctx, collectionID)
+			segments, err := project(ctx, collectionID, nil)
 			if err != nil {
 				mlog.Warn(ctx, "failed to project segments for DataView bootstrap",
 					mlog.Int64("collectionID", collectionID), mlog.Err(err))
@@ -555,7 +558,7 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		// Only Create/Bootstrap may install the complete initial shard skeleton.
 		return nil, nil
 	}
-	segments, err := project(ctx, collectionID)
+	segments, err := project(ctx, collectionID, base)
 	if err != nil {
 		return nil, err
 	}
@@ -647,6 +650,36 @@ func (m *dataViewManager) Get(ctx context.Context, collectionID int64, version *
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	return m.acquireReadyRefLocked(ctx, state, state.versions[protoVersionToStruct(version)])
+}
+
+// ReferencedSegments protects every retained version, including versions that
+// may still be acquired by Get. Version GC removes unreferenced old snapshots
+// before the segment GC sweep. Locks follow the usual per-state order.
+func (m *dataViewManager) ReferencedSegments() map[int64]struct{} {
+	m.mu.RLock()
+	states := make([]*collectionState, 0, len(m.states))
+	for _, state := range m.states {
+		states = append(states, state)
+	}
+	m.mu.RUnlock()
+	ids := make(map[int64]struct{})
+	for _, state := range states {
+		state.mu.Lock()
+		for _, entry := range state.versions {
+			if entry.isTombstone {
+				continue
+			}
+			for _, shard := range entry.view.GetShards() {
+				for _, partition := range shard.GetPartitions() {
+					for _, id := range partition.GetSegmentIds() {
+						ids[id] = struct{}{}
+					}
+				}
+			}
+		}
+		state.mu.Unlock()
+	}
+	return ids
 }
 
 func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error {

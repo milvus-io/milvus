@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -921,9 +922,9 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
 	err := SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.NoError(err)
 
-	segments, err := m.loadableProjection(ctx, 100)
+	segments, err := m.loadableProjection(ctx, 100, nil)
 	s.NoError(err)
-	_, err = m.dataViewManager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+	_, err = m.dataViewManager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return segments, nil
 	})
 	s.NoError(err)

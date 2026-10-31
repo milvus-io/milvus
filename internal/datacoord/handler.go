@@ -356,7 +356,11 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		var emit func(id, rootID UniqueID, fromFallback bool)
 		emit = func(id, rootID UniqueID, fromFallback bool) {
 			segment, ok := validSegmentInfos[id]
-			if ok && segment != nil && expanded.Contain(id) {
+			// DataView admission can certify a complete ancestor frontier behind
+			// an unready intermediate. Flatten it without emitting that intermediate.
+			// Legacy callers only admit indexed direct parents, so stop there.
+			if ok && segment != nil && (expanded.Contain(id) ||
+				(fromFallback && !segmentIndexed(id) && len(segment.GetCompactionFrom()) > 0 && allParentsReady(segment.GetCompactionFrom()...))) {
 				if visited == nil {
 					visited = make(map[candidateVisit]struct{})
 				}

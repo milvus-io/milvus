@@ -12,6 +12,7 @@ import (
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -27,7 +28,7 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		require.NoError(t, err)
 		_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"p0_1v0"}})
 		require.NoError(t, err)
-		firstVersion, err := manager.RecomputeNow(ctx, 1, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+		firstVersion, err := manager.RecomputeNow(ctx, 1, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return []dataview.LoadableSegment{{SegmentID: 10, PartitionID: 2, VChannel: "p0_1v0", ManifestVersion: 3, RowNum: 100}}, nil
 		})
 		require.NoError(t, err)
@@ -49,7 +50,7 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, int64(100), stats.RowNum)
 
-		_, err = manager.RecomputeNow(ctx, 1, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+		_, err = manager.RecomputeNow(ctx, 1, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return []dataview.LoadableSegment{{SegmentID: 11, PartitionID: 2, VChannel: "p0_1v0", RowNum: 200}}, nil
 		})
 		require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestRefreshDataViewPublishesBeforeReturning(t *testing.T) {
 		require.NoError(t, err)
 		var projectionErr error
 		segments := []dataview.LoadableSegment{{SegmentID: 10, PartitionID: 2, VChannel: "v1", RowNum: 100}}
-		mockey.Mock((*meta).loadableProjection).To(func(_ *meta, _ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+		mockey.Mock((*meta).loadableProjection).To(func(_ *meta, _ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return segments, projectionErr
 		}).Build()
 		s := &Server{dataViewManager: manager, meta: &meta{}}
