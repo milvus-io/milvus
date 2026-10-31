@@ -52,6 +52,7 @@ func TestShouldUseArrowTransport(t *testing.T) {
 		aggregates  []*planpb.Aggregate
 		orderBy     []*planpb.OrderByField
 		ignoreNonPk bool
+		returnDist  bool
 		want        bool
 		why         string
 	}{
@@ -81,6 +82,10 @@ func TestShouldUseArrowTransport(t *testing.T) {
 			why: "every user column is withheld, so the Arrow batch would carry nothing",
 		},
 		{
+			name: "calc distance", zeroCopy: true, returnDist: true, want: false,
+			why: "the internally-injected vector field is not a user output column, so it is absent from the Arrow record and cannot be materialized for the distance computation",
+		},
+		{
 			name: "flag off wins over an otherwise eligible request", zeroCopy: false,
 			want: false,
 			why:  "no combination may route to Arrow with the flag down",
@@ -100,6 +105,7 @@ func TestShouldUseArrowTransport(t *testing.T) {
 			}}
 			plan := &segcore.RetrievePlan{}
 			plan.SetIgnoreNonPk(tc.ignoreNonPk)
+			plan.SetReturnDistance(tc.returnDist)
 
 			require.Equal(t, tc.want, shouldUseArrowTransport(req, plan), tc.why)
 		})

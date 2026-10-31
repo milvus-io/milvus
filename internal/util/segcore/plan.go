@@ -215,6 +215,7 @@ type RetrievePlan struct {
 	msgID                 int64 // only used to debug.
 	maxLimitSize          int64
 	ignoreNonPk           bool
+	returnDistance        bool
 	consistencyLevel      commonpb.ConsistencyLevel
 	collectionTTL         typeutil.Timestamp
 	entityTTLPhysicalTime typeutil.Timestamp
@@ -262,6 +263,19 @@ func (plan *RetrievePlan) SetTakeForOutputAllowed(allowed bool) {
 
 func (plan *RetrievePlan) IsIgnoreNonPk() bool {
 	return plan.ignoreNonPk
+}
+
+// SetReturnDistance records whether the query requests a calc_distance column.
+// It lets the segments layer decide the transport (protobuf vs Arrow) without
+// re-unmarshalling the serialized expr plan. Set by the QueryNode once, from
+// the already-parsed planpb.PlanNode.
+func (plan *RetrievePlan) SetReturnDistance(returnDistance bool) {
+	plan.returnDistance = returnDistance
+}
+
+// GetReturnDistance reports whether the query requests a calc_distance column.
+func (plan *RetrievePlan) GetReturnDistance() bool {
+	return plan.returnDistance
 }
 
 // FeatureBits returns the execution feature bits the plan recorded across
