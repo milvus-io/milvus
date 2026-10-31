@@ -122,6 +122,8 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SetHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
 	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
 	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
+	cSearchFanoutThreadCoreCoefficient := C.float(paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat())
+	C.SetSearchFanoutThreadCoreCoefficient(cSearchFanoutThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 	cThreadPoolMaxThreadsSize := C.int(paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.GetAsInt())
