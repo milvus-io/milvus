@@ -16,6 +16,7 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "PluginInterface.h"
@@ -35,6 +36,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_reader_stream.h"
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
@@ -208,8 +210,8 @@ GetFFIReaderStream(CFFIPackedReader c_packed_reader,
 
         auto array_stream = result.ValueOrDie();
 
-        arrow::Status status =
-            arrow::ExportRecordBatchReader(array_stream, out_stream);
+        auto status = milvus::storage::ExportStatusAwareRecordBatchReader(
+            array_stream, out_stream);
         if (!status.ok()) {
             ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
                       "failed to export record batch reader, {}",
