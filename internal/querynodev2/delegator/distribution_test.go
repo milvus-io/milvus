@@ -844,6 +844,15 @@ func TestNewChannelQueryView(t *testing.T) {
 	assert.False(t, view.Serviceable())
 }
 
+func TestChannelQueryViewHasPartitions(t *testing.T) {
+	view := NewChannelQueryView(nil, nil, []int64{7, 8}, initialTargetVersion)
+	assert.True(t, view.HasPartitions([]int64{8, 7}))
+	assert.True(t, view.HasPartitions([]int64{7, 8, 8}))
+	assert.False(t, view.HasPartitions([]int64{7}))
+	assert.False(t, view.HasPartitions([]int64{7, 8, 9}))
+	assert.False(t, view.HasPartitions([]int64{7, 9}))
+}
+
 func TestDistribution_NewDistribution(t *testing.T) {
 	channelName := "test_channel"
 	growings := []int64{1, 2, 3}
