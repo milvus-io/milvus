@@ -409,8 +409,8 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             struct_array = []
             for j in range(num_elems):
                 # Use a distinctive unit vector for row 0, element 0 so it
-                # never collides with any seed-generated vector and Top-1
-                # assertions reliably return row 0.
+                # is the unique exact nearest neighbor for FLAT assertions.
+                # Approximate indexes do not guarantee recalling this vector.
                 if i == 0 and j == 0:
                     emb = [1.0] + [0.0] * (dim - 1)
                 else:
@@ -460,7 +460,7 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             field_name="structA[embedding]",
             index_type=index_type,
             metric_type=metric_type,
-            params=INDEX_PARAMS,
+            params={} if index_type == "FLAT" else INDEX_PARAMS,
         )
         if create_nested_index:
             index_params.add_index(
@@ -1403,9 +1403,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     def test_element_filter_search_parametrize_metrics(self, metric_type):
         """
-        target: element_filter search with different metric types
-        method: parametrize L2, COSINE, IP
-        expected: all metrics work with element_filter
+        target: HNSW element_filter search with different metric types
+        method: parametrize L2, COSINE, IP with default ANN search parameters
+        expected: nonempty filtered results with correctly ordered distances
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_{metric_type.lower()}")
@@ -1423,11 +1423,49 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             output_fields=["id", "structA"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results) == 1
+        assert results[0]
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"])
-        # Top-1: searching row 0's own vector should return row 0
+        # HNSW is approximate: even the query vector itself need not be recalled.
+        # Exact Top-1 and distance semantics are covered separately with FLAT.
+        _assert_distance_order(results, metric_type)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
+    def test_element_filter_search_exact_metrics(self, metric_type):
+        """
+        target: exact element_filter search results for L2, COSINE and IP
+        method: search a unique unit vector using FLAT
+        expected: row 0 is Top-1 with its exact self-distance/similarity
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(f"{prefix}_ef_flat_{metric_type.lower()}")
+        data = self._create_collection_and_insert(
+            client, collection_name, nb=500, metric_type=metric_type, index_type="FLAT"
+        )
+
+        query_vector = data[0]["structA"][0]["embedding"]
+        results, check = self.search(
+            client,
+            collection_name,
+            data=[query_vector],
+            anns_field="structA[embedding]",
+            search_params={"metric_type": metric_type},
+            filter="element_filter(structA, $[int_val] >= 0)",
+            limit=10,
+            output_fields=["id", "structA"],
+        )
+        assert check
+        assert len(results) == 1
+        assert results[0]
+        for hit in results[0]:
+            assert any(e["int_val"] >= 0 for e in hit["structA"])
         assert results[0][0]["id"] == 0, f"Top-1 should be row 0 (self-vector), got {results[0][0]['id']}"
+        # The fixture's row0/element0 is [1, 0, ...], so its self L2 distance
+        # is zero and its self cosine/inner-product similarity is one.
+        expected_score = 0.0 if metric_type == "L2" else 1.0
+        assert results[0][0]["distance"] == pytest.approx(expected_score, abs=epsilon)
         _assert_distance_order(results, metric_type)
 
 

@@ -15,11 +15,11 @@ func TestNativeDataViewRetainsTransformCoverage(t *testing.T) {
 		{PartitionID: 2, Segments: []*SegmentDataView{{SegmentID: 11, ManifestVersion: 4, TransformStartAfterTimetick: 50}}},
 	}}
 	view := syntheticDataView(&loadmgr.LoadConfig{CollectionID: 1}, qviews.DataVersion{StreamingVersion: 2}, shard)
-	require.Equal(t, uint64(50), shard.CompactedTransformStartAfterTimetick)
-	require.Equal(t, uint64(80), shard.GrowingTransformStartAfterTimetick)
+	require.Equal(t, uint64(50), view.Shards[0].CompactedTransformStartAfterTimetick)
+	require.Equal(t, uint64(80), view.Shards[0].GrowingTransformStartAfterTimetick)
 	require.Equal(t, uint64(50), qviews.NewQueryViewAtCoordBuilder(1, view, "v1").Build().GetMeta().GetTransformStartAfterTimetick())
 	require.Equal(t, []int64{3}, view.Shards[0].Partitions[0].SegmentManifestVersions)
-	require.Equal(t, uint64(70), shard.Partitions[0].Segments[0].TransformStartAfterTimetick)
+	require.Equal(t, []uint64{70}, view.Shards[0].Partitions[0].SegmentTransformStartAfterTimeticks)
 	require.Equal(t, []int64{4}, view.Shards[0].Partitions[1].SegmentManifestVersions)
-	require.Equal(t, uint64(50), shard.Partitions[1].Segments[0].TransformStartAfterTimetick)
+	require.Equal(t, []uint64{50}, view.Shards[0].Partitions[1].SegmentTransformStartAfterTimeticks)
 }

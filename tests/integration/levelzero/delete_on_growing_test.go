@@ -94,6 +94,26 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 
 	checkRowCount(0)
 
+	// release collection
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
+
+	// load
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(loadStatus, err)
+	s.Require().NoError(err)
+	s.WaitForLoad(ctx, collectionName)
+
+	checkRowCount(0)
+
+	// Reload must preserve deletes through TransformLog while the last L1 is
+	// still growing. L0 materialization requires its final Flush publication.
+	s.Flush(collectionName)
+	checkRowCount(0)
+
 	// The materializer may split a Delete batch across multiple L0 files.
 	// Wait for all delete entries to be persisted, not just the first L0.
 	s.Require().EventuallyWithT(func(t *assert.CollectT) {
@@ -114,21 +134,6 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 		}
 		assert.Equal(t, int64(5), entries, "all deletes must be persisted across L0 files")
 	}, 10*time.Second, 100*time.Millisecond)
-
-	// release collection
-	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})
-	err = merr.CheckRPCCall(status, err)
-	s.NoError(err)
-
-	// load
-	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(loadStatus, err)
-	s.Require().NoError(err)
-	s.WaitForLoad(ctx, collectionName)
-
-	checkRowCount(0)
 
 	// drop collection
 	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{

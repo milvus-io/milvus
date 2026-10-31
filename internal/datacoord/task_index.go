@@ -142,6 +142,9 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 		return err
 	}
 	it.SetState(state, failReason)
+	if state == indexpb.JobState_JobStateFinished {
+		it.meta.recomputeDataView(it.meta.ctx, it.CollectionID)
+	}
 	return nil
 }
 
@@ -163,6 +166,9 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		if err := it.meta.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
+	}
+	if !published && result.GetState() == commonpb.IndexState_Finished {
+		it.meta.recomputeDataView(it.meta.ctx, it.CollectionID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil
@@ -402,7 +408,10 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
-		it.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "fake finished index success")
+		if err := it.UpdateStateWithMeta(indexpb.JobState_JobStateFinished, "fake finished index success"); err != nil {
+			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
+			return
+		}
 		return
 	}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -72,4 +73,33 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	require.Empty(t, logs[0].Binlogs[0].LogPath, "RPC must not mutate shared metadata")
 	resp.Bm25Resources[0].Bm25Binlogs[0].Binlogs[1].LogPath = "caller-owned"
 	require.Equal(t, "existing/path/43", logs[0].Binlogs[1].LogPath)
+	// A V3 base resolves stats from its manifest, even when legacy descriptors
+	// remain in metadata. Do not expand or transmit those unused paths.
+	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segments", 9), Bm25Statslogs: logs}))
+	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Empty(t, resp.Bm25Resources[0].GetBm25Binlogs())
+	require.Equal(t, packed.MarshalManifestPath("segments", 9), resp.Bm25Resources[0].GetManifestPath())
+}
+
+func TestQueryViewCollectionIndexInfosResolveExactIDs(t *testing.T) {
+	s := &Server{meta: &meta{indexMeta: &indexMeta{indexes: map[int64]map[int64]*model.Index{
+		1: {
+			100: {CollectionID: 1, FieldID: 10, IndexID: 100, IndexName: "old", IsDeleted: true},
+			101: {CollectionID: 1, FieldID: 10, IndexID: 101, IndexName: "new"},
+			102: {CollectionID: 1, FieldID: 10, IndexID: 102, IndexName: "another-path"},
+		},
+	}}}}
+	current := s.GetQueryViewCollectionIndexInfos(1)
+	require.Len(t, current, 2)
+	require.EqualValues(t, 101, current[0].GetIndexID())
+	exact := s.GetQueryViewCollectionIndexInfos(1, 100, 102)
+	require.Len(t, exact, 2)
+	require.EqualValues(t, 100, exact[0].GetIndexID())
+	require.EqualValues(t, 102, exact[1].GetIndexID())
+	exact[0].IndexName = "caller-owned"
+	require.Equal(t, "old", s.GetQueryViewCollectionIndexInfos(1, 100)[0].IndexName)
+	require.Empty(t, s.GetQueryViewCollectionIndexInfos(1, 999))
+	require.Empty(t, s.GetQueryViewCollectionIndexInfos(2, 100))
 }

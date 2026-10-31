@@ -17,12 +17,11 @@
 package querycoordv2
 
 import (
-	"context"
 	"time"
 
-	"github.com/samber/lo"
-
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -30,7 +29,6 @@ import (
 
 const (
 	loadConfigWatcherInterval           = time.Minute
-	loadConfigReplicaPromotionInterval  = 5 * time.Second
 	loadConfigWatcherBackoffInitial     = 10 * time.Millisecond
 	loadConfigWatcherBackoffMaxInterval = 10 * time.Minute
 )
@@ -38,7 +36,7 @@ const (
 // NewLoadConfigWatcher creates a new load config watcher.
 func NewLoadConfigWatcher(s *Server) *LoadConfigWatcher {
 	w := &LoadConfigWatcher{
-		triggerCh: make(chan struct{}, 10),
+		triggerCh: make(chan struct{}, 1),
 		notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
 		s:         s,
 	}
@@ -54,9 +52,7 @@ type LoadConfigWatcher struct {
 	notifier  *syncutil.AsyncTaskNotifier[struct{}]
 	s         *Server
 
-	previousReplicaNum                   int32
-	previousRGs                          []string
-	previousForceOverrideUserReplicaMode bool
+	handlers map[string]config.EventHandler
 }
 
 // Trigger triggers a load config change.
@@ -64,6 +60,7 @@ func (w *LoadConfigWatcher) Trigger() {
 	select {
 	case <-w.notifier.Context().Done():
 	case w.triggerCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -71,9 +68,9 @@ func (w *LoadConfigWatcher) Trigger() {
 func (w *LoadConfigWatcher) background() {
 	defer func() {
 		w.notifier.Finish(struct{}{})
-		w.Logger().Info(context.TODO(), "load config watcher stopped")
+		w.Logger().Info(w.notifier.Context(), "load config watcher stopped")
 	}()
-	w.Logger().Info(context.TODO(), "load config watcher started")
+	w.Logger().Info(w.notifier.Context(), "load config watcher started")
 
 	balanceTimer := typeutil.NewBackoffTimer(typeutil.BackoffTimerConfig{
 		Default: loadConfigWatcherInterval,
@@ -83,8 +80,6 @@ func (w *LoadConfigWatcher) background() {
 			MaxInterval:     loadConfigWatcherBackoffMaxInterval,
 		},
 	})
-	promotionTicker := time.NewTicker(loadConfigReplicaPromotionInterval)
-	defer promotionTicker.Stop()
 
 	for {
 		nextTimer, _ := balanceTimer.NextTimer()
@@ -92,11 +87,8 @@ func (w *LoadConfigWatcher) background() {
 		case <-w.notifier.Context().Done():
 			return
 		case <-w.triggerCh:
-			w.Logger().Info(context.TODO(), "load config watcher triggered")
+			w.Logger().Info(w.notifier.Context(), "load config watcher triggered")
 		case <-nextTimer:
-		case <-promotionTicker.C:
-			w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
-			continue
 		}
 		if err := w.applyLoadConfigChanges(); err != nil {
 			balanceTimer.EnableBackoff()
@@ -108,76 +100,28 @@ func (w *LoadConfigWatcher) background() {
 
 // applyLoadConfigChanges applies the load config changes.
 func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
-	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
-
-	newReplicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt32()
-	newRGs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-	forceOverrideUserReplicaMode := paramtable.Get().QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.GetAsBool()
-
-	if newReplicaNum == 0 && len(newRGs) == 0 {
-		// default cluster level load config, nothing to do for it.
-		return nil
-	}
-
-	if newReplicaNum <= 0 || len(newRGs) == 0 {
-		w.Logger().Info(context.TODO(),
-			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
-		return nil
-	}
-
-	if len(newRGs) != 1 && len(newRGs) != int(newReplicaNum) {
-		w.Logger().Info(context.TODO(),
-			"illegal cluster level load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
-		return nil
-	}
-
-	left, right := lo.Difference(w.previousRGs, newRGs)
-	rgChanged := len(left) > 0 || len(right) > 0
-	forceOverrideChanged := w.previousForceOverrideUserReplicaMode != forceOverrideUserReplicaMode
-	if w.previousReplicaNum == newReplicaNum && !rgChanged && !forceOverrideChanged {
-		w.Logger().Info(context.TODO(),
-			"no need to update load config, skip it", mlog.Int32("replica_num", newReplicaNum), mlog.Strings("resource_groups", newRGs))
-		return nil
-	}
-
-	// try to check load config changes after restart, and try to update replicas
-	collectionIDs := w.s.meta.GetAll(w.notifier.Context())
-	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
-		collection := w.s.meta.GetCollection(w.notifier.Context(), collectionID)
-		if collection == nil {
-			return false
+	// Reconcile each current configuration, including after recovery and retries.
+	// A previously applied cluster setting does not prove every collection matches.
+	var result error
+	for id := range w.s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap() {
+		if err := w.notifier.Context().Err(); err != nil {
+			return err
 		}
-		if collection.UserSpecifiedReplicaMode && !forceOverrideUserReplicaMode {
-			w.Logger().Info(context.TODO(), "collection is user specified replica mode, skip update load config", mlog.FieldCollectionID(collectionID))
-			return false
+		if err := w.s.updateCollectionLoadConfig(w.notifier.Context(), id, 0, nil, true); err != nil {
+			result = merr.Combine(result, err)
 		}
-		return true
-	})
-
-	if len(collectionIDs) == 0 {
-		w.Logger().Info(context.TODO(), "no collection to update load config, skip it")
 	}
-
-	if err := w.s.updateLoadConfig(w.notifier.Context(), collectionIDs, newReplicaNum, newRGs, true); err != nil {
-		w.Logger().Warn(context.TODO(), "failed to update load config", mlog.Err(err))
-		return err
+	if result != nil {
+		w.Logger().Warn(w.notifier.Context(), "failed to apply cluster load configuration", mlog.Err(result))
 	}
-	w.s.tryPromoteReadyLoadConfigReplicas(w.notifier.Context())
-	w.Logger().Info(context.TODO(),
-		"apply load config changes",
-		mlog.Int64s("collectionIDs", collectionIDs),
-		mlog.Int32("previousReplicaNum", w.previousReplicaNum),
-		mlog.Strings("previousResourceGroups", w.previousRGs),
-		mlog.Int32("replicaNum", newReplicaNum),
-		mlog.Strings("resourceGroups", newRGs))
-	w.previousReplicaNum = newReplicaNum
-	w.previousRGs = newRGs
-	w.previousForceOverrideUserReplicaMode = forceOverrideUserReplicaMode
-	return nil
+	return result
 }
 
 // Close closes the load config watcher.
 func (w *LoadConfigWatcher) Close() {
+	for key, handler := range w.handlers {
+		paramtable.Get().Unwatch(key, handler)
+	}
 	w.notifier.Cancel()
 	w.notifier.BlockUntilFinish()
 }

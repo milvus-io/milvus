@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -98,4 +99,18 @@ func TestBalancerRepairsPublishedSchemaWhileTargetRemainsPending(t *testing.T) {
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.Nil(t, manager.PublishedRecovery(1), "explicit release must still remove the recovery obligation")
+}
+
+func TestPublishedRecoveryPreservesPartitionStats(t *testing.T) {
+	id := qviews.ShardID{ReplicaID: 1, VChannel: "p_1v0"}
+	original := &viewpb.QueryViewOfShard{
+		Meta:          &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: id.VChannel, ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}},
+		QueryNode:     []*viewpb.QueryViewOfQueryNode{{NodeId: 10, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 2, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{4}}}}},
+	}
+	base := newPublishedRecoveryBase(id, &coordview.PublishedRecovery{View: original})
+	data := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: original.Meta.Version.DataVersion, Shards: []*viewpb.DataViewOfShard{shardDataViewToProto(base.shard)}}
+	replacement := qviews.NewQueryViewAtCoordBuilder(1, data, id.VChannel).SetAssignments(map[int64]map[int64][]int64{20: {2: {101}}}).Build()
+	require.Equal(t, original.StreamingNode.PartitionStats, replacement.StreamingNode.PartitionStats)
+	require.Equal(t, []int64{4}, replacement.QueryNode[0].Partitions[0].SegmentManifestVersions)
 }

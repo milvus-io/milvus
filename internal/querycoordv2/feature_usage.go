@@ -22,11 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
-	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -34,78 +32,47 @@ import (
 // featureUsageFanoutTimeout bounds one QueryNode's GetFeatureUsage call.
 const featureUsageFanoutTimeout = 10 * time.Second
 
-// FeatureUsageEntries computes the loaded group of the feature usage report
-// from QueryCoord's in-memory load metadata: how many collections are loaded,
-// how many were loaded with a subset of their fields, how many have replicas
-// outside the default resource group, and the distribution of effective
-// replica numbers. It reads only local memory and holds no state.
+// FeatureUsageEntries counts only collections whose complete expected shard set
+// is Up for the current QueryView load configuration.
 func (s *Server) FeatureUsageEntries(ctx context.Context, cc featureusage.CollectionContext) []*internalpb.FeatureEntry {
-	if s.meta == nil || s.meta.CollectionManager == nil {
+	if s.qviewsRuntime == nil {
 		return nil
 	}
-	collections := s.meta.GetAllCollections(ctx)
-	cols := make([]featureusage.LoadedCollection, 0, len(collections))
-	for _, collection := range collections {
-		if collection == nil || collection.CollectionLoadInfo == nil {
+	runtime := s.qviewsRuntime
+	cols := make([]featureusage.LoadedCollection, 0)
+	for id := range runtime.loadConfigStore.Snapshot().ConfigsMap() {
+		if _, known := cc.FieldCount[id]; cc.Known() && !known {
 			continue
 		}
-		// Loading and failed-to-recover collections are in the manager too;
-		// the group counts what is loaded.
-		if collection.GetStatus() != querypb.LoadStatus_Loaded {
+		channels, err := runtime.resources.VChannels(ctx, id)
+		if err != nil {
 			continue
 		}
-		fieldCount, known := cc.FieldCount[collection.GetCollectionID()]
-		if cc.Known() && !known {
-			// Dropped in RootCoord, not yet released here.
+		progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, id, channels)
+		if !progress.Ready() {
 			continue
 		}
-		if !cc.Known() {
-			// No RootCoord snapshot in hand: fall back to the schema copy the
-			// manager may hold. Recovery leaves it nil, in which case the
-			// collection reads as a full load.
-			fieldCount = loadableFieldCount(s.meta.GetCollectionSchema(ctx, collection.GetCollectionID()))
+		cfg := progress.Config
+		fields := make(map[int64]struct{}, len(cfg.LoadFields))
+		for _, field := range cfg.LoadFields {
+			fields[field.GetFieldId()] = struct{}{}
 		}
-		col := featureusage.LoadedCollection{
-			ReplicaNumber:    collection.GetReplicaNumber(),
-			LoadFieldsSubset: isLoadFieldsSubset(collection.GetLoadFields(), fieldCount),
-		}
-		if s.meta.ReplicaManager != nil {
-			for _, replica := range s.meta.GetByCollection(ctx, collection.GetCollectionID()) {
-				col.ResourceGroups = append(col.ResourceGroups, replica.GetResourceGroup())
+		subset := false
+		if len(fields) > 0 {
+			for _, field := range cfg.RequiredFields {
+				if _, ok := fields[field.GetFieldId()]; !ok {
+					subset = true
+					break
+				}
 			}
+		}
+		col := featureusage.LoadedCollection{ReplicaNumber: int32(len(cfg.Replicas)), LoadFieldsSubset: subset}
+		for _, replica := range cfg.Replicas {
+			col.ResourceGroups = append(col.ResourceGroups, replica.ResourceGroup)
 		}
 		cols = append(cols, col)
 	}
 	return featureusage.ComputeLoadedEntries(cols)
-}
-
-// isLoadFieldsSubset reports whether the persisted load-field list names
-// fewer fields than the collection has. QueryCoord stores an explicit list
-// for every loaded collection, the full list of the moment when the request
-// named none, so a collection loaded in full and then given a new field reads
-// as a partial load until it is loaded again; the new field is indeed not
-// loaded (see the design doc's known limitations). An empty list, which only
-// a collection recovered from pre-list metadata carries, is a full load.
-func isLoadFieldsSubset(loadFields []int64, fieldCount int) bool {
-	return len(loadFields) > 0 && fieldCount > 0 && len(loadFields) < fieldCount
-}
-
-// loadableFieldCount counts, like CollectionContext does from the RootCoord
-// model, the fields a load request can name.
-func loadableFieldCount(schema *schemapb.CollectionSchema) int {
-	if schema == nil {
-		return 0
-	}
-	total := 0
-	for _, field := range schema.GetFields() {
-		if !common.IsSystemField(field.GetFieldID()) {
-			total++
-		}
-	}
-	for _, structField := range schema.GetStructArrayFields() {
-		total += len(structField.GetFields())
-	}
-	return total
 }
 
 // CollectQueryNodeFeatureUsage fans GetFeatureUsage out to every QueryNode in

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -43,7 +42,7 @@ func (c *queryViewSyncClient) SyncQueryView(ctx context.Context, pchannel string
 		}
 		stream, err := client.SyncQueryView(worknodehandler.EncodeQueryViewPChannelToOutgoingContext(ctx, assign.Channel))
 		if err != nil {
-			return nil, streamingstatus.ConvertStreamingError("ViewSyncService.SyncQueryView", err)
+			return nil, err
 		}
 		return stream, nil
 	})

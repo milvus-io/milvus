@@ -120,11 +120,12 @@ CreateSegment(milvus::segcore::Collection* col,
               SegmentType seg_type,
               int64_t segment_id,
               bool is_sorted_by_pk) {
+    auto schema = col->get_schema();
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing: {
             auto seg = milvus::segcore::CreateGrowingSegment(
-                col->get_schema(),
+                schema,
                 col->get_index_meta(),
                 segment_id,
                 milvus::segcore::SegcoreConfig::default_config());
@@ -132,14 +133,16 @@ CreateSegment(milvus::segcore::Collection* col,
             break;
         }
         case Sealed:
-        case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(
-                col->get_schema(),
-                col->get_index_meta(),
-                segment_id,
-                milvus::segcore::SegcoreConfig::default_config(),
-                is_sorted_by_pk);
-            break;
+        case Indexing: {
+            auto scope = milvus::segcore::LoadScope::FromLegacySchema(*schema);
+            segment =
+                std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
+                    col->GetSealedFieldLayout(scope),
+                    col->get_index_meta(),
+                    milvus::segcore::SegcoreConfig::default_config(),
+                    segment_id,
+                    is_sorted_by_pk);
+        } break;
 
         default:
             ThrowInfo(
@@ -195,6 +198,43 @@ NewSegmentWithLoadInfo(CCollection collection,
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
+CStatus
+NewSealedSegmentWithCollection(CCollection collection,
+                               int64_t segment_id,
+                               CSegmentInterface* output,
+                               bool sorted,
+                               const uint8_t* load_blob,
+                               int64_t load_length,
+                               const int64_t* load_fields,
+                               int64_t field_count) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* col = static_cast<milvus::segcore::Collection*>(collection);
+        auto schema = col->get_schema();
+        std::vector<int64_t> fields;
+        if (field_count > 0) {
+            fields.assign(load_fields, load_fields + field_count);
+        }
+        milvus::proto::segcore::SegmentLoadInfo info;
+        AssertInfo(info.ParseFromArray(load_blob, load_length),
+                   "unmarshal load info failed");
+        std::vector<int64_t> hints(info.field_hints().begin(),
+                                   info.field_hints().end());
+        auto segment =
+            std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
+                col->GetSealedFieldLayout(
+                    milvus::segcore::LoadScope(fields, hints)),
+                col->get_index_meta(),
+                milvus::segcore::SegcoreConfig::default_config(),
+                segment_id,
+                sorted);
+        segment->SetLoadInfo(std::move(info));
+        *output = segment.release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 milvus::SchemaPtr
 ParseReopenSchema(const void* schema_blob,
                   const int64_t schema_length,
@@ -219,6 +259,64 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
     auto suc = collection_schema.ParseFromArray(schema_blob, schema_length);
     AssertInfo(suc, "parse flush schema proto failed");
     return milvus::Schema::ParseFrom(collection_schema);
+}
+
+CFuture*
+AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
+                                       CSegmentInterface c_segment,
+                                       CCollection c_collection,
+                                       const uint8_t* load_blob,
+                                       int64_t load_length,
+                                       const int64_t* load_fields,
+                                       int64_t load_field_count) {
+    try {
+        auto* collection =
+            static_cast<milvus::segcore::Collection*>(c_collection);
+        std::vector<int64_t> fields;
+        if (load_field_count > 0) {
+            fields.assign(load_fields, load_fields + load_field_count);
+        }
+        milvus::proto::segcore::SegmentLoadInfo info;
+        AssertInfo(info.ParseFromArray(load_blob, load_length),
+                   "unmarshal load info failed");
+        auto layout =
+            collection->GetSealedFieldLayout(milvus::segcore::LoadScope(
+                fields,
+                std::vector<int64_t>(info.field_hints().begin(),
+                                     info.field_hints().end())));
+        // Capture the exact metadata before scheduling. The CCollection handle
+        // may be released once its Go owner has joined this operation; retained
+        // PublishedStates continue owning the layout independently.
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [c_segment, info = std::move(info), layout = std::move(layout)](
+                folly::CancellationToken token) -> bool* {
+                auto* segment =
+                    dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                        static_cast<milvus::segcore::SegmentInterface*>(
+                            c_segment));
+                AssertInfo(segment != nullptr,
+                           "borrowed schema reopen requires a sealed segment");
+                milvus::OpContext ctx(token);
+                segment->Reopen(&ctx, info, layout);
+                return nullptr;
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    } catch (...) {
+        auto error = std::current_exception();
+        auto future = milvus::futures::Future<bool>::async(
+            milvus::futures::getLoadCPUExecutor(),
+            milvus::futures::ExecutePriority::NORMAL,
+            [error](folly::CancellationToken) -> bool* {
+                std::rethrow_exception(error);
+            },
+            milvus::futures::PoolType::kLoad);
+        return static_cast<CFuture*>(static_cast<void*>(
+            static_cast<milvus::futures::IFuture*>(future.release())));
+    }
 }
 
 CFuture*
@@ -359,6 +457,40 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
         static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
+CStatus
+AdoptSealedSegmentReadState(CSegmentInterface c_segment,
+                            CSegmentInterface read_segment) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        auto* read = dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+            static_cast<milvus::segcore::SegmentInterface*>(read_segment));
+        AssertInfo(segment != nullptr && read != nullptr,
+                   "read-state adoption requires sealed segments");
+        segment->AdoptReadState(*read);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+PinSealedSegmentReadState(CSegmentInterface c_segment,
+                          CSegmentInterface* read_segment) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        AssertInfo(segment != nullptr,
+                   "read-state pin requires a sealed segment");
+        *read_segment = segment->PinReadState().release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 void
 DeleteSegment(CSegmentInterface c_segment) {
     SCOPE_CGO_CALL_METRIC();
@@ -452,8 +584,10 @@ AcquireSegmentReadLease(milvus::segcore::SegmentInterface* segment,
 }
 
 void
-ValidateSegmentSchemaCompatibility(milvus::segcore::SegmentInterface* segment,
-                                   const milvus::SchemaPtr& plan_schema) {
+ValidateSegmentSchemaCompatibility(
+    milvus::segcore::SegmentInterface* segment,
+    const milvus::SchemaPtr& plan_schema,
+    const std::vector<milvus::FieldId>& access_fields) {
     if (segment->type() == SegmentType::Growing) {
         return;
     }
@@ -464,6 +598,7 @@ ValidateSegmentSchemaCompatibility(milvus::segcore::SegmentInterface* segment,
                "sealed segment {} does not support schema validation",
                segment->get_segment_id());
     sealed->ValidateSchemaCompatibility(plan_schema);
+    sealed->ValidateLogicalFields(access_fields);
 }
 
 //////////////////////////////    public C API wrappers    //////////////////////////////
@@ -513,7 +648,8 @@ AsyncSearch(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
-            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            ValidateSegmentSchemaCompatibility(
+                segment, plan->schema_, plan->access_entries_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -622,7 +758,8 @@ AsyncRetrieve(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
-            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            ValidateSegmentSchemaCompatibility(
+                segment, plan->schema_, plan->access_entries_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -1055,7 +1192,8 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
-            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            ValidateSegmentSchemaCompatibility(
+                segment, plan->schema_, plan->access_entries_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);
@@ -1230,7 +1368,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
-            ValidateSegmentSchemaCompatibility(segment, plan->schema_);
+            ValidateSegmentSchemaCompatibility(
+                segment, plan->schema_, plan->access_entries_);
             auto internal_segment =
                 static_cast<milvus::segcore::SegmentInternalInterface*>(
                     segment);

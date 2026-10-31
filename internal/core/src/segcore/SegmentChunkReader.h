@@ -185,17 +185,6 @@ class SegmentChunkReader {
                          : segment_->GetStructElementOffsets(field_id);
     }
 
-    SchemaPtr
-    GetSchemaSnapshot() const {
-        if (snapshot_) {
-            auto schema = snapshot_->get_schema_snapshot();
-            AssertInfo(schema != nullptr,
-                       "chunk reader snapshot must provide a non-null schema");
-            return schema;
-        }
-        return segment_->get_schema_snapshot();
-    }
-
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
     // read the column from the frozen published state (same generation as the
     // chunk boundaries above); otherwise fall back to the segment.

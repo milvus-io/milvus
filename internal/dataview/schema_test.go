@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -86,7 +87,7 @@ func TestAdvanceSchemaFollowsReplacementAndMetadataOnlyBump(t *testing.T) {
 	a := []LoadableSegment{{SegmentID: 10, VChannel: "v1", PartitionID: 1, SchemaVersion: 1}}
 	current.Store(&a)
 	observed := make(chan struct{}, 8)
-	project := func(context.Context, int64) ([]LoadableSegment, error) {
+	project := func(context.Context, int64, *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		select {
 		case observed <- struct{}{}:
 		default:
@@ -166,7 +167,7 @@ func TestAdvanceSchemaWakesWhenRecomputeQueueIsFull(t *testing.T) {
 	var version atomic.Int32
 	version.Store(1)
 	observed := make(chan struct{}, 2)
-	m.projector = func(context.Context, int64) ([]LoadableSegment, error) {
+	m.projector = func(context.Context, int64, *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		v := version.Load()
 		select {
 		case observed <- struct{}{}:
@@ -201,7 +202,7 @@ func TestAdvanceSchemaDropWakesWaiter(t *testing.T) {
 	_, err := m.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, SchemaVersion: 1, VChannels: []string{"v1"}})
 	require.NoError(t, err)
 	observed := make(chan struct{})
-	project := func(context.Context, int64) ([]LoadableSegment, error) {
+	project := func(context.Context, int64, *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		close(observed)
 		return []LoadableSegment{{SegmentID: 10, VChannel: "v1", PartitionID: 1, SchemaVersion: 1}}, nil
 	}
@@ -228,7 +229,9 @@ func TestAdvanceSchemaRetriesProjectionFailure(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	_, err = m.OnCreateCollection(t.Context(), CreateCollectionDataViewEvent{CollectionID: 1, SchemaVersion: 1, VChannels: []string{"v1"}})
 	require.NoError(t, err)
-	_, err = m.AdvanceSchema(t.Context(), 1, 2, func(context.Context, int64) ([]LoadableSegment, error) { return nil, context.DeadlineExceeded })
+	_, err = m.AdvanceSchema(t.Context(), 1, 2, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
+		return nil, context.DeadlineExceeded
+	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	_, err = m.AdvanceSchema(t.Context(), 1, 2, projectSegments(LoadableSegment{SegmentID: 10, VChannel: "v1", PartitionID: 1, SchemaVersion: 2}))
 	require.NoError(t, err)

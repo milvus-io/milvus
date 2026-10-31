@@ -356,7 +356,11 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 		var emit func(id, rootID UniqueID, fromFallback bool)
 		emit = func(id, rootID UniqueID, fromFallback bool) {
 			segment, ok := validSegmentInfos[id]
-			if ok && segment != nil && expanded.Contain(id) {
+			// DataView admission can certify a complete ancestor frontier behind
+			// an unready intermediate. Flatten it without emitting that intermediate.
+			// Legacy callers only admit indexed direct parents, so stop there.
+			if ok && segment != nil && (expanded.Contain(id) ||
+				(fromFallback && !segmentIndexed(id) && len(segment.GetCompactionFrom()) > 0 && allParentsReady(segment.GetCompactionFrom()...))) {
 				if visited == nil {
 					visited = make(map[candidateVisit]struct{})
 				}
@@ -801,7 +805,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
-		return coll, nil
+		return h.s.meta.collectionForPreparation(ctx, coll)
 	}
 	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -827,7 +831,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 		// Dropped and recycled by GC right after it was loaded.
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	return coll, nil
+	return h.s.meta.collectionForPreparation(ctx, coll)
 }
 
 func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
@@ -1031,6 +1035,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			NumOfRows:         segInfo.GetNumOfRows(),
 			StartPosition:     segInfo.GetStartPosition(),
 			DmlPosition:       segInfo.GetDmlPosition(),
+			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 			StorageVersion:    segInfo.GetStorageVersion(),
 			IsSorted:          segInfo.GetIsSorted(),
 			Binlogs:           segInfo.GetBinlogs(),
@@ -1042,7 +1047,6 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
-			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 		})
 	}
 

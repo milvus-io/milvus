@@ -217,6 +217,27 @@ func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
 }
 
+// IsCollectionDropped checks authoritative lifecycle metadata, including during
+// recovery. Creating/Restoring collections are unavailable to public Describe
+// but still own pending publication obligations.
+func (c *Core) IsCollectionDropped(ctx context.Context, collectionID int64) (bool, error) {
+	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch collection.State {
+	case pb.CollectionState_CollectionDropping, pb.CollectionState_CollectionDropped:
+		return true, nil
+	case pb.CollectionState_CollectionCreating, pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
+		return false, nil
+	default:
+		return false, merr.WrapErrDataIntegrityMsg("collection %d has unknown state %d", collectionID, collection.State)
+	}
+}
+
 func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collectionID int64) (bool, error) {
 	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -226,7 +247,7 @@ func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collec
 		return false, err
 	}
 	switch collection.State {
-	case pb.CollectionState_CollectionCreated:
+	case pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
 		return true, nil
 	case pb.CollectionState_CollectionCreating,
 		pb.CollectionState_CollectionDropping,
@@ -1192,6 +1213,13 @@ func (c *Core) IsCollectionAvailable(collectionID int64) bool {
 	}
 	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
 	return ok && checker.IsCollectionAvailable(collectionID)
+}
+
+func (c *Core) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetCollectionProperties(ctx, collectionID)
 }
 
 // HasCollection check collection existence

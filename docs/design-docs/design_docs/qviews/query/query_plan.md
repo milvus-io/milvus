@@ -113,15 +113,19 @@ timestamp cannot occupy shared TimeTick sync work. The inspector certifies
 publication; planning separately waits for the selected runtime to apply the
 required frontiers before executing. This slow path retains the conservative
 (B,B) execution pair after establishing coverage.
-This extraction does not enable the Proxy Iterator path or extend historical
-retention.
+Proxy Iterator uses this scalar barrier for snapshot continuation. Historical
+retention is unchanged.
 
 Internal partial-update CAS reads use the ordinary Strong snapshot. Their
 channel ReadTs is max(GrowingMVCC, TransformMVCC): both frontiers come from one
 complete prefix and there are no later query-visible channel changes inside
 that prefix. No extra certificate or requirement that ReadTs reach BeginTs is
-needed. The write path still checks conflicts and retained-history bounds;
-old reads outside the history window fail instead of bypassing validation.
+needed. The write path still checks conflicts and the actual forgotten-write boundary.
+TTL only reclaims PK records: eviction or a budget omission advances that
+boundary to the discarded write's TimeTick, never to current time minus TTL.
+Reads below the boundary fail; equality is valid because that write is already
+in the snapshot. Thus idle snapshots do not expire solely with wall-clock age.
+WAL lifecycle, term and collection/transaction fences remain enforced.
 The client retains successful shard snapshots even for empty results.
 
 DropCollection removes the channel when its complete prefix is published.
@@ -209,11 +213,18 @@ Successful transaction bodies record whether Transform consumption is required
 before releasing their in-flight slots. Recovery reconstructs the same
 classification. At a complete ACK prefix, an insert-only commit advances only
 GrowingMVCC; a commit containing Delete advances both frontiers. ACK details
-remain available until WAB.Append and QueryMVCC publication finish. Empty
-transactions retain their existing acceptance behavior and conservative dual
-frontier projection.
+remain available until WAB.Append and QueryMVCC publication finish. The production
+integration rejects transactions with no successful bodies after in-flight appends
+finish.
 
 A published RestoreSnapshot, like CreateCollection, initializes both frontiers
 for its channel. Observing its append alone cannot register a query snapshot;
-late append callbacks cannot overwrite newer published progress. The full
-RestoreSnapshot creation workflow remains separate production integration.
+late append callbacks cannot overwrite newer published progress. The
+RestoreSnapshot creation workflow is wired by the production integration.
+
+## Partition statistics and pruning
+
+[Global segment pruning](../query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

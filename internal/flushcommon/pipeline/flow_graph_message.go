@@ -62,10 +62,6 @@ type FlowGraphMsg struct {
 	segmentsToSync []typeutil.UniqueID
 	dropCollection bool
 	dropPartitions []typeutil.UniqueID
-
-	// alter wal signal
-	isAlterWal       bool
-	alterWalTimeTick uint64
 }
 
 func (fgMsg *FlowGraphMsg) TimeTick() typeutil.Timestamp {

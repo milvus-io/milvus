@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -344,6 +345,13 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 				return nil, err
 			}
 
+			// View services have their own protocol. Only ownership/readiness and
+			// transport-unavailable errors belong in this assignment retry loop.
+			var viewStatus *viewerror.ViewClientStatus
+			if errors.As(err, &viewStatus) && !queryViewRPCNeedsWaitForReady(err) {
+				return nil, err
+			}
+
 			// Check if the error is permanent failure until new assignment.
 			if assign != nil && isPermanentFailureUntilNewAssignment(err) {
 				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
@@ -404,6 +412,10 @@ func isPermanentFailureUntilNewAssignment(err error) bool {
 	}
 	// The error is reported by grpc balancer at client that the sub connection is not exist (remote server is down at view of session).
 	if picker.IsErrSubConnNoExist(err) {
+		return true
+	}
+	// View services report stale WAL ownership using their own protocol.
+	if viewerror.AsViewError(err).IsNotPrimary() {
 		return true
 	}
 	// The error is reported by remote server that the wal is not exist at remote server.

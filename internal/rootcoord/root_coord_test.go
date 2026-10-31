@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -54,6 +55,11 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -62,6 +68,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -79,6 +86,46 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestIsCollectionDropped(t *testing.T) {
+	mockey.PatchConvey("only definitive lifecycle deletion releases publication obligations", t, func() {
+		var collection *model.Collection
+		var lookupErr error
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(_ *MetaTable, _ context.Context, _ string, id UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+			require.Equal(t, int64(100), id)
+			require.Equal(t, typeutil.MaxTimestamp, ts)
+			require.True(t, allowUnavailable, "Creating/Restoring must not be mistaken for deleted")
+			return collection, lookupErr
+		}).Build()
+		core := &Core{meta: &MetaTable{}}
+		for state, want := range map[etcdpb.CollectionState]bool{
+			etcdpb.CollectionState_CollectionCreating:  false,
+			etcdpb.CollectionState_CollectionCreated:   false,
+			etcdpb.CollectionState_CollectionRestoring: false,
+			etcdpb.CollectionState_CollectionDropping:  true,
+			etcdpb.CollectionState_CollectionDropped:   true,
+		} {
+			collection = &model.Collection{CollectionID: 100, State: state}
+			dropped, err := core.IsCollectionDropped(t.Context(), 100)
+			require.NoError(t, err)
+			require.Equal(t, want, dropped, state.String())
+		}
+		collection = nil
+		lookupErr = merr.WrapErrCollectionNotFound(int64(100))
+		dropped, err := core.IsCollectionDropped(t.Context(), 100)
+		require.NoError(t, err)
+		require.True(t, dropped)
+		lookupErr = context.DeadlineExceeded
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, dropped)
+		lookupErr = nil
+		collection = &model.Collection{CollectionID: 100, State: etcdpb.CollectionState(100)}
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.False(t, dropped)
+	})
 }
 
 func TestDataViewCollectionRecoveryValidator(t *testing.T) {
@@ -158,6 +205,20 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	// DDL-only tests have no loaded collections. Use a recovered empty config
+	// store so schema publication still executes its real release/no-load path.
+	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	previous := qvresource.Resource()
+	notifications := readiness.NewNotifications()
+	schemaPreparation := mockey.Mock((*testSchemaDataViews).PrepareDataViewSchema).Return(nil).Build()
+	t.Cleanup(func() { schemaPreparation.UnPatch() })
+	qvresource.Init(&qvresource.Resources{
+		Reconciler:  &testSchemaDataViews{},
+		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil, nil),
+		ShardViews: &coordview.ShardViewRegistry{}, Readiness: notifications,
+	})
+	t.Cleanup(func() { notifications.Close(); qvresource.Init(previous) })
 
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
@@ -202,8 +263,15 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
 	streaming.SetWALForTest(wal)
 
+	core.session = sessionutil.NewSessionWithEtcd(t.Context(), path, kv)
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		if msg.MessageType() == message.MessageTypeAlterCollection {
+			altered := message.MustAsMutableAlterCollectionMessageV2(msg)
+			if messageutil.IsSchemaChange(altered.Header()) {
+				require.True(t, msg.BroadcastHeader().AckSyncUp, "schema callback must wait for consuming-side flush completion")
+			}
+		}
 		// Stamp the header the way the real broadcaster does, control channel included.
 		msg = msg.OverwriteBroadcastHeader(1)
 		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
@@ -397,6 +465,7 @@ func TestRootCoord_DropCollection(t *testing.T) {
 }
 
 func TestRootCoord_TruncateCollection(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -407,6 +476,7 @@ func TestRootCoord_TruncateCollection(t *testing.T) {
 }
 
 func TestRootCoord_CreatePartition(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -2421,4 +2491,11 @@ func TestRootCoord_GetFileResources(t *testing.T) {
 
 func TestRootCoordSuite(t *testing.T) {
 	suite.Run(t, new(RootCoordSuite))
+}
+
+// Boundary stub: ordinary DDL unit tests do not run the DataCoord materializer.
+type testSchemaDataViews struct{ qvresource.DataViewReconciler }
+
+func (*testSchemaDataViews) PrepareDataViewSchema(context.Context, int64, *schemapb.CollectionSchema, *schemapb.CollectionSchema) error {
+	panic("mock with mockey")
 }

@@ -47,7 +47,7 @@ func interfaceSegment(id, rows int64) dataview.LoadableSegment {
 
 func publishInterfaceDataView(t *testing.T, m dataview.Manager, id, rows int64) *viewpb.DataVersion {
 	t.Helper()
-	version, err := m.RecomputeNow(t.Context(), testCollectionID, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+	version, err := m.RecomputeNow(t.Context(), testCollectionID, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return []dataview.LoadableSegment{interfaceSegment(id, rows)}, nil
 	})
 	require.NoError(t, err)

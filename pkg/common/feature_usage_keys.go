@@ -39,7 +39,7 @@ var officialFeatureKeys = func() map[string]struct{} {
 		EnableAnalyzerKey, AnalyzerParamKey,
 
 		// collection properties
-		CollectionTTLConfigKey, CollectionTTLFieldKey, CollectionAutoCompactionKey, CollectionDescription,
+		CollectionTTLConfigKey, CollectionTTLFieldKey, CollectionAutoReleaseIdleTTLKey, CollectionAutoCompactionKey, CollectionDescription,
 		CollectionOnTruncatingKey, CollectionAllowInsertNonBM25FunctionOutputs,
 		CollectionInsertRateMaxKey, CollectionInsertRateMinKey,
 		CollectionDeleteRateMaxKey, CollectionDeleteRateMinKey,

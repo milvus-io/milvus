@@ -8,10 +8,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+func loadFieldIDs(fields []*viewpb.LoadFieldConfig) []int64 {
 	if len(fields) == 0 {
 		return nil
 	}

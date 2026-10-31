@@ -30,10 +30,12 @@ L0 compaction advances DataView compact_version (a Manifest-version change
 with no dedicated counter). It invalidates the current
 QueryView: the state machine generates a new QueryView at the latest
 DataVersion so the old Manifest revision can be released. The TransformLog
-start frontier remains a TODO pending the StreamingNode shard barrier
-described in
-[Transform Start-After TimeTick](transform_start_after_timetick.md). The
-scheduling policy is not implemented by the current DataView-only PR.
+start frontier is generated from the version-bound W/A inputs described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). It
+calculates `min(W, A)` for QueryView; DataView persists only W/A.
+Checkpoint reports cannot generate a DataView. A Manifest update need not advance
+the frontier. The scheduling policy is not implemented by the current
+DataView-only PR.
 
 ### 1.1 Preparing
 
@@ -172,7 +174,7 @@ scheduling policy is not implemented by the current DataView-only PR.
 
 **Automatic Behavior:**
 1. Persist Unrecoverable to ETCD (if not already persisted).
-2. Wait for Manager to advance to Dropping (typically after generating a replacement view).
+2. If the shard has already received RequestRelease, the Manager immediately advances to Dropping, including when a node reports a failure after the release started. Otherwise, wait for the Manager to generate a replacement view before releasing protected resources.
 
 **Transitions:**
 
@@ -345,7 +347,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 **Automatic Behavior:**
 1. Replay WAL from the checkpoint position to recover growing segments.
-2. Do NOT serve queries (data is incomplete).
+2. Do NOT serve queries (data is incomplete). SN query acquisition waits on
+   local state notifications when a matching UpRecovering view is the only
+   eligible candidate, then acquires an Up lease after recovery. Cancellation,
+   recovery failure, teardown and shutdown terminate or wake the wait.
 3. Multiple UpRecovering versions may coexist. After recovery, query planning
    selects the highest available Up version.
 4. Resource preparation uses the same final-commit and applied-sealed-event
@@ -429,11 +434,11 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 ## 3. QueryNode State Machine
 
-The resource preparation steps below describe the target QN integration. Remote
-TransformLog consumption and its catch-up readiness wiring are not implemented
-by the current SN extraction.
+The qv branch wires remote TransformLog consumption through a shared VChannel
+buffer. Segment readiness waits for ordered catch-up application; queries still
+wait for their own Transform MVCC boundary.
 
-QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
+QueryNode is fully stateless with no persistence and no recovery process. It does NOT follow Coord Up/Down states — it can serve queries as soon as it reaches Ready. A local Dropping state waits for asynchronous segment release before reporting Dropped.
 
 QN stores the complete pending report proto at the moment a state/progress
 event occurs. `ConsumeReport` returns that immutable snapshot and clears it;
@@ -445,14 +450,13 @@ later local progress does not retroactively mutate an already-pending report.
 - Received Preparing sync signal from Coord via SyncQueryView.
 
 **Automatic Behavior:**
-1. Resolve each Segment's loading metadata from the DataView Manifest version:
-   - Version `0`: Coord keeps watching Coordinator SegmentMeta, resolves the
-     complete current SegmentInfo, and freezes it into this QueryView/load
-     operation before dispatch.
-   - Positive version: QueryNode constructs the canonical StorageV3 Manifest
-     object path from Collection/Partition/Segment IDs plus the version and
-     derives all loading metadata directly from that Manifest; no Coordinator
-     SegmentMeta watch is required for this Segment.
+1. Resolve unmet Segment loading requirements through the unary batch
+   `GetQueryViewSegmentLoadInfo` RPC (StorageV3, with indexes in the Manifest).
+   QN batches pending IDs by Collection and receives a complete current snapshot
+   or an independent error for each Segment. It validates the Manifest against
+   the View's requirement, together with the matching statistics and certified
+   Transform replay cursor. Compatible prepared ReadStates remain reusable;
+   Ready Views do not poll metadata. See [resource preparation §7](qnview/querynode_queryview_resource_preparation.md#7-on-demand-loading-metadata).
 2. Asynchronously load segments from object storage.
 3. Subscribe to the pure delete stream from SN, apply its ordered Entries and
    establish catch-up using SyncUp and the required Transform MVCC boundary.
@@ -477,7 +481,7 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Preparing → QN continues preparing; normal.
-- Coord pushes Dropped → QN transitions to Dropped directly.
+- Coord pushes Dropped → QN enters local Dropping, then reports Dropped after segment release completes.
 - Other signals → QN ignores (invalid transition).
 
 ### 3.2 Ready
@@ -521,11 +525,14 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 ### 3.4 Dropped
 
 **Entry Conditions:**
-- Received Dropped push from Coord.
+- Received Dropped push from Coord and completed the local segment release.
 
-**Automatic Behavior:**
-1. Release all view-related segments.
-2. Disconnect pure delete stream subscriptions.
-3. Report Dropped to Coord.
+**Before reporting Dropped:**
+1. Withdraw query admission and wait for this View's segment queries and
+   preparation operations to finish.
+2. Release its references and wait for unshared or already-closing segment
+   owners to finish physical destruction. Segments still shared by other Views
+   may remain; synchronous field/index/ReadState pruning is not required.
+3. Release its buffer/runtime references and report Dropped to Coord.
 
 **Transitions:** None (terminal state; state machine instance destroyed).

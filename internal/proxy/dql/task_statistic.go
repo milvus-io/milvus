@@ -14,10 +14,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -33,8 +35,9 @@ const (
 )
 
 type GetStatisticsTask struct {
-	request *milvuspb.GetStatisticsRequest
-	result  *milvuspb.GetStatisticsResponse
+	viewQueryClient queryclient.Client
+	request         *milvuspb.GetStatisticsRequest
+	result          *milvuspb.GetStatisticsResponse
 	baseTask
 	Condition
 	collectionName string
@@ -63,14 +66,15 @@ type GetStatisticsTask struct {
 // derived from the taskmodel.TaskNode contract.
 func NewGetStatisticsTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.GetStatisticsRequest, tr *timerecord.TimeRecorder) *GetStatisticsTask {
 	return &GetStatisticsTask{
-		request:        request,
-		baseTask:       baseTask{MetaCache: node.GetMetaCache()},
-		Condition:      NewTaskCondition(ctx),
-		ctx:            ctx,
-		tr:             tr,
-		mixc:           node.MixCoord(),
-		lb:             node.LBPolicy(),
-		shardclientMgr: node.ShardMgr(),
+		viewQueryClient: viewQueryClientFromNode(node),
+		request:         request,
+		baseTask:        baseTask{MetaCache: node.GetMetaCache()},
+		Condition:       NewTaskCondition(ctx),
+		ctx:             ctx,
+		tr:              tr,
+		mixc:            node.MixCoord(),
+		lb:              node.LBPolicy(),
+		shardclientMgr:  node.ShardMgr(),
 	}
 }
 
@@ -279,6 +283,16 @@ func (g *GetStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	g.PartitionIDs = g.loadedPartitionIDs
 	if g.resultBuf == nil {
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
+	}
+	if g.viewQueryClient != nil {
+		rows, err := g.viewQueryClient.Legacy().Statistics(ctx, g.CollectionID, &viewpb.StatisticsRequest{
+			PartitionIds: g.loadedPartitionIDs,
+		}, g.GuaranteeTimestamp)
+		if err != nil {
+			return err
+		}
+		g.resultBuf.Insert(&internalpb.GetStatisticsResponse{Status: merr.Success(), Stats: []*commonpb.KeyValuePair{{Key: "row_count", Value: strconv.FormatInt(rows, 10)}}})
+		return nil
 	}
 	err := g.lb.Execute(ctx, shardclient.CollectionWorkLoad{
 		Db:             g.request.GetDbName(),

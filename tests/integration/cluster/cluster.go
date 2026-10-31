@@ -99,6 +99,15 @@ func NewMiniClusterV3(
 	for _, opt := range opts {
 		opt(client)
 	}
+	// SetupSuite cannot tear down a cluster whose constructor did not return.
+	// In particular, a readiness timeout must not leave nodes occupying the
+	// fixed integration-test ports for the next suite.
+	defer func() {
+		if failure := recover(); failure != nil {
+			client.Stop()
+			panic(failure)
+		}
+	}()
 	client.init()
 	client.Logger().Info(ctx,
 
@@ -191,8 +200,9 @@ func (c *MiniClusterV3) init() {
 
 // initClients initializes the clients.
 func (c *MiniClusterV3) initClients() {
-	c.initMilvusClient()
+	// Observe a failed coordinator before waiting for dependent Proxy readiness.
 	c.initInternalClient()
+	c.initMilvusClient()
 }
 
 // initMilvusClient initializes the milvus client.
@@ -201,13 +211,13 @@ func (c *MiniClusterV3) initMilvusClient() {
 		return
 	}
 
-	_, err := c.defaultProxy.GetAddress(context.Background())
+	_, err := c.defaultProxy.GetAddress(c.ctx)
 	if err != nil {
 		panic(err)
 	}
 
 	// wait for proxy ready.
-	clientConn, err := grpc.DialContext(context.Background(), "localhost:19530", getGrpcDialOpt()...)
+	clientConn, err := grpc.DialContext(c.ctx, "localhost:19530", getGrpcDialOpt()...)
 	if err != nil {
 		panic(err)
 	}
@@ -708,15 +718,19 @@ func (c *MiniClusterV3) getClusterOperationOpt(opts ...ClusterOperationOpt) *clu
 func (c *MiniClusterV3) getOptions() []process.Option {
 	c.nodeID++
 	env := map[string]string{
-		"QUOTAANDLIMITS_ENABLED":  "false", // disable the quota limits by default to avoid rpc failure.
-		"PROXY_IP":                "localhost",
-		"STREAMINGNODE_IP":        "localhost",
-		"QUERYNODE_IP":            "localhost",
-		"DATANODE_IP":             "localhost",
-		"ROOTCOORD_IP":            "localhost",
-		"PROXY_PORT":              "19530",
-		"ROOTCOORD_DMLCHANNELNUM": "2", // set smaller dml channel num to speed up the test.
-		paramtable.MilvusConfigRefreshIntervalEnvKey: c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
+		// QueryView resource preparation requires StorageV3 data and manifest
+		// index publication. Explicit format-specific suites may override these.
+		"COMMON_STORAGE_USELOONFFI":                   "true",
+		"DATACOORD_INDEX_WRITESEGMENTINDEXTOMANIFEST": "true",
+		"QUOTAANDLIMITS_ENABLED":                      "false", // disable the quota limits by default to avoid rpc failure.
+		"PROXY_IP":                                    "localhost",
+		"STREAMINGNODE_IP":                            "localhost",
+		"QUERYNODE_IP":                                "localhost",
+		"DATANODE_IP":                                 "localhost",
+		"ROOTCOORD_IP":                                "localhost",
+		"PROXY_PORT":                                  "19530",
+		"ROOTCOORD_DMLCHANNELNUM":                     "2",                              // set smaller dml channel num to speed up the test.
+		paramtable.MilvusConfigRefreshIntervalEnvKey:  c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
 	}
 	for k, v := range c.extraEnv {
 		env[k] = v

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 
 	"github.com/samber/lo"
@@ -48,14 +47,14 @@ type DMLGroup struct {
 }
 
 type SourceCollectionInfo struct {
-	collectionID   int64
-	partitionID    int64
-	SegmentIDs     []int64
-	insertedIDs    *schemapb.IDs
-	storageVersion int
-	// Timestamp range extracted from source insert binlogs.
-	l1MinTs uint64 // min timestamp from L1 segments' insert binlogs
-	l1MaxTs uint64 // max timestamp from L1 segments' insert binlogs
+	collectionID int64
+	partitionID  int64
+	SegmentIDs   []int64
+	insertedIDs  *schemapb.IDs
+	snapshotURI  string
+	// Timestamp range retained in source column-group metadata.
+	l1MinTs uint64 // min timestamp from L1 column groups
+	l1MaxTs uint64 // max timestamp from L1 column groups
 }
 
 func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
@@ -188,7 +187,14 @@ func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *S
 	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
 	})
-	// Extract timestamp ranges from source segments' binlogs
+	s.Require().NotEmpty(segments)
+	for _, segment := range segments {
+		s.Require().EqualValues(storage.StorageV3, segment.GetStorageVersion())
+		s.Require().NotEmpty(segment.GetManifestPath())
+	}
+
+	// V3 column-group summaries retain row timestamp bounds even though
+	// actual data-file discovery uses the Manifest.
 	var l1MinTs uint64 = math.MaxUint64
 	var l1MaxTs uint64 = 0
 	for _, segment := range segments {
@@ -203,6 +209,9 @@ func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *S
 			}
 		}
 	}
+
+	s.Require().NotEqual(uint64(math.MaxUint64), l1MinTs)
+	s.Require().Positive(l1MaxTs)
 
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
@@ -253,16 +262,37 @@ func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *S
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
 
+	// StorageV3 backup import consumes snapshot metadata containing exact
+	// Manifest versions; legacy insert_log prefixes are not a V3 input format.
+	snapshotName := "binlog_source_" + funcutil.RandomString(8)
+	status, err := c.MilvusClient.CreateSnapshot(ctx, &milvuspb.CreateSnapshotRequest{
+		Name: snapshotName, CollectionName: collectionName,
+	})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.T().Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		status, err := c.MilvusClient.DropSnapshot(cleanupCtx, &milvuspb.DropSnapshotRequest{
+			Name: snapshotName, CollectionName: collectionName,
+		})
+		s.NoError(merr.CheckRPCCall(status, err))
+	})
+	snapshot, err := c.MilvusClient.DescribeSnapshot(ctx, &milvuspb.DescribeSnapshotRequest{
+		Name: snapshotName, CollectionName: collectionName,
+	})
+	s.Require().NoError(merr.CheckRPCCall(snapshot, err))
+	s.Require().NotEmpty(snapshot.GetS3Location())
+
 	return &SourceCollectionInfo{
 		collectionID: collectionID,
 		partitionID:  partitionID,
 		SegmentIDs: lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
 			return segment.GetID()
 		}),
-		insertedIDs:    totalInsertedIDs,
-		storageVersion: int(storage.StorageV2),
-		l1MinTs:        l1MinTs,
-		l1MaxTs:        l1MaxTs,
+		insertedIDs: totalInsertedIDs,
+		snapshotURI: snapshot.GetS3Location(),
+		l1MinTs:     l1MinTs,
+		l1MaxTs:     l1MaxTs,
 	}
 }
 
@@ -317,12 +347,8 @@ func (s *importTestBase) runBinlogTest(dmlGroup *DMLGroup) {
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	// binlog import
-	files := make([]*internalpb.ImportFile, 0)
-	for _, segmentID := range segmentIDs {
-		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
-			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
-	}
+	// Import the V3 snapshot while retaining source primary keys and timestamps.
+	files := []*internalpb.ImportFile{{Paths: []string{sourceCollectionInfo.snapshotURI}}}
 
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
@@ -330,7 +356,7 @@ func (s *importTestBase) runBinlogTest(dmlGroup *DMLGroup) {
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
 			{Key: "backup", Value: "true"},
-			{Key: importutilv2.StorageVersion, Value: strconv.Itoa(sourceCollectionInfo.storageVersion)},
+			{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
@@ -353,12 +379,9 @@ func (s *importTestBase) runBinlogTest(dmlGroup *DMLGroup) {
 	})
 	s.True(ok)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
-	s.True(len(segment.GetBinlogs()) > 0)
-	s.NoError(CheckLogID(segment.GetBinlogs()))
-	s.True(len(segment.GetDeltalogs()) == 0)
-	s.NoError(CheckLogID(segment.GetDeltalogs()))
-	s.True(len(segment.GetStatslogs()) > 0)
-	s.NoError(CheckLogID(segment.GetStatslogs()))
+	s.EqualValues(storage.StorageV3, segment.GetStorageVersion())
+	s.NotEmpty(segment.GetManifestPath())
+	s.Empty(segment.GetDeltalogs())
 
 	// Verify L1 segment positions match actual timestamps from source collection
 	s.Equal(sourceCollectionInfo.l1MinTs, segment.GetStartPosition().GetTimestamp(),

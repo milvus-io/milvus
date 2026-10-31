@@ -4660,11 +4660,11 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_external_table_refresh_requires_release_to_see_new_data(self, minio_env, external_prefix):
+    def test_milvus_client_external_table_refresh_visible_without_release(self, minio_env, external_prefix):
         """
-        target: test MilvusClient external table refresh requires release to see new data
-        method: Without release+load, queries still see pre-refresh data
-        expected: behavior matches the case assertion.
+        target: test refreshed external data is visible without release+load
+        method: refresh a loaded collection after adding another data file
+        expected: completed refresh exposes all rows, including after release+load.
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -4681,8 +4681,9 @@ class TestMilvusClientExternalTableLifecycle(ExternalTableTestBase):
         upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/part1.parquet", gen_basic_parquet_bytes(100, 100))
         self.refresh_and_wait(client, coll)
 
-        stale = self.query_count(client, coll)
-        assert stale == 100, f"without release+load expected 100, got {stale}"
+        # Refresh completion includes publishing the refreshed data to serving views.
+        refreshed = self.query_count(client, coll)
+        assert refreshed == 200, f"completed refresh expected 200, got {refreshed}"
 
         self.release_collection(client, coll)
         self.load_collection(client, coll)

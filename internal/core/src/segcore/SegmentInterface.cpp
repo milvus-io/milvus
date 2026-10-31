@@ -68,7 +68,8 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto schema = get_schema_snapshot();
+    auto schema =
+        type() == SegmentType::Growing ? get_schema_snapshot() : plan->schema_;
     auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
@@ -166,6 +167,7 @@ SegmentInternalInterface::Search(
                                        collection_ttl,
                                        entity_ttl_physical_time_us,
                                        std::move(trace_span));
+    visitor.SetReadSchema(plan->schema_);
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
     auto results = std::make_unique<SearchResult>();
@@ -226,6 +228,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetReadSchema(plan->schema_);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;
@@ -749,8 +752,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     auto data_type = field_meta.get_data_type();
 
     // Retrieve already holds mutex_; acquiring it again may deadlock
@@ -773,8 +775,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     set_field_avg_size(field_meta, num_rows, field_size);
 }
 

@@ -368,6 +368,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobState(jobID int64, state indexp
 			return true, nil
 		}
 
+		if state == indexpb.JobState_JobStateFailed && job.GetSegmentsApplied() && job.GetIndexWaitStartedTime() == 0 {
+			return true, nil
+		}
 		job.State = state
 		job.FailReason = failReason
 		if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
@@ -397,6 +400,19 @@ func (m *externalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 	preApply func(*datapb.ExternalCollectionRefreshJob) error,
 ) (bool, error) {
 	return m.updateJobStateWithPreApply(jobID, state, failReason, preApply, jobStateWriteOpts{})
+}
+
+// BeginPublication commits results once and keeps the job active until serving
+// views catch up. The marker follows the segment write; replay after a crash
+// between those writes is protected by segment manifest versions.
+func (m *externalCollectionRefreshMeta) BeginPublication(jobID int64, preApply func(*datapb.ExternalCollectionRefreshJob) error) (bool, error) {
+	return m.updateJobStateWithPreApply(jobID, indexpb.JobState_JobStateInProgress, "", preApply, jobStateWriteOpts{
+		skip: func(job *datapb.ExternalCollectionRefreshJob) bool { return job.GetSegmentsApplied() },
+		mutate: func(job *datapb.ExternalCollectionRefreshJob) {
+			job.SegmentsApplied = true
+			job.Progress = indexWaitProgressFloor
+		},
+	})
 }
 
 // BeginIndexWait applies the job's segment results and marks it as waiting for
@@ -559,6 +575,9 @@ func (m *externalCollectionRefreshMeta) UpdateJobProgress(jobID int64, progress 
 		if job.GetState() == indexpb.JobState_JobStateFinished ||
 			job.GetState() == indexpb.JobState_JobStateFailed {
 			return true, nil
+		}
+		if job.GetSegmentsApplied() {
+			progress = min(progress, int64(99))
 		}
 		// Nothing to persist when the value already matches. Callers compare
 		// against their own snapshot, which can be a tick stale; this is the

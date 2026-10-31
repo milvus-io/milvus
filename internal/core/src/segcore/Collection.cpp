@@ -18,8 +18,30 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Collection.h"
+#include "segcore/SealedFieldLayout.h"
 
 namespace milvus::segcore {
+
+std::shared_ptr<const SealedFieldLayout>
+Collection::GetSealedFieldLayout(const LoadScope& scope) {
+    auto schema = get_schema();
+    auto indexes = get_index_meta();
+    std::lock_guard lock(layouts_mutex_);
+    for (auto it = layouts_.begin(); it != layouts_.end();) {
+        if (auto layout = it->lock()) {
+            if (layout->Matches(schema, indexes, scope)) {
+                return layout;
+            }
+            ++it;
+        } else {
+            it = layouts_.erase(it);
+        }
+    }
+    auto layout =
+        std::make_shared<const SealedFieldLayout>(schema, scope, indexes);
+    layouts_.push_back(layout);
+    return layout;
+}
 
 Collection::Collection(const milvus::proto::schema::CollectionSchema* schema) {
     Assert(schema != nullptr);

@@ -31,11 +31,11 @@ func NewServer(walManager walManager) *Server {
 func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel())
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, normalizeQueryPlanError(err)
 	}
 	resp, err := p.GetQueryPlan(ctx, req)
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, normalizeQueryPlanError(err)
 	}
 	return resp, nil
 }
@@ -43,11 +43,11 @@ func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanReque
 func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
 	p, err := s.providerForVChannel(ctx, req.GetVchannel())
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, normalizeQueryPlanError(err)
 	}
 	resp, err := p.GetMVCCTimestamp(ctx, req)
 	if err != nil {
-		return nil, toRPCError(err)
+		return nil, normalizeQueryPlanError(err)
 	}
 	return resp, nil
 }
@@ -78,20 +78,11 @@ func (s *Server) providerForVChannel(ctx context.Context, vchannel string) (prov
 	return p, nil
 }
 
-func toRPCError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
-		return err
-	}
+// A released load config can outlive a serving View. Replan against a fresh View;
+// the shared server interceptor performs wire encoding after this domain decision.
+func normalizeQueryPlanError(err error) error {
 	if errors.Is(err, merr.ErrCollectionNotLoaded) {
-		// A view may outlive its load config during release. Retry against a fresh view.
-		err = viewerror.NewViewInvalidated("%s", err)
+		return viewerror.NewViewInvalidated("%s", err)
 	}
-	var viewErr *viewerror.ViewError
-	if errors.As(err, &viewErr) {
-		return viewerror.NewGRPCStatusFromViewError(viewErr).Err()
-	}
-	return viewerror.NewGRPCStatusFromError(err).Err()
+	return err
 }

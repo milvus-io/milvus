@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -60,9 +61,10 @@ type GcOption struct {
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
-	broker           broker.Broker
-	removeObjectPool *conc.Pool[struct{}]
-	dataViewGC       DataViewGarbageCollector
+	streamingNodeCatalog metastore.StreamingNodeCataLog
+	broker               broker.Broker
+	removeObjectPool     *conc.Pool[struct{}]
+	dataViewGC           DataViewGarbageCollector
 
 	// importJobAlive reports whether an ImportJob still exists for jobID. It is
 	// wired by the server from ImportMeta so the orphan scan never deletes an
@@ -1005,6 +1007,11 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if segment.GetIsImporting() && segment.GetCompacted() {
+		// Restore owns retired L0 inputs until its publication finishes. They
+		// also prove an applied mutation after a crash before task-state save.
+		return false
+	}
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
@@ -1026,23 +1033,9 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		return true
 	}
 
-	// A removed channel no longer needs checkpoint protection. Its checkpoint
-	// may stop advancing, while collection cleanup waits for segment GC.
-	segInsertChannel := segment.GetInsertChannel()
-	channelExists, err := gc.meta.metaStore.ChannelExists(gc.ctx, segInsertChannel)
-	if err != nil {
-		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
-			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
-		return false
-	}
-	if channelExists {
-		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", dmlTs),
-			mlog.Uint64("channelCpTs", cpTimestamp),
-		)
-		return false
-	}
-	return true
+	log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after physical checkpoint, skip meta gc",
+		mlog.Uint64("dmlPosTs", dmlTs), mlog.Uint64("checkpointTs", cpTimestamp))
+	return false
 }
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
@@ -1061,7 +1054,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	for _, segment := range all {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
-			channels.Insert(segment.GetInsertChannel())
+			channels.Insert(funcutil.ToPhysicalChannel(segment.GetInsertChannel()))
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
@@ -1069,6 +1062,11 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			compactTo[from] = segment
 		}
 	}
+
+	// A Dropped parent can still be the published QueryView frontier. Keep
+	// its descendants too: intermediate lineage is needed to flatten a later
+	// sort/merge before replacing that frontier. Snapshot once per sweep.
+	protected := gc.dataViewCompactionProtection(all)
 
 	droppedCompactTo := make(map[int64]*SegmentInfo)
 	for id := range drops {
@@ -1085,10 +1083,25 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		indexedSet.Insert(segment.GetID())
 	}
 
-	channelCPs := make(map[string]uint64)
+	// Capture each PChannel's durable replay frontier once per sweep, shared by
+	// every VChannel/segment on it. Never fall back to historical DataCoord
+	// checkpoints or the potentially newer control checkpoint.
+	channelCPs := make(map[string]uint64, len(channels))
 	for channel := range channels {
-		pos := gc.meta.GetChannelCheckpoint(channel)
-		channelCPs[channel] = pos.GetTimestamp()
+		if ctx.Err() != nil {
+			return
+		}
+		checkpoint, err := gc.option.streamingNodeCatalog.GetConsumeCheckpoint(ctx, channel)
+		if err != nil {
+			log.Warn(ctx, "failed to read physical checkpoint, skip channel GC",
+				mlog.String("pchannel", channel), mlog.Err(err))
+			continue
+		}
+		if checkpoint == nil {
+			log.Info(ctx, "physical checkpoint is missing, skip channel GC", mlog.String("pchannel", channel))
+			continue
+		}
+		channelCPs[channel] = checkpoint.GetTimeTick()
 	}
 
 	// try to get loaded segments
@@ -1112,6 +1125,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		}
 
 		gc.ackSignal(signal)
+
+		if _, referenced := protected[segmentID]; referenced {
+			continue
+		}
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
 			log.Info(ctx, "skip GC segment since collection is paused", mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
@@ -1139,12 +1156,45 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			}
 		}
 
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+		checkpoint, ok := channelCPs[funcutil.ToPhysicalChannel(segInsertChannel)]
+		if !ok || !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, checkpoint) {
 			continue
 		}
 
 		gc.recycleDroppedSegment(ctx, io, segmentID, segment)
 	}
+}
+
+// dataViewCompactionProtection retains both the published bases and the
+// intermediate metadata needed to relate current leaves to those bases. Once
+// the latest and all retained Views move past a base, its old ancestry is no
+// longer protected. This is O(segments + lineage edges), once per GC sweep.
+func (gc *garbageCollector) dataViewCompactionProtection(segments []*SegmentInfo) map[int64]struct{} {
+	if gc.meta.dataViewManager == nil {
+		return nil
+	}
+	protected := gc.meta.dataViewManager.ReferencedSegments()
+	children := make(map[int64][]int64)
+	for _, segment := range segments {
+		for _, parent := range segment.GetCompactionFrom() {
+			children[parent] = append(children[parent], segment.GetID())
+		}
+	}
+	queue := make([]int64, 0, len(protected))
+	for id := range protected {
+		queue = append(queue, id)
+	}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, child := range children[id] {
+			if _, seen := protected[child]; !seen {
+				protected[child] = struct{}{}
+				queue = append(queue, child)
+			}
+		}
+	}
+	return protected
 }
 
 // recycleDroppedSegment marks its index tasks deleted before removing a

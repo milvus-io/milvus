@@ -143,7 +143,7 @@ func recoverAllCollections(context.Context, int64) (bool, error) {
 // projectSegments builds a Projector returning a fixed loadable Segment set,
 // mimicking a SegmentMeta loadable projection (as datacoord provides).
 func projectSegments(segments ...LoadableSegment) Projector {
-	return func(_ context.Context, _ int64) ([]LoadableSegment, error) {
+	return func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		return segments, nil
 	}
 }
@@ -1180,7 +1180,7 @@ func TestManagerAsyncRecomputeRequiresProjector(t *testing.T) {
 func TestManagerAsyncRecomputeRetriesFailedProjection(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	manager := NewManager(&fakeDataViewCatalog{}, func(_ context.Context, _ int64) ([]LoadableSegment, error) {
+	manager := NewManager(&fakeDataViewCatalog{}, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		calls++
 		if calls == 1 {
 			return nil, errors.New("transient projection failure")

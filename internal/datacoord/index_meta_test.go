@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1161,6 +1161,100 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, segIdx)
 	})
+}
+
+func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(t *testing.T) {
+	const (
+		collectionID = UniqueID(100)
+		indexID      = UniqueID(200)
+		segment1ID   = UniqueID(1000)
+		segment2ID   = UniqueID(1001)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+
+	meta := newSegmentIndexMeta(catalog)
+	meta.indexes[collectionID] = map[UniqueID]*model.Index{
+		indexID: {
+			CollectionID: collectionID,
+			IndexID:      indexID,
+		},
+	}
+	meta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: collectionID,
+		SegmentID:    segment1ID,
+		IndexID:      indexID,
+		BuildID:      300,
+		IndexVersion: 1,
+	})
+	meta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: collectionID,
+		SegmentID:    segment2ID,
+		IndexID:      indexID,
+		BuildID:      301,
+		IndexVersion: 1,
+	})
+
+	firstSegmentRead := make(chan struct{})
+	continueSnapshot := make(chan struct{})
+	var getSegmentIndexesOrigin func(*indexMeta, UniqueID, UniqueID) map[UniqueID]*model.SegmentIndex
+	getSegmentIndexesMock := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+		func(meta *indexMeta, collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
+			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID)
+			if segmentID == segment1ID {
+				close(firstSegmentRead)
+				<-continueSnapshot
+			}
+			return indexes
+		},
+	).Origin(&getSegmentIndexesOrigin).Build()
+	defer getSegmentIndexesMock.UnPatch()
+
+	snapshotDone := make(chan map[int64]map[UniqueID]*model.SegmentIndex, 1)
+	go func() {
+		_, segmentIndexes := meta.getQueryViewIndexSnapshot(collectionID, []UniqueID{segment1ID, segment2ID})
+		snapshotDone <- segmentIndexes
+	}()
+	<-firstSegmentRead
+
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- meta.alterSegmentIndexes([]*model.SegmentIndex{
+			{
+				CollectionID: collectionID,
+				SegmentID:    segment1ID,
+				IndexID:      indexID,
+				BuildID:      300,
+				IndexVersion: 2,
+			},
+			{
+				CollectionID: collectionID,
+				SegmentID:    segment2ID,
+				IndexID:      indexID,
+				BuildID:      301,
+				IndexVersion: 2,
+			},
+		})
+	}()
+
+	updateCompletedBeforeSnapshot := false
+	select {
+	case err := <-updateDone:
+		require.NoError(t, err)
+		updateCompletedBeforeSnapshot = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(continueSnapshot)
+
+	snapshot := <-snapshotDone
+	if !updateCompletedBeforeSnapshot {
+		require.NoError(t, <-updateDone)
+	}
+	require.Contains(t, snapshot[segment1ID], indexID)
+	require.Contains(t, snapshot[segment2ID], indexID)
+	assert.Equal(t, int64(1), snapshot[segment1ID][indexID].IndexVersion)
+	assert.Equal(t, int64(1), snapshot[segment2ID][indexID].IndexVersion)
 }
 
 func TestMeta_GetAllSegmentIndexes(t *testing.T) {
@@ -2759,8 +2853,6 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 // The feature switch controls completed-artifact publication only. Task
 // lifecycle states remain durable in etcd in both modes.
 func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
-	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
-
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
 			withSegmentIndexManifestWrites(t, enabled)

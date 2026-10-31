@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -176,7 +176,7 @@ func (p *Provider) buildOracle(
 	return newOracleRuntime(ctx, p, walView, resources, false)
 }
 
-func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+func loadFieldIDs(fields []*viewpb.LoadFieldConfig) []int64 {
 	ids := make([]int64, 0, len(fields))
 	for _, field := range fields {
 		ids = append(ids, field.GetFieldId())

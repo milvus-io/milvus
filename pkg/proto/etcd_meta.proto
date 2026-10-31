@@ -33,6 +33,9 @@ enum CollectionState {
   CollectionCreating = 1 [deprecated = true];
   CollectionDropping = 2;
   CollectionDropped = 3;
+  // Metadata exists for recovery workers, but the collection is not available
+  // to clients until its snapshot data has been durably published.
+  CollectionRestoring = 4;
 }
 
 enum PartitionState {

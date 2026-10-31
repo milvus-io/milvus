@@ -135,6 +135,7 @@ func (h *copyCleanupLoadedHandler) ListLoadedSegments(context.Context) ([]int64,
 }
 
 func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
+	checkpointCatalog := mockGCCheckpointCatalog(t, 1000)
 	for _, protection := range []string{"snapshot", "loaded reader", "paused collection", "retention"} {
 		t.Run(protection, func(t *testing.T) {
 			ctx := context.Background()
@@ -166,7 +167,7 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 			require.False(t, m.GetSegment(ctx, 2001).GetIsImporting())
 			// This is the same visible-segment shape selected by GenSnapshot.
 			handler := &copyCleanupLoadedHandler{mockHandler: newMockHandler()}
-			gc := newGarbageCollector(m, handler, GcOption{cli: m.chunkManager})
+			gc := newGarbageCollector(m, handler, GcOption{streamingNodeCatalog: checkpointCatalog, cli: m.chunkManager})
 			defer gc.option.removeObjectPool.Release()
 			release := func() {}
 			switch protection {
@@ -214,6 +215,7 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 }
 
 func TestRejectedCopyCleanupNeverCreatedManifestBase(t *testing.T) {
+	checkpointCatalog := mockGCCheckpointCatalog(t, 1000)
 	for _, failure := range []string{"absent root", "missing child", "permission", "remote failure"} {
 		t.Run(failure, func(t *testing.T) {
 			ctx := context.Background()
@@ -225,7 +227,7 @@ func TestRejectedCopyCleanupNeverCreatedManifestBase(t *testing.T) {
 			require.Zero(t, version)
 			sibling := base + "0/_data/sibling.parquet"
 			require.NoError(t, m.chunkManager.Write(ctx, sibling, []byte("another segment")))
-			gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: m.chunkManager})
+			gc := newGarbageCollector(m, newMockHandler(), GcOption{streamingNodeCatalog: checkpointCatalog, cli: m.chunkManager})
 			defer gc.option.removeObjectPool.Release()
 			if failure != "absent root" {
 				var failureErr error

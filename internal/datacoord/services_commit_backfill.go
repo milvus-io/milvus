@@ -194,14 +194,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		appendUnitStatuses(&statuses, v3Applied, true, "")
 	}
 
-	// A V3 commit advances the manifest pointer that the DataView snapshot
-	// serves; recompute so consumers observe the new manifest versions. The
-	// framework does not recompute for manifest commits (stats, L0, bump-schema
-	// and the old ack callback all call recomputeDataView themselves), so this
-	// path must do it too, once, whenever any V3 segment was committed.
-	v3Committed := false
-	markV3Committed := func() { v3Committed = true }
-
+	// Metadata commit primitives notify DataView reconciliation after publication
+	// and after releasing their locks, including partially successful batches.
 	// Per-segment commits (replace of a dropped column): each goes through
 	// meta.CommitSegmentManifest so the SegmentIndexRemove lands in the same
 	// catalog transaction as the new manifest pointer. Each commit does manifest
@@ -233,7 +227,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 					}
 					mu.Lock()
 					appendUnitStatuses(&statuses, []backfillCommitUnit{unit}, true, "")
-					markV3Committed()
 					mu.Unlock()
 					return nil
 				})
@@ -274,15 +267,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			continue
 		}
 		appendUnitStatuses(&statuses, batch, true, "")
-		markV3Committed()
-	}
-
-	// The backfill commit is a Flushed->Flushed SegmentMeta mutation that
-	// advances manifest pointers; reconcile the DataView snapshot so consumers
-	// observe the new versions. V2 column-group upserts do not touch the
-	// manifest, so only V3 commits trigger.
-	if v3Committed {
-		s.meta.recomputeDataView(ctx, result.CollectionID)
 	}
 
 	committed, failed := countStatuses(statuses)
