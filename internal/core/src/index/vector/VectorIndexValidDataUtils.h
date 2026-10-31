@@ -267,6 +267,24 @@ CountValidDataBitmap(size_t count, const uint8_t* bitmap) {
     return valid_count;
 }
 
+// 3.0 memory builds persisted offsets {0} for a nullable embedding-list column
+// whose valid rows are all empty lists, although the artifact holds one list
+// per valid row (#54857). Every list is empty, so the valid-row count alone
+// restores the per-list offsets.
+inline void
+RestoreLegacyEmptyEmbListOffsets(std::vector<size_t>& offsets,
+                                 const knowhere::LoadOptions& input) {
+    if (offsets.size() != 1 || !input.validity.has_value()) {
+        return;
+    }
+    const auto& validity = *input.validity;
+    const auto valid_count = CountValidDataBitmap(
+        static_cast<size_t>(validity.logical_row_count), validity.data);
+    if (valid_count > 0) {
+        offsets.assign(valid_count + 1, 0);
+    }
+}
+
 // --- knowhere IdMap input views ------------------------------------------
 
 // Borrowed public-row validity bitmap. `count` is the number of public rows,
