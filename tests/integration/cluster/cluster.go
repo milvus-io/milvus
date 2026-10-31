@@ -718,15 +718,19 @@ func (c *MiniClusterV3) getClusterOperationOpt(opts ...ClusterOperationOpt) *clu
 func (c *MiniClusterV3) getOptions() []process.Option {
 	c.nodeID++
 	env := map[string]string{
-		"QUOTAANDLIMITS_ENABLED":  "false", // disable the quota limits by default to avoid rpc failure.
-		"PROXY_IP":                "localhost",
-		"STREAMINGNODE_IP":        "localhost",
-		"QUERYNODE_IP":            "localhost",
-		"DATANODE_IP":             "localhost",
-		"ROOTCOORD_IP":            "localhost",
-		"PROXY_PORT":              "19530",
-		"ROOTCOORD_DMLCHANNELNUM": "2", // set smaller dml channel num to speed up the test.
-		paramtable.MilvusConfigRefreshIntervalEnvKey: c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
+		// QueryView resource preparation requires StorageV3 data and manifest
+		// index publication. Explicit format-specific suites may override these.
+		"COMMON_STORAGE_USELOONFFI":                   "true",
+		"DATACOORD_INDEX_WRITESEGMENTINDEXTOMANIFEST": "true",
+		"QUOTAANDLIMITS_ENABLED":                      "false", // disable the quota limits by default to avoid rpc failure.
+		"PROXY_IP":                                    "localhost",
+		"STREAMINGNODE_IP":                            "localhost",
+		"QUERYNODE_IP":                                "localhost",
+		"DATANODE_IP":                                 "localhost",
+		"ROOTCOORD_IP":                                "localhost",
+		"PROXY_PORT":                                  "19530",
+		"ROOTCOORD_DMLCHANNELNUM":                     "2",                              // set smaller dml channel num to speed up the test.
+		paramtable.MilvusConfigRefreshIntervalEnvKey:  c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
 	}
 	for k, v := range c.extraEnv {
 		env[k] = v

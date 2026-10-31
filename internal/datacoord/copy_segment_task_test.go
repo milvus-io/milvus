@@ -589,9 +589,10 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedSegmentRoot
 
 func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 	tests := []struct {
-		name     string
-		external bool
-		err      error
+		name            string
+		external        bool
+		writeToManifest bool
+		err             error
 	}{
 		{
 			name:     "external service not ready",
@@ -599,7 +600,12 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 			err:      merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
 		},
 		{
-			name:     "local unimplemented",
+			name:            "segment rooted service not ready",
+			writeToManifest: true,
+			err:             merr.ErrServiceNotReady,
+		},
+		{
+			name:     "legacy local unimplemented",
 			external: false,
 			err:      merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
 		},
@@ -609,6 +615,9 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 		s.Run(test.name, func() {
 			task := createTestCopyTask(100, 2001).(*copySegmentTask)
 			task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+			// Persist the format explicitly: local copies can use either legacy
+			// or segment-rooted paths, independently of the current default.
+			UpdateCopyTaskIndexWriteToManifest(test.writeToManifest)(task)
 			copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
 			task.copyMeta = copyMeta
 
