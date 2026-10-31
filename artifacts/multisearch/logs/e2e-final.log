@@ -1,0 +1,34 @@
+LOADED ms_prototype_00: L2, dim=8, rows=256
+LOADED ms_prototype_01: IP, dim=16, rows=256
+LOADED ms_prototype_02: COSINE, dim=32, rows=256
+LOADED ms_prototype_03: L2, dim=8, rows=256
+LOADED ms_prototype_04: IP, dim=16, rows=256
+LOADED ms_prototype_05: COSINE, dim=32, rows=256
+LOADED ms_prototype_06: L2, dim=8, rows=256
+LOADED ms_prototype_07: IP, dim=16, rows=256
+LOADED ms_prototype_08: COSINE, dim=32, rows=256
+LOADED ms_prototype_09: L2, dim=8, rows=256
+LOADED ms_prototype_10: IP, dim=16, rows=256
+LOADED ms_prototype_11: COSINE, dim=32, rows=256
+LOADED ms_prototype_12: L2, dim=8, rows=256
+LOADED ms_prototype_13: IP, dim=16, rows=256
+LOADED ms_prototype_14: COSINE, dim=32, rows=256
+LOADED ms_prototype_15: L2, dim=8, rows=256
+LOADED ms_prototype_16: IP, dim=16, rows=256
+LOADED ms_prototype_17: COSINE, dim=32, rows=256
+LOADED ms_prototype_18: L2, dim=8, rows=256
+LOADED ms_prototype_19: IP, dim=16, rows=256
+LOADED ms_prototype_20: COSINE, dim=32, rows=256
+LOADED ms_prototype_21: L2, dim=8, rows=256
+LOADED ms_prototype_22: IP, dim=16, rows=256
+LOADED ms_prototype_23: COSINE, dim=32, rows=256
+PASS Populated heterogeneous collections: 24 collections, 6144 rows; mixed fields, dimensions, metrics and primary-key types
+PASS 50-item equivalence and one RPC: 50 independent searches across 24 collections; IDs, topks, scalar fields and scores match ordinary Search
+PASS Partial failure isolation: [{'id': 'valid-a', 'code': 0, 'grpc_code': 0, 'reason': ''}, {'id': 'missing', 'code': 100, 'grpc_code': 0, 'reason': 'collection not found[database=default][collection=ms_prototype_missing]'}, {'id': 'bad-dim', 'code': 2000, 'grpc_code': 0, 'reason': 'failed to search: failed to search/query delegator 2 for channel by-dev-rootcoord-dml_1_470146438620250081v0: fail to search on QueryNode 2: worker(2) query failed: parser searchRequest failed:  => vector dimension mismatch, expected vector size(byte) 64, actual 8. at ../internal/core/src/query/Plan.cpp:183: segcore error[segcoreCode=2001]'}, {'id': 'valid-b', 'code': 0, 'grpc_code': 0, 'reason': ''}, {'id': 'empty', 'code': 0, 'grpc_code': 0, 'reason': ''}]
+PASS Envelope rejects empty: {'code': 1100, 'reason': 'MultiSearch requires 1..128 items: invalid parameter'}
+PASS Envelope rejects duplicate IDs: {'code': 1100, 'reason': 'duplicate MultiSearch item id "x": invalid parameter'}
+PASS Envelope rejects 129 items: {'code': 1100, 'reason': 'MultiSearch requires 1..128 items: invalid parameter'}
+PASS Per-item collection authorization: {'allowed': 0, 'denied_grpc_code': 7}
+PASS Envelope authentication: UNAUTHENTICATED
+PASS Client deadline: DEADLINE_EXCEEDED
+PASS Search succeeds after deadline: server continues serving requests

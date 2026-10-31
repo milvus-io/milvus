@@ -135,3 +135,6 @@ docs/plans/
 
 # agent context
 .context/
+
+# Local MultiSearch prototype Python environment
+.venv-multisearch/

@@ -1,0 +1,299 @@
+[2026/10/31 17:12:47.721 +00:00] [DEBUG] [config/refresher.go:69] ["start refreshing configurations"] [source=FileSource]
+[2026/10/31 17:12:47.722 +00:00] [DEBUG] [config/etcd_source.go:52] ["init etcd source"] [etcdInfo="{\"UseEmbed\":false,\"EnableAuth\":false,\"UserName\":\"etcdadmin\",\"PassWord\":\"etcdadmin\",\"UseSSL\":false,\"Endpoints\":[\"localhost:22379\"],\"KeyPrefix\":\"by-dev\",\"CertFile\":\"/path/to/etcd-client.pem\",\"KeyFile\":\"/path/to/etcd-client-key.pem\",\"CaCertFile\":\"/path/to/ca.pem\",\"MinVersion\":\"1.3\",\"DialTimeout\":5000000000,\"RefreshInterval\":5000000000}"]
+[2026/10/31 17:12:47.722 +00:00] [INFO] [etcd/etcd_util.go:121] ["create etcd client"] [useEmbedEtcd=false] [useSSL=false] [endpoints="[localhost:22379]"] [minVersion=1.3]
+[2026/10/31 17:12:47.728 +00:00] [DEBUG] [config/etcd_source.go:173] ["etcd refreshConfigurations"] [prefix=by-dev/config] [endpoints="[localhost:22379]"]
+[2026/10/31 17:12:47.728 +00:00] [DEBUG] [config/refresher.go:69] ["start refreshing configurations"] [source=EtcdSource]
+[2026/10/31 17:12:47.738 +00:00] [INFO] [paramtable/component_param.go:7277] ["DeployModeEnv is not set, use default"] [default=0.5]
+[2026/10/31 17:12:47.740 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.741 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.741 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.741 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.741 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.741 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.742 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.742 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.742 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.742 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.742 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.743 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.743 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.743 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.743 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.743 +00:00] [INFO] [paramtable/hook_config.go:21] ["hook config"] [hook={}]
+[2026/10/31 17:12:47.744 +00:00] [INFO] [paramtable/cipher_config.go:26] ["init cipher config"]
+[2026/10/31 17:12:47.744 +00:00] [DEBUG] [config/refresher.go:69] ["start refreshing configurations"] [source=FileSource]
+=== RUN   Test_NewServer
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DQLSearch] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLDB] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLIndex] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLCompaction] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DQLQuery] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLCollection] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLPartition] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DDLFlush] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DMLInsert] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DMLDelete] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/simple_rate_limiter.go:241] ["RateLimiter register for rateType"] [source=Cluster] [rateType=DMLBulkLoad] [rateLimit=+inf] [burst=1.7976931348623157e+308]
+[2026/10/31 17:12:47.746 +00:00] [INFO] [hookutil/hook.go:76] ["empty so path, skip to load plugin"]
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [proxy/proxy.go:139] ["create a new Proxy instance"] [state=2]
+=== RUN   Test_NewServer/Run
+[2026/10/31 17:12:47.746 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/listener_manager.go:54] ["Proxy listen on external grpc listener"] [address=172.16.70.10:19530] [port=19530]
+[2026/10/31 17:12:47.747 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/listener_manager.go:64] ["Proxy listen on internal grpc listener"] [address=172.16.70.10:19529] [port=19529]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/listener_manager.go:98] ["Proxy server(http) and external grpc server share the same port"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/service.go:456] ["init Proxy server"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/service.go:475] ["Proxy init service's parameter table done"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/service.go:477] ["Proxy init http server's parameter table done"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [accesslog/global.go:154] ["Init access logger success"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [proxy/service.go:481] ["init Proxy's tracer done"] ["service name"="Proxy ip: 172.16.70.10, port: 19530"]
+[2026/10/31 17:12:47.747 +00:00] [INFO] [etcd/etcd_util.go:121] ["create etcd client"] [useEmbedEtcd=false] [useSSL=false] [endpoints="[localhost:22379]"] [minVersion=1.3]
+[2026/10/31 17:12:47.750 +00:00] [INFO] [utils/util.go:56] ["Internal TLS Enabled"] [value=false]
+[2026/10/31 17:12:47.750 +00:00] [INFO] [proxy/service.go:433] ["create Proxy internal grpc server"] ["enforcement policy"="{\"MinTime\":5000000000,\"PermitWithoutStream\":true}"] ["server parameters"="{\"MaxConnectionIdle\":0,\"MaxConnectionAge\":0,\"MaxConnectionAgeGrace\":0,\"Time\":60000000000,\"Timeout\":10000000000}"]
+[2026/10/31 17:12:47.751 +00:00] [DEBUG] [proxy/service.go:290] ["Get proxy rate limiter done"]
+[2026/10/31 17:12:47.752 +00:00] [DEBUG] [proxy/service.go:368] ["create Proxy grpc server"] ["enforcement policy"="{\"MinTime\":5000000000,\"PermitWithoutStream\":true}"] ["server parameters"="{\"MaxConnectionIdle\":0,\"MaxConnectionAge\":0,\"MaxConnectionAgeGrace\":0,\"Time\":60000000000,\"Timeout\":10000000000}"]
+[2026/10/31 17:12:47.752 +00:00] [INFO] [proxy/service.go:373] ["Proxy external grpc server is served by shared http2 server"]
+[2026/10/31 17:12:47.752 +00:00] [DEBUG] [proxy/service.go:529] ["Proxy wait for MixCoordClient to be healthy"]
+[2026/10/31 17:12:47.755 +00:00] [INFO] [componentutil/componentutil.go:60] ["WaitForComponentStates success"] ["current state"=Healthy]
+[2026/10/31 17:12:47.755 +00:00] [DEBUG] [proxy/service.go:534] ["Proxy wait for MixCoord to be healthy done"]
+[2026/10/31 17:12:47.756 +00:00] [DEBUG] [proxy/service.go:536] ["set MixCoord client for Proxy"]
+[2026/10/31 17:12:47.756 +00:00] [DEBUG] [proxy/service.go:538] ["set MixCoord client for Proxy done"]
+[2026/10/31 17:12:47.756 +00:00] [INFO] [proxy/service.go:542] ["register Proxy http server"]
+[2026/10/31 17:12:47.756 +00:00] [DEBUG] [proxy/service.go:547] ["update Proxy's state to Initializing"]
+[2026/10/31 17:12:47.756 +00:00] [DEBUG] [proxy/service.go:550] ["init Proxy"]
+[2026/10/31 17:12:47.756 +00:00] [DEBUG] [proxy/service.go:555] ["init Proxy done"]
+---Milvus Proxy successfully initialized and ready to serve!---
+[2026/10/31 17:12:47.756 +00:00] [INFO] [proxy/service.go:461] ["init Proxy server done"]
+[2026/10/31 17:12:47.756 +00:00] [INFO] [proxy/service.go:463] ["start Proxy server"]
+[2026/10/31 17:12:47.757 +00:00] [INFO] [proxy/service.go:575] ["start Proxy http server"]
+[2026/10/31 17:12:47.758 +00:00] [INFO] [proxy/service.go:468] ["start Proxy server done"]
+[2026/10/31 17:12:47.761 +00:00] [INFO] [proxy/service.go:596] ["Proxy stopping"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.761 +00:00] [INFO] [proxy/service.go:613] ["Proxy shutdown http server..."] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:110] ["Proxy tcp server exited"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/service.go:258] ["Proxy http server exited"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/service.go:622] ["Proxy stop external grpc server"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/service.go:637] ["Proxy stop internal grpc server"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [utils/util.go:24] ["try to graceful stop grpc server..."]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:208] ["Proxy close cmux http2 listener"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:212] ["Proxy close cmux http listener"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:216] ["Proxy close cmux..."]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:219] ["Proxy cmux closed"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:231] ["Proxy close internal grpc listener"] [address=172.16.70.10:19529]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/listener_manager.go:238] ["Proxy close external grpc listener"] [address=172.16.70.10:19530]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/service.go:442] ["Proxy internal grpc server exited"]
+[2026/10/31 17:12:47.762 +00:00] [INFO] [proxy/service.go:649] ["internal server[proxy] start to stop"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.763 +00:00] [INFO] [proxy/service.go:598] ["Proxy stopped"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530] []
+=== RUN   Test_NewServer/GetComponentStates
+=== RUN   Test_NewServer/GetStatisticsChannel
+=== RUN   Test_NewServer/InvalidateCollectionMetaCache
+=== RUN   Test_NewServer/InvalidateShardLeaderCache
+=== RUN   Test_NewServer/CreateCollection
+=== RUN   Test_NewServer/DropCollection
+=== RUN   Test_NewServer/TruncateCollection
+=== RUN   Test_NewServer/HasCollection
+=== RUN   Test_NewServer/LoadCollection
+=== RUN   Test_NewServer/ReleaseCollection
+=== RUN   Test_NewServer/DescribeCollection
+=== RUN   Test_NewServer/BatchDescribeCollection
+=== RUN   Test_NewServer/GetCollectionStatistics
+=== RUN   Test_NewServer/ShowCollections
+=== RUN   Test_NewServer/CreatePartition
+=== RUN   Test_NewServer/DropPartition
+=== RUN   Test_NewServer/HasPartition
+=== RUN   Test_NewServer/LoadPartitions
+=== RUN   Test_NewServer/ReleasePartitions
+=== RUN   Test_NewServer/GetPartitionStatistics
+=== RUN   Test_NewServer/ShowPartitions
+=== RUN   Test_NewServer/GetLoadingProgress
+=== RUN   Test_NewServer/CreateIndex
+=== RUN   Test_NewServer/DropIndex
+=== RUN   Test_NewServer/DescribeIndex
+=== RUN   Test_NewServer/GetIndexStatistics
+=== RUN   Test_NewServer/GetIndexBuildProgress
+=== RUN   Test_NewServer/GetIndexState
+=== RUN   Test_NewServer/Insert
+=== RUN   Test_NewServer/Delete
+=== RUN   Test_NewServer/Upsert
+=== RUN   Test_NewServer/Search
+=== RUN   Test_NewServer/Flush
+=== RUN   Test_NewServer/Query
+=== RUN   Test_NewServer/CalcDistance
+=== RUN   Test_NewServer/GetDdChannel
+=== RUN   Test_NewServer/GetPersistentSegmentInfo
+=== RUN   Test_NewServer/GetQuerySegmentInfo
+=== RUN   Test_NewServer/Dummy
+=== RUN   Test_NewServer/RegisterLink
+=== RUN   Test_NewServer/GetMetrics
+=== RUN   Test_NewServer/LoadBalance
+=== RUN   Test_NewServer/CreateAlias
+=== RUN   Test_NewServer/DropAlias
+=== RUN   Test_NewServer/AlterAlias
+=== RUN   Test_NewServer/DescribeAlias
+=== RUN   Test_NewServer/ListAliases
+=== RUN   Test_NewServer/GetCompactionState
+=== RUN   Test_NewServer/ManualCompaction
+=== RUN   Test_NewServer/GetCompactionStateWithPlans
+=== RUN   Test_NewServer/CreateCredential
+=== RUN   Test_NewServer/UpdateCredential
+=== RUN   Test_NewServer/DeleteCredential
+=== RUN   Test_NewServer/ListCredUsers
+=== RUN   Test_NewServer/InvalidateCredentialCache
+=== RUN   Test_NewServer/UpdateCredentialCache
+=== RUN   Test_NewServer/CreateRole
+=== RUN   Test_NewServer/AlterRole
+=== RUN   Test_NewServer/DropRole
+=== RUN   Test_NewServer/OperateUserRole
+=== RUN   Test_NewServer/SelectRole
+=== RUN   Test_NewServer/SelectUser
+=== RUN   Test_NewServer/OperatePrivilege
+=== RUN   Test_NewServer/SelectGrant
+=== RUN   Test_NewServer/RefreshPrivilegeInfoCache
+=== RUN   Test_NewServer/CheckHealth
+=== RUN   Test_NewServer/RenameCollection
+=== RUN   Test_NewServer/CreateResourceGroup
+=== RUN   Test_NewServer/DropResourceGroup
+=== RUN   Test_NewServer/TransferNode
+=== RUN   Test_NewServer/TransferReplica
+=== RUN   Test_NewServer/ListResourceGroups
+=== RUN   Test_NewServer/DescribeResourceGroup
+=== RUN   Test_NewServer/FlushAll
+=== RUN   Test_NewServer/GetFlushAllState
+=== RUN   Test_NewServer/CreateDatabase
+=== RUN   Test_NewServer/DropDatabase
+=== RUN   Test_NewServer/ListDatabase
+=== RUN   Test_NewServer/AlterDatabase
+=== RUN   Test_NewServer/DescribeDatabase
+=== RUN   Test_NewServer/AllocTimestamp
+=== RUN   Test_NewServer/RunAnalyzer
+=== RUN   Test_NewServer/Run_with_different_config
+[2026/10/31 17:12:47.781 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/listener_manager.go:54] ["Proxy listen on external grpc listener"] [address=172.16.70.10:19530] [port=19530]
+[2026/10/31 17:12:47.781 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/listener_manager.go:64] ["Proxy listen on internal grpc listener"] [address=172.16.70.10:19529] [port=19529]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/listener_manager.go:98] ["Proxy server(http) and external grpc server share the same port"]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/service.go:456] ["init Proxy server"]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/service.go:475] ["Proxy init service's parameter table done"]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/service.go:477] ["Proxy init http server's parameter table done"]
+[2026/10/31 17:12:47.781 +00:00] [INFO] [proxy/service.go:481] ["init Proxy's tracer done"] ["service name"="Proxy ip: 172.16.70.10, port: 19530"]
+[2026/10/31 17:12:47.782 +00:00] [INFO] [etcd/etcd_util.go:121] ["create etcd client"] [useEmbedEtcd=false] [useSSL=false] [endpoints="[localhost:22379]"] [minVersion=1.3]
+[2026/10/31 17:12:47.786 +00:00] [INFO] [utils/util.go:56] ["Internal TLS Enabled"] [value=false]
+[2026/10/31 17:12:47.786 +00:00] [INFO] [proxy/service.go:433] ["create Proxy internal grpc server"] ["enforcement policy"="{\"MinTime\":5000000000,\"PermitWithoutStream\":true}"] ["server parameters"="{\"MaxConnectionIdle\":0,\"MaxConnectionAge\":0,\"MaxConnectionAgeGrace\":0,\"Time\":60000000000,\"Timeout\":10000000000}"]
+[2026/10/31 17:12:47.786 +00:00] [DEBUG] [proxy/service.go:290] ["Get proxy rate limiter done"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:368] ["create Proxy grpc server"] ["enforcement policy"="{\"MinTime\":5000000000,\"PermitWithoutStream\":true}"] ["server parameters"="{\"MaxConnectionIdle\":0,\"MaxConnectionAge\":0,\"MaxConnectionAgeGrace\":0,\"Time\":60000000000,\"Timeout\":10000000000}"]
+[2026/10/31 17:12:47.787 +00:00] [INFO] [proxy/service.go:373] ["Proxy external grpc server is served by shared http2 server"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:529] ["Proxy wait for MixCoordClient to be healthy"]
+[2026/10/31 17:12:47.787 +00:00] [INFO] [componentutil/componentutil.go:60] ["WaitForComponentStates success"] ["current state"=Healthy]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:534] ["Proxy wait for MixCoord to be healthy done"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:536] ["set MixCoord client for Proxy"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:538] ["set MixCoord client for Proxy done"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:547] ["update Proxy's state to Initializing"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:550] ["init Proxy"]
+[2026/10/31 17:12:47.787 +00:00] [DEBUG] [proxy/service.go:555] ["init Proxy done"]
+---Milvus Proxy successfully initialized and ready to serve!---
+[2026/10/31 17:12:47.788 +00:00] [INFO] [proxy/service.go:461] ["init Proxy server done"]
+[2026/10/31 17:12:47.788 +00:00] [INFO] [proxy/service.go:463] ["start Proxy server"]
+[2026/10/31 17:12:47.788 +00:00] [INFO] [proxy/service.go:575] ["start Proxy http server"]
+[2026/10/31 17:12:47.789 +00:00] [INFO] [proxy/service.go:468] ["start Proxy server done"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:596] ["Proxy stopping"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:613] ["Proxy shutdown http server..."] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:110] ["Proxy tcp server exited"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:258] ["Proxy http server exited"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:622] ["Proxy stop external grpc server"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:637] ["Proxy stop internal grpc server"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [utils/util.go:24] ["try to graceful stop grpc server..."]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:208] ["Proxy close cmux http2 listener"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:212] ["Proxy close cmux http listener"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/service.go:442] ["Proxy internal grpc server exited"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:216] ["Proxy close cmux..."]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:219] ["Proxy cmux closed"]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:231] ["Proxy close internal grpc listener"] [address=172.16.70.10:19529]
+[2026/10/31 17:12:47.794 +00:00] [INFO] [proxy/listener_manager.go:238] ["Proxy close external grpc listener"] [address=172.16.70.10:19530]
+[2026/10/31 17:12:47.795 +00:00] [INFO] [proxy/service.go:649] ["internal server[proxy] start to stop"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530]
+[2026/10/31 17:12:47.795 +00:00] [INFO] [proxy/service.go:598] ["Proxy stopped"] ["internal address"=172.16.70.10:19529] ["external address"=172.16.70.10:19530] []
+--- PASS: Test_NewServer (0.05s)
+    --- PASS: Test_NewServer/Run (0.02s)
+    --- PASS: Test_NewServer/GetComponentStates (0.00s)
+    --- PASS: Test_NewServer/GetStatisticsChannel (0.00s)
+    --- PASS: Test_NewServer/InvalidateCollectionMetaCache (0.00s)
+    --- PASS: Test_NewServer/InvalidateShardLeaderCache (0.00s)
+    --- PASS: Test_NewServer/CreateCollection (0.00s)
+    --- PASS: Test_NewServer/DropCollection (0.00s)
+    --- PASS: Test_NewServer/TruncateCollection (0.00s)
+    --- PASS: Test_NewServer/HasCollection (0.00s)
+    --- PASS: Test_NewServer/LoadCollection (0.00s)
+    --- PASS: Test_NewServer/ReleaseCollection (0.00s)
+    --- PASS: Test_NewServer/DescribeCollection (0.00s)
+    --- PASS: Test_NewServer/BatchDescribeCollection (0.00s)
+    --- PASS: Test_NewServer/GetCollectionStatistics (0.00s)
+    --- PASS: Test_NewServer/ShowCollections (0.00s)
+    --- PASS: Test_NewServer/CreatePartition (0.00s)
+    --- PASS: Test_NewServer/DropPartition (0.00s)
+    --- PASS: Test_NewServer/HasPartition (0.00s)
+    --- PASS: Test_NewServer/LoadPartitions (0.00s)
+    --- PASS: Test_NewServer/ReleasePartitions (0.00s)
+    --- PASS: Test_NewServer/GetPartitionStatistics (0.00s)
+    --- PASS: Test_NewServer/ShowPartitions (0.00s)
+    --- PASS: Test_NewServer/GetLoadingProgress (0.00s)
+    --- PASS: Test_NewServer/CreateIndex (0.00s)
+    --- PASS: Test_NewServer/DropIndex (0.00s)
+    --- PASS: Test_NewServer/DescribeIndex (0.00s)
+    --- PASS: Test_NewServer/GetIndexStatistics (0.00s)
+    --- PASS: Test_NewServer/GetIndexBuildProgress (0.00s)
+    --- PASS: Test_NewServer/GetIndexState (0.00s)
+    --- PASS: Test_NewServer/Insert (0.00s)
+    --- PASS: Test_NewServer/Delete (0.00s)
+    --- PASS: Test_NewServer/Upsert (0.00s)
+    --- PASS: Test_NewServer/Search (0.00s)
+    --- PASS: Test_NewServer/Flush (0.00s)
+    --- PASS: Test_NewServer/Query (0.00s)
+    --- PASS: Test_NewServer/CalcDistance (0.00s)
+    --- PASS: Test_NewServer/GetDdChannel (0.00s)
+    --- PASS: Test_NewServer/GetPersistentSegmentInfo (0.00s)
+    --- PASS: Test_NewServer/GetQuerySegmentInfo (0.00s)
+    --- PASS: Test_NewServer/Dummy (0.00s)
+    --- PASS: Test_NewServer/RegisterLink (0.00s)
+    --- PASS: Test_NewServer/GetMetrics (0.00s)
+    --- PASS: Test_NewServer/LoadBalance (0.00s)
+    --- PASS: Test_NewServer/CreateAlias (0.00s)
+    --- PASS: Test_NewServer/DropAlias (0.00s)
+    --- PASS: Test_NewServer/AlterAlias (0.00s)
+    --- PASS: Test_NewServer/DescribeAlias (0.00s)
+    --- PASS: Test_NewServer/ListAliases (0.00s)
+    --- PASS: Test_NewServer/GetCompactionState (0.00s)
+    --- PASS: Test_NewServer/ManualCompaction (0.00s)
+    --- PASS: Test_NewServer/GetCompactionStateWithPlans (0.00s)
+    --- PASS: Test_NewServer/CreateCredential (0.00s)
+    --- PASS: Test_NewServer/UpdateCredential (0.00s)
+    --- PASS: Test_NewServer/DeleteCredential (0.00s)
+    --- PASS: Test_NewServer/ListCredUsers (0.00s)
+    --- PASS: Test_NewServer/InvalidateCredentialCache (0.00s)
+    --- PASS: Test_NewServer/UpdateCredentialCache (0.00s)
+    --- PASS: Test_NewServer/CreateRole (0.00s)
+    --- PASS: Test_NewServer/AlterRole (0.00s)
+    --- PASS: Test_NewServer/DropRole (0.00s)
+    --- PASS: Test_NewServer/OperateUserRole (0.00s)
+    --- PASS: Test_NewServer/SelectRole (0.00s)
+    --- PASS: Test_NewServer/SelectUser (0.00s)
+    --- PASS: Test_NewServer/OperatePrivilege (0.00s)
+    --- PASS: Test_NewServer/SelectGrant (0.00s)
+    --- PASS: Test_NewServer/RefreshPrivilegeInfoCache (0.00s)
+    --- PASS: Test_NewServer/CheckHealth (0.00s)
+    --- PASS: Test_NewServer/RenameCollection (0.00s)
+    --- PASS: Test_NewServer/CreateResourceGroup (0.00s)
+    --- PASS: Test_NewServer/DropResourceGroup (0.00s)
+    --- PASS: Test_NewServer/TransferNode (0.00s)
+    --- PASS: Test_NewServer/TransferReplica (0.00s)
+    --- PASS: Test_NewServer/ListResourceGroups (0.00s)
+    --- PASS: Test_NewServer/DescribeResourceGroup (0.00s)
+    --- PASS: Test_NewServer/FlushAll (0.00s)
+    --- PASS: Test_NewServer/GetFlushAllState (0.00s)
+    --- PASS: Test_NewServer/CreateDatabase (0.00s)
+    --- PASS: Test_NewServer/DropDatabase (0.00s)
+    --- PASS: Test_NewServer/ListDatabase (0.00s)
+    --- PASS: Test_NewServer/AlterDatabase (0.00s)
+    --- PASS: Test_NewServer/DescribeDatabase (0.00s)
+    --- PASS: Test_NewServer/AllocTimestamp (0.00s)
+    --- PASS: Test_NewServer/RunAnalyzer (0.00s)
+    --- PASS: Test_NewServer/Run_with_different_config (0.02s)
+PASS
+ok  	github.com/milvus-io/milvus/internal/distributed/proxy	0.522s

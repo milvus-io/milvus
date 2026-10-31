@@ -1,0 +1,18 @@
+[
+  {
+    "pod": "proxy-7c6d54599b-bfdb8",
+    "binary_sha256": "bbadbcbe91f24648ee862f8aa83807f7601b46be3b81f6570cb30d864ab62afe",
+    "items": 50,
+    "rpc_count": 1,
+    "passed": true,
+    "image_id": "sha256:be80787c0d446b51eae191f6c2ae73306d0c4b54f7af1b76217799ceab0158c7"
+  },
+  {
+    "pod": "proxy-7c6d54599b-r6zz8",
+    "binary_sha256": "bbadbcbe91f24648ee862f8aa83807f7601b46be3b81f6570cb30d864ab62afe",
+    "items": 50,
+    "rpc_count": 1,
+    "passed": true,
+    "image_id": "sha256:be80787c0d446b51eae191f6c2ae73306d0c4b54f7af1b76217799ceab0158c7"
+  }
+]

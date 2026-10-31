@@ -101,6 +101,7 @@ mkdir -p ./datapb
 mkdir -p ./querypb
 mkdir -p ./planpb
 mkdir -p ./workerpb
+mkdir -p ./multisearchpb
 mkdir -p ./messagespb
 mkdir -p ./streamingpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
@@ -125,6 +126,7 @@ ${protoc_opt} --go_out=paths=source_relative:./clusteringpb --go-grpc_out=requir
 ${protoc_opt} --go_out=paths=source_relative:./messagespb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./messagespb messages.proto || { echo 'generate messages.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto || { echo 'generate streamingpb.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./workerpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./workerpb worker.proto|| { echo 'generate worker.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./multisearchpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./multisearchpb multisearch.proto || { echo 'generate multisearch.proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/pkg/eventlog/ --go_out=paths=source_relative:../../pkg/eventlog/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../pkg/eventlog/ event_log.proto || { echo 'generate event_log.proto failed'; exit 1; }
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend --go_out=paths=source_relative:../../cmd/tools/migration/backend/ --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:../../cmd/tools/migration/backend backup_header.proto || { echo 'generate backup_header.proto failed'; exit 1; }

@@ -1,0 +1,4 @@
+=== RUN   TestMultiSearchStatsIsolation
+--- PASS: TestMultiSearchStatsIsolation (0.00s)
+PASS
+ok  	github.com/milvus-io/milvus/pkg/v3/metrics	1.056s

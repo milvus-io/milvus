@@ -1,0 +1,773 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "multisearch-prototype"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "milvus-config",
+        "namespace": "multisearch-prototype"
+      },
+      "data": {
+        "user.yaml": "etcd:\n  endpoints: etcd:2379\n  rootPath: multisearch-k8s\n  auth:\n    enabled: false\n  use:\n    embed: false\ncommon:\n  storageType: remote\n  security:\n    authorizationEnabled: true\nminio:\n  address: minio\n  port: 9000\n  accessKeyID: minioadmin\n  secretAccessKey: minioadmin\n  bucketName: multisearch-prototype\n  useSSL: false\nmq:\n  type: woodpecker\nwoodpecker:\n  storage:\n    type: minio\nrootCoord:\n  dmlChannelNum: 4\nlog:\n  level: warn\nquotaAndLimits:\n  dql:\n    enabled: true\nproxy:\n  multiSearch:\n    maxItems: 128\n    parallelism: 16\n    globalParallelism: 64\n    maxBatches: 8\n    maxRequestBytes: 4194304\n    maxResponseBytes: 16777216\n    timeoutSeconds: 30\n"
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "etcd",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "etcd"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "etcd"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "etcd",
+                "image": "quay.io/coreos/etcd:v3.5.25",
+                "imagePullPolicy": "IfNotPresent",
+                "command": [
+                  "etcd",
+                  "--data-dir=/data/etcd",
+                  "--advertise-client-urls=http://etcd:2379",
+                  "--listen-client-urls=http://0.0.0.0:2379",
+                  "--quota-backend-bytes=4294967296"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "1Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/data"
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "etcd",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "selector": {
+          "app": "etcd"
+        },
+        "ports": [
+          {
+            "port": 2379,
+            "targetPort": 2379
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "minio",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "minio"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "minio"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "minio",
+                "image": "minio/minio:RELEASE.2024-05-28T17-19-04Z",
+                "imagePullPolicy": "IfNotPresent",
+                "command": [
+                  "minio",
+                  "server",
+                  "/data"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "1Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/data"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "MINIO_ROOT_USER",
+                    "value": "minioadmin"
+                  },
+                  {
+                    "name": "MINIO_ROOT_PASSWORD",
+                    "value": "minioadmin"
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "minio",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "selector": {
+          "app": "minio"
+        },
+        "ports": [
+          {
+            "port": 9000,
+            "targetPort": 9000
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "mixcoord",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "mixcoord"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "mixcoord"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "mixcoord",
+                "image": "milvus-multisearch:prototype",
+                "imagePullPolicy": "Never",
+                "command": [
+                  "milvus",
+                  "run",
+                  "mixcoord"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "3Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/milvus"
+                  },
+                  {
+                    "name": "config",
+                    "mountPath": "/milvus/configs/user.yaml",
+                    "subPath": "user.yaml"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "ETCD_USE_EMBED",
+                    "value": "false"
+                  },
+                  {
+                    "name": "COMMON_STORAGETYPE",
+                    "value": "remote"
+                  },
+                  {
+                    "name": "DEPLOY_MODE",
+                    "value": "DISTRIBUTED"
+                  },
+                  {
+                    "name": "ETCD_ENDPOINTS",
+                    "value": "etcd:2379"
+                  },
+                  {
+                    "name": "MINIO_ADDRESS",
+                    "value": "minio"
+                  },
+                  {
+                    "name": "MQ_TYPE",
+                    "value": "woodpecker"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 9091
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              },
+              {
+                "name": "config",
+                "configMap": {
+                  "name": "milvus-config"
+                }
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "proxy",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 2,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "proxy"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "proxy"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "proxy",
+                "image": "milvus-multisearch:prototype",
+                "imagePullPolicy": "Never",
+                "command": [
+                  "milvus",
+                  "run",
+                  "proxy"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "2Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/milvus"
+                  },
+                  {
+                    "name": "config",
+                    "mountPath": "/milvus/configs/user.yaml",
+                    "subPath": "user.yaml"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "ETCD_USE_EMBED",
+                    "value": "false"
+                  },
+                  {
+                    "name": "COMMON_STORAGETYPE",
+                    "value": "remote"
+                  },
+                  {
+                    "name": "DEPLOY_MODE",
+                    "value": "DISTRIBUTED"
+                  },
+                  {
+                    "name": "ETCD_ENDPOINTS",
+                    "value": "etcd:2379"
+                  },
+                  {
+                    "name": "MINIO_ADDRESS",
+                    "value": "minio"
+                  },
+                  {
+                    "name": "MQ_TYPE",
+                    "value": "woodpecker"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 9091
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              },
+              {
+                "name": "config",
+                "configMap": {
+                  "name": "milvus-config"
+                }
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "querynode",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "querynode"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "querynode"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "querynode",
+                "image": "milvus-multisearch:prototype",
+                "imagePullPolicy": "Never",
+                "command": [
+                  "milvus",
+                  "run",
+                  "querynode"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "4",
+                    "memory": "4Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/milvus"
+                  },
+                  {
+                    "name": "config",
+                    "mountPath": "/milvus/configs/user.yaml",
+                    "subPath": "user.yaml"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "ETCD_USE_EMBED",
+                    "value": "false"
+                  },
+                  {
+                    "name": "COMMON_STORAGETYPE",
+                    "value": "remote"
+                  },
+                  {
+                    "name": "DEPLOY_MODE",
+                    "value": "DISTRIBUTED"
+                  },
+                  {
+                    "name": "ETCD_ENDPOINTS",
+                    "value": "etcd:2379"
+                  },
+                  {
+                    "name": "MINIO_ADDRESS",
+                    "value": "minio"
+                  },
+                  {
+                    "name": "MQ_TYPE",
+                    "value": "woodpecker"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 9091
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              },
+              {
+                "name": "config",
+                "configMap": {
+                  "name": "milvus-config"
+                }
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "datanode",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "datanode"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "datanode"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "datanode",
+                "image": "milvus-multisearch:prototype",
+                "imagePullPolicy": "Never",
+                "command": [
+                  "milvus",
+                  "run",
+                  "datanode"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "4Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/milvus"
+                  },
+                  {
+                    "name": "config",
+                    "mountPath": "/milvus/configs/user.yaml",
+                    "subPath": "user.yaml"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "ETCD_USE_EMBED",
+                    "value": "false"
+                  },
+                  {
+                    "name": "COMMON_STORAGETYPE",
+                    "value": "remote"
+                  },
+                  {
+                    "name": "DEPLOY_MODE",
+                    "value": "DISTRIBUTED"
+                  },
+                  {
+                    "name": "ETCD_ENDPOINTS",
+                    "value": "etcd:2379"
+                  },
+                  {
+                    "name": "MINIO_ADDRESS",
+                    "value": "minio"
+                  },
+                  {
+                    "name": "MQ_TYPE",
+                    "value": "woodpecker"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 9091
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              },
+              {
+                "name": "config",
+                "configMap": {
+                  "name": "milvus-config"
+                }
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "streamingnode",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "streamingnode"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "streamingnode"
+            }
+          },
+          "spec": {
+            "enableServiceLinks": false,
+            "containers": [
+              {
+                "name": "streamingnode",
+                "image": "milvus-multisearch:prototype",
+                "imagePullPolicy": "Never",
+                "command": [
+                  "milvus",
+                  "run",
+                  "streamingnode"
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "500m",
+                    "memory": "512Mi"
+                  },
+                  "limits": {
+                    "cpu": "4",
+                    "memory": "6Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/milvus"
+                  },
+                  {
+                    "name": "config",
+                    "mountPath": "/milvus/configs/user.yaml",
+                    "subPath": "user.yaml"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "ETCD_USE_EMBED",
+                    "value": "false"
+                  },
+                  {
+                    "name": "COMMON_STORAGETYPE",
+                    "value": "remote"
+                  },
+                  {
+                    "name": "DEPLOY_MODE",
+                    "value": "DISTRIBUTED"
+                  },
+                  {
+                    "name": "ETCD_ENDPOINTS",
+                    "value": "etcd:2379"
+                  },
+                  {
+                    "name": "MINIO_ADDRESS",
+                    "value": "minio"
+                  },
+                  {
+                    "name": "MQ_TYPE",
+                    "value": "woodpecker"
+                  }
+                ],
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 9091
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "data",
+                "emptyDir": {}
+              },
+              {
+                "name": "config",
+                "configMap": {
+                  "name": "milvus-config"
+                }
+              }
+            ],
+            "terminationGracePeriodSeconds": 30
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "proxy",
+        "namespace": "multisearch-prototype"
+      },
+      "spec": {
+        "selector": {
+          "app": "proxy"
+        },
+        "ports": [
+          {
+            "port": 19530,
+            "targetPort": 19530,
+            "nodePort": 30530
+          }
+        ],
+        "type": "NodePort"
+      }
+    }
+  ]
+}

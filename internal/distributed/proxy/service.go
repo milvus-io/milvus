@@ -50,12 +50,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
-	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -65,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/multisearchpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -292,20 +291,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 
 	var unaryServerOption grpc.ServerOption
 	if enableCustomInterceptor {
-		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
-			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
-			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptor),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
-			proxy.UnaryServerHookInterceptor(),
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptor(limiter),
-			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.TraceLogInterceptor,
-			connection.KeepActiveInterceptor,
-		))
+		unaryServerOption = grpc.UnaryInterceptor(proxyEntryInterceptor(limiter))
 	} else {
 		unaryServerOption = grpc.EmptyServerOption{}
 	}
@@ -373,6 +359,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		proxypb.RegisterProxyServer(s.grpcExternalServer, s)
 	}
 
+	multisearchpb.RegisterMultiSearchServiceServer(s.grpcExternalServer, newMultiSearchServer(s, limiter))
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
 	milvuspb.RegisterClientTelemetryServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)

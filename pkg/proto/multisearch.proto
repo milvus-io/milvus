@@ -1,0 +1,40 @@
+syntax = "proto3";
+package milvus.proto.multisearch;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/multisearchpb";
+
+import "common.proto";
+import "milvus.proto";
+
+// Prototype extension on the public Proxy gRPC port. Items are independent
+// ordinary searches, not a cross-collection ranking or snapshot operation.
+service MultiSearchService {
+  rpc MultiSearch(MultiSearchRequest) returns (MultiSearchResponse) {}
+}
+
+message SearchItem {
+  string id = 1;
+  milvus.SearchRequest search = 2;
+}
+
+message MultiSearchRequest {
+  string db_name = 1;
+  repeated SearchItem items = 2;
+}
+
+message SearchOutcome {
+  string id = 1;
+  // Present for ordinary Milvus outcomes, including non-success Status.
+  milvus.SearchResults result = 2;
+  // Transport errors from the ordinary Search entry chain remain distinct
+  // from Milvus Status. Zero means OK; nonzero means result is absent.
+  int32 grpc_code = 3;
+  string grpc_message = 4;
+}
+
+message MultiSearchResponse {
+  // Envelope status only: success does not imply every item succeeded.
+  common.Status status = 1;
+  // Same order and cardinality as input when envelope status is successful.
+  repeated SearchOutcome items = 2;
+}

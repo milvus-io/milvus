@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Request byte limit",
+    "passed": true,
+    "detail": {
+      "code": 1102,
+      "bytes": 4194509
+    }
+  },
+  {
+    "name": "Single-database envelope",
+    "passed": true,
+    "detail": {
+      "code": 1100
+    }
+  },
+  {
+    "name": "Real collection quota isolation",
+    "passed": true,
+    "detail": {
+      "ordinary_code": 9,
+      "multisearch_item_code": 9,
+      "other_item_code": 0,
+      "retriable": false
+    }
+  }
+]

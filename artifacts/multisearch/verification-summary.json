@@ -1,0 +1,10 @@
+{
+  "focused_dispatcher_tests": 6,
+  "dispatcher_race_tests_passed": true,
+  "stats_isolation_race_test_passed": true,
+  "proxy_service_regression_passed": true,
+  "proxy_service_subtests": 84,
+  "merr_and_proxy_config_checks_passed": true,
+  "full_repository_suite_run": false,
+  "known_test_environment_exception": "Existing TestComponentParam/test_queryNodeConfig expects the default storage path; fails with the temporary LOCALSTORAGE_PATH override. Focused Proxy config test passes."
+}

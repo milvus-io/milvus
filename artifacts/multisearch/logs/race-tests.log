@@ -1,0 +1,38 @@
+[2026/10/31 17:08:48.659 +00:00] [INFO] [distance/calc_distance_amd64.go:15] ["Hook avx for go simd distance computation"]
+[2026/10/31 17:08:48.794 +00:00] [DEBUG] [config/refresher.go:69] ["start refreshing configurations"] [source=FileSource]
+[2026/10/31 17:08:48.802 +00:00] [DEBUG] [config/etcd_source.go:52] ["init etcd source"] [etcdInfo="{\"UseEmbed\":false,\"EnableAuth\":false,\"UserName\":\"etcdadmin\",\"PassWord\":\"etcdadmin\",\"UseSSL\":false,\"Endpoints\":[\"localhost:2379\"],\"KeyPrefix\":\"by-dev\",\"CertFile\":\"/path/to/etcd-client.pem\",\"KeyFile\":\"/path/to/etcd-client-key.pem\",\"CaCertFile\":\"/path/to/ca.pem\",\"MinVersion\":\"1.3\",\"DialTimeout\":5000000000,\"RefreshInterval\":5000000000}"]
+[2026/10/31 17:08:48.803 +00:00] [INFO] [etcd/etcd_util.go:121] ["create etcd client"] [useEmbedEtcd=false] [useSSL=false] [endpoints="[localhost:2379]"] [minVersion=1.3]
+[2026/10/31 17:08:53.808 +00:00] [INFO] [paramtable/base_table.go:223] ["init with etcd failed"] [error="context deadline exceeded"]
+[2026/10/31 17:08:53.840 +00:00] [INFO] [paramtable/component_param.go:7277] ["DeployModeEnv is not set, use default"] [default=0.5]
+[2026/10/31 17:08:53.852 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.853 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.854 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.855 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.856 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.857 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.858 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.859 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.860 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.861 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.862 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.863 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.864 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.865 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.867 +00:00] [DEBUG] [funcutil/func.go:184] ["Selected IP by priority"] [ip=172.16.70.10] [categoryName=IPv4Private]
+[2026/10/31 17:08:53.868 +00:00] [INFO] [paramtable/hook_config.go:21] ["hook config"] [hook={}]
+[2026/10/31 17:08:53.868 +00:00] [INFO] [paramtable/cipher_config.go:26] ["init cipher config"]
+[2026/10/31 17:08:53.868 +00:00] [DEBUG] [config/refresher.go:69] ["start refreshing configurations"] [source=FileSource]
+=== RUN   TestMultiSearchIndependentOutcomes
+--- PASS: TestMultiSearchIndependentOutcomes (0.01s)
+=== RUN   TestMultiSearchEnvelopeValidation
+--- PASS: TestMultiSearchEnvelopeValidation (0.01s)
+=== RUN   TestMultiSearchDatabaseAndPointerIsolation
+--- PASS: TestMultiSearchDatabaseAndPointerIsolation (0.00s)
+=== RUN   TestMultiSearchConcurrencyAndAdmission
+--- PASS: TestMultiSearchConcurrencyAndAdmission (0.00s)
+=== RUN   TestMultiSearchDeadlineStopsDispatch
+--- PASS: TestMultiSearchDeadlineStopsDispatch (0.02s)
+=== RUN   TestMultiSearchResponseBudgetAndInvalidResult
+--- PASS: TestMultiSearchResponseBudgetAndInvalidResult (0.00s)
+PASS
+ok  	github.com/milvus-io/milvus/internal/proxy	7.082s

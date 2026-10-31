@@ -1,0 +1,9 @@
+**
+!bin/
+!bin/milvus
+!configs/
+!configs/**
+!examples/
+!examples/multisearch/
+!examples/multisearch/user.yaml
+!examples/multisearch/embedEtcd.yaml

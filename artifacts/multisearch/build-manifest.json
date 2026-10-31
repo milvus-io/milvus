@@ -1,0 +1,14 @@
+{
+  "source_commit": "d49b1eb6c599295cfc1f4e918d171c582243088e",
+  "go_version": "go version go1.26.5 linux/amd64",
+  "binary_sha256": "bbadbcbe91f24648ee862f8aa83807f7601b46be3b81f6570cb30d864ab62afe",
+  "container_binary_sha256": "bbadbcbe91f24648ee862f8aa83807f7601b46be3b81f6570cb30d864ab62afe",
+  "image_id": "sha256:be80787c0d446b51eae191f6c2ae73306d0c4b54f7af1b76217799ceab0158c7",
+  "base_image_id": "sha256:b0dfe54d1e107bbb6b345d50b5133f3486b53d4ed3f56ba812bb10b07246186f",
+  "platform": "Linux-5.15.0-174-generic-x86_64-with-glibc2.35",
+  "host_logical_cpus": 128,
+  "standalone_cpu_limit": 16,
+  "standalone_memory_gib": 32,
+  "native_runtime": "Unmodified shared libraries from cached milvusdb/milvus:v3.0.0; Go binary rebuilt with -tags dynamic",
+  "build_command": "source scripts/setenv.sh; go build -p 16 -tags dynamic -o bin/milvus ./cmd/main.go"
+}
