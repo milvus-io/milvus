@@ -28,7 +28,6 @@
 #include "common/ChunkWriter.h"
 #include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
-#include "storage/MmapManager.h"
 #include "storage/Util.h"
 
 namespace milvus {
@@ -1053,33 +1052,26 @@ WriteAlignmentPadding(int64_t row_count,
 }
 
 std::shared_ptr<const ColumnarArrayChunk>
-MaterializeMmapColumnarArrayChunk(
+MaterializeColumnarArrayChunk(
     const ColumnarArrayBuildNode& root,
     int64_t row_count,
-    const proto::schema::TypeSchema& type,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
-    const auto serialized_size = ColumnarArraySerializedByteSize(root, type);
+    std::shared_ptr<const proto::schema::TypeSchema> type,
+    const ColumnarArrayBlockAllocator& allocate) {
+    const auto serialized_size = ColumnarArraySerializedByteSize(root, *type);
 
-    auto mmap_manager =
-        storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto* data = static_cast<char*>(
-        mmap_manager->Allocate(mmap_descriptor, serialized_size));
+    auto* data = allocate(serialized_size);
     AssertInfo(data != nullptr,
-               "failed to allocate {} bytes for nested ARRAY mmap block",
+               "failed to allocate {} bytes for nested ARRAY block",
                serialized_size);
 
     auto target =
         std::make_shared<BorrowedArrayChunkTarget>(data, serialized_size);
-    WriteColumnarArrayNode(root, type, target);
+    WriteColumnarArrayNode(root, *type, target);
     char padding[MMAP_ARRAY_PADDING] = {};
     target->write(padding, MMAP_ARRAY_PADDING);
 
     return std::make_shared<const ColumnarArrayChunk>(
-        row_count,
-        data,
-        serialized_size,
-        std::make_shared<const proto::schema::TypeSchema>(type),
-        nullptr);
+        row_count, data, serialized_size, std::move(type), nullptr);
 }
 
 std::shared_ptr<const ArrayValueStorage>
@@ -1111,39 +1103,38 @@ CreateArrayValueStorage(std::unique_ptr<ColumnarArrayBuildNode> root,
 }  // namespace
 
 std::shared_ptr<const ColumnarArrayChunk>
-CreateMmapColumnarArrayChunkFromProtoRows(
+CreateColumnarArrayChunkFromProtoRows(
     std::span<const ScalarFieldProto* const> rows,
-    const proto::schema::TypeSchema& type,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
+    std::shared_ptr<const proto::schema::TypeSchema> type,
+    const ColumnarArrayBlockAllocator& allocate) {
+    AssertInfo(type != nullptr, "nested ARRAY block type must not be null");
     AssertInfo(
         rows.size() <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
         "nested ARRAY row count {} exceeds int64 range",
         rows.size());
 
     std::vector<const ScalarFieldProto*> row_ptrs(rows.begin(), rows.end());
-    auto root = BuildColumnarArrayNode(row_ptrs, type);
+    auto root = BuildColumnarArrayNode(row_ptrs, *type);
     const auto row_count = static_cast<int64_t>(rows.size());
-    return MaterializeMmapColumnarArrayChunk(
-        *root, row_count, type, mmap_descriptor);
+    return MaterializeColumnarArrayChunk(
+        *root, row_count, std::move(type), allocate);
 }
 
 std::shared_ptr<const ColumnarArrayChunk>
-CreateMmapColumnarArrayChunkFromValues(
+CreateColumnarArrayChunkFromValues(
     std::span<const ArrayValue> values,
     std::span<const uint8_t> valid_data,
-    const storage::MmapChunkDescriptorPtr& mmap_descriptor) {
-    AssertInfo(!values.empty(),
-               "cannot build nested ARRAY mmap block from no rows");
+    const ColumnarArrayBlockAllocator& allocate) {
+    AssertInfo(!values.empty(), "cannot build nested ARRAY block from no rows");
     AssertInfo(values.size() <=
                    static_cast<size_t>(std::numeric_limits<int64_t>::max()),
                "nested ARRAY row count {} exceeds int64 range",
                values.size());
 
-    const auto& type = values.front().type();
-    auto root = BuildColumnarArrayNode(values, valid_data, type);
+    const auto& type = values.front().shared_type();
+    auto root = BuildColumnarArrayNode(values, valid_data, *type);
     const auto row_count = static_cast<int64_t>(values.size());
-    return MaterializeMmapColumnarArrayChunk(
-        *root, row_count, type, mmap_descriptor);
+    return MaterializeColumnarArrayChunk(*root, row_count, type, allocate);
 }
 
 struct ColumnarArrayChunkWriter::Impl {

@@ -921,11 +921,10 @@ TEST(ArrayValue, GrowingSchemaUsesArrayValueAndDenseNullableRows) {
     ASSERT_TRUE(record.get_valid_data(field_id)->is_valid(0));
     ASSERT_FALSE(record.get_valid_data(field_id)->is_valid(1));
     ASSERT_TRUE(record.get_valid_data(field_id)->is_valid(2));
-    ASSERT_EQ(&(*values)[0].type(), &(*values)[1].type());
-    ASSERT_EQ(&(*values)[0].type(), &(*values)[2].type());
-    AssertProtoEqual(row0, (*values)[0].output_data());
-    ASSERT_TRUE((*values)[1].is_null());
-    AssertProtoEqual(row2, (*values)[2].output_data());
+    ASSERT_FALSE(values->is_mmap());
+    AssertProtoEqual(row0, values->view_element(0).output_data());
+    ASSERT_TRUE(values->view_element(1).is_null());
+    AssertProtoEqual(row2, values->view_element(2).output_data());
 
     proto::schema::FieldData next_batch;
     next_batch.set_field_id(field_id.get());
@@ -938,18 +937,16 @@ TEST(ArrayValue, GrowingSchemaUsesArrayValueAndDenseNullableRows) {
     record.get_valid_data(field_id)->set_data_raw(
         3, 1, &next_batch, field_meta);
     record.get_data_base(field_id)->set_data_raw(3, 1, &next_batch, field_meta);
-    ASSERT_EQ(&(*values)[0].type(), &(*values)[3].type());
+    AssertProtoEqual(row0, values->view_element(0).output_data());
+    AssertProtoEqual(row2, values->view_element(3).output_data());
+    // Blocks from different batches and chunks share one TypeSchema.
+    ASSERT_EQ(&values->view_element(0).type(), &values->view_element(3).type());
 }
 
-TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksDirectlyFromDataArray) {
+TEST(ArrayValue, GrowingBuildsColumnarBlocksDirectlyFromDataArray) {
     auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
     const auto field_id = FieldId(100);
     const auto field_meta = NestedArrayFieldMeta(field_id, type);
-
-    auto mmap_manager =
-        storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto mmap_descriptor = mmap_manager->Register();
-    segcore::ConcurrentVector<ArrayValue> values(2, mmap_descriptor);
 
     auto row0 = NestedArrayRow(proto::schema::DataType::Int32,
                                {IntArrayRow({1}), IntArrayRow({2, 3})});
@@ -961,7 +958,6 @@ TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksDirectlyFromDataArray) {
     auto* first_array = first_batch.mutable_scalars()->mutable_array_data();
     first_array->set_element_type(proto::schema::DataType::Array);
     *first_array->add_data() = row0;
-    values.set_data_raw(0, 1, &first_batch, field_meta);
 
     proto::schema::FieldData second_batch;
     second_batch.set_field_id(field_id.get());
@@ -972,16 +968,31 @@ TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksDirectlyFromDataArray) {
     second_array->set_element_type(proto::schema::DataType::Array);
     second_array->add_data();
     *second_array->add_data() = row2;
-    values.set_data_raw(1, 2, &second_batch, field_meta);
 
-    ASSERT_TRUE(values.is_mmap());
-    ASSERT_EQ(values.num_chunk(), 2);
-    AssertProtoEqual(row0, values.view_element(0).output_data());
-    ASSERT_TRUE(values.view_element(1).is_null());
-    AssertProtoEqual(row2, values.view_element(2).output_data());
+    for (bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap ? "mmap" : "heap");
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr;
+        if (enable_mmap) {
+            mmap_descriptor = storage::MmapManager::GetInstance()
+                                  .GetMmapChunkManager()
+                                  ->Register();
+        }
+        segcore::ConcurrentVector<ArrayValue> values(2, mmap_descriptor);
+        values.set_data_raw(0, 1, &first_batch, field_meta);
+        values.set_data_raw(1, 2, &second_batch, field_meta);
+
+        ASSERT_EQ(values.is_mmap(), enable_mmap);
+        ASSERT_EQ(values.num_chunk(), 2);
+        AssertProtoEqual(row0, values.view_element(0).output_data());
+        ASSERT_TRUE(values.view_element(1).is_null());
+        AssertProtoEqual(row2, values.view_element(2).output_data());
+        // Rows 0 and 2 come from different batches and chunks.
+        ASSERT_EQ(&values.view_element(0).type(),
+                  &values.view_element(2).type());
+    }
 }
 
-TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksFromFieldDataValues) {
+TEST(ArrayValue, GrowingBuildsColumnarBlocksFromFieldDataValues) {
     auto type =
         NestedArrayType(LeafArrayType(proto::schema::DataType::Int32), true);
 
@@ -1000,21 +1011,27 @@ TEST(ArrayValue, GrowingMmapBuildsColumnarBlocksFromFieldDataValues) {
     field_data->FillFieldData(arrow_array);
     std::vector<FieldDataPtr> field_datas{field_data};
 
-    auto valid_data = std::make_shared<segcore::ThreadSafeValidData>(2);
-    valid_data->set_data_raw(0, field_datas);
-    auto mmap_manager =
-        storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto mmap_descriptor = mmap_manager->Register();
-    segcore::ConcurrentVector<ArrayValue> values(
-        2, mmap_descriptor, valid_data);
+    for (bool enable_mmap : {false, true}) {
+        SCOPED_TRACE(enable_mmap ? "mmap" : "heap");
+        auto valid_data = std::make_shared<segcore::ThreadSafeValidData>(2);
+        valid_data->set_data_raw(0, field_datas);
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr;
+        if (enable_mmap) {
+            mmap_descriptor = storage::MmapManager::GetInstance()
+                                  .GetMmapChunkManager()
+                                  ->Register();
+        }
+        segcore::ConcurrentVector<ArrayValue> values(
+            2, mmap_descriptor, valid_data);
 
-    values.set_data_raw(0, field_datas);
+        values.set_data_raw(0, field_datas);
 
-    ASSERT_TRUE(values.is_mmap());
-    ASSERT_EQ(values.num_chunk(), 2);
-    AssertProtoEqual(row0, values.view_element(0).output_data());
-    ASSERT_TRUE(values.view_element(1).is_null());
-    AssertProtoEqual(row2, values.view_element(2).output_data());
+        ASSERT_EQ(values.is_mmap(), enable_mmap);
+        ASSERT_EQ(values.num_chunk(), 2);
+        AssertProtoEqual(row0, values.view_element(0).output_data());
+        ASSERT_TRUE(values.view_element(1).is_null());
+        AssertProtoEqual(row2, values.view_element(2).output_data());
+    }
 }
 
 TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {

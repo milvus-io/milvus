@@ -57,6 +57,7 @@ AdaptBuildField(const storage::FileManagerContext& context) {
     result.field_type = static_cast<DataType>(schema.data_type());
     result.element_type = static_cast<DataType>(schema.element_type());
     result.nullable = schema.nullable();
+    result.element_nullable = schema.element_nullable();
     if (schema.has_default_value()) {
         result.estimated_missing_row_bytes =
             std::max<size_t>(1, schema.default_value().ByteSizeLong());
@@ -873,6 +874,7 @@ BuildSession::RunToArtifact() {
                     req_.value_type,
                     file_manager_context_.indexMeta.dim,
                     field_spec_.nullable,
+                    field_spec_.element_nullable,
                     req_.expected_rows,
                     req_.family,
                     req_.params);
@@ -903,6 +905,7 @@ BuildSession::RunToArtifact() {
                     field_spec_.field_type,
                     req_.value_type,
                     file_manager_context_.indexMeta.dim,
+                    field_spec_.element_nullable,
                     req_.expected_rows,
                     req_.family,
                     req_.params);

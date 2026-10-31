@@ -30,6 +30,15 @@
 namespace milvus {
 // Internal representation of one VECTOR_ARRAY row. length_ is the logical
 // element count; data_ stores valid vectors only in compact order.
+//
+// Segments do not keep VectorArrays: growing chunks hold one VectorArrayView
+// per row into per-batch blocks and sealed segments hold VectorArrayChunks, so
+// stored rows are read as VectorArrayView. A VectorArray exists only for one
+// conversion: an insert payload on its way into a block, an element of
+// FieldData<VectorArray> while binlogs are read or written, a growing segment
+// is loaded or a vector index is built, and a sealed row output as protobuf.
+// ConcurrentVector<VectorArray> and VariableLengthChunk<VectorArray> use the
+// type only as a tag and store VectorArrayViews.
 class VectorArray : public milvus::VectorTrait {
  public:
     VectorArray() = default;
@@ -534,6 +543,17 @@ class VectorArrayView {
     int
     physical_length() const {
         return physical_length_;
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    // Validity of the logical elements; empty unless element-nullable.
+    const TargetBitmapView&
+    element_validity_view() const {
+        return element_valid_data_;
     }
 
     const char*

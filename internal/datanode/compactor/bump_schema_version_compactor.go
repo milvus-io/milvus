@@ -1297,6 +1297,10 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 	statsByField := make(map[int64]*storage.BM25Stats)
 	fieldMemorySizeByField := make(map[int64]int, len(outputFieldIDs))
 	fieldNullCountByField := make(map[int64]int64, len(outputFieldIDs))
+	// The writer schema setupWriter uses: the output fields at top level.
+	outputSchema := &schemapb.CollectionSchema{Fields: outputFields}
+	var fieldValidElementsByField map[int64]int64
+	var fieldValidElementsUnknown map[int64]struct{}
 	for _, outputFieldID := range outputFieldIDs {
 		if isBM25MaterializedOutputField(t.plan.GetSchema(), outputFieldID) {
 			statsByField[outputFieldID] = storage.NewBM25Stats()
@@ -1357,6 +1361,8 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 			fieldMemorySizeByField[outputFieldID] += batchMemSize
 			fieldNullCountByField[outputFieldID] += int64(outputCol.NullN())
 		}
+		fieldValidElementsByField, fieldValidElementsUnknown = storage.CollectVectorArrayValidElements(
+			outputSchema, wrapped, fieldValidElementsByField, fieldValidElementsUnknown)
 
 		writeStart := time.Now()
 		if err := writerResult.writer.Write(wrapped); err != nil {
@@ -1470,6 +1476,7 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 					writerResult.columnGroups,
 					fieldMemorySizeByField,
 					fieldNullCountByField,
+					fieldValidElementsByField,
 					writerResult.statsBlobSize,
 				),
 			},
