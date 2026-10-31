@@ -63,12 +63,18 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls.ScannerImpls, err error) {
 	// The scanner is stateless, so we can create a scanner with an anonymous consumer.
 	// and there's no commit opeartions.
-	consumerConfig := cloneKafkaConfig(w.consumerConfig)
+	consumerConfig := w.consumerConfigForRead()
 	consumerConfig.SetKey("group.id", opt.Name)
 	c, err := kafka.NewConsumer(&consumerConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create kafka consumer")
 	}
+	consumerOwnedByScanner := false
+	defer func() {
+		if !consumerOwnedByScanner {
+			c.Close()
+		}
+	}()
 
 	topic := w.Channel().Name
 	seekPosition := kafka.TopicPartition{
@@ -101,7 +107,18 @@ func (w *walImpl) Read(ctx context.Context, opt walimpls.ReadOption) (s walimpls
 	if err := c.Assign([]kafka.TopicPartition{seekPosition}); err != nil {
 		return nil, errors.Wrap(err, "failed to assign kafka consumer")
 	}
+	consumerOwnedByScanner = true
 	return newScanner(opt.Name, exclude, c), nil
+}
+
+func (w *walImpl) consumerConfigForRead() kafka.ConfigMap {
+	consumerConfig := cloneKafkaConfig(w.consumerConfig)
+	if w.Channel().AccessMode == types.AccessModeRO {
+		// A read-only WAL must never materialize a topic that its writer has
+		// already decommissioned, so keep broker-side auto creation disabled.
+		consumerConfig.SetKey("allow.auto.create.topics", false)
+	}
+	return consumerConfig
 }
 
 func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {

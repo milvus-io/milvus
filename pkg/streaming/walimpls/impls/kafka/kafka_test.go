@@ -4,11 +4,15 @@ import (
 	"os"
 	"testing"
 
+	ckafka "github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -37,6 +41,27 @@ func TestKafka(t *testing.T) {
 		t.Skip("there's no kafka broker available, skipping kafka test")
 	}
 	walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
+}
+
+func TestConsumerConfigForRead(t *testing.T) {
+	baseConfig := ckafka.ConfigMap{"allow.auto.create.topics": true}
+
+	readOnlyWAL := &walImpl{
+		WALHelper: helper.NewWALHelper(&walimpls.OpenOption{
+			Channel: types.PChannelInfo{Name: "read-only", AccessMode: types.AccessModeRO},
+		}),
+		consumerConfig: baseConfig,
+	}
+	require.Equal(t, false, readOnlyWAL.consumerConfigForRead()["allow.auto.create.topics"])
+	require.Equal(t, true, baseConfig["allow.auto.create.topics"])
+
+	readWriteWAL := &walImpl{
+		WALHelper: helper.NewWALHelper(&walimpls.OpenOption{
+			Channel: types.PChannelInfo{Name: "read-write", AccessMode: types.AccessModeRW},
+		}),
+		consumerConfig: baseConfig,
+	}
+	require.Equal(t, true, readWriteWAL.consumerConfigForRead()["allow.auto.create.topics"])
 }
 
 func TestGetBasicConfig(t *testing.T) {
