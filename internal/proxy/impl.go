@@ -7361,6 +7361,9 @@ func (node *Proxy) ListClientCommands(ctx context.Context, req *rootcoordpb.List
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &rootcoordpb.ListClientCommandsResponse{Status: merr.Status(err)}, nil
 	}
+	if err := checkTelemetryAdmin(ctx, "ListClientCommands"); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{Status: merr.Status(err)}, nil
+	}
 
 	return node.mixCoord.ListClientCommands(ctx, req)
 }
