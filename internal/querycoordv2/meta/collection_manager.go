@@ -159,7 +159,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 				mlog.Info(ctx, "recover loading collection times reach limit, release collection",
 					mlog.FieldCollectionID(collection.CollectionID),
 					mlog.Int32("recoverTimes", collection.RecoverTimes))
-				break
+				continue
 			}
 			// update recoverTimes meta in etcd
 			collection.RecoverTimes += 1
