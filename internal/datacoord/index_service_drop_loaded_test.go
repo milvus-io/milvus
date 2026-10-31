@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -51,17 +50,6 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 	b := broker.NewMockBroker(t)
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:         merr.Success(),
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name: "test_collection",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector},
-			},
-		},
-	}, nil)
 	s := &Server{
 		meta: &meta{
 			catalog: catalog,
@@ -87,6 +75,12 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 		allocator:       newMockAllocator(t),
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	seedCollections(s, &collectionInfo{ID: collID, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldID, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+	}})
 	mixCoord := mocks.NewMixCoord(t)
 	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status:        merr.Success(),

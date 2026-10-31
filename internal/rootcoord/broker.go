@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type watchInfo struct {
@@ -54,8 +53,6 @@ type Broker interface {
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	// notify observer to clean their meta cache
-	BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error
 	ShowResourceGroups(ctx context.Context) ([]string, error)
 }
 
@@ -230,48 +227,6 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	}
 
 	return resp.GetStates(), nil
-}
-
-func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error {
-	mlog.Info(ctx, "broadcasting request to alter collection",
-		mlog.Int64("collectionID", collectionID))
-
-	colMeta, err := b.s.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
-	if err != nil {
-		return err
-	}
-
-	db, err := b.s.meta.GetDatabaseByName(ctx, colMeta.DBName, typeutil.MaxTimestamp)
-	if err != nil {
-		return err
-	}
-
-	partitionIDs := make([]int64, len(colMeta.Partitions))
-	for i, p := range colMeta.Partitions {
-		partitionIDs[i] = p.PartitionID
-	}
-	dcReq := &datapb.AlterCollectionRequest{
-		CollectionID:   collectionID,
-		Schema:         colMeta.ToCollectionSchemaPB(),
-		PartitionIDs:   partitionIDs,
-		StartPositions: colMeta.StartPositions,
-		Properties:     colMeta.Properties,
-		DbID:           db.ID,
-		VChannels:      colMeta.VirtualChannelNames,
-	}
-	resp, err := b.s.mixCoord.BroadcastAlteredCollection(ctx, dcReq)
-	if err != nil {
-		return err
-	}
-
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return merr.Error(resp)
-	}
-	mlog.Info(ctx, "done to broadcast request to alter collection",
-		mlog.String("collectionName", colMeta.Name), mlog.Int64("collectionID", dcReq.GetCollectionID()),
-		mlog.Any("props", colMeta.Properties), mlog.Any("fields", colMeta.Fields),
-		mlog.Int32("schemaVersion", colMeta.SchemaVersion))
-	return nil
 }
 
 func (b *ServerBroker) ShowResourceGroups(ctx context.Context) ([]string, error) {

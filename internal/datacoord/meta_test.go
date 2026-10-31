@@ -36,7 +36,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -56,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -178,15 +176,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSegments_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{100},
-				},
-			},
-		}, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
@@ -199,14 +188,13 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
+		_, err := newMeta(ctx, suite.catalog, nil, newMetaStoreWithCollections(suite.catalog, 100), brk)
 		suite.Error(err)
 	})
 
 	suite.Run("ListChannelCheckpoint_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
@@ -230,16 +218,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
 
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{1},
-				},
-			},
-		}, nil)
-
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -272,7 +250,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		meta, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
+		meta, err := newMeta(ctx, suite.catalog, nil, newMetaStoreWithCollections(suite.catalog, 1), brk)
 		suite.NoError(err)
 		suite.NotNil(meta.compactionTargetMeta)
 		suite.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.compactionTargetMeta.GetCompactionTarget(10).GetState())
@@ -283,7 +261,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListIndexes_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -303,7 +280,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListAnalyzeTasks_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("mock"))
@@ -323,7 +299,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListPartitionStatsInfos_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -343,7 +318,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListCompactionTask_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -363,7 +337,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListStatsTasks_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -383,7 +356,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSnapshots_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -403,20 +375,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("test list segments", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{100, 101, 102},
-				},
-				{
-					DbName:        "db_2",
-					CollectionIDs: []int64{200, 201, 202},
-				},
-			},
-		}, nil)
-
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -440,7 +398,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				}, nil
 			})
 
-		meta, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
+		meta, err := newMeta(ctx, suite.catalog, nil, newMetaStoreWithCollections(suite.catalog, 100, 101, 102, 200, 201, 202), brk)
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -499,8 +457,6 @@ func (suite *MetaBasicSuite) TestCollection() {
 	suite.EqualValues(info.Schema, collInfo.Schema)
 	suite.EqualValues(len(suite.partIDs), len(collInfo.Partitions))
 	suite.ElementsMatch(info.Partitions, collInfo.Partitions)
-
-	suite.MetricsEqual(metrics.DataCoordNumCollections.WithLabelValues(), 1)
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
@@ -3755,7 +3711,6 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 
@@ -4800,7 +4755,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		metakv.EXPECT().Has(mock.Anything, mock.Anything).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 
@@ -5978,93 +5932,6 @@ func Test_meta_GcConfirm(t *testing.T) {
 		Return(false)
 
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
-}
-
-func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
-	ms := metacache.NewMetaStore(nil)
-	t.Run("fail to list database", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show collections", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to describe collection", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show partitions", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID: 1000,
-		}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.NoError(t, err)
-		c := m.GetCollection(UniqueID(1000))
-		assert.NotNil(t, c)
-	})
 }
 
 func TestMeta_GetSegmentsJSON(t *testing.T) {

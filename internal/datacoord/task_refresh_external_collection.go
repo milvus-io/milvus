@@ -326,6 +326,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	if collInfo == nil {
 		return merr.WrapErrServiceInternalMsg("collection %d not found in meta", collectionID)
 	}
+	// DropVirtualChannel has already dropped a Dropping collection's
+	// segments; new ones would never be dropped and would stall its GC.
+	if !collInfo.IsCreated() {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
 	// External collections are single-shard, single-partition (enforced at creation).
 	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
 	if len(collInfo.VChannelNames) != 1 {
@@ -776,6 +781,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+	if !collInfo.IsCreated() {
+		err = merr.WrapErrCollectionNotFound(t.GetCollectionId())
 		return
 	}
 	if len(collInfo.Partitions) != 1 {

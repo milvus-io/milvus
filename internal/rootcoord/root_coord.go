@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -255,6 +256,16 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 
 func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
 	return c.proxyClientManager
+}
+
+// CollectionSource returns the collection view that DataCoord and QueryCoord
+// read from. Call it after Init, which loads the MetaTable.
+func (c *Core) CollectionSource() (metacache.CollectionSource, error) {
+	mt, ok := c.meta.(*MetaTable)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("rootcoord meta %T is not a MetaTable", c.meta)
+	}
+	return mt.CollectionSource(), nil
 }
 
 func (c *Core) ServerExist(serverID int64) bool {
@@ -1184,16 +1195,6 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	}, nil
 }
 
-// IsCollectionAvailable lets in-process GC skip live collections without
-// materializing their schemas. False means unknown, not safe to delete.
-func (c *Core) IsCollectionAvailable(collectionID int64) bool {
-	if c.GetStateCode() != commonpb.StateCode_Healthy {
-		return false
-	}
-	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
-	return ok && checker.IsCollectionAvailable(collectionID)
-}
-
 // HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
@@ -1263,10 +1264,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = collInfo.ToCollectionSchemaPB()
 	// Use the dbName parameter (resolved from the request) for consistency
 	// with resp.DbName; the model's DBName may not always be in sync.
-	resp.Schema.DbName = dbName
+	resp.Schema = collectionSchemaPB(collInfo, dbName)
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames

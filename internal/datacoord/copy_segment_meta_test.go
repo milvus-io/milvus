@@ -67,7 +67,6 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
 	s.NoError(err)
@@ -102,7 +101,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
@@ -167,7 +165,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
@@ -219,7 +216,6 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(s.T())
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)

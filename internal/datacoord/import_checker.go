@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -74,7 +73,6 @@ type importCheckerHooks struct {
 type importChecker struct {
 	ctx        context.Context
 	meta       *meta
-	broker     broker.Broker
 	alloc      allocator.Allocator
 	importMeta ImportMeta
 	ci         CompactionInspector
@@ -98,7 +96,6 @@ type importChecker struct {
 
 func NewImportChecker(ctx context.Context,
 	meta *meta,
-	broker broker.Broker,
 	alloc allocator.Allocator,
 	importMeta ImportMeta,
 	ci CompactionInspector,
@@ -110,7 +107,6 @@ func NewImportChecker(ctx context.Context,
 	return &importChecker{
 		ctx:        ctx,
 		meta:       meta,
-		broker:     broker,
 		alloc:      alloc,
 		importMeta: importMeta,
 		ci:         ci,
@@ -901,21 +897,15 @@ func (c *importChecker) checkCollection(collectionID int64, jobs []ImportJob) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-	defer cancel()
-	has, err := c.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		mlog.Warn(c.ctx, "verify existence of collection failed", mlog.Int64("collection", collectionID), mlog.Err(err))
-		return
-	}
-	if !has {
+	// A Dropping collection counts as dropped.
+	if !c.meta.GetCollection(collectionID).IsCreated() {
 		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
 			return job.GetState() != internalpb.ImportJobState_Failed &&
 				job.GetState() != internalpb.ImportJobState_Completed &&
 				job.GetState() != internalpb.ImportJobState_Committing
 		})
 		for _, job := range jobs {
-			err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
+			err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
 				UpdateJobReason(fmt.Sprintf("collection %d dropped", collectionID)))
 			if err != nil {
 				mlog.Warn(c.ctx, "failed to update job state to Failed", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))

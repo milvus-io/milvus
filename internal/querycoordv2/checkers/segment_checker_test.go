@@ -95,8 +95,6 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
 
 	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, suite.scheduler)
-
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *SegmentCheckerTestSuite) TearDownTest() {

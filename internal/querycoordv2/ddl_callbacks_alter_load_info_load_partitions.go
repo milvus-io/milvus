@@ -35,7 +35,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}

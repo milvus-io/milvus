@@ -63,14 +63,7 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 				ctx := context.Background()
 				cluster := session.NewMockCluster(t)
 				server := newAutoscalePrecheckTestServer(t, cluster)
-				broker := meta.NewMockBroker(t)
-				server.broker = broker
-				broker.EXPECT().DescribeCollection(mock.Anything, autoscalePrecheckTestCollectionID).
-					Return(newAutoscalePrecheckTestRequest().CollectionInfo, nil).Once()
-				if !loadPartitions {
-					broker.EXPECT().GetPartitions(mock.Anything, autoscalePrecheckTestCollectionID).
-						Return([]int64{autoscalePrecheckTestPartitionID}, nil).Once()
-				}
+				server.broker = meta.NewMockBroker(t)
 				totalMemory := uint64(8192)
 				if scenario == "precheck rejection" {
 					totalMemory = 1024

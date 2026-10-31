@@ -24,8 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -571,13 +570,13 @@ func buildValidateTestServer(t *testing.T, snapshotFound bool) *Server {
 	} else {
 		sm = newTestSnapshotMeta(nil)
 	}
-	return &Server{
+	return seedCollections(&Server{
 		broker: mockBroker,
 		meta: &meta{
 			snapshotMeta: sm,
 			indexMeta:    &indexMeta{},
 		},
-	}
+	}, &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_coll"}})
 }
 
 // buildBaseSnapshotData creates a snapshotstorage.SnapshotData with a default partition and one index.
@@ -593,33 +592,16 @@ func buildBaseSnapshotData() *snapshotstorage.SnapshotData {
 	}
 }
 
-// mockDescribeCollection mocks DescribeCollectionInternal to return success.
-func mockDescribeCollection() *mockey.Mocker {
-	return mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
-		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				CollectionID:   collectionID,
-				CollectionName: "test_coll",
-				DbName:         "default",
-			}, nil
-		}).Build()
-}
-
-// mockShowPartitions mocks ShowPartitions to return the given partition names.
-func mockShowPartitions(names []string) *mockey.Mocker {
-	return mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
-		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
-			ids := make([]int64, len(names))
-			for i := range names {
-				ids[i] = int64(i + 1)
-			}
-			return &milvuspb.ShowPartitionsResponse{
-				Status:         merr.Success(),
-				PartitionNames: names,
-				PartitionIDs:   ids,
-			}, nil
-		}).Build()
+// setViewPartitions publishes names as collection 100's partitions.
+func setViewPartitions(server *Server, names []string) {
+	coll := *server.meta.GetCollection(100)
+	coll.Partitions = nil
+	coll.PartitionIDsByName = make(map[string]int64, len(names))
+	for i, name := range names {
+		coll.Partitions = append(coll.Partitions, int64(i+1))
+		coll.PartitionIDsByName[name] = int64(i + 1)
+	}
+	server.meta.AddCollection(&coll)
 }
 
 // mockGetIndexes mocks GetIndexesForCollection to return the given indexes.
@@ -646,11 +628,7 @@ func TestValidateRestoreSnapshotResources_CollectionNotFound(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeCollectionInternal")).To(
-		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			return nil, errors.New("collection gone")
-		}).Build()
-	defer m.UnPatch()
+	server.meta.DropCollection(100)
 
 	err := server.validateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
 
@@ -658,34 +636,12 @@ func TestValidateRestoreSnapshotResources_CollectionNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "collection 100 does not exist")
 }
 
-func TestValidateRestoreSnapshotResources_ShowPartitionsError(t *testing.T) {
-	ctx := context.Background()
-	server := buildValidateTestServer(t, true)
-
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-
-	m2 := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(
-		func(_ *broker.MockBroker, ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error) {
-			return nil, errors.New("rpc failure")
-		}).Build()
-	defer m2.UnPatch()
-
-	err := server.validateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get partitions")
-}
-
 func TestValidateRestoreSnapshotResources_PartitionNotFound(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
 	// Return partitions that do NOT include "_default"
-	m2 := mockShowPartitions([]string{"other_partition"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"other_partition"})
 
 	err := server.validateRestoreSnapshotResources(ctx, 100, buildBaseSnapshotData())
 
@@ -698,10 +654,7 @@ func TestValidateRestoreSnapshotResources_IndexNotFound(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-	m2 := mockShowPartitions([]string{"_default"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"_default"})
 	// Return empty indexes — snapshot expects vec_idx
 	m3 := mockGetIndexes([]*model.Index{})
 	defer m3.UnPatch()
@@ -717,10 +670,7 @@ func TestValidateRestoreSnapshotResources_IndexFieldMismatch(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-	m2 := mockShowPartitions([]string{"_default"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"_default"})
 	// Index name matches but field ID does not
 	m3 := mockGetIndexes([]*model.Index{
 		{FieldID: 999, IndexName: "vec_idx"},
@@ -738,10 +688,7 @@ func TestValidateRestoreSnapshotResources_Success(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-	m2 := mockShowPartitions([]string{"_default"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"_default"})
 	m3 := mockGetIndexes([]*model.Index{
 		{FieldID: 100, IndexName: "vec_idx"},
 	})
@@ -756,10 +703,7 @@ func TestValidateRestoreSnapshotResources_SuccessNoIndexes(t *testing.T) {
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-	m2 := mockShowPartitions([]string{"_default"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"_default"})
 
 	// No indexes in snapshot data
 	snapshotData := &snapshotstorage.SnapshotData{
@@ -779,10 +723,7 @@ func TestValidateRestoreSnapshotResources_MultiplePartitionsAndIndexes(t *testin
 	ctx := context.Background()
 	server := buildValidateTestServer(t, true)
 
-	m1 := mockDescribeCollection()
-	defer m1.UnPatch()
-	m2 := mockShowPartitions([]string{"_default", "part_a", "part_b"})
-	defer m2.UnPatch()
+	setViewPartitions(server, []string{"_default", "part_a", "part_b"})
 	m3 := mockGetIndexes([]*model.Index{
 		{FieldID: 100, IndexName: "vec_idx"},
 		{FieldID: 200, IndexName: "scalar_idx"},

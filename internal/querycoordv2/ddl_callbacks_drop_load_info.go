@@ -38,7 +38,7 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped.
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -48,8 +48,8 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().
 		WithHeader(&message.DropLoadConfigMessageHeader{
-			DbId:         coll.GetDbId(),
-			CollectionId: coll.GetCollectionID(),
+			DbId:         coll.DatabaseID,
+			CollectionId: coll.ID,
 		}).
 		WithBody(&message.DropLoadConfigMessageBody{}).
 		WithControlChannelBroadcast().

@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -232,7 +231,6 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -311,7 +309,6 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -391,7 +388,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
@@ -473,7 +469,6 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	})
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	segment := &SegmentInfo{
@@ -563,7 +558,6 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -649,7 +643,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.NoError(t, err)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -850,7 +843,6 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -1173,7 +1165,6 @@ func TestImportUtil_GetV3ImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 
@@ -1681,7 +1672,6 @@ func TestImportUtil_AssembleRequestCarriesIDRange(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(800, nil)
 
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	assert.NoError(t, err)
 	err = meta.AddSegment(context.Background(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 5, IsImporting: true}})

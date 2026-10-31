@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -1102,14 +1101,14 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		}, nil
 	}
 
-	dresp, err := s.broker.DescribeCollectionInternal(s.ctx, collectionID)
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
-		mlog.Error(context.TODO(), "get collection info from rootcoord failed",
+		mlog.Error(ctx, "get collection info failed",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	channels := dresp.GetVirtualChannelNames()
+	channels := coll.VChannelNames
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, c := range channels {
@@ -1779,18 +1778,13 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 // getChannelsByCollectionID gets the channels of the collection.
 func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int64) ([]RWChannel, error) {
-	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
-		CollectionID: collectionID,
-	})
+	coll, err := s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	channels := make([]RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
-	for _, channel := range describeRsp.GetVirtualChannelNames() {
-		startPos := toMsgPosition(channel, describeRsp.GetStartPositions())
+	channels := make([]RWChannel, 0, len(coll.VChannelNames))
+	for _, channel := range coll.VChannelNames {
+		startPos := toMsgPosition(channel, coll.StartPositions)
 		channels = append(channels, &channelMeta{
 			Name:          channel,
 			CollectionID:  collectionID,
@@ -1896,43 +1890,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Status(err), nil
 	}
 
-	properties := make(map[string]string)
-	for _, pair := range req.Properties {
-		properties[pair.GetKey()] = pair.GetValue()
-	}
-
-	// RootCoord builds this request from its authoritative meta and populates
-	// every field (broker.go BroadcastAlteredCollection), so the request wins
-	// throughout. Taking Partitions/DatabaseName/DatabaseID from the existing
-	// entry instead -- as the pre-metacache code did -- pinned them to whatever
-	// the initial load saw: create/drop partition never refreshed Partitions,
-	// and a cross-database rename left DatabaseName stale for the resource-key
-	// locks built from it. CreatedAt is the one field the request lacks, so it
-	// is carried over.
-	info := &collectionInfo{
-		ID:             req.GetCollectionID(),
-		Schema:         req.GetSchema(),
-		Partitions:     req.GetPartitionIDs(),
-		StartPositions: req.GetStartPositions(),
-		Properties:     properties,
-		DatabaseID:     req.GetDbID(),
-		DatabaseName:   req.GetSchema().GetDbName(),
-		VChannelNames:  req.GetVChannels(),
-	}
-	var oldSchema *schemapb.CollectionSchema
-	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
-		info.CreatedAt = existing.CreatedAt
-		oldSchema = existing.Schema
-	}
-	s.meta.AddCollection(info)
-	// A refresh that rebinds an external collection applies its segments before
-	// publishing the new source/spec, so their index builds are enqueued here.
-	if externalSourceChanged(oldSchema, req.GetSchema()) {
-		notifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
-	}
-	// An added field may need text or JSON key stats on existing segments, and a
-	// published external source/spec makes refreshed segments ready for them.
-	notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
+	// DataCoord reads collections straight from RootCoord's meta through the
+	// shared CollectionSource, so there is no copy to refresh. RootCoord no
+	// longer calls this; it stays until the RPC is removed.
 	return merr.Success(), nil
 }
 
@@ -2113,7 +2073,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	// Broadcast the import message
-	// dbName is retrieved inside broadcastImport via broker.DescribeCollectionInternal
+	// dbName is read inside broadcastImport from the collection view
 	duplicatedJobID, duplicated, err := s.broadcastImport(
 		ctx,
 		in.GetCollectionID(),
@@ -2312,7 +2272,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		resp.Status = merr.Status(merr.Wrap(err, "get collection failed"))
 		return resp, nil
 	}
-	if importCollectionInfo == nil {
+	// A Dropping collection stays visible until RootCoord removes it; an
+	// import ack replayed for it must not start a job.
+	if !importCollectionInfo.IsCreated() {
 		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(body.GetCollectionID()))
 		return resp, nil
 	}
@@ -2541,10 +2503,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Resolve collection identity for the broadcast lock set (also validates
-	// collection existence). Read from the datacoord-local meta cache via
-	// handler.GetCollection — avoids a cross-component RPC to MixCoord on every
-	// CreateSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// collection existence). Read from RootCoord's collection view via
+	// handler.GetCollection, which retries a miss for a bounded time.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "CreateSnapshot failed to resolve collection", mlog.Err(err))
@@ -2572,12 +2532,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	// resolution above and lock acquisition; in that case this request must
 	// terminate before broadcasting a CreateSnapshot message whose ack callback
 	// can no longer generate a valid snapshot.
-	hasCollection, err := s.broker.HasCollection(ctx, req.GetCollectionId())
-	if err != nil {
-		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check collection existence after lock", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if !hasCollection {
+	if !s.meta.GetCollection(req.GetCollectionId()).IsCreated() {
 		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
@@ -2623,13 +2578,13 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 
 	mlog.Info(context.TODO(), "receive BatchUpdateManifest request", mlog.Int("itemCount", len(req.GetItems())))
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	coll, err := s.meta.getCollectionOrNotFound(req.GetCollectionId())
 	if err != nil {
-		mlog.Warn(context.TODO(), "BatchUpdateManifest failed to describe collection", mlog.Err(err))
+		mlog.Warn(ctx, "BatchUpdateManifest failed to get collection", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
+	dbName := coll.DatabaseName
+	collectionName := coll.Schema.GetName()
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(dbName),
 		message.NewSharedCollectionNameResourceKey(dbName, collectionName),
@@ -2689,10 +2644,9 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	// Dropping a snapshot must serialize against concurrent DropCollection / AlterCollection
 	// on the owning collection, otherwise DropSnapshot can race with a cascade drop path.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every DropSnapshot, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Read from the collection view RootCoord publishes. This avoids a
+	// cross-component RPC to MixCoord on every DropSnapshot; handler.GetCollection
+	// retries a miss briefly in case RootCoord has not applied the collection.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "DropSnapshot failed to resolve collection", mlog.Err(err))
@@ -3103,10 +3057,9 @@ func (s *Server) PinSnapshotData(ctx context.Context, req *datapb.PinSnapshotDat
 	// collection to exist before we can acquire the locks that serialize Pin
 	// against DropSnapshot / DropCollection.
 	//
-	// Read from the datacoord-local meta cache (populated at startup and kept in sync
-	// via BroadcastAlteredCollection). This avoids a cross-component RPC to MixCoord
-	// on every PinSnapshotData, and on cache miss handler.GetCollection transparently
-	// falls back to rootcoord with bounded retries.
+	// Read from the collection view RootCoord publishes. This avoids a
+	// cross-component RPC to MixCoord on every PinSnapshotData; handler.GetCollection
+	// retries a miss briefly in case RootCoord has not applied the collection.
 	coll, err := s.handler.GetCollection(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "PinSnapshotData failed to resolve collection", mlog.Err(err))
