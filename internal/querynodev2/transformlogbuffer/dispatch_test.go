@@ -141,6 +141,7 @@ func TestDispatchWaitingChannelDoesNotOccupyCatchupWorker(t *testing.T) {
 func TestDispatchIdleSegmentsHaveNoWorkers(t *testing.T) {
 	streams := newFakeStreamManager()
 	buffer := New(streams, 2)
+	defer buffer.Close()
 	guard, err := buffer.Acquire(t.Context(), newTestQueryView("v", 50))
 	require.NoError(t, err)
 	defer guard.Release()
@@ -148,20 +149,32 @@ func TestDispatchIdleSegmentsHaveNoWorkers(t *testing.T) {
 	before := runtime.NumGoroutine()
 	const n = 10000
 	regs := make([]qnview.TransformRegistration, 0, n)
+	defer func() {
+		for _, reg := range regs {
+			reg.Unregister()
+		}
+	}()
+	// Measure the steady-state goroutine count with all registrations alive.
+	// Catch up in batches so setup does not impose a bulk-replay throughput
+	// requirement on race/coverage builds running on busy CI workers.
+	const batchSize = 100
 	for i := 0; i < n; i++ {
 		reg, err := buffer.RegisterSegment(t.Context(), &fakeSegment{id: int64(i), vchannel: "v", startAfter: 50})
 		require.NoError(t, err)
 		regs = append(regs, reg)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	for _, reg := range regs {
-		require.NoError(t, reg.WaitCatchup(ctx))
+		if len(regs)%batchSize == 0 {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			for _, pending := range regs[len(regs)-batchSize:] {
+				err := pending.WaitCatchup(ctx)
+				if err != nil {
+					cancel()
+					require.NoError(t, err)
+				}
+			}
+			cancel()
+		}
 	}
 	require.Less(t, runtime.NumGoroutine()-before, 20, "live registrations must not own waiting goroutines")
-	for _, reg := range regs {
-		reg.Unregister()
-	}
 }
 
 func TestDispatchFailureCallbackCatchesAlreadyFailedRegistration(t *testing.T) {

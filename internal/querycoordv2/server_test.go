@@ -132,9 +132,16 @@ func (suite *ServerSuite) SetupTest() {
 	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
 	suite.T().Cleanup(func() { schemaTarget.UnPatch() })
 	provider := newRuntimeDataViewProvider(suite.T())
+	// Keep one allocator across runtime restarts, just as the coordinator's
+	// persisted allocator does. Node lifecycle tests do not run RootCoord RPCs.
+	allocateVersion := params.RandomIncrementIDAllocator()
 	var createRuntime func(context.Context, qviewsRuntimeDependencies) (*qviewsRuntime, error)
 	patch := mockey.Mock(newQViewsRuntime).Origin(&createRuntime).To(func(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
 		deps.dataViewProvider = provider
+		deps.loadConfigDependencies.AllocateVersion = func(context.Context) (uint64, error) {
+			id, err := allocateVersion()
+			return uint64(id), err
+		}
 		return createRuntime(ctx, deps)
 	}).Build()
 	suite.T().Cleanup(func() { patch.UnPatch() })

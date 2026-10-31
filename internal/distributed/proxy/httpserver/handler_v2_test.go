@@ -72,10 +72,23 @@ type rawTestCase struct {
 }
 
 type requestBodyTestCase struct {
-	path        string
-	requestBody []byte
-	errMsg      string
-	errCode     int32
+	path         string
+	requestBody  []byte
+	errMsg       string
+	errMsgPrefix string
+	errCode      int32
+}
+
+func (tc requestBodyTestCase) assertErrorMessage(t *testing.T, message string) {
+	t.Helper()
+	if tc.errMsgPrefix != "" {
+		// JSON parsers have different syntax-error wording. Verify the API's
+		// error context and a nonempty cause without fixing one parser's text.
+		assert.True(t, strings.HasPrefix(message, tc.errMsgPrefix), "message: %s", message)
+		assert.NotEmpty(t, strings.TrimPrefix(message, tc.errMsgPrefix))
+		return
+	}
+	assert.Equal(t, tc.errMsg, message)
 }
 
 type DefaultReq struct {
@@ -611,10 +624,10 @@ func TestHTTPWrapper(t *testing.T) {
 		errCode:     1801, // ErrIncorrectParameterFormat
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"collectionName": "book", "dbName"}`),
-		errMsg:      "can only accept json format request, error: invalid character '}' after object key",
-		errCode:     1801, // ErrIncorrectParameterFormat
+		path:         path,
+		requestBody:  []byte(`{"collectionName": "book", "dbName"}`),
+		errMsgPrefix: "can only accept json format request, error: ",
+		errCode:      1801, // ErrIncorrectParameterFormat
 	})
 	path = "/wrapper/post/trace"
 	app.POST(path, wrapperPost(func() any { return &DefaultReq{} }, wrapperTraceLog(func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
@@ -654,7 +667,7 @@ func TestHTTPWrapper(t *testing.T) {
 				err := json.Unmarshal(w.Body.Bytes(), returnBody)
 				assert.Nil(t, err)
 				assert.Equal(t, testcase.errCode, returnBody.Code)
-				assert.Equal(t, testcase.errMsg, returnBody.Message)
+				testcase.assertErrorMessage(t, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -6507,10 +6520,10 @@ func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
 				errMsg:      "element data type MYBLOB is invalid(case sensitive): invalid parameter",
 			},
 			{
-				path:        versionalV2(CollectionFieldCategory, AddAction),
-				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field"`),
-				errCode:     1801, // bad request
-				errMsg:      "can only accept json format request, error: unexpected EOF",
+				path:         versionalV2(CollectionFieldCategory, AddAction),
+				requestBody:  []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field"`),
+				errCode:      1801, // bad request
+				errMsgPrefix: "can only accept json format request, error: ",
 			},
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
@@ -6594,10 +6607,10 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionNormal() {
 				errMsg:      "missing required parameters, error: Key: 'CollectionAddFunction.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
 			},
 			{
-				path:        versionalV2(CollectionCategory, AddFunctionAction),
-				requestBody: []byte(`invalid json`),
-				errCode:     1801,
-				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+				path:         versionalV2(CollectionCategory, AddFunctionAction),
+				requestBody:  []byte(`invalid json`),
+				errCode:      1801,
+				errMsgPrefix: "can only accept json format request, error: ",
 			},
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionTestCases, false)
@@ -6642,10 +6655,10 @@ func (s *CollectionFunctionSuite) TestAlterCollectionFunctionNormal() {
 				errMsg:      "missing required parameters, error: Key: 'CollectionAlterFunction.CollectionName' Error:Field validation for 'CollectionName' failed on the 'required' tag",
 			},
 			{
-				path:        versionalV2(CollectionCategory, AlterFunctionAction),
-				requestBody: []byte(`invalid json`),
-				errCode:     1801,
-				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+				path:         versionalV2(CollectionCategory, AlterFunctionAction),
+				requestBody:  []byte(`invalid json`),
+				errCode:      1801,
+				errMsgPrefix: "can only accept json format request, error: ",
 			},
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, alterFunctionTestCases, false)
@@ -6719,10 +6732,10 @@ func (s *CollectionFunctionSuite) TestAddCollectionFunctionFieldNormal() {
 				errMsg:      `indexParams.fieldName "wrong_field" must match outputField.fieldName "sparse": invalid parameter`,
 			},
 			{
-				path:        versionalV2(CollectionCategory, AddFunctionFieldAction),
-				requestBody: []byte(`invalid json`),
-				errCode:     1801,
-				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+				path:         versionalV2(CollectionCategory, AddFunctionFieldAction),
+				requestBody:  []byte(`invalid json`),
+				errCode:      1801,
+				errMsgPrefix: "can only accept json format request, error: ",
 			},
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, addFunctionFieldTestCases, false)
@@ -6753,10 +6766,10 @@ func (s *CollectionFunctionSuite) TestDropCollectionFunctionFieldNormal() {
 				errMsg:      "missing required parameters, error: Key: 'CollectionDropFunctionField.FunctionName' Error:Field validation for 'FunctionName' failed on the 'required' tag",
 			},
 			{
-				path:        versionalV2(CollectionCategory, DropFunctionFieldAction),
-				requestBody: []byte(`invalid json`),
-				errCode:     1801,
-				errMsg:      "can only accept json format request, error: invalid character 'i' looking for beginning of value",
+				path:         versionalV2(CollectionCategory, DropFunctionFieldAction),
+				requestBody:  []byte(`invalid json`),
+				errCode:      1801,
+				errMsgPrefix: "can only accept json format request, error: ",
 			},
 		}
 		validateRequestBodyTestCases(s.T(), s.testEngine, dropFunctionFieldTestCases, false)

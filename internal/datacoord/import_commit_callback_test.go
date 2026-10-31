@@ -49,7 +49,9 @@ func newImportCommitCallbackTest(t *testing.T) (*DDLCallbacks, *datacoordkv.Cata
 		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true},
 		tr:        timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&collectionInfo{ID: 100})
+	segments := NewSegmentsInfo(metaStore)
 	for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
 		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel,
@@ -57,7 +59,7 @@ func newImportCommitCallbackTest(t *testing.T) (*DDLCallbacks, *datacoordkv.Cata
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
 		}})
 	}
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments}}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments, metaStore: metaStore}}}
 	manager, err := dataview.RecoverManager(t.Context(), catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, callbacks.meta, callbacks.importMeta, view)
@@ -394,7 +396,9 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 		},
 		tr: timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&collectionInfo{ID: 100})
+	segments := NewSegmentsInfo(metaStore)
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
 		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10,
@@ -408,7 +412,7 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 	}, imports, nil, nil)
 	require.NoError(t, imports.AddTask(ctx, v3task))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments}}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments, metaStore: metaStore}}}
 	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, callbacks.meta, callbacks.importMeta, view)
