@@ -681,12 +681,10 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			NodeID:       7,
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
-		importStore := metacache.NewMetaStore(catalog)
 		task := &importTask{
 			meta: &meta{
-				catalog:   catalog,
-				metaStore: importStore,
-				segments:  NewSegmentsInfo(importStore),
+				catalog:  catalog,
+				segments: NewSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
