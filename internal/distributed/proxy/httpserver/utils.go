@@ -2693,6 +2693,9 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 }
 
 type structArrayRowAccessor struct {
+	vectorEncoding outputVectorEncoding
+	vectorScratch  *[]byte
+
 	fieldData    *schemapb.FieldData
 	subFields    []*schemapb.FieldData
 	subAccessors []*fieldDataRowAccessor
@@ -2806,6 +2809,9 @@ func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map
 					short, elemCount, len(values))
 			}
 			for i, v := range values {
+				if accessor.vectorEncoding == "base64" && va.GetElementType() == schemapb.DataType_FloatVector {
+					v = accessor.vectorEncoding.floatVector(v.([]float32), accessor.vectorScratch)
+				}
 				out[i][short] = v
 			}
 		default:
@@ -4222,11 +4228,18 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 	}
 }
 
-//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
 ) ([]map[string]interface{}, error) {
+	return buildQueryRespWithEncoding(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, "")
+}
+
+//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
+func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, vectorEncoding outputVectorEncoding,
+) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
+	var vectorScratch []byte
 	jsonFieldNames := make(map[string]struct{})
 	jsonAllValid := true
 
@@ -4270,6 +4283,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				return nil, wrapOutputFieldErr(fieldData.GetFieldName(), err)
 			}
 			structArrayAccessors[idx] = structAccessor
+			structAccessor.vectorEncoding = vectorEncoding
+			structAccessor.vectorScratch = &vectorScratch
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
@@ -4331,7 +4346,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				case schemapb.DataType_BinaryVector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
-					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+					vector := fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
+					row[fieldDataList[j].GetFieldName()] = vectorEncoding.floatVector(vector, &vectorScratch)
 				case schemapb.DataType_Float16Vector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:
