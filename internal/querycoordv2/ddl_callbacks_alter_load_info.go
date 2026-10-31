@@ -32,7 +32,7 @@ import (
 func (s *Server) alterLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error {
 	// currently, we only sent the put load config message to the control channel
 	// TODO: after we support query view in 3.0, we should broadcast the put load config message to all vchannels.
-	job := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.checkerController, s.nodeMgr, s.proxyClientManager)
+	job := job.NewLoadCollectionJob(ctx, result, s.dist, s.meta, s.broker, s.targetMgr, s.targetObserver, s.collectionObserver, s.checkerController, s.nodeMgr, s.proxyClientManager, s.cluster)
 	if err := job.Execute(); err != nil {
 		// The collection's channel is already in dropped-sentinel state, meaning
 		// a concurrent DropCollection has landed at the channel level on this

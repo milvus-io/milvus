@@ -631,6 +631,37 @@ func (suite *IDFOracleSuite) TestFetchStatsDiff() {
 	suite.Equal(int64(0), diff.NumRow())
 }
 
+// A partition release takes its segments out of current at once, without a target change: the
+// sealed stats are deactivated and deleted from disk, the growing stats removed. Segments the
+// oracle does not know are skipped, and a second removal changes nothing.
+func (suite *IDFOracleSuite) TestRemoveSegments() {
+	size1 := suite.registerSealed(1, 1, 2)
+	suite.registerSealed(2, 2, 3)
+	suite.idfOracle.SetNext(suite.updateSnapshot([]int64{1, 2}, nil, nil))
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.idfOracle.RegisterGrowing(10, suite.genStats(10, 15))
+	suite.Require().Equal(int64(7), suite.idfOracle.current.NumRow())
+	diskBefore := suite.idfOracle.sealedDiskSize.Load()
+
+	suite.NoError(suite.idfOracle.RemoveSegments([]int64{1, 999}, []int64{10, 999}))
+
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+	suite.False(suite.idfOracle.sealed.Contain(1))
+	suite.True(suite.idfOracle.sealed.Contain(2))
+	_, ok := suite.idfOracle.growing[10]
+	suite.False(ok)
+	suite.Equal(diskBefore-size1, suite.idfOracle.sealedDiskSize.Load())
+	suite.Equal(suite.targetVersion, suite.idfOracle.TargetVersion())
+
+	suite.NoError(suite.idfOracle.RemoveSegments([]int64{1}, []int64{10}))
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+
+	// the next target sync still works on what is left
+	suite.idfOracle.SetNext(suite.updateSnapshot(nil, nil, []int64{2}))
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(0), suite.idfOracle.current.NumRow())
+}
+
 func TestIDFOracle(t *testing.T) {
 	suite.Run(t, new(IDFOracleSuite))
 }

@@ -645,6 +645,11 @@ queryCoord:
   # Set to 0 to disable the penalty period.
   resourceExhaustionPenaltyDuration: 30
   resourceExhaustionCleanupInterval: 10 # Interval (in seconds) for cleaning up expired resource exhaustion marks on query nodes.
+  # Seconds a delegator may keep refusing to release a sealed segment it still serves before QueryCoord releases it by force.
+  # The forced release fires only when the replica cannot make progress otherwise: nothing has been loaded since the refusal began,
+  # the current target has not moved, and every node of the replica is marked resource exhausted while segments are waiting to be loaded.
+  # Set to 0 to disable the forced release.
+  forceReleaseRefusedSegmentAfter: 600
   autoscale:
     precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.
     enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.

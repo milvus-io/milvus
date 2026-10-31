@@ -1246,6 +1246,53 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
 }
 
+// observeReleaseRefusal feeds the release refusal tracker from the outcome of a sealed segment
+// task: a release the delegator refused starts or extends a refusal, a release that went through
+// ends it, and a load that went through is progress for the replica. The segment checker reads
+// the tracker to decide when a lasting refusal is released by force.
+func (scheduler *taskScheduler) observeReleaseRefusal(task *SegmentTask) {
+	tracker := scheduler.distMgr.ReleaseRefusals
+	if tracker == nil || task.ReplicaID() == 0 {
+		return
+	}
+	now := time.Now()
+	for _, action := range task.Actions() {
+		segmentAction, ok := action.(*SegmentAction)
+		if !ok || segmentAction.GetScope() == querypb.DataScope_Streaming {
+			continue
+		}
+		switch segmentAction.Type() {
+		case ActionTypeReduce:
+			if errors.Is(task.Err(), merr.ErrSegmentReleaseRefused) {
+				targetVersion := scheduler.targetMgr.GetCollectionTargetVersion(scheduler.ctx, task.CollectionID(), meta.CurrentTarget)
+				refusal := tracker.Refused(task.CollectionID(), task.ReplicaID(), task.SegmentID(), segmentAction.Node(), targetVersion, now)
+				mlog.Info(scheduler.ctx, "delegator refused to release segment",
+					mlog.Int64("taskID", task.ID()),
+					mlog.Int64("collectionID", task.CollectionID()),
+					mlog.Int64("replicaID", task.ReplicaID()),
+					mlog.Int64("segmentID", task.SegmentID()),
+					mlog.Int64("nodeID", segmentAction.Node()),
+					mlog.Int64("targetVersion", targetVersion),
+					mlog.Duration("refusedFor", now.Sub(refusal.Since)))
+			} else if task.Status() == TaskStatusSucceeded {
+				if refusedFor, ok := tracker.Released(task.ReplicaID(), task.SegmentID(), now); ok {
+					mlog.Info(scheduler.ctx, "segment the delegator refused to release is released",
+						mlog.Int64("taskID", task.ID()),
+						mlog.Int64("collectionID", task.CollectionID()),
+						mlog.Int64("replicaID", task.ReplicaID()),
+						mlog.Int64("segmentID", task.SegmentID()),
+						mlog.Bool("forced", task.IsForceRelease()),
+						mlog.Duration("refusedFor", refusedFor))
+				}
+			}
+		case ActionTypeGrow:
+			if task.Status() == TaskStatusSucceeded {
+				tracker.LoadSucceeded(task.ReplicaID(), now)
+			}
+		}
+	}
+}
+
 func (scheduler *taskScheduler) remove(task Task) {
 	log := mlog.With(
 		mlog.Int64("taskID", task.ID()),
@@ -1258,6 +1305,10 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log.Info(task.Context(), "segment in target has been cleaned, trigger force update next target")
 		// Avoid using task.Ctx as it may be canceled before remove is called.
 		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+	}
+
+	if segmentTask, ok := task.(*SegmentTask); ok {
+		scheduler.observeReleaseRefusal(segmentTask)
 	}
 
 	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),

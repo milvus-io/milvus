@@ -1216,6 +1216,39 @@ func (suite *ServiceSuite) TestReleasePartitions_Normal() {
 	}
 }
 
+// ReleasePartitions reaches every delegator of the collection on the node and no other; a
+// delegator that fails makes the call fail, so QueryCoord falls back to waiting for the target sync.
+func (suite *ServiceSuite) TestReleasePartitions_Delegators() {
+	ctx := context.Background()
+	partitions := []int64{suite.partitionIDs[0]}
+	req := &querypb.ReleasePartitionsRequest{
+		CollectionID: suite.collectionID,
+		PartitionIDs: partitions,
+	}
+
+	sd := delegator.NewMockShardDelegator(suite.T())
+	sd.EXPECT().Collection().Return(suite.collectionID)
+	sd.EXPECT().ReleasePartitions(mock.Anything, partitions).Return(nil).Once()
+	sd.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_0_100v0", sd)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_0_100v0")
+
+	other := delegator.NewMockShardDelegator(suite.T())
+	other.EXPECT().Collection().Return(suite.collectionID + 1)
+	other.EXPECT().Close().Maybe()
+	suite.node.delegators.Insert("qn_unitest_dml_1_101v1", other)
+	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_1_101v1")
+
+	status, err := suite.node.ReleasePartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+
+	sd.EXPECT().ReleasePartitions(mock.Anything, partitions).Return(merr.WrapErrServiceUnavailable("worker down")).Once()
+	status, err = suite.node.ReleasePartitions(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceUnavailable)
+}
+
 func (suite *ServiceSuite) TestReleasePartitions_Failed() {
 	ctx := context.Background()
 	req := &querypb.ReleasePartitionsRequest{}
