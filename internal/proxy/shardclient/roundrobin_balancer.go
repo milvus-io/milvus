@@ -35,16 +35,13 @@ func NewRoundRobinBalancer() *RoundRobinBalancer {
 
 func (b *RoundRobinBalancer) RegisterNodeInfo(nodeInfos []NodeInfo) {}
 
-func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, error) {
+func (b *RoundRobinBalancer) SelectNode(ctx context.Context, availableNodes []int64, cost int64) (int64, func(), error) {
 	if len(availableNodes) == 0 {
-		return -1, merr.ErrNodeNotAvailable
+		return -1, nil, merr.ErrNodeNotAvailable
 	}
 
 	idx := b.idx.Inc()
-	return availableNodes[int(idx)%len(availableNodes)], nil
-}
-
-func (b *RoundRobinBalancer) CancelWorkload(node int64, nq int64) {
+	return availableNodes[int(idx)%len(availableNodes)], func() {}, nil
 }
 
 func (b *RoundRobinBalancer) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {}

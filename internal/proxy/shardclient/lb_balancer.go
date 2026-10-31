@@ -24,8 +24,11 @@ import (
 
 type LBBalancer interface {
 	RegisterNodeInfo(nodeInfos []NodeInfo)
-	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (int64, error)
-	CancelWorkload(node int64, nq int64)
+	// SelectNode reserves nq on the selected node. On success, the caller must
+	// call release exactly once, including when it abandons the selection.
+	// The release function belongs to this reservation, not the node's current state.
+	// On error, no workload is reserved and release is nil.
+	SelectNode(ctx context.Context, availableNodes []int64, nq int64) (nodeID int64, release func(), err error)
 	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
 	Start(ctx context.Context)
 	Close()

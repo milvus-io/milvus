@@ -100,7 +100,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// test select node success
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(5), nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(5), func() {}, nil)
 	excludeNodes := typeutil.NewUniqueSet()
 	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
@@ -118,11 +118,11 @@ func (s *LBPolicySuite) TestSelectNode() {
 	// First call with cache fails
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), errors.New("fake err")).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, errors.New("fake err")).Once()
 	// Second call without cache succeeds
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(3), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(3), func() {}, nil).Once()
 	excludeNodes = typeutil.NewUniqueSet()
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
@@ -140,7 +140,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.ErrNodeNotAvailable)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, merr.ErrNodeNotAvailable)
 	excludeNodes = typeutil.NewUniqueSet()
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
@@ -158,7 +158,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.ErrNodeNotAvailable)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, merr.ErrNodeNotAvailable)
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -189,7 +189,7 @@ func (s *LBPolicySuite) TestPreferredNodeHint() {
 
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, release, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    s.collectionID,
@@ -199,7 +199,7 @@ func (s *LBPolicySuite) TestPreferredNodeHint() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.NodeID)
-	s.False(selectedByBalancer)
+	s.Nil(release)
 }
 
 func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
@@ -214,9 +214,9 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(nodes []int64) bool {
 		return !lo.Contains(nodes, int64(2)) && lo.Contains(nodes, int64(1)) && lo.Contains(nodes, int64(3))
-	}), int64(1)).Return(int64(1), nil)
+	}), int64(1)).Return(int64(1), func() {}, nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, release, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    s.collectionID,
@@ -226,7 +226,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintFallback() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(1), targetNode.NodeID)
-	s.True(selectedByBalancer)
+	s.NotNil(release)
 }
 
 func (s *LBPolicySuite) TestExecuteUsesPreferredNodeHint() {
@@ -264,7 +264,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, collectionID, channel).Return(s.nodes, nil)
 	excludeNodes := typeutil.NewUniqueSet()
-	targetNode, selectedByBalancer, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
+	targetNode, release, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:              s.dbName,
 		CollectionName:  s.collectionName,
 		CollectionID:    collectionID,
@@ -274,7 +274,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetrics() {
 	}, &excludeNodes)
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.NodeID)
-	s.False(selectedByBalancer)
+	s.Nil(release)
 
 	after := testutil.ToFloat64(metrics.ProxyShardLeaderPreferredNodeCount.WithLabelValues(
 		metrics.PreferredNodeHitLabel,
@@ -292,7 +292,7 @@ func (s *LBPolicySuite) TestPreferredNodeHintMetricsDisabledForNormalWorkload() 
 
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, collectionID, channel).Return(s.nodes, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, int64(1)).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, int64(1)).Return(int64(1), func() {}, nil)
 	excludeNodes := typeutil.NewUniqueSet()
 	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
@@ -326,8 +326,7 @@ func (s *LBPolicySuite) TestPreferredNodeFailureFallsBackToOtherReplica() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(2)}, int64(1)).Return(int64(2), nil).Once()
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, []int64{int64(2)}, int64(1)).Return(int64(2), func() {}, nil).Once()
 
 	executedNodes := make([]int64, 0, 2)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
@@ -357,8 +356,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -377,7 +375,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.ErrNodeNotAvailable)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, merr.ErrNodeNotAvailable)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -397,10 +395,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -420,11 +417,10 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Once()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -444,10 +440,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := 0
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
@@ -472,10 +467,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Once()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
@@ -509,10 +503,9 @@ func (s *LBPolicySuite) TestExecuteWithRetryFieldNotLoadedUsesRequestLevelRetry(
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-			return availableNodes[0], nil
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+			return availableNodes[0], func() {}, nil
 		})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 
 	executedNodes := make([]int64, 0, 3)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -556,10 +549,9 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRetriesAfterAllReplica
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-			return availableNodes[0], nil
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+			return availableNodes[0], func() {}, nil
 		})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 
 	executedNodes := make([]int64, 0, 4)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -609,10 +601,9 @@ func (s *LBPolicySuite) TestExecuteWithRetryRetriableErrorRefreshesStaleShardLea
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-			return availableNodes[0], nil
+		func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+			return availableNodes[0], func() {}, nil
 		})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 
 	executedNodes := make([]int64, 0, 2)
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -647,8 +638,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorUsesBlacklist() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
@@ -680,8 +670,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryInputErrorSkipsBlacklist() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 
 	execCount := 0
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -720,8 +709,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryUnsupportedSkipsBlacklist() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 
 	execCount := 0
 	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -755,8 +743,7 @@ func (s *LBPolicySuite) TestExecuteOneChannel() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -796,10 +783,9 @@ func (s *LBPolicySuite) TestExecute() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -820,10 +806,9 @@ func (s *LBPolicySuite) TestExecute() {
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, mock.Anything).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, error) {
-		return availableNodes[0], nil
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, availableNodes []int64, nq int64) (int64, func(), error) {
+		return availableNodes[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	counter := atomic.NewInt64(0)
 	err = s.lbPolicy.Execute(ctx, CollectionWorkLoad{
 		Db:             s.dbName,
@@ -938,7 +923,7 @@ func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(singleNode, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(singleNode, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude the single node
 	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
@@ -965,7 +950,7 @@ func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
 	// Should select from serviceable nodes only (node 3, since node 1 is excluded)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(nodes []int64) bool {
 		return len(nodes) == 1 && nodes[0] == 3 // Only node 3 is serviceable and not excluded
-	}), mock.Anything).Return(int64(3), nil).Once()
+	}), mock.Anything).Return(int64(3), func() {}, nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude node 1, node 3 should be available
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
@@ -1026,7 +1011,7 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(twoNodes, nil).Once()
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(twoNodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil).Once()
 
 	excludeNodes := typeutil.NewUniqueSet(int64(1), int64(2)) // Exclude all available nodes
 	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
@@ -1051,7 +1036,7 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	}
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(threeNodes, nil).Once()
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil).Once()
 
 	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Only exclude node 1
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
@@ -1116,7 +1101,7 @@ func (s *LBPolicySuite) TestSelectNodeScopedToResourceGroup() {
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.MatchedBy(onlyRGB)).Once()
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(ids []int64) bool {
 		return len(ids) == 2 && lo.Contains(ids, int64(2)) && lo.Contains(ids, int64(3))
-	}), mock.Anything).Return(int64(3), nil).Once()
+	}), mock.Anything).Return(int64(3), func() {}, nil).Once()
 
 	excludeNodes := typeutil.NewUniqueSet()
 	targetNode, _, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
@@ -1133,7 +1118,7 @@ func (s *LBPolicySuite) TestSelectNodeScopedToResourceGroup() {
 
 	// Unscoped: the same leaders, all five are candidates.
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.MatchedBy(func(nodes []NodeInfo) bool { return len(nodes) == 5 })).Once()
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(ids []int64) bool { return len(ids) == 5 }), mock.Anything).Return(int64(4), nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.MatchedBy(func(ids []int64) bool { return len(ids) == 5 }), mock.Anything).Return(int64(4), func() {}, nil).Once()
 	targetNode, _, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -1206,8 +1191,7 @@ func (s *LBPolicySuite) TestExecuteScopedFanOutCoversEveryShard() {
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(channel2Leaders, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil)
 
 	executed := typeutil.NewConcurrentSet[string]()
 	err := s.lbPolicy.Execute(ctx, CollectionWorkLoad{
@@ -1273,14 +1257,13 @@ func (s *LBPolicySuite) TestExecuteWithRetryScopedRecoversAfterGroupExhausted() 
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	// The balancer picks the first offered rg-b leader each time; the
 	// exclusion set decides which ones are offered.
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, ids []int64, nq int64) (int64, error) {
+		func(ctx context.Context, ids []int64, nq int64) (int64, func(), error) {
 			s.Subset([]int64{2, 3}, ids, "only rg-b leaders may be offered")
 			s.NotEmpty(ids)
-			return lo.Min(ids), nil
+			return lo.Min(ids), func() {}, nil
 		})
 
 	var attempts []int64
@@ -1322,8 +1305,7 @@ func (s *LBPolicySuite) TestExecuteWithRetryScopedRetriableSelectErrorIsNotMaske
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(withoutLeader, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil)
 
 	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
 	s.Require().False(merr.IsRetryableErr(execErr))
@@ -1364,8 +1346,7 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrefersAServableChannel() {
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[1]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil)
 
 	var executed []string
 	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
@@ -1439,9 +1420,8 @@ func (s *LBPolicySuite) TestExecuteWithRetryUnscopedKeepsTheExecError() {
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Once()
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
 
 	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
 	s.Require().False(merr.IsRetryableErr(execErr))
@@ -1479,8 +1459,7 @@ func (s *LBPolicySuite) TestExecuteOneChannelScopedPrePassRetriesTransientErrors
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil)
 
 	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
 		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Nq: 1, ResourceGroup: "rg-b",
@@ -1514,9 +1493,8 @@ func (s *LBPolicySuite) TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFai
 	s.mgr.EXPECT().GetShard(mock.Anything, mock.Anything, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(rgNodes(), nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), nil).Once()
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(2), func() {}, nil).Once()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(-1), nil, merr.WrapErrServiceUnavailable("all available nodes are unreachable"))
 
 	execErr := merr.WrapErrSegmentNotLoaded(1, "not retriable")
 	s.Require().False(merr.IsRetryableErr(execErr))
