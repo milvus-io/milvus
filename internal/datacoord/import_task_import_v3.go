@@ -182,7 +182,10 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		PluginContext: GetReadPluginContext(job.GetOptions()),
 		Plan:          plan,
 	}
-	WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	if err := WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		return
+	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.
 	// Clearing old_segment_ids here is safe: the superseded segments were dropped

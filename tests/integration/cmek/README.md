@@ -1,0 +1,118 @@
+# CMEK integration tests
+
+The suites verify persisted raw data and index artifacts under CMEK using repository-owned cipher fixtures and isolated MiniCluster processes. Each IT writes through Milvus, locates the resulting objects from authoritative metadata, checks their encryption, then releases/reloads the collection and verifies query or search results.
+
+## Running the suites
+
+Build the C++ libraries and ordinary Milvus server, and start the Etcd, MinIO and Pulsar dependencies described in the [integration-test setup](../README.md#how-to-run-integration-test-locally). From the Milvus checkout root, build the cipher fixtures and run the selected scenarios:
+
+```bash
+make build-cmek-fixtures
+source scripts/setenv.sh
+export MILVUS_WORK_DIR="$PWD"
+export MILVUS_CMEK_FIXTURE_DIR="$PWD/bin/cmek-fixtures"
+
+go test -race -tags dynamic,test -gcflags="all=-N -l" -count=1 -v \
+  ./tests/integration/cmek -run '^TestKeyPropagation' -timeout 90m
+```
+
+Use an entry point from the tables below to narrow `-run`, for example `'^TestKeyPropagationImport$'`. The build tags and compiler flags also apply to focused runs. `make integration-test-cmek` builds the fixtures and runs the entire CMEK package through the integration-test runner.
+
+## IT entry points
+
+| File | Test entry point | What it verifies |
+| --- | --- | --- |
+| `raw_data_v2_test.go` | `TestRawDataV2Suite` | Scalar, vector and StructArray raw data in Storage V2: inspect every binlog-referenced Parquet object, then release/reload and check actual values. |
+| `raw_data_v3_test.go` | `TestRawDataV3Suite` | Non-TEXT scalar, vector and StructArray raw data in Storage V3: inspect every manifest-referenced Parquet object, verify loaded manifest identities, then check actual values after release/reload. The scalar case also verifies correct, missing and wrong keys on one real object. |
+| `raw_data_v3_consumer_test.go` | `TestRawDataV3ConsumerSuite` | Uses encrypted V3 manifests as real HNSW build inputs, physical index files, loaded build identity, and query/search results. |
+| `scalar_index_v2_test.go` | `TestScalarIndexV2Campaign` | STL_SORT, Trie, BITMAP, HYBRID, INVERTED, NGRAM, RTREE and TextMatch artifacts under scalar engine version 2 and legacy IndexData format V2. |
+| `scalar_index_v3_test.go` | `TestScalarIndexV3Campaign` | The same scalar families under scalar engine version 3 and packed index artifact format V3, including object checks and query results after reload. |
+| `scalar_index_fmindex_v3_test.go` | `TestScalarIndexFMINDEXCampaign` | FMINDEX under scalar engine version 5 and packed artifact format V3. Its cost-ratio setting makes the small fixture's LIKE query use FMINDEX. |
+| `vector_index_test.go` | `TestVectorIndexV2Suite` | HNSW index artifacts produced from Storage V2 raw data, using vector engine version 8 and IndexData format V2. Verify all index objects, actual loaded index identities and the deterministic search result. |
+
+Segment Storage Version, index engine version and index artifact format are separate choices. The scalar-index suites currently all use Storage V2 source segments, including the packed V3 and FMINDEX suites. The V2/V3 raw-data campaigns keep physical indexes absent; the V3 consumer case builds physical HNSW indexes from encrypted V3 source. `vector_index_test.go` covers physical HNSW from V2 source. The Key Propagation scenarios below additionally isolate task registration and exercise unavailable writer keys.
+
+## Key propagation
+
+Key propagation tests cover two behaviors: each business path receives the key/context needed for its actual reads and writes, and an encrypted target cannot write when its writer key is unavailable.
+
+Each case uses an isolated database/EZ. Background-task scenarios replace the DataNode after preparing their inputs, so encrypted requests must register their keys in a fresh process. Fixture observations check both Go key receipt and C++ context registration there. Task IDs and segment/build metadata identify the resulting objects; object inspection and release/load query or search results verify those same outputs. Import replaces the DataNode between independently dispatched stages as well.
+
+Failure scenarios inject an empty key at the Go plugin lookup selected by role, EZ, collection and adapter. They compare the storage object set and content hashes while blocked, including unpublished objects. Background requests must be rejected before DataNode dispatch; ordinary flush rejects the key in its StreamingNode writer. Recovery follows each path's existing task policy, as shown below.
+
+### Coverage and expected outcomes
+
+The entry-point tables generate **49 cases**, including successful paths and fault stages. Normal and unavailable-key variants use the same suite for each business path.
+
+| Entry point | Cases | Paths exercised | Writer-key failure expectation |
+| --- | ---: | --- | --- |
+| `TestKeyPropagationFlush` | 4 | V2/V3 ordinary flush. | No persisted output or completed flush; restoring the key completes the original batch and Flush request. |
+| `TestKeyPropagationIndex` | 10 | V2/V3 physical vector and scalar builds; V3 default-value build with no source file for the added field. | No dispatch or changed objects; the same build IDs complete after restoration. |
+| `TestKeyPropagationImport` | 18 | Protocol V2 (8) and V3 (10); all four source/target encryption combinations. V3 includes reshard fragments and the separately dispatched final writer. | PreImport fails before dispatch. Import and reshard retry, then complete the same tasks after restoration. Faults target encrypted outputs. |
+| `TestKeyPropagationCompaction` | 8 | V2/V3 Sort and Mix, including each plan's Text Stats. | Failed plan, no output segments or changed objects, and no key registration on the cold DataNode. |
+| `TestKeyPropagationSchema` | 5 | V3 column-group append followed by independent Text Stats; full rewrite after dropping a physical field. | Schema-task failures leave storage unchanged. The independent Text Stats task retries and recovers. |
+| `TestKeyPropagationJSONStats` | 2 | V2 independent JSON Stats, SHARED key-index slices, synchronous reload and exact query results. | No dispatch or changed objects; the same Stats tasks complete after restoration. |
+| `TestKeyPropagationAnalyzeAndClustering` | 2 | V3 Analyze reads encrypted input; clustering uses another cold DataNode. | The Analyze-fault case recovers through clustering. The clustering-fault case reports the missing key, leaves storage unchanged and produces no output segments. |
+
+Import protocol version is independent of Segment Storage Version: both protocols use **Storage V2 backup objects and target segments** here. Import V3 additionally checks every Parquet fragment against the exact completed reshard manifest. Its backup PreImport is size-only; reshard establishes the source row count.
+
+### Code map
+
+| File | Responsibility |
+| --- | --- |
+| [`key_propagation_test.go`](key_propagation_test.go) | All seven entry points and case matrices; fault controls, registration observations, cold-node replacement, storage snapshots and helpers shared across business groups. |
+| [`key_propagation_write_test.go`](key_propagation_write_test.go) | Flush and Import flows, including source/target EZ setup, stage metadata and reshard-fragment checks. |
+| [`key_propagation_index_test.go`](key_propagation_index_test.go) | Ordinary index builds and independent JSON Stats. Independent Text Stats is exercised after schema backfill. |
+| [`key_propagation_compaction_test.go`](key_propagation_compaction_test.go) | Sort/Mix, schema append/rewrite and Analyze-to-clustering flows; their task-specific output checks. |
+
+The fixture protocol and physical-format inspectors are shared with the other CMEK suites, as described below. External KMS availability, key revocation and WAL message encryption are outside this suite. Analyze intermediates and JSON shredding BSON values remain outside the supported CMEK object formats; Vortex and TEXT/LOB encryption are also outside current coverage.
+
+## Shared scenario code
+
+| File | Responsibility |
+| --- | --- |
+| `raw_data_suite_test.go` | Shared V2/V3 MiniCluster setup, flushed-segment metadata, loaded fields and absence of physical vector indexes. |
+| `raw_data_campaign_test.go` | Shared scalar/vector/StructArray schemas, deterministic data, collection preparation, server-assigned field IDs, flush and exact query/search assertions. Its vector-data helper is also used by the vector-index suite. |
+| `scalar_index_fixture_test.go` | Shared scalar-index cluster lifecycle and `runCell` flow: create, insert, flush, build/locate/inspect index objects, release/reload and query. It also currently owns package-wide `TestMain`, temporary cipher configuration and fixture plugin-path resolution used by all CMEK suites. |
+| `scalar_index_oracle_test.go` | Scalar-index test inputs, index parameters, query predicates and expected IDs/counts for each family. `assertOracle` compares Milvus query results with those expectations. |
+| `fixture_keys_test.go` | Independently authenticate fixture EDEKs and derive object DEKs for the real Parquet object's three key modes. |
+
+Raw-data format campaigns disable compaction before starting the cluster; propagation scenarios enable the required task explicitly. On master, ordinary flush persists WAL SegmentView data through PackWriter and chooses BulkPackWriterV2 or BulkPackWriterV3 using the Segment Storage Version. Each campaign inspects every object reported by its completed flush, releases/reloads the collection, and verifies the loaded Segment identities. The old QueryNode growing-source writer and its dedicated batch/recovery tests are excluded from this PR.
+
+The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
+
+## Object discovery and encryption checks
+
+| File | Responsibility |
+| --- | --- |
+| `inspector/storage_v2_binlogs.go` | `LocateRawDataV2` finds every raw-data object through `FieldBinlog/Binlog`. |
+| `inspector/storage_v3_manifest.go` | `LocateManifestsV3` selects each segment's exact manifest revision; `ParseParquetObjectsV3` requires Parquet groups and no LOB objects for the non-TEXT campaigns, then enumerates every referenced data object. Unrelated metadata extensions remain ignored. |
+| `inspector/parquet_encryption.go` | `InspectEncryptedParquet` checks encrypted footer metadata, algorithm, EZ and collection identity. `ReadEncryptedParquet` independently reads all row groups. These are physical-format tools shared by V2/V3 where applicable. |
+| `inspector/locator.go` | `LocateScalarIndex` resolves scalar-index paths from segment/index metadata; `LocateTextLog` resolves TextMatch objects from `TextStatsLogs`. |
+| `inspector/scalar_v2.go` | `InspectV2` checks the legacy scalar IndexData envelope's EDEK and EZ identity. |
+| `inspector/scalar_v3.go` | `InspectV3` independently validates the packed scalar-index header, footer, directory, entry/slice ranges and encryption metadata. |
+| `inspector/vector_index.go` | `LocateVectorIndex` resolves all vector-index objects and build identities; `InspectIndexDataV2` checks descriptor identity/encryption metadata and rejects a complete plaintext index event. |
+| `inspector/object_reader.go` | `ObjectReader.Read` fetches object bytes through the cluster's ChunkManager and rejects empty objects. |
+
+The current V2 and testable V3 raw-data scenarios both store Parquet files. Their object discovery differs: V2 follows binlogs; V3 follows manifests. Scalar packed index format V3 is a different format from these Parquet objects.
+
+## Cipher fixtures and tool checks
+
+| Files | Responsibility |
+| --- | --- |
+| `pluginmock/go/main.go`, `pluginmock/cpp/cipher_plugin.cpp` | Go/C++ cipher plugins implementing the same test key derivation and authenticated EDEK protocol. Built into shared libraries consumed by the Milvus processes. |
+| `plugin_mode_test.go`, `plugin_mode_race_test.go` | Select the Go fixture library matching the test binary's non-race/race build mode. |
+| `fixture_plugins_test.go`, fixture checks in `scalar_index_fixture_test.go` | Check fixture artifact paths, Go plugin ABI and cipher configuration. |
+| `raw_data_schema_test.go`, `raw_data_metadata_test.go` | Check field-ID binding and metadata-selection helpers used by the raw-data scenarios. |
+| `inspector/*_test.go` | Check the object locators and encryption validators, including incomplete object sets, malformed metadata and independent-reader failure handling. |
+| `pluginmock/go/main_test.go`, `pluginmock/cpp/cipher_plugin_test.cpp` | Check the fixture protocol implementations. |
+
+Tool and fixture checks verify the reliability of the IT's supporting code; they are not additional product scenarios. Product acceptance runs through collection, flush/build and release/reload. Internal paths are not inferred from production log messages.
+
+Deterministic binary-key regressions live in the existing unit tests: `internal/core/unittest/CipherPluginContextTest.cpp` checks `GetEncParams` for imported writer contexts, and `internal/storagev2/packed/packed_writer_ffi_test.go` verifies Parquet readback with Arrow Go. Both use 32-byte keys whose first NUL is at byte 0, 16, 24, or 31, including the two truncation lengths that remain valid AES keys.
+
+The Go DataNode fixture starts with an empty EZ-key cache and only uses keys received through registration. Other roles obtain their own deterministic fixture keys. The C++ fixture requires a registered context for both encryption and decryption and rejects access after unref. Import source readers may use a registered source EZ with collection ID 0; writers require their actual target collection ID.
+
+`MILVUS_CMEK_FIXTURE_CONTROL` points to a test-owned directory containing optional `fault.json` and per-process observation files. Faults affect only the selected unsafe-key lookup; source decryption and other adapters remain available. Observation files contain role, process/node identity, EZ, collection and operation, never key bytes. The control and observations live entirely in the fixture plugins.
+
+V3 raw-data Vortex and TEXT/LOB remain outside current coverage. Start raw-data verification with the V3 scalar scenario, then run the V2/V3 matrix; investigate an unexpected failure before expanding the run.

@@ -121,7 +121,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         parquet::WriterProperties::Builder builder;
         auto plugin_ptr =
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
+        if (c_plugin_context != nullptr) {
+            AssertInfo(plugin_ptr != nullptr, "failed to get cipher plugin");
             plugin_ptr->Update(c_plugin_context->ez_id,
                                c_plugin_context->collection_id,
                                std::string(c_plugin_context->key));
@@ -203,7 +204,8 @@ NewPackedWriter(struct ArrowSchema* schema,
         parquet::WriterProperties::Builder builder;
         auto plugin_ptr =
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
+        if (c_plugin_context != nullptr) {
+            AssertInfo(plugin_ptr != nullptr, "failed to get cipher plugin");
             plugin_ptr->Update(c_plugin_context->ez_id,
                                c_plugin_context->collection_id,
                                std::string(c_plugin_context->key));

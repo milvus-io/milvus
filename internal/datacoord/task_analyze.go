@@ -232,7 +232,10 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 	req.TaskSlot = Params.DataCoordCfg.AnalyzeTaskSlotUsage.GetAsInt64()
 
-	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
+	if err := WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req); err != nil {
+		log.Warn(context.TODO(), "failed to prepare analyze task plugin context", mlog.Err(err))
+		return
+	}
 
 	var err error
 	defer func() {
