@@ -45,7 +45,7 @@ func GetPrivilegeExtObj(m interface{}) (commonpb.PrivilegeExt, error) {
 
 	if !proto.HasExtension(pbMsg.ProtoReflect().Descriptor().Options(), commonpb.E_PrivilegeExtObj) {
 		err := merr.WrapErrParameterInvalidMsg("Extension not found")
-		mlog.RatedWarn(context.TODO(), rate.Limit(60), "GetPrivilegeExtObj failed", mlog.Err(err))
+		mlog.RatedDebug(context.TODO(), rate.Limit(60), "GetPrivilegeExtObj failed", mlog.Err(err))
 		return commonpb.PrivilegeExt{}, err
 	}
 	extObj := proto.GetExtension(pbMsg.ProtoReflect().Descriptor().Options(), commonpb.E_PrivilegeExtObj)
