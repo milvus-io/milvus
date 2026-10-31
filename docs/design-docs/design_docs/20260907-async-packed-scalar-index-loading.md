@@ -275,7 +275,12 @@ Final destinations are reserved separately. Magic/footer and directory reads
 bypass admission; the metadata entry is admitted like other payloads.
 
 The cache estimate distinguishes final resident resources, request-local inputs,
-and temporary work covered by slice leases. Full-entry buffers or sidecars that
+and temporary work covered by slice leases. Translators return one
+`LoadingResourceUsage` from `estimated_loading_usage(cids)` for the complete
+requested cell batch. `resident` is the sum of the final cell resources;
+`private_overhead` is reserved in full for each loading request; only
+`shared_overhead` is aggregated under the configured overhead groups.
+Full-entry buffers or sidecars that
 outlive one slice remain request-local reservations. StringSort and Bitmap
 validity bits, and FMIndex null bits, are read directly into zero-initialized
 final bitmaps and moved into the index after CRC validation. Their async loads
@@ -285,6 +290,13 @@ only the synchronous or asynchronous path's resource model. For async loads,
 the estimate sums the directory's possible slice scratch before global limits
 are applied, so a later admission-limit expansion does not rely on a smaller
 fixed per-load estimate.
+
+Async bitmap downloads share their admitted slice scratch while retaining
+private reservations for full input buffers and frozen-format construction.
+Synchronous bitmap loading keeps both parts private because its ordered
+prefetch path does not consume destinations on the downloading worker.
+Explicit legacy `LoadResourceRequest` overrides do not identify shared scratch,
+so their temporary resources are reserved entirely as private overhead.
 
 Eligible async memory overhead shares
 `LoadMemoryOverheadController::GetInstance().GetOrCreate()` with async field loading.

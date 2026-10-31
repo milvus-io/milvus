@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <numeric>
 #include <stddef.h>
 #include <algorithm>
 #include <cstdint>
@@ -115,8 +116,10 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
         EXPECT_EQ(translator->cell_id_of(i), i);
     }
 
-    // Test estimated_byte_size_of_cell
-    auto [usage, peak_usage] = translator->estimated_byte_size_of_cell(0);
+    // Test estimated_loading_usage
+    auto [usage, private_overhead, shared_overhead] =
+        translator->estimated_loading_usage({0});
+    const auto peak_usage = private_overhead + shared_overhead;
     if (use_mmap) {
         EXPECT_GT(usage.file_bytes, 0);
     } else {
@@ -600,7 +603,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
     EXPECT_EQ(translator->num_cells(), 0);
 }
 
-// Test estimated_byte_size_of_cell for different cell indices
+// Test estimated_loading_usage for different cell indices
 TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     bool use_mmap = GetParam();
     int64_t row_count = 5000000;  // Ensure multiple cells
@@ -618,18 +621,22 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
-    size_t num_cells = translator->num_cells();
-    if (num_cells > 1) {
-        for (size_t i = 0; i < num_cells; ++i) {
-            auto [usage, peak_usage] =
-                translator->estimated_byte_size_of_cell(i);
-            if (use_mmap) {
-                EXPECT_GT(usage.file_bytes, 0);
-            } else {
-                EXPECT_GT(usage.memory_bytes, 0);
-            }
-        }
-    }
+    const size_t num_cells = translator->num_cells();
+    ASSERT_GT(num_cells, 1);
+    std::vector<cachinglayer::cid_t> cids(num_cells);
+    std::iota(cids.begin(), cids.end(), 0);
+    const auto usage = translator->estimated_loading_usage(cids);
+    EXPECT_EQ(
+        usage.resident,
+        (use_mmap
+             ? cachinglayer::ResourceUsage{0, row_count * sizeof(int64_t)}
+             : cachinglayer::ResourceUsage{row_count * sizeof(int64_t), 0}));
+    EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
+    const auto empty = translator->estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 }
 
 // Parameterized test with both mmap modes
