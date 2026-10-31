@@ -520,9 +520,9 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     def test_element_filter_search_basic_l2(self):
         """
-        target: element_filter search with L2 metric
-        method: search on structA[embedding] with L2 metric + element_filter
-        expected: results returned successfully
+        target: HNSW element_filter search with L2 metric
+        method: search on structA[embedding] with default ANN parameters + element_filter
+        expected: nonempty filtered results with ascending distances
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_ef_l2")
@@ -540,12 +540,13 @@ class TestMilvusClientStructArrayElementFilterSearch(TestMilvusClientV2Base):
             output_fields=["id", "structA"],
         )
         assert check
-        assert len(results) > 0
+        assert len(results) == 1
+        assert results[0]
         # Scalar condition verification
         for hit in results[0]:
             assert any(e["int_val"] >= 0 for e in hit["structA"]), f"Row {hit['id']} has no element with int_val >= 0"
-        # Top-1: querying row 0's own vector should return row 0
-        assert results[0][0]["id"] == 0, f"Top-1 should be row 0, got {results[0][0]['id']}"
+        # HNSW need not recall the self-vector. Exact Top-1 and distance
+        # semantics are covered by test_element_filter_search_exact_metrics.
         # Distance ordering (L2: ascending)
         _assert_distance_order(results, "L2")
 
