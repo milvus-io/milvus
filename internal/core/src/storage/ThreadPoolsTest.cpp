@@ -14,11 +14,15 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
+#include "futures/Executor.h"
+#include "futures/future_c.h"
 #include "folly/CancellationToken.h"
 #include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "monitor/Monitor.h"
+#include "segcore/OutputFields.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
@@ -68,6 +72,7 @@ class SearchFanoutPoolTest : public testing::Test {
         milvus::InitCpuNum(2);
         milvus::SetThreadPoolMaxThreadsSize(16);
         milvus::SetMiddlePriorityThreadCoreCoefficient(1.0);
+        milvus::SetSearchFanoutThreadCoreCoefficient(2.0);
     }
 
     void
@@ -79,6 +84,7 @@ class SearchFanoutPoolTest : public testing::Test {
         milvus::InitCpuNum(cpu_num_);
         milvus::SetThreadPoolMaxThreadsSize(max_threads_);
         milvus::SetMiddlePriorityThreadCoreCoefficient(coefficient_);
+        milvus::SetSearchFanoutThreadCoreCoefficient(fanout_coefficient_);
     }
 
  private:
@@ -86,64 +92,76 @@ class SearchFanoutPoolTest : public testing::Test {
     const int max_threads_ = milvus::THREAD_POOL_MAX_THREADS_SIZE.load();
     const float coefficient_ =
         milvus::MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load();
+    const float fanout_coefficient_ =
+        milvus::SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.load();
     std::unique_ptr<milvus::ThreadPool> middle_;
     std::unique_ptr<milvus::ThreadPool> search_;
 };
 
 }  // namespace
 
-TEST_F(SearchFanoutPoolTest, ResizeBeforeFirstUse) {
+TEST_F(SearchFanoutPoolTest, IndependentResizeBeforeFirstUse) {
     milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 12.0);
     EXPECT_FALSE(milvus::ThreadPoolsTestAccess::HasPool(milvus::MIDDLE));
     EXPECT_FALSE(milvus::ThreadPoolsTestAccess::HasPool(milvus::SEARCH_FANOUT));
     auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
     auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
     EXPECT_EQ(middle.GetMaxThreadNum(), 6);
-    EXPECT_EQ(search.GetMaxThreadNum(), 6);
+    EXPECT_EQ(search.GetMaxThreadNum(), 24);
     EXPECT_NE(&middle, &search);
 }
 
-TEST_F(SearchFanoutPoolTest, SearchCreatedAfterMiddleResize) {
-    auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
-    EXPECT_EQ(middle.GetMaxThreadNum(), 2);
-    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
-    EXPECT_EQ(middle.GetMaxThreadNum(), 6);
-    EXPECT_EQ(milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT)
-                  .GetMaxThreadNum(),
-              6);
+TEST_F(SearchFanoutPoolTest, SmallPositiveRatioBeforeAndAfterCreation) {
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 0.1f);
+    EXPECT_FALSE(milvus::ThreadPoolsTestAccess::HasPool(milvus::SEARCH_FANOUT));
+    EXPECT_FLOAT_EQ(milvus::SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.load(), 0.1f);
+    auto& fanout = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    EXPECT_EQ(fanout.GetMaxThreadNum(), 1);
+
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 2.0f);
+    ASSERT_EQ(fanout.GetMaxThreadNum(), 4);
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 0.1f);
+    EXPECT_EQ(fanout.GetMaxThreadNum(), 1);
+    EXPECT_FLOAT_EQ(milvus::SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.load(), 0.1f);
 }
 
-TEST_F(SearchFanoutPoolTest, ResizeWithOnlySearchCreated) {
-    auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
-    EXPECT_EQ(search.GetMaxThreadNum(), 2);
-    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
-    EXPECT_EQ(search.GetMaxThreadNum(), 6);
-    EXPECT_EQ(
-        milvus::ThreadPools::GetThreadPool(milvus::MIDDLE).GetMaxThreadNum(),
-        6);
-}
-
-TEST_F(SearchFanoutPoolTest, LiveResizeAndCapPreserveLoadWorkerCount) {
+TEST_F(SearchFanoutPoolTest, LiveResizeIsIndependentAndUncapped) {
     const auto load_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto& middle = milvus::ThreadPools::GetThreadPool(milvus::MIDDLE);
     auto& search = milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
+    EXPECT_EQ(search.GetMaxThreadNum(), 4);
     for (const auto cap : {3, 0, 16}) {
         milvus::SetThreadPoolMaxThreadsSize(cap);
         milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
         const auto expected = cap == 3 ? 3 : 6;
         EXPECT_EQ(middle.GetMaxThreadNum(), expected);
-        EXPECT_EQ(search.GetMaxThreadNum(), expected);
+        EXPECT_EQ(search.GetMaxThreadNum(), 4);
         EXPECT_EQ(
             milvus::monitor::internal_storage_pool_capacity_middle.Value(),
             expected);
         EXPECT_EQ(milvus::monitor::internal_storage_pool_capacity_search_fanout
                       .Value(),
-                  expected);
+                  4);
         EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(), load_workers);
     }
-    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 1.0);
-    EXPECT_EQ(middle.GetMaxThreadNum(), 2);
-    EXPECT_EQ(search.GetMaxThreadNum(), 2);
+    milvus::SetThreadPoolMaxThreadsSize(1);
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 12.0);
+    EXPECT_EQ(middle.GetMaxThreadNum(), 6);
+    EXPECT_EQ(search.GetMaxThreadNum(), 24);
+    // Resize must also bypass the shared limit in the ThreadPool wrapper.
+    search.Resize(40);
+    EXPECT_EQ(search.GetMaxThreadNum(), 40);
+    EXPECT_EQ(
+        milvus::monitor::internal_storage_pool_capacity_search_fanout.Value(),
+        40);
+    auto* executor = milvus::futures::getSearchCPUExecutor();
+    const auto search_threads = executor->numThreads();
+    auto restore = folly::makeGuard([&] {
+        executor_set_search_thread_num(static_cast<int>(search_threads));
+    });
+    executor_set_search_thread_num(3);
+    EXPECT_EQ(search.GetMaxThreadNum(), 40);
     EXPECT_EQ(milvus::ThreadPools::GetLoadExecutorWorkers(), load_workers);
 }
 
@@ -153,8 +171,11 @@ TEST_F(SearchFanoutPoolTest, InvalidResizeKeepsBothPoolsAndCoefficient) {
     for (const auto ratio : {0.0f, -1.0f}) {
         milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, ratio);
         EXPECT_EQ(middle.GetMaxThreadNum(), 2);
-        EXPECT_EQ(search.GetMaxThreadNum(), 2);
+        EXPECT_EQ(search.GetMaxThreadNum(), 4);
         EXPECT_EQ(milvus::MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load(), 1.0);
+        milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, ratio);
+        EXPECT_EQ(search.GetMaxThreadNum(), 4);
+        EXPECT_EQ(milvus::SEARCH_FANOUT_THREAD_CORE_COEFFICIENT.load(), 2.0);
     }
 }
 
@@ -222,8 +243,79 @@ TEST_F(SearchFanoutPoolTest, CreationRacingResizeUsesLatestCoefficient) {
         return &milvus::ThreadPools::GetThreadPool(milvus::SEARCH_FANOUT);
     });
     start.set_value();
-    milvus::ThreadPools::ResizeThreadPool(milvus::MIDDLE, 3.0);
+    milvus::ThreadPools::ResizeThreadPool(milvus::SEARCH_FANOUT, 3.0);
     EXPECT_EQ(creating.get()->GetMaxThreadNum(), 6);
+}
+
+TEST_F(SearchFanoutPoolTest, DispatchesOnlyParallelOutputWork) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    struct Output {
+        int64_t segment_id;
+        std::vector<FetchedOutputField> fields;
+    };
+    const auto caller_thread = std::this_thread::get_id();
+    for (int segment_count : {1, 2}) {
+        for (int field_count : {1, 2}) {
+            SCOPED_TRACE("segments=" + std::to_string(segment_count) +
+                         ", fields=" + std::to_string(field_count));
+            std::map<int32_t, Output> outputs;
+            for (int i = 0; i < segment_count; ++i) {
+                outputs.emplace(i, Output{i, {}});
+            }
+            std::vector<FieldId> field_ids;
+            for (int i = 0; i < field_count; ++i) {
+                field_ids.emplace_back(100 + i);
+            }
+            OpContext parent_ctx;
+            parent_ctx.storage_usage.scanned_cold_bytes.store(1000);
+            const auto submitted =
+                milvus::monitor::
+                    internal_storage_pool_task_submitted_total_search_fanout
+                        .Value();
+            MaterializeOutputSegments(outputs, {}, [&](Output& output) {
+                const auto segment_thread = std::this_thread::get_id();
+                EXPECT_EQ(segment_thread == caller_thread, segment_count == 1);
+                output.fields = FetchOutputFields(
+                    field_ids,
+                    output.segment_id,
+                    &parent_ctx,
+                    [&](FieldId field_id, OpContext* ctx) {
+                        EXPECT_EQ(std::this_thread::get_id() == segment_thread,
+                                  field_count == 1);
+                        EXPECT_NE(ctx, &parent_ctx);
+                        EXPECT_EQ(ctx->storage_usage.scanned_cold_bytes.load(),
+                                  0);
+                        ctx->storage_usage.scanned_cold_bytes.store(3);
+                        ctx->storage_usage.scanned_total_bytes.store(5);
+                        auto data = std::make_unique<DataArray>();
+                        data->set_type(proto::schema::DataType::Int64);
+                        data->mutable_scalars()->mutable_long_data()->add_data(
+                            output.segment_id * 1000 + field_id.get());
+                        return data;
+                    });
+            });
+            const auto expected_tasks =
+                field_count == 1 ? 0 : segment_count * field_count;
+            EXPECT_EQ(
+                milvus::monitor::
+                    internal_storage_pool_task_submitted_total_search_fanout
+                        .Value(),
+                submitted + expected_tasks);
+            EXPECT_EQ(parent_ctx.storage_usage.scanned_cold_bytes.load(), 1000);
+            for (const auto& [_, output] : outputs) {
+                ASSERT_EQ(output.fields.size(), field_count);
+                for (int i = 0; i < field_count; ++i) {
+                    const auto& field = output.fields[i];
+                    EXPECT_EQ(field.field_id.get(), field_ids[i].get());
+                    EXPECT_EQ(field.field_data->scalars().long_data().data(0),
+                              output.segment_id * 1000 + field_ids[i].get());
+                    EXPECT_EQ(field.scanned_remote_bytes, 3);
+                    EXPECT_EQ(field.scanned_total_bytes, 5);
+                }
+            }
+        }
+    }
 }
 
 TEST(ThreadPool, ThreadNum) {
