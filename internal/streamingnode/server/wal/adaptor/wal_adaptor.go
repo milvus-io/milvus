@@ -6,6 +6,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
+	"github.com/pingcap/failpoint"
 	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
+	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -386,6 +388,12 @@ func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.Mut
 		appendCtx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
 		message.OverwriteTraceContext(appendCtx, msg)
 		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
+		failpoint.Inject("afterBackendAppend", func(value failpoint.Value) {
+			if err == nil && walpoint.Hit(appendCtx, value, walpoint.AfterBackendAppend, msg, msgID, nil) {
+				// Persisted data with a lost acknowledgement must enter the real retry loop.
+				err = status.NewInner("injected lost WAL backend acknowledgement")
+			}
+		})
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
