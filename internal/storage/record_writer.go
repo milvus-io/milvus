@@ -517,6 +517,68 @@ type packedTextBatchWriter struct {
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
 	columnGroupCompressed   map[typeutil.UniqueID]uint64
 	storageConfig           *indexpb.StorageConfig
+	unflushedInput          unflushedInputLimiter
+}
+
+// unflushedInputLimiter bounds the input bytes a writer has accepted but not yet
+// flushed, measured before TEXT values are replaced by LOB references. Those
+// bytes stay reachable from the columns the writer reuses as-is, so the writer's
+// own post-conversion buffer accounting never sees them. The bound is the
+// writer's own buffer size, which keeps a TEXT-aware writer on the same flush
+// cadence as a plain one: import gives it packed.DefaultWriteBufferSize and
+// compaction gives it dataNode.segment.binlog.maxsize, while streaming flush
+// passes 0 because every sync already closes its writer.
+type unflushedInputLimiter struct {
+	max   uint64
+	bytes uint64
+}
+
+// add records n more input bytes and reports whether the writer should flush.
+func (l *unflushedInputLimiter) add(n uint64) bool {
+	if l.max == 0 {
+		return false
+	}
+	l.bytes += n
+	if l.bytes < l.max {
+		return false
+	}
+	l.bytes = 0
+	return true
+}
+
+// recordBuffersSize reports the bytes the record's arrays hold. Buffers shared
+// by several columns are counted once per column, which can only make the
+// unflushed-input bound fire earlier.
+func recordBuffersSize(rec Record, schema *schemapb.CollectionSchema) uint64 {
+	var total uint64
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		col, ok := TryRecordColumn(rec, field.GetFieldID())
+		if !ok || col == nil {
+			continue
+		}
+		total += arrayDataBuffersSize(col.Data())
+	}
+	return total
+}
+
+func arrayDataBuffersSize(data arrow.ArrayData) uint64 {
+	// arrow.ArrayData is an interface: Children()/Dictionary() can hand back a
+	// typed nil, which `data == nil` does not catch.
+	concrete, ok := data.(*array.Data)
+	if !ok || concrete == nil {
+		return 0
+	}
+	var total uint64
+	for _, buf := range concrete.Buffers() {
+		if buf != nil {
+			total += uint64(buf.Len())
+		}
+	}
+	for _, child := range concrete.Children() {
+		total += arrayDataBuffersSize(child)
+	}
+	total += arrayDataBuffersSize(concrete.Dictionary())
+	return total
 }
 
 func (pw *packedTextBatchWriter) Write(r Record) error {
@@ -536,7 +598,23 @@ func (pw *packedTextBatchWriter) Write(r Record) error {
 			}
 		}
 	}
-	return pw.writer.Write(rec)
+
+	if err := pw.writer.Write(rec); err != nil {
+		return err
+	}
+	if pw.unflushedInput.add(recordBuffersSize(r, pw.schema)) {
+		return pw.SyncBuffered()
+	}
+	return nil
+}
+
+// SyncBuffered flushes the buffered column groups to storage without closing the
+// writer. TEXT column writers keep their own flush threshold.
+func (pw *packedTextBatchWriter) SyncBuffered() error {
+	if pw.writer == nil {
+		return nil
+	}
+	return pw.writer.SyncBuffered()
 }
 
 func (pw *packedTextBatchWriter) GetWrittenUncompressed() uint64 {
@@ -680,5 +758,6 @@ func NewPackedTextBatchWriter(
 		columnGroupUncompressed: columnGroupUncompressed,
 		columnGroupCompressed:   columnGroupCompressed,
 		storageConfig:           storageConfig,
+		unflushedInput:          unflushedInputLimiter{max: uint64(max(bufferSize, 0))},
 	}, nil
 }

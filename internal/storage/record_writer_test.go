@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -263,4 +264,39 @@ func TestToWriterRecordRejectsNonNullTextTypeMismatch(t *testing.T) {
 		require.Nil(t, converted)
 		require.Nil(t, release)
 	})
+}
+
+func TestUnflushedInputLimiter(t *testing.T) {
+	limiter := unflushedInputLimiter{max: 100}
+	require.False(t, limiter.add(60))
+	require.Equal(t, uint64(60), limiter.bytes)
+	require.False(t, limiter.add(30))
+	require.True(t, limiter.add(20), "crossing the cap reports a flush")
+	require.Zero(t, limiter.bytes, "a reported flush resets the unflushed bytes")
+
+	disabled := unflushedInputLimiter{}
+	require.False(t, disabled.add(1<<40))
+	require.Zero(t, disabled.bytes)
+}
+
+func TestRecordBuffersSizeCountsRawText(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+	}}
+	arrowSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "100", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "101", Type: arrow.BinaryTypes.String},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+	payload := strings.Repeat("x", 1024)
+	builder.Field(1).(*array.StringBuilder).AppendValues([]string{payload, payload}, nil)
+	rec := builder.NewRecord()
+	defer rec.Release()
+
+	simple := NewSimpleArrowRecord(rec, map[FieldID]int{100: 0, 101: 1})
+	require.GreaterOrEqual(t, recordBuffersSize(simple, schema), uint64(2*len(payload)),
+		"the raw TEXT payload must be part of the retained input")
 }
