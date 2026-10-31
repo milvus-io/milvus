@@ -41,6 +41,23 @@
 namespace milvus::indexbuilder::test {
 namespace {
 
+// Distinct, well-spread integer-valued vectors derived from the row ID.
+// HNSW recall is unreliable on degenerate inputs such as collinear vectors.
+std::array<float, 4>
+VectorOf(int64_t row) {
+    std::array<float, 4> vector{};
+    for (size_t col = 0; col < vector.size(); ++col) {
+        // splitmix64 finalizer.
+        uint64_t z = (static_cast<uint64_t>(row) * vector.size() + col + 1) *
+                     0x9E3779B97F4A7C15ULL;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        z ^= z >> 31;
+        vector[col] = static_cast<float>(z % 256);
+    }
+    return vector;
+}
+
 class StorageV2BuildSessionOrderTest : public SourceBuildTest {
  protected:
     std::string
@@ -201,10 +218,7 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
         arrow::FixedSizeBinaryBuilder builder(
             arrow::fixed_size_binary(dim * sizeof(float)));
         for (int64_t row = begin; row < begin + rows / 2; ++row) {
-            const std::array<float, dim> vector{static_cast<float>(row),
-                                                static_cast<float>(2 * row),
-                                                static_cast<float>(3 * row),
-                                                static_cast<float>(4 * row)};
+            const auto vector = VectorOf(row);
             ASSERT_TRUE(
                 builder.Append(reinterpret_cast<const uint8_t*>(vector.data()))
                     .ok());
@@ -241,14 +255,16 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
     std::memcpy(decoded.data(), bytes.data(), bytes.size());
     for (size_t i = 0; i < ids.size(); ++i) {
         for (int64_t col = 0; col < dim; ++col) {
-            EXPECT_FLOAT_EQ(decoded[i * dim + col],
-                            static_cast<float>(ids[i] * (col + 1)));
+            EXPECT_FLOAT_EQ(decoded[i * dim + col], VectorOf(ids[i])[col]);
         }
     }
-    const std::array<float, dim> query{0, 0, 0, 0};
-    // Query tenant == 2, which includes row 0 and the second log's first
-    // quarter. Knowhere selects the isolated partition from the first
+    // Query tenant == 2, which includes the first log's first half and the
+    // second log's first quarter, with the vector of a tenant 2 row in the
+    // second log. Knowhere selects the isolated partition from the first
     // unmasked row, so pass the full category filter instead of an empty view.
+    constexpr int64_t target = rows / 2 + 3;
+    constexpr int64_t tenant2_rows = rows / 4 + rows / 8;
+    const auto query = VectorOf(target);
     std::vector<uint8_t> excluded((rows + 7) / 8, 0xff);
     for (int64_t row = 0; row < rows; ++row) {
         if (row < rows / 4 || (row >= rows / 2 && row < 5 * rows / 8)) {
@@ -256,16 +272,21 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
         }
     }
     SearchResult result;
-    vectors->Search(GenDataset(1, dim, query.data()),
-                    index::VectorSearchParams{
-                        .search_params_ = {{knowhere::indexparam::EF, 64}},
-                        .metric_type_ = "L2",
-                        .topk_ = 1},
-                    BitsetView(excluded.data(), rows),
-                    nullptr,
-                    result);
+    vectors->Search(
+        GenDataset(1, dim, query.data()),
+        index::VectorSearchParams{
+            // An ef covering the whole partition makes the
+            // exact match reachable on any connected graph.
+            .search_params_ = {{knowhere::indexparam::EF, tenant2_rows}},
+            .metric_type_ = "L2",
+            .topk_ = 1},
+        BitsetView(excluded.data(), rows),
+        nullptr,
+        result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
-    EXPECT_EQ(result.seg_offsets_[0], 0);
+    ASSERT_EQ(result.distances_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_[0], target);
+    EXPECT_FLOAT_EQ(result.distances_[0], 0);
 
     // Check the optional scalar's physical row IDs independently of HNSW's
     // category ordering, which is not part of its public reader contract.
