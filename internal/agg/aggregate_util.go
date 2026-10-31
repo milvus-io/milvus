@@ -648,15 +648,16 @@ func ComputeVarianceFromCountAndM2(op string, countFieldData *schemapb.FieldData
 			data[i] = math.Sqrt(data[i])
 		}
 	}
-	return &schemapb.FieldData{
+	result := &schemapb.FieldData{
 		Type: schemapb.DataType_Double,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}},
 			},
 		},
-		ValidData: valid,
-	}, nil
+	}
+	typeutil.SetFieldDataValidData(result, valid)
+	return result, nil
 }
 
 func computeAvgValues[T int64 | float64](sums []T, counts []int64, sumValid, countValid []bool) ([]float64, []bool, error) {

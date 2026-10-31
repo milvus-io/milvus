@@ -336,8 +336,10 @@ func varianceResult(keys []string, groups [][]float64, intSum bool) []*schemapb.
 	if intSum {
 		sum = scalar(schemapb.DataType_Int64, long(isums), valid)
 	}
-	cols := []*schemapb.FieldData{sum, scalar(schemapb.DataType_Int64, long(counts), nil),
-		scalar(schemapb.DataType_Double, double(m2s), valid)}
+	cols := []*schemapb.FieldData{
+		sum, scalar(schemapb.DataType_Int64, long(counts), nil),
+		scalar(schemapb.DataType_Double, double(m2s), valid),
+	}
 	if keys != nil {
 		strs := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: keys}}}
 		cols = append([]*schemapb.FieldData{scalar(schemapb.DataType_VarChar, strs, nil)}, cols...)
