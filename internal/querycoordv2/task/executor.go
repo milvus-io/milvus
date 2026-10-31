@@ -264,7 +264,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	replica := ex.meta.Get(ctx, task.ReplicaID())
 	if replica == nil {
 		msg := "node doesn't belong to any replica"
-		err := merr.WrapErrNodeNotAvailable(action.Node())
+		// assign the outer err so the deferred task.Fail observes the failure
+		err = merr.WrapErrNodeNotAvailable(action.Node())
 		mlog.Warn(ctx, msg, mlog.Err(err))
 		return err
 	}
