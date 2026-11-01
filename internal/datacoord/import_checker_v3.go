@@ -34,7 +34,6 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -50,7 +49,6 @@ import (
 type importCheckerV3 struct {
 	ctx        context.Context
 	meta       *meta
-	broker     broker.Broker
 	alloc      allocator.Allocator
 	importMeta ImportMeta
 	cluster    session.Cluster
@@ -63,7 +61,6 @@ type importCheckerV3 struct {
 
 func NewImportCheckerV3(ctx context.Context,
 	meta *meta,
-	broker broker.Broker,
 	alloc allocator.Allocator,
 	importMeta ImportMeta,
 	cluster session.Cluster,
@@ -72,7 +69,6 @@ func NewImportCheckerV3(ctx context.Context,
 	return &importCheckerV3{
 		ctx:        ctx,
 		meta:       meta,
-		broker:     broker,
 		alloc:      alloc,
 		importMeta: importMeta,
 		cluster:    cluster,
@@ -148,9 +144,8 @@ func (c *importCheckerV3) checkJob(job ImportJob) {
 }
 
 // runGCLoop is the checker's low-frequency pass. It runs the terminal-state
-// policies and then reclaims each terminal job's resources; the collection
-// check stays on this clock because it is a broker RPC, not a cheap timestamp
-// comparison like the job timeout.
+// policies, fails the jobs of dropped collections and then reclaims each
+// terminal job's resources.
 func (c *importCheckerV3) runGCLoop() {
 	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second))
 	defer ticker.Stop()
@@ -261,14 +256,8 @@ func (c *importCheckerV3) checkCollection(collectionID int64, jobs []ImportJob) 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-	defer cancel()
-	has, err := c.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		mlog.Warn(c.ctx, "verify existence of collection failed", mlog.Int64("collection", collectionID), mlog.Err(err))
-		return
-	}
-	if !has {
+	// A Dropping collection counts as dropped.
+	if !c.meta.GetCollection(collectionID).IsCreated() {
 		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
 			return job.GetState() != internalpb.ImportJobState_Failed &&
 				job.GetState() != internalpb.ImportJobState_Completed &&

@@ -318,11 +318,7 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *te
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{
-			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
-				return nil
-			},
-		}),
+		withBroker(&mockBroker{}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -362,11 +358,7 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundE
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
-		withBroker(&mockBroker{
-			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
-				return nil
-			},
-		}),
+		withBroker(&mockBroker{}),
 	)
 	cb := &DDLCallback{Core: c}
 
@@ -411,11 +403,7 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		withMixCoord(mixc),
 		withValidProxyManager(),
 		withTsoAllocator(newMockTsoAllocator()),
-		withBroker(&mockBroker{
-			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
-				return nil
-			},
-		}),
+		withBroker(&mockBroker{}),
 	)
 	cb := &DDLCallback{Core: c}
 	notifyErr := merr.WrapErrServiceUnavailableMsg("proxy temporarily unavailable")
@@ -514,51 +502,6 @@ func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
 		require.Equal(t, int32(1), cfg.ReplicaNumber)
 		require.Equal(t, []string{"rg2"}, cfg.ResourceGroups)
 	})
-}
-
-func TestDDLCallbacksAlterCollectionV2AckCallback_BroadcastAlteredCollectionError(t *testing.T) {
-	ctx := context.Background()
-
-	meta := mockrootcoord.NewIMetaTable(t)
-	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
-
-	// UpdateLoadConfig is never reached: the schema broadcast now runs first
-	// (before the bound-index apply and load-config update) and fails here.
-	mixc := imocks.NewMixCoord(t)
-
-	c := newTestCore(
-		withMeta(meta),
-		withMixCoord(mixc),
-		withValidProxyManager(),
-		withBroker(&mockBroker{
-			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
-				return errors.New("broadcast error")
-			},
-		}),
-	)
-	cb := &DDLCallback{Core: c}
-
-	raw := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			CollectionId: 1,
-		}).
-		WithBody(&messagespb.AlterCollectionMessageBody{
-			Updates: &messagespb.AlterCollectionMessageUpdates{
-				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
-					ReplicaNumber:  1,
-					ResourceGroups: []string{"rg1"},
-				},
-			},
-		}).
-		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
-		MustBuildBroadcast()
-	msg := message.MustAsBroadcastAlterCollectionMessageV2(raw)
-
-	err := cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
-		Message: msg,
-		Results: map[string]*message.AppendResult{},
-	})
-	require.Error(t, err)
 }
 
 func TestDDLCallbacksAlterCollectionPropertiesForDynamicField(t *testing.T) {

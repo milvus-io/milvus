@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -724,18 +723,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		mixCoord := mocks.NewMixCoord(t)
-		svr.mixCoord = mixCoord
 		channelName := "ch"
-		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionName:      "test_collection",
-				CollectionID:        req.CollectionID,
-				Schema:              &schemapb.CollectionSchema{},
-				VirtualChannelNames: []string{fmt.Sprintf("%s%d", channelName, req.CollectionID)},
-			}, nil
-		})
 
 		type testCase struct {
 			collID          int64
@@ -788,9 +776,10 @@ func TestGetSegmentsByStates(t *testing.T) {
 			},
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:         1,
-			Partitions: []int64{1, 2},
-			Schema:     nil,
+			ID:            1,
+			Partitions:    []int64{1, 2},
+			Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+			VChannelNames: []string{fmt.Sprintf("%s%d", channelName, 1)},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -799,9 +788,10 @@ func TestGetSegmentsByStates(t *testing.T) {
 			},
 		})
 		svr.meta.AddCollection(&collectionInfo{
-			ID:         2,
-			Partitions: []int64{3},
-			Schema:     nil,
+			ID:            2,
+			Partitions:    []int64{3},
+			Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+			VChannelNames: []string{fmt.Sprintf("%s%d", channelName, 2)},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -1356,6 +1346,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		mockHandler := NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
+		svr.meta.AddCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
+		})
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -1400,7 +1395,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1505,8 +1501,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1578,7 +1575,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1680,8 +1678,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1724,8 +1723,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1763,8 +1763,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -3017,57 +3018,6 @@ func Test_initGarbageCollection(t *testing.T) {
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid port")
-	})
-}
-
-func TestLoadCollectionFromRootCoord(t *testing.T) {
-	broker := broker.NewMockBroker(t)
-	s := &Server{
-		broker: broker,
-		meta:   newEmptyTestMeta(),
-	}
-
-	t.Run("has collection fail with error", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
-			Return(false, errors.New("has collection error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "has collection error")
-	})
-
-	t.Run("has collection with not found", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
-	})
-
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-
-	t.Run("describeCollectionInternal fail", func(t *testing.T) {
-		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("describeCollectionInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "describeCollectionInternal error")
-	})
-
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionID: 1,
-	}, nil).Twice()
-
-	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
-		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "ShowPartitionsInternal error")
-	})
-
-	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
-	t.Run("ok", func(t *testing.T) {
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.ListCollections()))
-		coll := s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
 	})
 }
 

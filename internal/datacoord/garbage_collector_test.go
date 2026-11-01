@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -61,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -2318,13 +2318,10 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		// has no coverage anywhere.
 		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
 	})
-	store.PutCollection(&metacache.CollectionInfo{ID: 123})
-	store.PutCollection(&metacache.CollectionInfo{ID: 124})
+	store.PutCollection(&collectionInfo{ID: 123})
+	store.PutCollection(&collectionInfo{ID: 124})
 
-	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
-
-	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{})
 
 	t.Run("list channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
@@ -2349,13 +2346,12 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		assert.Equal(t, 4, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(6)
+	store.RemoveCollection(123)
+	store.RemoveCollection(124)
 	t.Run("drop collection meta fail keeps channel cp", func(t *testing.T) {
 		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(errors.New("mock error")).Once()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 4, len(m.metaStore.GetChannelCheckpoints()))
-		_, cached := store.GetCollection(123)
-		assert.True(t, cached)
 	})
 
 	t.Run("drop channel cp fail", func(t *testing.T) {
@@ -2375,11 +2371,6 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		assert.Equal(t, 2, len(m.metaStore.GetChannelCheckpoints()))
 		_, stillThere := m.metaStore.GetChannelCheckpoints()["cluster-id-rootcoord-dm_0_invalidedCollectionIDv0"]
 		assert.True(t, stillThere, "an unparseable vchannel must be skipped, not GC'd")
-		// Only the collection whose segments are all recycled leaves the cache.
-		_, cached := store.GetCollection(123)
-		assert.False(t, cached)
-		_, cached = store.GetCollection(124)
-		assert.True(t, cached)
 	})
 }
 
@@ -2934,6 +2925,70 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 
 			require.Equal(t, []int64{parentSegmentID}, recycled)
 			handler.AssertNotCalled(t, "GetCollection", mock.Anything, mock.Anything)
+		})
+	}
+}
+
+// TestGarbageCollector_recycleDroppedSegments_LoadedSegments pins the GC side
+// of the contract QueryCoord targets rely on: a segment ListLoadedSegments
+// reports is never recycled, and if the call fails no segment is recycled.
+// TestListLoadedSegmentsCoversCurrentTarget pins the QueryCoord side.
+func TestGarbageCollector_recycleDroppedSegments_LoadedSegments(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		loadedID     = int64(1000)
+		unloadedID   = int64(1001)
+		channelName  = "loaded-segments-channel"
+	)
+
+	tests := []struct {
+		name     string
+		loaded   []int64
+		err      error
+		recycled []int64
+	}{
+		{"loaded segment kept", []int64{loadedID}, nil, []int64{unloadedID}},
+		{"nothing loaded", nil, nil, []int64{loadedID, unloadedID}},
+		{"list fails", nil, errors.New("mock"), nil},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(false, nil).Build()
+			defer channelExists.UnPatch()
+
+			store := metacache.NewMetaStore(catalog)
+			meta := &meta{
+				catalog:   catalog,
+				metaStore: store,
+				segments:  NewSegmentsInfo(store),
+				indexMeta: &indexMeta{indexes: make(map[UniqueID]map[UniqueID]*model.Index)},
+			}
+			for _, id := range []int64{loadedID, unloadedID} {
+				meta.segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+					ID:            id,
+					CollectionID:  collectionID,
+					InsertChannel: channelName,
+					State:         commonpb.SegmentState_Dropped,
+					DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+				}})
+			}
+
+			handler := NewNMockHandler(t)
+			handler.EXPECT().ListLoadedSegments(mock.Anything).Return(test.loaded, test.err).Once()
+
+			var recycled []int64
+			mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).
+				To(func(_ *garbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64, _ *SegmentInfo) {
+					recycled = append(recycled, segmentID)
+				}).Build()
+			defer mockRecycle.UnPatch()
+
+			gc := newGarbageCollector(meta, handler, GcOption{dropTolerance: 0})
+			gc.recycleDroppedSegments(context.Background(), nil)
+
+			assert.ElementsMatch(t, test.recycled, recycled)
 		})
 	}
 }
@@ -5437,13 +5492,16 @@ func TestGarbageCollector_recycleUnusedBinlogFiles_TextAndJSONStats_SegmentNil(t
 func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 	ctx := context.Background()
 
-	setupGCTest := func(t *testing.T, sm *snapshotMeta, broker *broker2.MockBroker) *garbageCollector {
+	setupGCTest := func(t *testing.T, sm *snapshotMeta, colls ...*collectionInfo) *garbageCollector {
 		m := &meta{
 			snapshotMeta: sm,
 			segments:     newSegmentsInfoWithSegments(make(map[int64]*SegmentInfo)),
 			metaStore:    metacache.NewMetaStore(nil),
 		}
-		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
+		for _, coll := range colls {
+			m.metaStore.PutCollection(coll)
+		}
+		gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{})
 		return gc
 	}
 
@@ -5457,9 +5515,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 			State:        datapb.SnapshotState_SnapshotStateCommitted,
 		}, nil, nil)
 
-		broker := broker2.NewMockBroker(t)
-		broker.EXPECT().HasCollection(mock.Anything, int64(100)).Return(false, nil).Once()
-		gc := setupGCTest(t, sm, broker)
+		gc := setupGCTest(t, sm)
 
 		// Mock catalog calls to skip pending/deleting cleanup, reach orphan cleanup
 		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
@@ -5492,9 +5548,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 			State:        datapb.SnapshotState_SnapshotStateCommitted,
 		}, nil, nil)
 
-		broker := broker2.NewMockBroker(t)
-		broker.EXPECT().HasCollection(mock.Anything, int64(200)).Return(true, nil).Once()
-		gc := setupGCTest(t, sm, broker)
+		gc := setupGCTest(t, sm, &collectionInfo{ID: 200})
 
 		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
 		defer mockGetPending.UnPatch()
@@ -5510,7 +5564,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 
 	t.Run("live_collection_reaps_expired_pins_and_keeps_snapshot", func(t *testing.T) {
 		// Regression: the GC hoist moved cleanExpiredPinsForCollection in front
-		// of the HasCollection check so active collections also get their
+		// of the collection check so active collections also get their
 		// expired pins reaped — previously they accumulated forever on live
 		// collections. Assert that both effects happen: expired pin removed,
 		// snapshot still present.
@@ -5525,9 +5579,7 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 			PinExpireAtMs: map[int64]int64{9001: now - 1000, 9002: now + 3600000},
 		}, nil, nil)
 
-		broker := broker2.NewMockBroker(t)
-		broker.EXPECT().HasCollection(mock.Anything, int64(400)).Return(true, nil).Once()
-		gc := setupGCTest(t, sm, broker)
+		gc := setupGCTest(t, sm, &collectionInfo{ID: 400})
 
 		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
 		defer mockGetPending.UnPatch()
@@ -5549,30 +5601,34 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 		assert.False(t, hasExpired, "expired pin's expiry entry must be removed")
 	})
 
-	t.Run("has_collection_error_skips", func(t *testing.T) {
-		// HasCollection returns error → should skip, not delete
+	t.Run("dropping_collection_deleted", func(t *testing.T) {
+		// A Dropping collection counts as dropped, as it did when this
+		// check was a public describe through the broker.
 		sm := createTestSnapshotMeta(t)
 		insertTestSnapshot(sm, &datapb.SnapshotInfo{
 			Id:           3,
-			Name:         "err_snap",
+			Name:         "dropping_snap",
 			CollectionId: 300,
 			State:        datapb.SnapshotState_SnapshotStateCommitted,
 		}, nil, nil)
 
-		broker := broker2.NewMockBroker(t)
-		broker.EXPECT().HasCollection(mock.Anything, int64(300)).Return(false, fmt.Errorf("rpc unavailable")).Once()
-		gc := setupGCTest(t, sm, broker)
+		gc := setupGCTest(t, sm, &collectionInfo{ID: 300, State: etcdpb.CollectionState_CollectionDropping})
 
 		mockGetPending := mockey.Mock((*snapshotMeta).GetPendingSnapshots).Return(nil, nil).Build()
 		defer mockGetPending.UnPatch()
 		mockGetDeleting := mockey.Mock((*snapshotMeta).GetDeletingSnapshots).Return(nil, nil).Build()
 		defer mockGetDeleting.UnPatch()
+		mockSave := mockey.Mock((*datacoord.Catalog).SaveSnapshot).Return(nil).Build()
+		defer mockSave.UnPatch()
+		mockDropCatalog := mockey.Mock((*datacoord.Catalog).DropSnapshot).Return(nil).Build()
+		defer mockDropCatalog.UnPatch()
+		mockWriter := mockey.Mock((*snapshotstorage.SnapshotWriter).Drop).Return(nil).Build()
+		defer mockWriter.UnPatch()
 
 		gc.recycleSnapshots(ctx, nil)
 
-		// Verify snapshot was NOT deleted (error → skip)
 		_, exists := sm.snapshotID2Info.Get(int64(3))
-		assert.True(t, exists, "snapshot should not be deleted when HasCollection fails")
+		assert.False(t, exists, "snapshot of a Dropping collection should be deleted")
 	})
 }
 

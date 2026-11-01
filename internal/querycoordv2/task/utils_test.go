@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -40,9 +41,9 @@ type UtilsSuite struct {
 }
 
 func (s *UtilsSuite) TestPackLoadMetaSchemaVersions() {
-	collectionInfoResp := &milvuspb.DescribeCollectionResponse{
-		CollectionID:    100,
-		DbName:          "default",
+	collectionInfoResp := &metacache.CollectionInfo{
+		ID:              100,
+		DatabaseName:    "default",
 		UpdateTimestamp: 200,
 		Schema: &schemapb.CollectionSchema{
 			Version: 3,

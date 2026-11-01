@@ -189,7 +189,7 @@ func (s *Server) checkLoadResource(ctx context.Context, req *job.AlterLoadConfig
 	}
 
 	mlog.Warn(ctx, "skip load resource precheck due to internal error",
-		mlog.Int64("collectionID", req.CollectionInfo.GetCollectionID()),
+		mlog.Int64("collectionID", req.CollectionInfo.ID),
 		mlog.Err(err),
 	)
 	return requiredByRG, nil
@@ -220,7 +220,7 @@ func (s *Server) evaluateLoadResource(ctx context.Context, req *job.AlterLoadCon
 	)
 	err = checkAutoscaleLoadResourceByRGWithCapacity(requiredByRG, currentByRG, capacityByRG, globalCapacity, globalLimit, autoscaleEnabled)
 	mlog.Info(ctx, "autoscale load resource precheck",
-		mlog.Int64("collectionID", req.CollectionInfo.GetCollectionID()),
+		mlog.Int64("collectionID", req.CollectionInfo.ID),
 		mlog.Bool("autoscaleEnabled", autoscaleEnabled),
 		mlog.Bool("passed", err == nil),
 		mlog.Any("requiredByRGMB", resourceUsageByRGToMB(requiredByRG)),
@@ -277,7 +277,7 @@ func autoscaleGlobalLimitFromConfig(maxMemoryLimitGB, maxDiskLimitGB int64) auto
 }
 
 func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoadConfigRequest) (map[string]autoscaleResourceUsage, error) {
-	collectionID := req.CollectionInfo.GetCollectionID()
+	collectionID := req.CollectionInfo.ID
 	expectedPartitionIDs := req.Expected.ExpectedPartitionIDs
 	if len(expectedPartitionIDs) == 0 {
 		return nil, nil
@@ -308,8 +308,8 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 
 	expectedUsage, err := estimateLoadResourceForLoadConfig(
 		ctx,
-		req.CollectionInfo.GetSchema(),
-		req.CollectionInfo.GetProperties(),
+		req.CollectionInfo.Schema,
+		req.CollectionInfo.PropertyPairs,
 		segments,
 		indexes,
 		req.Expected.ExpectedLoadFields,
@@ -329,11 +329,11 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 		if len(currentSegments) > 0 {
 			currentUsage, err = estimateLoadResourceForLoadConfig(
 				ctx,
-				// The live DescribeCollection response. This used to prefer a
-				// schema cached on meta.Collection at load time, which was
-				// both a duplicate of DC's copy and staler than this one.
-				req.CollectionInfo.GetSchema(),
-				req.CollectionInfo.GetProperties(),
+				// The live collection view. This used to prefer a schema
+				// cached on meta.Collection at load time, which was both a
+				// duplicate of DC's copy and staler than this one.
+				req.CollectionInfo.Schema,
+				req.CollectionInfo.PropertyPairs,
 				currentSegments,
 				indexes,
 				req.Current.GetLoadFields(),

@@ -18,13 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -773,59 +773,25 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 	}
 }
 
-// HasCollection returns whether the collection exist from user's perspective.
-func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID) (bool, error) {
-	var hasCollection bool
-	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
-	if err := retry.Do(ctx2, func() error {
-		has, err := h.s.broker.HasCollection(ctx2, collectionID)
-		if err != nil {
-			mlog.RatedInfo(ctx, rate.Limit(60), "datacoord ServerHandler HasCollection retry failed", mlog.Err(err))
-			return err
-		}
-		hasCollection = has
-		return nil
-	}, retry.Attempts(5)); err != nil {
-		mlog.Error(ctx2, "datacoord ServerHandler HasCollection finally failed",
-			mlog.FieldCollectionID(collectionID),
-			mlog.Err(err))
-		// A workaround for https://github.com/milvus-io/milvus/issues/26863. The collection may be considered as not
-		// dropped when any exception happened, but there are chances that finally the collection will be cleaned.
-		return true, nil
-	}
-	return hasCollection, nil
-}
-
-// GetCollection returns collection info with specified collection id
+// GetCollection returns collection info with specified collection id. A
+// Dropping collection is returned with its State. A collection whose
+// CreateCollection is already in the WAL becomes visible only once
+// RootCoord's ack callback applies it, so a miss is retried briefly, as the
+// RootCoord lookup this replaced was.
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
-	coll := h.s.meta.GetCollection(collectionID)
-	if coll != nil {
+	if coll := h.s.meta.GetCollection(collectionID); coll != nil {
 		return coll, nil
 	}
 	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
+	var coll *collectionInfo
 	if err := retry.Do(ctx2, func() error {
-		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
-		if err != nil {
-			mlog.Warn(ctx, "failed to load collection from rootcoord", mlog.FieldCollectionID(collectionID), mlog.Err(err))
-			// A dropped collection never comes back, retrying only stalls the caller.
-			if errors.Is(err, merr.ErrCollectionNotFound) {
-				return retry.Unrecoverable(err)
-			}
-			return err
+		if coll = h.s.meta.GetCollection(collectionID); coll == nil {
+			return merr.WrapErrCollectionNotFound(collectionID)
 		}
 		return nil
 	}, retry.Attempts(5)); err != nil {
-		mlog.Warn(ctx2, "datacoord ServerHandler GetCollection finally failed",
-			mlog.FieldCollectionID(collectionID),
-			mlog.Err(err))
 		return nil, err
-	}
-	coll = h.s.meta.GetCollection(collectionID)
-	if coll == nil {
-		// Dropped and recycled by GC right after it was loaded.
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	return coll, nil
 }
@@ -907,21 +873,12 @@ func hasCommittedManifest(info *SegmentInfo) (bool, error) {
 // - Collection cloning to different database/cluster
 func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
-	resp, err := h.s.broker.DescribeCollectionInternal(ctx, collectionID)
+	collInfo, err := h.s.meta.getCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	showPartitionResp, err := h.s.broker.ShowPartitions(ctx, collectionID)
-	if err != nil {
-		return nil, err
-	}
-	partitionIDs := showPartitionResp.GetPartitionIDs()
-	partitionNames := showPartitionResp.GetPartitionNames()
-
-	partitionMapping := make(map[string]int64)
-	for idx, name := range partitionNames {
-		partitionMapping[name] = partitionIDs[idx]
-	}
+	partitionIDs := append(slices.Clone(collInfo.Partitions), collInfo.DroppingPartitions...)
+	partitionMapping := maps.Clone(collInfo.PartitionIDsByName)
 
 	// These positions come from the consuming-acked CreateSnapshot broadcast.
 	// Recovery checkpoints may lag behind this collection's durable data.
@@ -1048,10 +1005,10 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 
 	// Clone schema and add consistency level to properties
 	// This is needed because mustConsumeConsistencyLevel in restore expects consistency level in schema.Properties
-	schema := proto.Clone(resp.GetSchema()).(*schemapb.CollectionSchema)
+	schema := proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
 	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{
 		Key:   common.ConsistencyLevel,
-		Value: strconv.Itoa(int(resp.GetConsistencyLevel())),
+		Value: strconv.Itoa(int(collInfo.ConsistencyLevel)),
 	})
 
 	return &snapshotstorage.SnapshotData{
@@ -1063,12 +1020,12 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		},
 		Collection: &datapb.CollectionDescription{
 			Schema:              schema,
-			NumShards:           int64(resp.GetShardsNum()),
-			NumPartitions:       resp.GetNumPartitions(),
-			ConsistencyLevel:    resp.GetConsistencyLevel(),
-			Properties:          common.CloneKeyValuePairs(resp.GetProperties()),
+			NumShards:           int64(collInfo.ShardsNum),
+			NumPartitions:       int64(len(partitionIDs)),
+			ConsistencyLevel:    collInfo.ConsistencyLevel,
+			Properties:          common.CloneKeyValuePairs(collInfo.PropertyPairs),
 			Partitions:          partitionMapping,
-			VirtualChannelNames: resp.GetVirtualChannelNames(),
+			VirtualChannelNames: slices.Clone(collInfo.VChannelNames),
 		},
 		Indexes:  indexInfos,
 		Segments: segDescList,

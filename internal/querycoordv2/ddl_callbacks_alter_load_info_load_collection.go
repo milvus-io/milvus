@@ -38,15 +38,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 
-	partitionIDs, err := s.broker.GetPartitions(ctx, coll.CollectionID)
-	if err != nil {
-		return err
-	}
+	partitionIDs := coll.Partitions
 	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
 		ctx,
 		req.GetReplicaNumber(),
@@ -202,7 +199,7 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
 	if replicaNumber <= 0 && len(resourceGroups) == 0 {
 		// when replica number or resource groups is not set, use pre-defined load config
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
+		rgs, replicas, err := s.meta.GetCollectionLoadInfo(ctx, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to get pre-defined load info", mlog.Err(err))
 		} else {

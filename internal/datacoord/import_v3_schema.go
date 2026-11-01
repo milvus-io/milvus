@@ -160,11 +160,9 @@ func (p *importSchemaProjection) equal(other *importSchemaProjection) bool {
 func validateImportV3Schema(meta *meta, collectionID int64, frozen *schemapb.CollectionSchema) (int32, error) {
 	collection := meta.GetCollection(collectionID)
 	if collection == nil || collection.Schema == nil {
-		// The collection cache is populated asynchronously after a DataCoord
-		// restart, so a miss means "not loaded yet", not "dropped" (the GC loop's
-		// checkCollection detects real drops via broker.HasCollection). Return a
-		// retryable error so the job waits for the cache to warm instead of being
-		// failed permanently.
+		// A miss means RootCoord has removed the collection. Return a retryable
+		// error and leave failing the job to the import checker's
+		// checkCollection, which detects drops in the collection view.
 		return 0, merr.WrapErrServiceNotReadyMsg("import v3 collection %d schema is not loaded into cache yet", collectionID)
 	}
 	if equal, difference := compareImportSchemaProjection(frozen, collection.Schema); !equal {

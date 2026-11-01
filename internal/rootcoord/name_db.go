@@ -17,6 +17,8 @@
 package rootcoord
 
 import (
+	"sync"
+
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -25,6 +27,10 @@ import (
 )
 
 type nameDb struct {
+	// mu guards db2Name2ID for get, which the collection view calls without
+	// ddLock. Writers hold ddLock and mu, so other readers, which hold
+	// ddLock, need not take mu.
+	mu                 sync.RWMutex
 	db2Name2ID         map[string]map[string]UniqueID // database -> collection name -> collection id
 	totalCollectionNum int
 	totalPartitionNum  int
@@ -41,12 +47,20 @@ func (n *nameDb) empty(dbName string) bool {
 }
 
 func (n *nameDb) createDbIfNotExist(dbName string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.createDbIfNotExistLocked(dbName)
+}
+
+func (n *nameDb) createDbIfNotExistLocked(dbName string) {
 	if !n.exist(dbName) {
 		n.db2Name2ID[dbName] = make(map[string]UniqueID)
 	}
 }
 
 func (n *nameDb) dropDb(dbName string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	delete(n.db2Name2ID, dbName)
 }
 
@@ -54,14 +68,15 @@ func (n *nameDb) insert(dbName string, collectionName string, collectionID Uniqu
 	if dbName == "" {
 		dbName = util.DefaultDBName
 	}
-	n.createDbIfNotExist(dbName)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.createDbIfNotExistLocked(dbName)
 	n.db2Name2ID[dbName][collectionName] = collectionID
 }
 
 func (n *nameDb) get(dbName string, collectionName string) (collectionID UniqueID, ok bool) {
-	if !n.exist(dbName) {
-		return 0, false
-	}
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	collectionID, ok = n.db2Name2ID[dbName][collectionName]
 	return collectionID, ok
 }
@@ -91,17 +106,19 @@ func (n *nameDb) listCollectionID(dbName string) ([]typeutil.UniqueID, error) {
 }
 
 func (n *nameDb) removeIfMatched(db, collection string, collectionID UniqueID) bool {
-	if id, ok := n.get(db, collection); !ok || id != collectionID {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if id, ok := n.db2Name2ID[db][collection]; !ok || id != collectionID {
 		return false
 	}
-	n.remove(db, collection)
+	delete(n.db2Name2ID[db], collection)
 	return true
 }
 
 func (n *nameDb) remove(db, collection string) {
-	if n.exist(db) {
-		delete(n.db2Name2ID[db], collection)
-	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.db2Name2ID[db], collection)
 }
 
 func (n *nameDb) iterate(exitOnFalse func(db string, collection string, id UniqueID) bool) {
