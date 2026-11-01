@@ -17,6 +17,7 @@
 package siliconflow
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,7 +75,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		ret, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
+		ret, err := c.Embedding(context.Background(), url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
 		assert.Equal(t, ret.Data[1].Index, 1)
@@ -95,7 +96,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		_, err := c.Embedding(url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
+		_, err := c.Embedding(context.Background(), url, "BAAI/bge-large-zh-v1.5", []string{"sentence"}, "float", 0, 0)
 		assert.True(t, err != nil)
 	}
 }
@@ -144,7 +145,7 @@ func TestRerankOK(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		ret, err := c.Rerank(url, "BAAI/bge-large-zh-v1.5", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
+		ret, err := c.Rerank(context.Background(), url, "BAAI/bge-large-zh-v1.5", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Results[0].Index, 0)
 		assert.Equal(t, ret.Results[0].RelevanceScore, float32(0.99184376))
@@ -171,7 +172,7 @@ func TestRerankFailed(t *testing.T) {
 
 	{
 		c, _ := NewSiliconflowClient("mock_key")
-		_, err := c.Rerank(url, "BAAI/bge-large-zh-v1.5", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
+		_, err := c.Rerank(context.Background(), url, "BAAI/bge-large-zh-v1.5", "query", []string{"text1", "text2", "text3"}, map[string]any{}, 0)
 		assert.True(t, err != nil)
 	}
 }
