@@ -120,7 +120,10 @@ func reduceSearchResultDataWithGroupBy(
 		},
 	}
 	groupBound := groupSize * limit
-	if err := setupIdListForSearchResult(ret, pkType, groupBound); err != nil {
+	// groupSize*limit is user-controlled and can far exceed the rows the
+	// inputs hold, so cap every result buffer's presize at the input rows.
+	rowCap := reduce.PresizeRows(subSearchResultData, nq*groupBound)
+	if err := setupIdListForSearchResult(ret, pkType, min(groupBound, rowCap)); err != nil {
 		return ret, err
 	}
 	allSearchCount, hitNum, err := checkResultDatas(ctx, subSearchResultData, nq, topk)
@@ -130,7 +133,6 @@ func reduceSearchResultDataWithGroupBy(
 	}
 	ret.GetResults().AllSearchCount = allSearchCount
 
-	rowCap := reduce.PresizeRows(subSearchResultData, nq*groupBound)
 	for _, result := range subSearchResultData {
 		if len(result.GetFieldsData()) > 0 {
 			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
@@ -166,10 +168,10 @@ func reduceSearchResultDataWithGroupBy(
 	var acceptedRows []reduce.RowRef
 	if len(groupByFieldIDs) == 1 {
 		acceptedRows, err = runSingleFieldGroupByHotLoop(ctx, ret, subSearchResultData, subSearchNqOffset, idxComputers,
-			nq, offset, groupSize, limit, groupBound, groupByFieldIDs[0], maxOutputSize)
+			nq, offset, groupSize, limit, groupBound, rowCap, groupByFieldIDs[0], maxOutputSize)
 	} else {
 		acceptedRows, err = runMultiFieldGroupByHotLoop(ctx, ret, subSearchResultData, subSearchNqOffset, idxComputers,
-			nq, offset, groupSize, limit, groupBound, groupByFieldIDs, maxOutputSize, isSearchAggregation)
+			nq, offset, groupSize, limit, groupBound, rowCap, groupByFieldIDs, maxOutputSize, isSearchAggregation)
 	}
 	if err != nil {
 		return nil, err
@@ -197,7 +199,7 @@ func runSingleFieldGroupByHotLoop(
 	subSearchResultData []*schemapb.SearchResultData,
 	subSearchNqOffset [][]int64,
 	idxComputers []*typeutil.FieldDataIdxComputer,
-	nq, offset, groupSize, limit, groupBound int64,
+	nq, offset, groupSize, limit, groupBound, rowCap int64,
 	groupByFieldID int64,
 	maxOutputSize int64,
 ) ([]reduce.RowRef, error) {
@@ -208,7 +210,7 @@ func runSingleFieldGroupByHotLoop(
 		subSearchGroupByValIterator[i] = typeutil.GetDataIterator(fd)
 	}
 
-	acceptedRows := make([]reduce.RowRef, 0, nq*groupBound)
+	acceptedRows := make([]reduce.RowRef, 0, rowCap)
 	var realTopK int64 = -1
 	var retSize int64
 
@@ -219,7 +221,7 @@ func runSingleFieldGroupByHotLoop(
 		// plus interface-boxing allocs for int64/string pk values.
 		groupByValMap := make(map[any][]reduce.RowRef)
 		skipOffsetMap := make(map[any]bool)
-		groupByValList := make([]any, 0, limit)
+		groupByValList := make([]any, 0, min(limit, rowCap))
 
 		var j int64
 		for j = 0; j < groupBound; {
@@ -258,7 +260,7 @@ func runSingleFieldGroupByHotLoop(
 				ret.Results.Scores = append(ret.Results.Scores, subResData.GetScores()[ref.RowIdx])
 				if subResData.ElementIndices != nil {
 					if ret.Results.ElementIndices == nil {
-						ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, limit)}
+						ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, min(limit, rowCap))}
 					}
 					ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, subResData.ElementIndices.GetData()[ref.RowIdx])
 				}
@@ -289,7 +291,7 @@ func runMultiFieldGroupByHotLoop(
 	subSearchResultData []*schemapb.SearchResultData,
 	subSearchNqOffset [][]int64,
 	idxComputers []*typeutil.FieldDataIdxComputer,
-	nq, offset, groupSize, limit, groupBound int64,
+	nq, offset, groupSize, limit, groupBound, rowCap int64,
 	groupByFieldIDs []int64,
 	maxOutputSize int64,
 	isSearchAggregation bool,
@@ -300,7 +302,7 @@ func runMultiFieldGroupByHotLoop(
 		subSearchKeyExtractors[i] = buildMultiGroupKeyExtractor(subSearchResultData[i], groupByFieldIDs)
 	}
 
-	acceptedRows := make([]reduce.RowRef, 0, nq*groupBound)
+	acceptedRows := make([]reduce.RowRef, 0, rowCap)
 	var realTopK int64 = -1
 	var retSize int64
 
@@ -310,11 +312,11 @@ func runMultiFieldGroupByHotLoop(
 		skipGroups := make(map[uint64][]*multiGroupEntry)
 		distinctSkipped := int64(0)
 		totalGroups := int64(0)
-		perNqAccepted := make([]reduce.RowRef, 0, groupBound)
+		perNqAccepted := make([]reduce.RowRef, 0, min(groupBound, rowCap))
 		// Non-agg only: insertion-order list for regroup-on-emit.
 		var groupOrder []*multiGroupEntry
 		if !isSearchAggregation {
-			groupOrder = make([]*multiGroupEntry, 0, limit)
+			groupOrder = make([]*multiGroupEntry, 0, min(limit, rowCap))
 		}
 
 		var j int64
@@ -382,7 +384,7 @@ func runMultiFieldGroupByHotLoop(
 			ret.Results.Scores = append(ret.Results.Scores, subResData.GetScores()[ref.RowIdx])
 			if subResData.ElementIndices != nil {
 				if ret.Results.ElementIndices == nil {
-					ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, limit)}
+					ret.Results.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, min(limit, rowCap))}
 				}
 				ret.Results.ElementIndices.Data = append(ret.Results.ElementIndices.Data, subResData.ElementIndices.GetData()[ref.RowIdx])
 			}
@@ -642,7 +644,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		},
 	}
 
-	if err := setupIdListForSearchResult(ret, pkType, limit); err != nil {
+	if err := setupIdListForSearchResult(ret, pkType, reduce.PresizeRows(subSearchResultData, limit)); err != nil {
 		return ret, err
 	}
 
@@ -733,7 +735,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				if subSearchResultData[subSearchIdx].ElementIndices != nil {
 					if ret.Results.ElementIndices == nil {
 						ret.Results.ElementIndices = &schemapb.LongArray{
-							Data: make([]int64, 0, limit),
+							Data: make([]int64, 0, min(limit, rowCap)),
 						}
 					}
 					elemIdx := subSearchResultData[subSearchIdx].ElementIndices.GetData()[resultDataIdx]
