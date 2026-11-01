@@ -176,6 +176,8 @@ const (
 	HTTPReturnFieldDefaultValue     = "defaultValue"
 	HTTPReturnFieldAutoID           = "autoId"
 	HTTPReturnFieldElementType      = "elementType"
+	HTTPReturnFieldElementNullable  = "elementNullable"
+	HTTPReturnFieldTypeSchema       = "typeSchema"
 	HTTPReturnDescription           = "description"
 	HTTPReturnFieldIsFunctionOutput = "isFunctionOutput"
 
@@ -201,6 +203,7 @@ const (
 	HTTPReturnIndexParams     = "indexParams"
 
 	HTTPReturnDistance = "distance"
+	HTTPReturnOffset   = "offset"
 
 	HTTPReturnRowCount = "rowCount"
 
