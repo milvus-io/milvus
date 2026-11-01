@@ -3182,3 +3182,30 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	)
 	assert.Error(t, err) // server not healthy
 }
+
+func TestServer_CollectionMetaForTask(t *testing.T) {
+	t.Run("no meta yet", func(t *testing.T) {
+		_, ok := (&Server{}).collectionMetaForTask(1)
+		assert.False(t, ok)
+	})
+
+	ms := metacache.NewMetaStore(nil)
+	s := &Server{meta: &meta{ctx: context.Background(), metaStore: ms}}
+	s.meta.AddCollection(&collectionInfo{
+		ID:           1,
+		Schema:       &schemapb.CollectionSchema{Name: "docs"},
+		DatabaseID:   7,
+		DatabaseName: "analytics",
+	})
+
+	t.Run("cached collection", func(t *testing.T) {
+		got, ok := s.collectionMetaForTask(1)
+		assert.True(t, ok)
+		assert.Equal(t, session.CollectionMeta{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, got)
+	})
+
+	t.Run("uncached collection", func(t *testing.T) {
+		_, ok := s.collectionMetaForTask(2)
+		assert.False(t, ok)
+	})
+}
