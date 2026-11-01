@@ -20,6 +20,18 @@ type (
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 )
 
+// WaitRequiredError is returned by an inner interceptor when the append must
+// wait for a condition that needs the WAL lock to be free. Nothing of the
+// message is appended when it is returned. The redo interceptor calls Wait
+// without holding any lock and then runs the chain again.
+type WaitRequiredError struct {
+	Wait func(ctx context.Context) error
+}
+
+func (e *WaitRequiredError) Error() string {
+	return "the append must wait outside the WAL lock"
+}
+
 // MessageRowLock coordinates writes before their visibility timestamp is
 // allocated. The lock interceptor calls it under the shard lifecycle lock for
 // every non-replicated message. The returned context may retain decoded write
