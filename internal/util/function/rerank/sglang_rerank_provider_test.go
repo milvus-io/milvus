@@ -1,5 +1,5 @@
 /*
- * # Licensed to the LF AI & Data foundation under one
+ * Licensed to the LF AI & Data foundation under one
  * or more contributor license agreements. See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership. The ASF licenses this file
@@ -21,104 +21,114 @@ package rerank
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
-	"time"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
-func (s *RerankModelSuite) TestSGLangProviderProtocol() {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.Equal(http.MethodPost, r.Method)
-		s.Equal("/v1/rerank", r.URL.Path)
-		s.Equal("Bearer mock", r.Header.Get("Authorization"))
-
-		var request struct {
-			Query           string   `json:"query"`
-			Documents       []string `json:"documents"`
-			ReturnDocuments bool     `json:"return_documents"`
-		}
-		s.Require().NoError(json.NewDecoder(r.Body).Decode(&request))
-		s.Equal("query", request.Query)
-		s.Equal([]string{"first", "second", "third"}, request.Documents)
-		s.False(request.ReturnDocuments)
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`[{"index":2,"score":0.3},{"index":0,"score":0.1},{"index":1,"score":0.2}]`))
-	}))
-	defer ts.Close()
-
-	provider, err := newSGLangProvider([]*commonpb.KeyValuePair{
-		{Key: models.CredentialParamKey, Value: "mock"},
-	}, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
-	s.Require().NoError(err)
-
-	scores, err := provider.Rerank(context.Background(), "query", []string{"first", "second", "third"})
-	s.Require().NoError(err)
-	s.Equal([]float32{0.1, 0.2, 0.3}, scores)
+func newSGLangTestProvider(t *testing.T, endpoint string, timeoutMs string) ModelProvider {
+	t.Helper()
+	params := []*commonpb.KeyValuePair{
+		{Key: models.EndpointParamKey, Value: endpoint},
+		{Key: models.ModelNameParamKey, Value: "BAAI/bge-reranker-v2-m3"},
+		{Key: models.CredentialParamKey, Value: "sglang"},
+	}
+	if timeoutMs != "" {
+		params = append(params, &commonpb.KeyValuePair{Key: models.TimeoutMsParamKey, Value: timeoutMs})
+	}
+	provider, err := newSGLangProvider(params, nil, credentials.NewCredentials(map[string]string{"sglang.apikey": "test-key"}))
+	require.NoError(t, err)
+	return provider
 }
 
-func (s *RerankModelSuite) TestSGLangProviderHonorsTimeoutAndCancellation() {
+func TestSGLangRerank(t *testing.T) {
+	docs := []string{"d0", "d1", "d2"}
+	t.Run("maps result indexes to request documents", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "/v1/rerank", r.URL.Path)
+			require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+			var request struct {
+				Model     string   `json:"model"`
+				Query     string   `json:"query"`
+				Documents []string `json:"documents"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			require.Equal(t, "BAAI/bge-reranker-v2-m3", request.Model)
+			require.Equal(t, "q", request.Query)
+			require.Equal(t, docs, request.Documents)
+			_, _ = w.Write([]byte(`[{"index":2,"score":0.3},{"index":0,"score":0},{"index":1,"score":0.2}]`))
+		}))
+		defer server.Close()
+
+		scores, err := newSGLangTestProvider(t, server.URL, "").Rerank(context.Background(), "q", docs)
+		require.NoError(t, err)
+		require.Equal(t, []float32{0, 0.2, 0.3}, scores)
+	})
+
 	for _, tc := range []struct {
-		name    string
-		timeout int64
-		cancel  bool
-		err     error
+		name string
+		body string
+		err  string
 	}{
-		{name: "timeout", timeout: 20, err: context.DeadlineExceeded},
-		{name: "cancellation", timeout: 1000, cancel: true, err: context.Canceled},
+		{"duplicate index", `[{"index":0,"score":0.1},{"index":0,"score":0.2},{"index":2,"score":0.3}]`, "invalid or duplicated result index"},
+		{"missing index", `[{"score":0.1},{"index":1,"score":0.2},{"index":2,"score":0.3}]`, "without index or score"},
+		{"missing result", `[{"index":0,"score":0.1},{"index":1,"score":0.2}]`, "number of docs and scores does not match"},
+		{"negative index", `[{"index":-1,"score":0.1},{"index":1,"score":0.2},{"index":2,"score":0.3}]`, "invalid or duplicated result index"},
+		{"out of range index", `[{"index":0,"score":0.1},{"index":1,"score":0.2},{"index":3,"score":0.3}]`, "invalid or duplicated result index"},
+		{"missing score", `[{"index":0},{"index":1,"score":0.2},{"index":2,"score":0.3}]`, "without index or score"},
+		{"malformed response", `{`, "unmarshal response failed"},
 	} {
-		s.Run(tc.name, func() {
-			started := make(chan struct{})
-			aborted := make(chan struct{})
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				close(started)
-				<-r.Context().Done()
-				close(aborted)
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
 			}))
-			defer ts.Close()
+			defer server.Close()
 
-			provider, err := newSGLangProvider([]*commonpb.KeyValuePair{
-				{Key: models.EndpointParamKey, Value: ts.URL},
-				{Key: models.TimeoutMsParamKey, Value: strconv.FormatInt(tc.timeout, 10)},
-			}, nil, &credentials.Credentials{})
-			s.Require().NoError(err)
-
-			ctx := context.Background()
-			var cancel context.CancelFunc
-			if tc.cancel {
-				ctx, cancel = context.WithCancel(ctx)
-			}
-			result := make(chan error, 1)
-			go func() {
-				_, err := provider.Rerank(ctx, "query", []string{"document"})
-				result <- err
-			}()
-
-			select {
-			case <-started:
-			case <-time.After(time.Second):
-				s.Fail("SGLang service was not called")
-			}
-			if cancel != nil {
-				cancel()
-			}
-
-			select {
-			case err := <-result:
-				s.ErrorIs(err, tc.err)
-			case <-time.After(time.Second):
-				s.Fail("rerank call did not finish")
-			}
-			select {
-			case <-aborted:
-			case <-time.After(time.Second):
-				s.Fail("SGLang request context was not canceled")
-			}
+			_, err := newSGLangTestProvider(t, server.URL, "").Rerank(context.Background(), "q", docs)
+			require.ErrorContains(t, err, tc.err)
 		})
 	}
+}
+
+func TestSGLangRerankErrorsRespectContext(t *testing.T) {
+	t.Run("API error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"invalid request"}`))
+		}))
+		defer server.Close()
+
+		_, err := newSGLangTestProvider(t, server.URL, "").Rerank(context.Background(), "q", []string{"d"})
+		require.ErrorContains(t, err, "call service failed")
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+
+		_, err := newSGLangTestProvider(t, server.URL, "20").Rerank(context.Background(), "q", []string{"d"})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("cancellation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := newSGLangTestProvider(t, server.URL, "").Rerank(ctx, "q", []string{"d"})
+		require.True(t, errors.Is(err, context.Canceled))
+	})
 }

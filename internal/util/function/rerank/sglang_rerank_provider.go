@@ -32,49 +32,56 @@ import (
 type sglangProvider struct {
 	baseProvider
 	client    *sglang.Client
+	modelName string
 	timeoutMs int64
 }
 
 func newSGLangProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
-	endpoint := conf[models.URLParamKey]
+	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
+	if err != nil {
+		return nil, err
+	}
+
+	var endpoint, modelName string
 	maxBatch := 32
 	for _, param := range params {
 		switch strings.ToLower(param.Key) {
 		case models.EndpointParamKey:
 			endpoint = param.Value
+		case models.ModelNameParamKey:
+			modelName = param.Value
 		case models.MaxClientBatchSizeParamKey:
-			batch, err := parseMaxBatch(param.Value)
-			if err != nil {
+			if maxBatch, err = parseMaxBatch(param.Value); err != nil {
 				return nil, err
 			}
-			maxBatch = batch
 		}
 	}
 	if endpoint == "" {
 		return nil, merr.WrapErrParameterMissingMsg("sglang rerank endpoint is required")
 	}
+	if modelName == "" {
+		return nil, merr.WrapErrParameterMissingMsg("sglang rerank model name is required")
+	}
 
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
-	if err != nil {
-		return nil, err
-	}
-	client, err := sglang.NewClient(apiKey, endpoint)
-	if err != nil {
-		return nil, err
-	}
 	return &sglangProvider{
 		baseProvider: baseProvider{batchSize: maxBatch},
-		client:       client,
+		client:       sglang.NewClient(apiKey, endpoint),
+		modelName:    modelName,
 		timeoutMs:    models.ResolveTimeoutMs(params),
 	}, nil
 }
 
 func (provider *sglangProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	response, err := provider.client.Rerank(ctx, query, docs, provider.timeoutMs)
+	results, err := provider.client.Rerank(ctx, provider.modelName, query, docs, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	return rerankScoresByIndex(len(docs), len(*response), func(i int) (int, float32) {
-		return (*response)[i].Index, (*response)[i].Score
+	for _, result := range results {
+		if result.Index == nil || result.Score == nil {
+			return nil, merr.WrapErrFunctionFailedMsg("get rerank scores failed, the sglang service returned a result without index or score")
+		}
+	}
+	return rerankScoresByIndex(len(docs), len(results), func(i int) (int, float32) {
+		return *results[i].Index, *results[i].Score
 	})
 }

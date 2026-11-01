@@ -330,7 +330,8 @@ func PostRequest[T Response](req any, url string, headers map[string]string, tim
 	return PostRequestWithContext[T](context.Background(), req, url, headers, timeoutMs)
 }
 
-// PostRequestWithContext sends a request with the caller's cancellation and deadline.
+// PostRequestWithContext sends a JSON request with both the caller's context
+// and the configured request timeout.
 func PostRequestWithContext[T Response](ctx context.Context, req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
 	data, err := json.Marshal(req)
 	if err != nil {

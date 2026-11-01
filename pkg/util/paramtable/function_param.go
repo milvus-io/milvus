@@ -171,6 +171,10 @@ func (p *functionConfig) init(base *BaseTable) {
 		NonSensitiveSuffixes: []string{"enable"},
 		DocFunc: func(key string) string {
 			switch key {
+			case "sglang.credential":
+				return "The name in the credential configuration item"
+			case "sglang.enable":
+				return "Whether to enable SGLang rerank service"
 			case "tei.credential":
 				return "The name in the crendential configuration item"
 			case "tei.enable":
