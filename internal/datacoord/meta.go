@@ -1052,6 +1052,15 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 			return false
 		}
 
+		// Dropped is terminal. A late writer (an import result, a flush
+		// completion) that still holds the segment ID must not revive a
+		// segment that DropVirtualChannel, compaction or GC already retired.
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			mlog.Warn(modPack.meta.ctx, "meta update: segment is dropped, refuse to change its state",
+				mlog.Int64("segmentID", segmentID), mlog.String("status", status.String()))
+			return false
+		}
+
 		updateSegStateAndPrepareMetrics(segment, status, modPack.metricMutation)
 		if status == commonpb.SegmentState_Dropped {
 			segment.DroppedAt = uint64(time.Now().UnixNano())
