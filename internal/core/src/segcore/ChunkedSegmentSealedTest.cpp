@@ -1436,7 +1436,10 @@ TEST(test_chunk_segment,
         segcore::SegmentLoadInfo info(StructProviderLoadInfo(stored, 3),
                                       schema);
         segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
-            *schema, info, "items");
+            segcore::SealedFieldLayout(
+                schema, segcore::LoadScope::FromLegacySchema(*schema)),
+            info,
+            "items");
     };
     try {
         check({100, 102});
@@ -1463,7 +1466,10 @@ TEST(test_chunk_segment, StructProviderCheckIgnoresIndexOnlyFields) {
         // this test would not cover the index-only field.
         ASSERT_TRUE(info.FieldIndexHasRawData(FieldId(104)));
         segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
-            *schema, info, "items");
+            segcore::SealedFieldLayout(
+                schema, segcore::LoadScope::FromLegacySchema(*schema)),
+            info,
+            "items");
     };
     EXPECT_NO_THROW(check({100}, {104}));
     // A row column of a dropped sub-field still fails, index or not.

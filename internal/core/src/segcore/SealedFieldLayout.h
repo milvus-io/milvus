@@ -77,6 +77,11 @@ class SealedFieldLayout {
                scope_.SameSelection(scope);
     }
 
+    std::optional<FieldId>
+    GetStructFieldId(const std::string& struct_name) const {
+        return schema_->GetStructFieldId(struct_name);
+    }
+
     const FieldMeta&
     operator[](FieldId id) const {
         AssertInfo(

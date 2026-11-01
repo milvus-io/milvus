@@ -114,7 +114,7 @@ enum class VortexColumnGroupLocalFormat {
 // struct's current sub-fields but does store fields written after the struct
 // was created; see the definition for the rule.
 void
-CheckStructProviderNotDropped(const Schema& schema,
+CheckStructProviderNotDropped(const SealedFieldLayout& schema,
                               const SegmentLoadInfo& load_info,
                               const std::string& struct_name,
                               int64_t segment_id);
@@ -1967,7 +1967,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     static std::optional<FieldId>
     SelectStructElementOffsetsSource(
         const RuntimeResourceState& runtime,
-        const Schema& schema,
+        const SealedFieldLayout& schema,
         const SegmentLoadInfo& load_info,
         const std::string& struct_name,
         const std::unordered_set<FieldId>& newly_loaded_fields,
@@ -1976,7 +1976,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     static void
     BuildStructElementOffsets(
         RuntimeResourceState& runtime,
-        const SchemaPtr& schema_snapshot,
+        const SealedFieldLayoutPtr& schema_snapshot,
         const SegmentLoadInfo& segment_load_info,
         const std::unordered_set<FieldId>& affected_fields,
         milvus::OpContext* op_ctx,
@@ -2484,7 +2484,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Runs the check that rejects building struct offsets for a segment whose
     // stored sub-fields of the struct were all dropped.
     static void
-    TestCheckStructProviderNotDropped(const Schema& schema,
+    TestCheckStructProviderNotDropped(const SealedFieldLayout& schema,
                                       const SegmentLoadInfo& load_info,
                                       const std::string& struct_name) {
         CheckStructProviderNotDropped(schema, load_info, struct_name, 0);

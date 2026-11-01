@@ -718,7 +718,8 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
 }
 
 void
-SegmentLoadInfo::ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known) {
+SegmentLoadInfo::ResolveLegacyBinlogChildFields(
+    const SealedFieldLayoutPtr& fields, const SegmentLoadInfo* known) {
     if (GetStorageVersion() != STORAGE_V2 || HasManifestPath()) {
         return;
     }
@@ -757,7 +758,7 @@ SegmentLoadInfo::ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known) {
         }
         if (fs == nullptr) {
             fs = milvus::segcore::GetDefaultArrowFileSystem();
-            arrow_schema = schema_->ConvertToArrowSchema();
+            arrow_schema = fields->ConvertToArrowSchema();
         }
         // The loader reads the group's field ids from its first file.
         std::vector<std::string> files;

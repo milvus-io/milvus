@@ -869,7 +869,8 @@ class SegmentLoadInfo {
     // computing one. A group whose files match one already resolved in
     // `known` reuses its child_fields instead of reading the footer again.
     void
-    ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known);
+    ResolveLegacyBinlogChildFields(const SealedFieldLayoutPtr& fields,
+                                   const SegmentLoadInfo* known);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest

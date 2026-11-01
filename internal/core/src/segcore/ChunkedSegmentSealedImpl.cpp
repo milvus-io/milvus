@@ -368,7 +368,7 @@ CopyTakenPrimitive(const ChunkedColumnInterface::OwnedTakeData& data,
 // sub-fields were dropped without that rule. Schemas that do not carry the
 // struct's own ID (built in tests without a proto) skip the check.
 void
-CheckStructProviderNotDropped(const Schema& schema,
+CheckStructProviderNotDropped(const SealedFieldLayout& schema,
                               const SegmentLoadInfo& load_info,
                               const std::string& struct_name,
                               int64_t segment_id) {
@@ -8270,7 +8270,7 @@ ChunkedSegmentSealedImpl::InvalidateStaleStructElementOffsets(
 std::optional<FieldId>
 ChunkedSegmentSealedImpl::SelectStructElementOffsetsSource(
     const RuntimeResourceState& runtime,
-    const Schema& schema,
+    const SealedFieldLayout& schema,
     const SegmentLoadInfo& load_info,
     const std::string& struct_name,
     const std::unordered_set<FieldId>& newly_loaded_fields,
@@ -8317,7 +8317,7 @@ ChunkedSegmentSealedImpl::SelectStructElementOffsetsSource(
 void
 ChunkedSegmentSealedImpl::BuildStructElementOffsets(
     RuntimeResourceState& runtime,
-    const SchemaPtr& schema_snapshot,
+    const SealedFieldLayoutPtr& schema_snapshot,
     const SegmentLoadInfo& segment_load_info,
     const std::unordered_set<FieldId>& affected_fields,
     milvus::OpContext* op_ctx,
@@ -8948,8 +8948,8 @@ ChunkedSegmentSealedImpl::Reopen(
     }
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
-    current_mutable.ResolveLegacyBinlogChildFields(nullptr);
-    new_local.ResolveLegacyBinlogChildFields(&current_mutable);
+    current_mutable.ResolveLegacyBinlogChildFields(current_schema, nullptr);
+    new_local.ResolveLegacyBinlogChildFields(target_schema, &current_mutable);
     for (auto fid : current->load_info->GetCreatedTextIndexes()) {
         if (field_exists_in_schema(target_schema, fid)) {
             new_local.SetTextIndexCreated(fid);
@@ -10396,7 +10396,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
         mutable_copy.SetTextIndexCreated(fid);
     }
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Load()");
-    mutable_copy.ResolveLegacyBinlogChildFields(nullptr);
+    mutable_copy.ResolveLegacyBinlogChildFields(snapshot->fields, nullptr);
     auto diff = mutable_copy.GetLoadDiff(snapshot->fields);
     LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
