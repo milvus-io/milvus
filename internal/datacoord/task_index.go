@@ -223,7 +223,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	// Project the worker result now so an invalid one is rejected before any
 	// manifest I/O. CommitSegmentManifest repeats this under indexMeta's
 	// per-buildID lock and persists that authoritative copy.
-	finished, _, err := it.meta.indexMeta.buildFinishedSegmentIndex(segIdx, result)
+	finished, err := it.meta.indexMeta.buildFinishedSegmentIndex(segIdx, result)
 	if err != nil {
 		return false, err
 	}
