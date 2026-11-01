@@ -1,0 +1,14 @@
+{
+  "excluded": [
+    "r0-search-rate160",
+    "r0-multi-rate160"
+  ],
+  "reason": "A docker exec sha256sum of the running binary consumed the tested container CPU quota during r0-multi-rate160, approximately elapsed seconds 44\u201346. The paired ordinary-Search control is also excluded; both conditions were rerun in the same Search-then-MultiSearch order.",
+  "manifest_write_elapsed_s": 46.225435972213745,
+  "replacement_runs": [
+    "r2-search-rate160",
+    "r2-multi-rate160"
+  ],
+  "raw_data_retained": "excluded-hash-interference/",
+  "replacement_completed": true
+}

@@ -132,3 +132,31 @@ count every native thread.
 See the [English engineering report](../../artifacts/multisearch-v2/multisearch-report.html),
 [per-run measurements](../../artifacts/multisearch-v2/performance-summary.json),
 and [verification scope](../../artifacts/multisearch-v2/verification-summary.json).
+
+## Resident Search with added MultiSearch traffic
+
+A further experiment keeps 128 ordinary Search callers active through baseline,
+traffic injection and recovery. CPU is already approximately 97% utilized before
+injection. The secondary client adds identical groups of eight searches using
+individual RPCs or MultiSearch. Both variants wait for all eight before completing
+a group; no scheduler priority or server binary is changed.
+
+At 480 additional logical searches/s, resident Search retains 578.4 QPS with
+ordinary-Search injection versus 625.3 QPS with MultiSearch injection. Its pooled
+p99 is 286.2 ms versus 271.2 ms. Both injected workloads achieve approximately
+480 logical searches/s. Resident throughput returns to approximately 1,090 QPS
+after either secondary workload stops. The continuously backlogged comparison
+also serves both clients; the secondary completion share is approximately 46.9%
+for both API variants. The group barrier means 50/50 is not an expected invariant.
+
+Fourteen valid runs completed 991,884 logical searches, including warmup and
+transitions, with no recorded RPC/item errors, admission drops or late-generated
+groups. An operator checksum command contaminated one earlier run by sharing the
+tested CPU quota. Both members of that pair were excluded and rerun; the raw data
+and exclusion reason are retained. These short same-identity FLAT tests support
+normal resource competition in this fixture, not tenant fairness or isolation.
+
+See the [highlighted mixed-traffic report](../../artifacts/multisearch-mixed/mixed-report.html),
+[PDF](../../artifacts/multisearch-mixed/mixed-report.pdf),
+[measurements](../../artifacts/multisearch-mixed/summary.json), and
+[exclusion audit](../../artifacts/multisearch-mixed/excluded-runs.json).
