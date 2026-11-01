@@ -260,6 +260,14 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     virtual TakeResultPtr
     Take(milvus::OpContext* op_ctx, TakeOptions options) const;
 
+    // Optional positional-read scratch reuse. This does not alter ordinary
+    // TakeResult lifetimes. Unsupported backends return nullptr, and callers
+    // must retain their existing Take path. The binding borrows op_ctx until
+    // its last input lease has ended and the binding has been destroyed.
+    virtual std::unique_ptr<milvus::TakeBinding>
+    CreateTakeBinding(milvus::OpContext* op_ctx,
+                      milvus::TakeBindingOptions options) const;
+
     // Get number of rows before a specific chunk
     virtual int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const = 0;
@@ -469,6 +477,13 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     MakeTakeCellAccess(
         milvus::OpContext* op_ctx,
         const std::vector<int64_t>* batch_cell_ids = nullptr) const {
+        return {};
+    }
+
+    // Optional generation-stable bulk source for a bounded TakeContext. Source
+    // geometry and pinning remain in the Column, never in the Expr consumer.
+    virtual TakeCellSource
+    MakeTakeCellSource(milvus::OpContext* op_ctx) const {
         return {};
     }
 

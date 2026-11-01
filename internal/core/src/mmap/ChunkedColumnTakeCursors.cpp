@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -31,6 +33,8 @@
 
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/detail/PinnedStringViews.h"
+#include "mmap/detail/PreparedCellSlots.h"
 
 namespace milvus {
 namespace detail {
@@ -91,6 +95,8 @@ ValidateTakeTargetType(DataType data_type,
     return requested;
 }
 
+class RawTakeBinding;
+
 template <bool HasCandidateMask, TakePinPolicy PinPolicy>
 class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
  public:
@@ -107,13 +113,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                   DataType data_type,
                   ChunkedColumnInterface::TargetType target_type,
                   bool nullable,
-                  const TargetBitmap* candidate_mask)
+                  const TargetBitmap* candidate_mask,
+                  TakeCellSource source = {},
+                  std::shared_ptr<TakeContext> context = {})
         : planner_(std::move(planner)),
           data_type_(data_type),
           target_type_(target_type),
           nullable_(nullable),
           offsets_(offsets),
           filter_(std::move(filter)),
+          source_(std::move(source)),
+          context_(std::move(context)),
           candidate_mask_(candidate_mask) {
         AssertInfo(planner_ != nullptr, "raw take planner is null");
     }
@@ -209,6 +219,250 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     }
 
  protected:
+    int64_t
+    PrepareBorrowedBatch(int64_t first, int64_t maximum) const override {
+        // Do not clean up an already-active OUTER borrow on reentrant error.
+        AssertInfo(!in_borrowed_batch_, "nested take view consumer");
+        AssertInfo(first >= 0 && maximum > 0 && first <= Size() &&
+                       maximum <= Size() - first,
+                   "invalid take view prefix");
+        in_borrowed_batch_ = true;
+        try {
+            if (owned_ != nullptr || !context_ || !source_.identity ||
+                HasCandidateMask) {
+                return maximum;
+            }
+            AssertInfo(source_.identity && source_.pin && source_.project,
+                       "incomplete take cell source");
+            // estimated_bytes is a backend callback and may reenter this
+            // context. A new physical publication invalidates the local
+            // missing proof; retain the public checked fallback in that case.
+            const auto publications_before = context_->Stats().bulk_pins;
+            // Bounded scratch only: arbitrary-length Take/EvalOffsets inputs
+            // continue through as many prefixes as necessary. This is not a
+            // 64-lane bitmap/callback restriction or a source-ID slot table.
+            const auto limit = std::min<int64_t>(maximum, kPreparedRows);
+            // Fixed bounded scratch is initialized once per result/binding,
+            // not value-initialized again for every input. Active lanes and
+            // unique-cell records are overwritten before their count publishes.
+            // Ordinary noncontextual Take never allocates this workspace.
+            if (prepared_workspace_ == nullptr) {
+                prepared_workspace_ =
+                    std::make_unique<PreparedWorkspace>(planner_->NumCells());
+            }
+            auto& workspace = *prepared_workspace_;
+            // CellLocation has default member initializers. Keep this bounded
+            // scratch too, rather than initializing all64 slots per prefix
+            // immediately before LocateBatch overwrites every active lane.
+            auto& locations = workspace.locations;
+            planner_->LocateBatch(offsets_, first, limit, locations.data());
+            prepared_first_ = first;
+            if (PrepareRetainedPrefix(limit)) {
+                prepared_count_ = limit;
+                return limit;
+            }
+            auto& cells = workspace.cells;
+            std::array<int64_t, kPreparedRows> cell_ids;
+            std::array<size_t, kPreparedRows> lane_slots;
+            std::array<size_t, kPreparedRows> missing_slots;
+            auto& missing = workspace.missing;
+            missing.clear();
+            missing.reserve(limit);
+            PreparedCellSlots unique_slots;
+            int64_t lane_count = 0;
+            size_t estimated_missing = 0;
+            bool temporary_cell = false;
+            for (int64_t lane = 0; lane < limit; ++lane) {
+                const auto location = locations[lane];
+                const auto id = location.cell_id;
+                // Match PrepareItem's existing preloaded-statistics fast path:
+                // do not pin payload merely to rediscover a skipped cell.
+                const bool skipped_without_pin =
+                    filter_ != nullptr &&
+                    filter_->Source() ==
+                        ColumnFilter::MetricsSource::PreloadedStatistics &&
+                    (!nullable_ || !filter_->SkippedValidityRequired()) &&
+                    ShouldSkipFilteredCell(id);
+                if (skipped_without_pin) {
+                    lane_slots[lane] = kNoPreparedCell;
+                    workspace.row_ids[lane] = id;
+                    workspace.row_offsets[lane] = location.cell_offset;
+                    ++lane_count;
+                    continue;
+                }
+                // At most64 cells in a prepared prefix; arbitrary chunk IDs
+                // remain distinct. Dedup affects source work, never output lanes.
+                const auto found = unique_slots.Find(id);
+                size_t slot;
+                if (found.cell_index != PreparedCellSlots::kEmpty) {
+                    slot = found.cell_index;
+                } else {
+                    // Capture each distinct backing owner once BEFORE a new
+                    // cohort can evict FIFO entries. Cells borrow that batch
+                    // owner set, not one shared_ptr copy per physical cell.
+                    auto& cached =
+                        workspace.projections[static_cast<uint64_t>(id) &
+                                              workspace.projection_mask];
+                    auto hit = context_->FindBorrowedCached(
+                        source_, id, prepared_owners_, cached.borrowed);
+                    if (!hit.has_value()) {
+                        const auto bytes = source_.estimated_bytes
+                                               ? source_.estimated_bytes(id)
+                                               : 0;
+                        const bool single_temporary =
+                            bytes == 0 || bytes > context_->Budget();
+                        if (lane != 0 &&
+                            (temporary_cell || single_temporary ||
+                             bytes > context_->Budget() - estimated_missing)) {
+                            break;
+                        }
+                        // Only MISSING cells consume the preparation budget.
+                        // Unknown/oversized first cells are safe one-cell
+                        // temporary cohorts, never an unbounded lookahead.
+                        temporary_cell |= single_temporary;
+                        if (!single_temporary) {
+                            estimated_missing += bytes;
+                        }
+                        missing_slots[missing.size()] = prepared_cell_count_;
+                        missing.push_back(id);
+                    }
+                    slot = prepared_cell_count_++;
+                    cell_ids[slot] = id;
+                    cells[slot] = {hit.value_or(nullptr)};
+                    unique_slots.Insert(found, id, slot);
+                }
+                lane_slots[lane] = slot;
+                workspace.row_ids[lane] = id;
+                workspace.row_offsets[lane] = location.cell_offset;
+                ++lane_count;
+            }
+            const auto count = lane_count;
+            AssertInfo(count > 0, "take preparation made no progress");
+            if (!missing.empty()) {
+                // Find above captured hit leases, so immediate publication is
+                // safe even if Acquire evicts those owners from retention.
+                auto acquired =
+                    context_->Stats().bulk_pins == publications_before
+                        ? context_->PinAndPublish(source_, missing)
+                        : context_->AcquireUniqueMissing(source_, missing);
+                prepared_owners_.Add(acquired);
+                for (size_t i = 0; i < missing.size(); ++i) {
+                    cells[missing_slots[i]].backing = acquired->cells[i].second;
+                }
+            }
+            for (size_t i = 0; i < prepared_cell_count_; ++i) {
+                auto& cell = cells[i];
+                // Project each physical cell once; duplicate output lanes
+                // reuse the field pointer and the same complete backing owner.
+                const auto& projected =
+                    ProjectPreparedCell(cell_ids[i], cell.backing);
+                cell.chunk = projected.chunk;
+                cell.fixed_data = projected.fixed_data;
+                cell.fixed_stride = projected.fixed_stride;
+            }
+            for (int64_t lane = 0; lane < count; ++lane) {
+                const auto slot = lane_slots[lane];
+                auto* chunk =
+                    slot == kNoPreparedCell ? nullptr : cells[slot].chunk;
+                workspace.row_chunks[lane] = chunk;
+                if (target_type_ == TargetType::StringView) {
+                    workspace.string_chunks[lane] =
+                        static_cast<const StringChunk*>(chunk);
+                } else if (target_type_ >= TargetType::Bool &&
+                           target_type_ <= TargetType::Double && !nullable_ &&
+                           filter_ == nullptr) {
+                    // Fixed-width payloads expose an immutable strided Span.
+                    // Resolve that storage representation once per cell, not
+                    // through a virtual ValueAt call for every output lane.
+                    // Other Chunk implementations retain their getter path.
+                    const auto& cell = cells[slot];
+                    workspace.fixed_values[lane] =
+                        cell.fixed_data != nullptr
+                            ? cell.fixed_data + workspace.row_offsets[lane] *
+                                                    cell.fixed_stride
+                            : chunk->ValueAt(workspace.row_offsets[lane]);
+                    __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
+                }
+            }
+            prepared_count_ = count;
+            return count;
+        } catch (...) {
+            // Prepare is called before the caller's guard is constructed.
+            // Restore this borrow only; preserve the original error.
+            EndBorrowedBatch();
+            throw;
+        }
+    }
+
+    void
+    EndBorrowedBatch() const override {
+        prepared_count_ = 0;
+        detached_fixed_prefix_ = false;
+        prepared_first_ = -1;
+        // Raw metadata does not own a payload and is unreadable when count=0.
+        // Keep bounded scratch, but always release the actual borrowed owners.
+        prepared_cell_count_ = 0;
+        prepared_owners_.Clear();
+        borrowed_pins_.clear();
+        borrowed_cohorts_.clear();
+        current_pin_.reset();
+        current_cohort_.reset();
+        current_cell_id_ = -1;
+        current_chunk_ = nullptr;
+        current_data_ = nullptr;
+        cached_location_index_ = -1;
+        in_borrowed_batch_ = false;
+    }
+
+    bool
+    FillBorrowedBatch(int64_t first,
+                      int64_t count,
+                      TargetType target_type,
+                      void* values,
+                      bool* validity,
+                      bool* skipped) const override {
+        if (HasCandidateMask || owned_ != nullptr || prepared_count_ != count ||
+            prepared_first_ != first) {
+            return false;
+        }
+        AssertInfo(count > 0 && target_type == target_type_ && values &&
+                       ((validity == nullptr) == (skipped == nullptr)),
+                   "invalid prepared take buffers");
+        if (validity == nullptr && (nullable_ || filter_ != nullptr)) {
+            return false;
+        }
+        // Dispatch storage representation once, never an Expr operation.
+        // Other representations retain the original item access fallback.
+        switch (target_type) {
+            case TargetType::Bool:
+                return FillPrepared<bool>(
+                    first, count, values, validity, skipped);
+            case TargetType::Int8:
+                return FillPrepared<int8_t>(
+                    first, count, values, validity, skipped);
+            case TargetType::Int16:
+                return FillPrepared<int16_t>(
+                    first, count, values, validity, skipped);
+            case TargetType::Int32:
+                return FillPrepared<int32_t>(
+                    first, count, values, validity, skipped);
+            case TargetType::Int64:
+                return FillPrepared<int64_t>(
+                    first, count, values, validity, skipped);
+            case TargetType::Float:
+                return FillPrepared<float>(
+                    first, count, values, validity, skipped);
+            case TargetType::Double:
+                return FillPrepared<double>(
+                    first, count, values, validity, skipped);
+            case TargetType::StringView:
+                return FillPrepared<std::string_view>(
+                    first, count, values, validity, skipped);
+            default:
+                return false;
+        }
+    }
+
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
         if constexpr (HasCandidateMask) {
@@ -221,15 +475,16 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     read_data && owned_data_.data_skipped &&
                         owned_data_.data_skipped[index]};
         }
-        if (!nullable_ && read_data && filter_ == nullptr) {
-            // The value read resolves the position; IsValid still validates
-            // lazy offsets without pinning.
+        if (!nullable_ && (!read_data || filter_ == nullptr)) {
+            // A following value getter resolves/checks this offset itself.
+            // Do not add a second location call to ordinary non-null reads.
+            // Validity-only access has no getter, so retain its bounds check.
+            if (!read_data) {
+                ResolveLocation(index);
+            }
             return {true, false};
         }
         const auto& location = ResolveLocation(index);
-        if (!nullable_ && !read_data) {
-            return {true, false};
-        }
         const auto preloaded_skip =
             read_data && filter_ != nullptr &&
             filter_->Source() ==
@@ -523,6 +778,277 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     }
 
  private:
+    static constexpr size_t kPreparedRows = 64;
+    static_assert(kPreparedRows == PreparedCellSlots::kMaximumCells);
+    static constexpr size_t kNoPreparedCell = static_cast<size_t>(-1);
+
+    struct PreparedCell {
+        void* backing{nullptr};
+        Chunk* chunk{nullptr};
+        const char* fixed_data{nullptr};
+        int64_t fixed_stride{0};
+    };
+
+    struct CachedProjection {
+        uint64_t prepared_sequence{0};
+        uint64_t publication{0};
+        uint64_t retention_epoch{0};
+        int64_t id{-1};
+        void* backing{nullptr};
+        Chunk* chunk{nullptr};
+        const char* fixed_data{nullptr};
+        int64_t fixed_stride{0};
+        TakeContext::BorrowedCellCache borrowed;
+    };
+
+    struct PreparedWorkspace {
+        explicit PreparedWorkspace(int64_t cells)
+            : projections(std::bit_ceil(static_cast<size_t>(
+                  std::clamp<int64_t>(cells, kPreparedRows, 1024)))),
+              projection_mask(projections.size() - 1) {
+        }
+        std::array<CellLocation, kPreparedRows> locations;
+        // Prepare already resolves each lane. Keep the gather inputs in their
+        // final contiguous layout instead of repacking the same metadata into
+        // two stack arrays in every FillPrepared call. Unique physical cells
+        // remain separate from logical lanes (including duplicates/skips).
+        std::array<PreparedCell, kPreparedRows> cells;
+        std::array<int64_t, kPreparedRows> row_ids;
+        std::array<size_t, kPreparedRows> row_offsets;
+        std::array<Chunk*, kPreparedRows> row_chunks;
+        std::array<const StringChunk*, kPreparedRows> string_chunks;
+        std::array<const char*, kPreparedRows> fixed_values;
+        // Metadata only, at most 1024 entries, never payload owners.
+        // Avoid needless projection collisions for ordinary multi-cell columns
+        // while keeping arbitrarily large sources bounded and fully supported.
+        std::vector<CachedProjection> projections;
+        // Power-of-two metadata capacity eliminates division in the row loop.
+        // Full IDs/backings still distinguish collisions above this capacity.
+        size_t projection_mask;
+        uint64_t prepare_sequence{0};
+        // Only bounded IDs, never owners or data; capacity is reused across
+        // inputs so a cache-hit prefix does not allocate a missing-ID vector.
+        std::vector<int64_t> missing;
+    };
+
+    // A hot, non-null raw prefix needs no missing-cell plan or unique-cell
+    // scratch. Only reuse projections that already belong to the current pin
+    // retained-owner epoch, and still capture the live cohort for EVERY batch. No
+    // backend callback/pin/eviction occurs here; a miss retains captured owners
+    // and falls through to the original bounded preparation below.
+    bool
+    PrepareRetainedPrefix(int64_t count) const {
+        const bool strings = target_type_ == TargetType::StringView;
+        const bool primitives = target_type_ >= TargetType::Bool &&
+                                target_type_ <= TargetType::Double;
+        if (nullable_ || filter_ != nullptr || (!strings && !primitives)) {
+            return false;
+        }
+        auto& workspace = *prepared_workspace_;
+        // Fixed-width values are COPIED before VisitViews calls its consumer.
+        // On a fully retained prefix there are no backend callbacks, pins or
+        // evictions between these checks and FillPrepared's plain loads. The
+        // worker-private context already owns every backing, so avoid taking
+        // one shared_ptr reference per cell/batch just to copy scalar values.
+        // Never use this proof for borrowed strings, nonretained projections,
+        // nullable/skip reads or the cold path, all of which keep their owners.
+        const auto retention_epoch = context_->borrow_epoch_;
+        if (primitives) {
+            for (int64_t lane = 0; lane < count; ++lane) {
+                const auto location = workspace.locations[lane];
+                const auto id = location.cell_id;
+                const auto& cached =
+                    workspace.projections[static_cast<uint64_t>(id) &
+                                          workspace.projection_mask];
+                if (cached.id != id || cached.fixed_data == nullptr ||
+                    cached.retention_epoch == 0 ||
+                    cached.retention_epoch != retention_epoch) {
+                    return false;
+                }
+                workspace.row_ids[lane] = id;
+                workspace.row_offsets[lane] = location.cell_offset;
+                workspace.row_chunks[lane] = cached.chunk;
+                workspace.fixed_values[lane] =
+                    cached.fixed_data +
+                    location.cell_offset * cached.fixed_stride;
+                __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
+            }
+            context_->stats_.cache_hits += count;
+            detached_fixed_prefix_ = true;
+            return true;
+        }
+        if (++workspace.prepare_sequence == 0) {
+            for (auto& projection : workspace.projections) {
+                projection.prepared_sequence = 0;
+            }
+            ++workspace.prepare_sequence;
+        }
+        for (int64_t lane = 0; lane < count; ++lane) {
+            const auto location = workspace.locations[lane];
+            const auto id = location.cell_id;
+            auto& cached = workspace.projections[static_cast<uint64_t>(id) &
+                                                 workspace.projection_mask];
+            if (cached.id != id || (!strings && cached.fixed_data == nullptr)) {
+                return false;
+            }
+            if (cached.prepared_sequence != workspace.prepare_sequence) {
+                const auto hit = context_->FindBorrowedCached(
+                    source_, id, prepared_owners_, cached.borrowed);
+                if (!hit || !ProjectionIsCurrent(cached, id, *hit)) {
+                    return false;
+                }
+                cached.prepared_sequence = workspace.prepare_sequence;
+            } else {
+                // Same binding/cell in this callback-free prepare prefix.
+                // Its owner was already captured for the entire consumer.
+                ++context_->stats_.cache_hits;
+            }
+            workspace.row_ids[lane] = id;
+            workspace.row_offsets[lane] = location.cell_offset;
+            workspace.row_chunks[lane] = cached.chunk;
+            if (strings) {
+                workspace.string_chunks[lane] =
+                    static_cast<const StringChunk*>(cached.chunk);
+            } else {
+                workspace.fixed_values[lane] =
+                    cached.fixed_data +
+                    location.cell_offset * cached.fixed_stride;
+                // Overlap independent value loads just as the original
+                // general Gather did; the Expr kernel remains untouched.
+                __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
+            }
+        }
+        return true;
+    }
+
+    bool
+    ProjectionIsCurrent(const CachedProjection& cached,
+                        int64_t id,
+                        void* backing) const {
+        if (cached.id != id || cached.backing != backing ||
+            cached.chunk == nullptr) {
+            return false;
+        }
+        if (cached.retention_epoch == 0) {
+            // Unknown/oversized owners are not retained. Their next physical
+            // pin must still invalidate a pointer, including address reuse.
+            return cached.publication == context_->Stats().bulk_pins;
+        }
+        const auto& hint = cached.borrowed;
+        return cached.retention_epoch == context_->borrow_epoch_ &&
+               hint.context == context_.get() &&
+               hint.epoch == cached.retention_epoch && hint.id == id &&
+               hint.cell == backing && hint.entry != nullptr;
+    }
+
+    const CachedProjection&
+    ProjectPreparedCell(int64_t id, void* backing) const {
+        // The caller has ALREADY captured this exact backing's current owner.
+        // A cache collision only misses: compare the complete ID and pointer.
+        // Eviction/Clear invalidates retained Entry hints BEFORE releasing
+        // owners. An unrelated publication must not discard still-owned field
+        // projections. Non-retained cells keep the physical-pin epoch check.
+        // No cache entry retains a payload owner.
+        const auto publication = context_->Stats().bulk_pins;
+        auto& projections = prepared_workspace_->projections;
+        auto& cached = projections[static_cast<uint64_t>(id) &
+                                   prepared_workspace_->projection_mask];
+        if (ProjectionIsCurrent(cached, id, backing)) {
+            return cached;
+        }
+        // A freshly pinned missing cell has not populated its Entry hint yet.
+        // Capture it if retained, but never substitute another backing for
+        // the one whose active batch owner the caller already acquired.
+        const auto retained = context_->FindBorrowedCached(
+            source_, id, prepared_owners_, cached.borrowed);
+        const auto retention_epoch =
+            retained && *retained == backing ? context_->borrow_epoch_ : 0;
+        auto* chunk = source_.project(backing);
+        AssertInfo(chunk != nullptr,
+                   "take source projected a null prepared cell");
+        // Use the epoch from BEFORE project: a reentrant publication during
+        // that callback must not promote an old backing into the newer epoch.
+        cached.publication = publication;
+        cached.retention_epoch = retention_epoch;
+        cached.id = id;
+        cached.backing = backing;
+        cached.chunk = chunk;
+        cached.fixed_data = nullptr;
+        cached.fixed_stride = 0;
+        if (target_type_ != TargetType::StringView && !nullable_ &&
+            filter_ == nullptr) {
+            if (auto* fixed = dynamic_cast<FixedWidthChunk*>(chunk)) {
+                const auto span = fixed->Span();
+                cached.fixed_data = static_cast<const char*>(span.data());
+                cached.fixed_stride = span.element_sizeof();
+            }
+        }
+        return cached;
+    }
+
+    template <typename T>
+    bool
+    FillPrepared(int64_t first,
+                 int64_t count,
+                 void* output,
+                 bool* validity,
+                 bool* skipped) const {
+        auto* values = static_cast<T*>(output);
+        const auto& workspace = *prepared_workspace_;
+        if (!nullable_ && filter_ == nullptr) {
+            // These exact lanes are already resolved and pinned. There is no
+            // per-row virtual PrepareItem/GetValue, Resolve or PinCell here.
+            if constexpr (std::is_same_v<T, std::string_view>) {
+                // Keep the canonical getter's storage loop in a small TU. The
+                // bounded prefix already holds its pointer/row metadata;
+                // the logical Take input remains unbounded and no value or
+                // backing owner is copied. Nullable/SkipIndex stays below.
+                AssertInfo(count <= kPreparedRows,
+                           "prepared string prefix exceeds its capacity");
+                storage::GatherPinnedStringViews(workspace.string_chunks.data(),
+                                                 workspace.row_offsets.data(),
+                                                 count,
+                                                 values,
+                                                 validity,
+                                                 skipped);
+                return true;
+            }
+            for (int64_t lane = 0; lane < count; ++lane) {
+                if constexpr (!std::is_same_v<T, std::string_view>) {
+                    values[lane] = *static_cast<const T*>(
+                        static_cast<const void*>(workspace.fixed_values[lane]));
+                }
+                if (validity != nullptr) {
+                    validity[lane] = true;
+                    skipped[lane] = false;
+                }
+            }
+            if (detached_fixed_prefix_) {
+                // Values now live in caller scratch. A consumer may Clear the
+                // context and then access this result again: do not expose a
+                // prepared raw-pointer shortcut after releasing that proof.
+                // Keep the outer borrow open, so nested VisitViews still fails
+                // closed and ordinary item access acquires its own live pins.
+                prepared_count_ = 0;
+            }
+        } else {
+            // Original item access remains the authority for nullable,
+            // preloaded/loaded SkipIndex, skipped-value and error semantics.
+            for (int64_t lane = 0; lane < count; ++lane) {
+                const auto item = GetUnchecked<T>(first + lane);
+                validity[lane] = item.is_valid;
+                skipped[lane] = item.data_skipped;
+                values[lane] = item.value.has_value() ? *item.value : T{};
+                if constexpr (std::is_same_v<T, std::string_view>) {
+                    if (!values[lane].empty()) {
+                        __builtin_prefetch(values[lane].data(), 0, 1);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     bool
     PrepareValue(int64_t index, TakeItemState& state) const {
         if constexpr (!HasCandidateMask) {
@@ -539,19 +1065,97 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         std::vector<int64_t> positions;
     };
 
-    // Keep Cell-switch setup off the per-row resolver's stack frame.
     FOLLY_NOINLINE Chunk*
     LoadCell(int64_t cell_id) const {
-        Chunk* chunk;
-        {
-            ResetBorrowedPin();
-            auto next = access_cell_(cell_id);
-            chunk = next.get();
-            current_pin_.emplace(std::move(next));
+        if (prepared_count_ > 0 && cached_location_index_ >= prepared_first_ &&
+            cached_location_index_ - prepared_first_ < prepared_count_) {
+            const auto lane = cached_location_index_ - prepared_first_;
+            AssertInfo(prepared_workspace_->row_ids[lane] == cell_id &&
+                           prepared_workspace_->row_chunks[lane] != nullptr,
+                       "take lane has no prepared payload");
+            // Required by the existing LoadedPayload filter's current-cell
+            // contract; ownership is held by prepared_owners_, not copied here.
+            if (current_chunk_ != prepared_workspace_->row_chunks[lane]) {
+                current_data_ = nullptr;
+            }
+            current_cell_id_ = cell_id;
+            current_chunk_ = prepared_workspace_->row_chunks[lane];
+            return current_chunk_;
         }
+        if (current_chunk_ != nullptr && current_cell_id_ == cell_id) {
+            return current_chunk_;
+        }
+        if (current_cohort_ != nullptr) {
+            // Oversized cohorts are not retained by the context but their
+            // already-pinned cells must still be reused inside this result.
+            for (const auto& [id, cell] : current_cohort_->cells) {
+                if (id == cell_id) {
+                    current_cell_id_ = id;
+                    current_chunk_ = source_.project(cell);
+                    current_data_ = nullptr;
+                    return current_chunk_;
+                }
+            }
+        }
+        ResetBorrowedPin();
+        if (context_ && source_.identity) {
+            auto selected = context_->Find(source_, cell_id);
+            if (!selected.has_value()) {
+                // Bound each physical bulk-pin cohort independently of the
+                // caller's logical batch size. Keep the current cell first;
+                // optional lookahead combines missing cells without an O(N)
+                // plan for a large offset request.
+                std::vector<int64_t> ids{cell_id};
+                size_t estimated = source_.estimated_bytes
+                                       ? source_.estimated_bytes(cell_id)
+                                       : 0;
+                for (int64_t i = cached_location_index_ + 1;
+                     i < Size() && i < cached_location_index_ + 32 &&
+                     ids.size() < 32 && estimated != 0 &&
+                     estimated < context_->Budget();
+                     ++i) {
+                    if constexpr (HasCandidateMask) {
+                        if (!(*candidate_mask_)[i]) {
+                            continue;
+                        }
+                    }
+                    const auto id =
+                        planner_->Locate(offsets_.AtUnchecked(i)).cell_id;
+                    if (filter_ != nullptr &&
+                        filter_->Source() ==
+                            ColumnFilter::MetricsSource::PreloadedStatistics &&
+                        (!nullable_ || !filter_->SkippedValidityRequired()) &&
+                        ShouldSkipFilteredCell(id)) {
+                        continue;
+                    }
+                    if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+                        const auto bytes = source_.estimated_bytes(id);
+                        if (bytes == 0 ||
+                            bytes > context_->Budget() - estimated) {
+                            continue;
+                        }
+                        ids.push_back(id);
+                        estimated += bytes;
+                    }
+                }
+                auto cells = context_->Acquire(source_, ids);
+                selected = std::move(cells.front());
+            }
+            current_cohort_ = std::move(selected->cohort);
+            current_chunk_ = source_.project(selected->cell);
+            AssertInfo(current_chunk_ != nullptr,
+                       "take source projected null cell {}",
+                       cell_id);
+            current_cell_id_ = cell_id;
+            return current_chunk_;
+        }
+        auto next = access_cell_(cell_id);
+        auto* chunk = next.get();
+        current_pin_.emplace(std::move(next));
         AssertInfo(chunk != nullptr, "raw take pinned null cell {}", cell_id);
         current_cell_id_ = cell_id;
         current_chunk_ = chunk;
+        current_data_ = nullptr;
         return chunk;
     }
 
@@ -594,21 +1198,32 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         return {static_cast<T*>(current_data_), offset};
     }
 
-    RawTakeLocation
+    // Keep this checked per-item adapter in its getter. Enlarging the batch
+    // implementation must not add a PLT call to ordinary non-batch reads.
+    FOLLY_ALWAYS_INLINE const RawTakeLocation&
     ResolveLocation(int64_t index) const {
         if constexpr (PinPolicy == TakePinPolicy::Batch) {
-            return {batch_->cells[batch_->cell_indices[index]].source_cell_id,
-                    static_cast<size_t>(batch_->cell_offsets[index])};
+            cached_location_ = {
+                batch_->cells[batch_->cell_indices[index]].source_cell_id,
+                static_cast<size_t>(batch_->cell_offsets[index])};
         } else {
             if (cached_location_index_ == index) {
                 return cached_location_;
             }
-            const auto location = planner_->Locate(offsets_.AtUnchecked(index));
-            cached_location_ = {location.cell_id,
-                                static_cast<size_t>(location.cell_offset)};
-            cached_location_index_ = index;
-            return cached_location_;
+            if (prepared_count_ > 0 && index >= prepared_first_ &&
+                index - prepared_first_ < prepared_count_) {
+                const auto lane = index - prepared_first_;
+                cached_location_ = {prepared_workspace_->row_ids[lane],
+                                    prepared_workspace_->row_offsets[lane]};
+            } else {
+                const auto location =
+                    planner_->Locate(offsets_.AtUnchecked(index));
+                cached_location_ = {location.cell_id,
+                                    static_cast<size_t>(location.cell_offset)};
+            }
         }
+        cached_location_index_ = index;
+        return cached_location_;
     }
 
     bool
@@ -624,9 +1239,12 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             current_filter_skip_.has_value()) {
             return *current_filter_skip_;
         }
-        auto [it, inserted] = filter_skip_by_cell_.try_emplace(cell_id, false);
-        if (inserted) {
-            it->second = filter_->CanSkipPhysicalCell(cell_id);
+        auto it = filter_skip_by_cell_.find(cell_id);
+        if (it == filter_skip_by_cell_.end()) {
+            // Evaluate before publishing: an exception must not leave a false
+            // decision that a later input could mistake for a cache hit.
+            const auto skip = filter_->CanSkipPhysicalCell(cell_id);
+            it = filter_skip_by_cell_.emplace(cell_id, skip).first;
         }
         current_filter_cell_id_ = cell_id;
         current_filter_skip_ = it->second;
@@ -677,10 +1295,51 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     void
     ResetBorrowedPin() const {
+        if (in_borrowed_batch_) {
+            if (current_pin_.has_value()) {
+                borrowed_pins_.push_back(std::move(*current_pin_));
+            }
+            if (current_cohort_ != nullptr) {
+                borrowed_cohorts_.push_back(std::move(current_cohort_));
+            }
+        }
         current_pin_.reset();
+        current_cohort_.reset();
         current_cell_id_ = -1;
         current_chunk_ = nullptr;
         current_data_ = nullptr;
+    }
+
+    friend class RawTakeBinding;
+
+    // Only an explicitly reusable binding may change input. Ordinary Take
+    // results never expose these operations and keep their finite input.
+    void
+    BeginInput(OffsetView offsets) {
+        offsets_ = offsets;
+    }
+
+    void
+    EndInput() noexcept {
+        offsets_ = {};
+        EndBorrowedBatch();
+        owned_data_ = {};
+        owned_.reset();
+        // GetOwn and legacy borrowed access may visit an arbitrary number of
+        // cells. Do not retain their request-sized capacity in a binding.
+        // Keep bounded immutable decision metadata, not truth or payload pins.
+        // Large/ad-hoc callbacks retain their original per-input lifetime.
+        constexpr size_t kRetainedSkipDecisions = 4096;
+        if (filter_ == nullptr || !filter_->StableAcrossInputs() ||
+            filter_skip_by_cell_.size() > kRetainedSkipDecisions) {
+            current_filter_cell_id_ = -1;
+            current_filter_skip_.reset();
+            decltype(filter_skip_by_cell_){}.swap(filter_skip_by_cell_);
+        }
+        decltype(borrowed_pins_){}.swap(borrowed_pins_);
+        decltype(borrowed_cohorts_){}.swap(borrowed_cohorts_);
+        // Workspace and prepared owners are bounded by the existing64-row
+        // prefix. Keep metadata capacity only, never an active payload lease.
     }
 
     CellAccess access_cell_;
@@ -690,6 +1349,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     bool nullable_;
     OffsetView offsets_;
     ColumnFilterPtr filter_;
+    TakeCellSource source_;
+    std::shared_ptr<TakeContext> context_;
     mutable std::unordered_map<int64_t, bool> filter_skip_by_cell_;
     mutable int64_t current_filter_cell_id_{-1};
     mutable std::optional<bool> current_filter_skip_;
@@ -699,10 +1360,63 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     mutable std::optional<PinWrapper<Chunk*>> current_pin_;
     mutable int64_t current_cell_id_{-1};
     mutable Chunk* current_chunk_{nullptr};
+    mutable std::shared_ptr<const TakeCellCohort> current_cohort_;
+    mutable bool in_borrowed_batch_{false};
+    mutable int64_t prepared_first_{-1};
+    mutable int64_t prepared_count_{0};
+    mutable bool detached_fixed_prefix_{false};
+    // Column/source/field configuration is immutable for this result. Arbitrary
+    // physical IDs remain supported; conflicting slots simply project again.
+    // Allocate only for contextual borrowed batches, not ordinary Take.
+    mutable std::unique_ptr<PreparedWorkspace> prepared_workspace_;
+    mutable size_t prepared_cell_count_{0};
+    mutable TakeBatchOwners prepared_owners_;
+    mutable std::vector<PinWrapper<Chunk*>> borrowed_pins_;
+    mutable std::vector<std::shared_ptr<const TakeCellCohort>>
+        borrowed_cohorts_;
     mutable std::shared_ptr<OwnedTakeStorage> owned_;
     mutable ChunkedColumnInterface::OwnedTakeData owned_data_;
     mutable void* current_data_{nullptr};
     const TargetBitmap* candidate_mask_;
+};
+
+class RawTakeBinding final : public TakeBinding {
+ public:
+    RawTakeBinding(RawTakeCellPin pin_cell,
+                   std::shared_ptr<const ColumnPlanner> planner,
+                   ColumnFilterPtr filter,
+                   DataType data_type,
+                   TargetType target_type,
+                   bool nullable,
+                   TakeCellSource source,
+                   std::shared_ptr<TakeContext> context)
+        : result_(std::move(planner),
+                  OffsetView{},
+                  std::move(filter),
+                  data_type,
+                  target_type,
+                  nullable,
+                  nullptr,
+                  std::move(source),
+                  std::move(context)) {
+        if (pin_cell) {
+            result_.SetCellAccess(std::move(pin_cell));
+        }
+    }
+
+ private:
+    const TakeResult&
+    BeginInput(OffsetView offsets) override {
+        result_.BeginInput(offsets);
+        return result_;
+    }
+
+    void
+    EndInput() noexcept override {
+        result_.EndInput();
+    }
+
+    RawTakeResult<false, TakePinPolicy::CurrentCell> result_;
 };
 
 }  // namespace detail
@@ -734,6 +1448,12 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
         return nullptr;
     }
     auto planner = PlannerHandle();
+    // Batch owns its complete pin set through the upstream accessor. Retention
+    // is an optional CurrentCell optimization; it never weakens Batch lifetime.
+    auto source =
+        options.context && options.pin_policy == TakePinPolicy::CurrentCell
+            ? MakeTakeCellSource(op_ctx)
+            : TakeCellSource{};
     const auto make_result =
         [&]<bool HasCandidateMask, TakePinPolicy PinPolicy>() -> TakeResultPtr {
         using Result = detail::RawTakeResult<HasCandidateMask, PinPolicy>;
@@ -743,7 +1463,12 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
                                                *data_type,
                                                *target_type,
                                                IsNullable(),
-                                               options.candidate_mask);
+                                               options.candidate_mask,
+                                               source,
+                                               options.context);
+        if (source.identity) {
+            return result;
+        }
         std::optional<std::vector<int64_t>> batch_cell_ids;
         if constexpr (PinPolicy == TakePinPolicy::Batch) {
             batch_cell_ids.emplace(result->PlanBatch());
@@ -766,6 +1491,40 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
     return options.pin_policy == TakePinPolicy::Batch
                ? with_policy.template operator()<TakePinPolicy::Batch>()
                : with_policy.template operator()<TakePinPolicy::CurrentCell>();
+}
+
+std::unique_ptr<TakeBinding>
+ChunkedColumnInterface::CreateTakeBinding(milvus::OpContext* op_ctx,
+                                          TakeBindingOptions options) const {
+    ValidateArrayViewTarget(options.target_type);
+    auto data_type = GetDefaultScanDataType();
+    if (!data_type.has_value()) {
+        return nullptr;
+    }
+    auto target_type =
+        detail::ValidateTakeTargetType(*data_type, options.target_type);
+    if (!target_type.has_value()) {
+        return nullptr;
+    }
+    auto source =
+        options.context ? MakeTakeCellSource(op_ctx) : TakeCellSource{};
+    detail::RawTakeCellPin pin_cell;
+    if (!source.identity) {
+        auto access = MakeTakeCellAccess(op_ctx);
+        auto* pin = std::get_if<detail::RawTakeCellPin>(&access);
+        if (pin == nullptr || !*pin) {
+            return nullptr;
+        }
+        pin_cell = std::move(*pin);
+    }
+    return std::make_unique<detail::RawTakeBinding>(std::move(pin_cell),
+                                                    PlannerHandle(),
+                                                    std::move(options.filter),
+                                                    *data_type,
+                                                    *target_type,
+                                                    IsNullable(),
+                                                    std::move(source),
+                                                    std::move(options.context));
 }
 
 }  // namespace milvus

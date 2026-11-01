@@ -15,6 +15,7 @@
 // limitations under the License.
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -29,6 +30,7 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/ValidityView.h"
+#include "mmap/TakeContext.h"
 #include "pb/plan.pb.h"
 
 namespace milvus {
@@ -225,6 +227,16 @@ class ColumnPlanner {
     CellLocation
     Locate(int64_t segment_offset) const;
 
+    // Resolve an ordered slice through the same mapping as Locate. Inputs
+    // may be int32 or int64, repeated or unordered; this pins no payload.
+    // Output has count entries and may be null only for an empty request.
+    // The input/output buffers must not overlap. On error output is invalid.
+    // Count is unrestricted; bounded caller scratch is not an API limit.
+    void
+    LocateBatch(OffsetView offsets,
+                int64_t first,
+                int64_t count,
+                CellLocation* output) const;
     // Return Cell ids and Cell-local offsets in input order, preserving
     // duplicates. Backends choose the lookup algorithm independently of pin
     // policy; pin-set deduplication must not change this positional mapping.
@@ -248,10 +260,13 @@ class ColumnPlanner {
 
  private:
     void
-    ValidateBoundaries() const;
+    ValidateBoundaries();
 
     std::shared_ptr<const std::vector<int64_t>> owned_num_rows_until_cell_;
     const std::vector<int64_t>* num_rows_until_cell_{nullptr};
+    // Proven once from immutable geometry, never inferred from an offset.
+    // Zero retains the general mapping for irregular or empty interior Cells.
+    int64_t uniform_cell_rows_{0};
     OffsetLookupOptions lookup_options_;
 };
 
@@ -427,7 +442,120 @@ class TakeResult {
         return accessor[index];
     }
 
+    // Consume ordered borrowed values in batches, without materializing owning
+    // strings. Views are valid only inside consume; input order, duplicates,
+    // validity and per-position skip information are preserved. The batch size
+    // is a caller's maximum working buffer, not a protocol limit on Take().
+    // Storage may return shorter contiguous prefixes to bound missing-cell
+    // preparation. Consumers must preserve/accept the supplied first/count.
+    template <typename T, typename Consumer>
+    void
+    VisitViews(int64_t batch_size,
+               Consumer&& consume,
+               bool compact_constant_state = false) const {
+        AssertInfo(batch_size > 0, "take batch size must be positive");
+        const auto items = Access<T>();
+        const auto capacity = std::min(batch_size, items.Size());
+        if (capacity == 0) {
+            return;
+        }
+        auto visit = [&](T* values, bool* validity, bool* skipped) {
+            for (int64_t first = 0; first < items.Size();) {
+                const auto maximum = std::min(capacity, items.Size() - first);
+                const auto count = PrepareBorrowedBatch(first, maximum);
+                struct Guard {
+                    const TakeResult* result;
+                    ~Guard() {
+                        result->EndBorrowedBatch();
+                    }
+                } guard{this};
+                AssertInfo(count > 0 && count <= maximum,
+                           "take preparation must return a nonempty prefix");
+                // An opt-in consumer accepts an absent validity/skip array as
+                // all-valid/unskipped. The storage backend must prove that
+                // shape before accepting a values-only fill. Existing callers
+                // keep the expanded state contract without any API change.
+                const bool constant_state = compact_constant_state &&
+                                            FillBorrowedBatch(first,
+                                                              count,
+                                                              TargetTypeOf<T>(),
+                                                              values,
+                                                              nullptr,
+                                                              nullptr);
+                if (!constant_state && !FillBorrowedBatch(first,
+                                                          count,
+                                                          TargetTypeOf<T>(),
+                                                          values,
+                                                          validity,
+                                                          skipped)) {
+                    // Compatibility path for other backends/representations:
+                    // retain the original single-item state/value semantics.
+                    for (int64_t i = 0; i < count; ++i) {
+                        auto item = items[first + i];
+                        validity[i] = item.is_valid;
+                        skipped[i] = item.data_skipped;
+                        values[i] = item.value.has_value() ? *item.value : T{};
+                        if constexpr (std::is_same_v<T, std::string_view>) {
+                            if (!values[i].empty()) {
+                                __builtin_prefetch(values[i].data(), 0, 1);
+                            }
+                        }
+                    }
+                }
+                consume(values,
+                        constant_state ? ValidityView{}
+                                       : ValidityView::FromExpanded(validity),
+                        constant_state ? nullptr : skipped,
+                        first,
+                        count);
+                first += count;
+            }
+        };
+        // Bounded scratch, not a row-domain/transport limit. Large callers
+        // and nontrivial owning representations preserve the original heap
+        // buffer path; small primitive/view batches avoid three allocations.
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            if (capacity <= 64) {
+                std::array<T, 64> values;
+                std::array<bool, 64> validity, skipped;
+                visit(values.data(), validity.data(), skipped.data());
+                return;
+            }
+        }
+        FixedVector<T> values(capacity);
+        FixedVector<bool> validity(capacity), skipped(capacity);
+        visit(values.data(), validity.data(), skipped.data());
+    }
+
  protected:
+    // Prepare before any lane is read. An implementation returning a short
+    // prefix must retain ALL of its borrowed owners until EndBorrowedBatch.
+    // If preparation throws, it must close only its own newly opened state;
+    // nested/reentrant preparation must not release the outer consumer's pins.
+    virtual int64_t
+    PrepareBorrowedBatch(int64_t first, int64_t maximum) const {
+        return maximum;
+    }
+
+    // Optional storage-only bulk fill into caller-owned, type-checked buffers.
+    // count never exceeds their capacity. Both state buffers may be nullptr:
+    // accept that request ONLY when all lanes are known valid and unskipped.
+    // Return false without consuming rows
+    // to retain the original GetUnchecked path. No predicate runs here.
+    virtual bool
+    FillBorrowedBatch(int64_t first,
+                      int64_t count,
+                      TargetType target_type,
+                      void* values,
+                      bool* validity,
+                      bool* skipped) const {
+        return false;
+    }
+
+    virtual void
+    EndBorrowedBatch() const {
+    }
+
     template <typename T>
     TakeItem<T>
     GetUnchecked(int64_t index) const {
@@ -519,6 +647,117 @@ struct TakeOptions {
     // Backend-neutral filter binding. Physical Cell/file planning and skip
     // decisions remain inside the Column implementation.
     detail::ColumnFilterPtr filter;
+    // Preserve the upstream aggregate field order for existing Take callers.
+    TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
+    const TargetBitmap* candidate_mask = nullptr;
+    // Optional worker-private state; omitted by existing callers. It retains
+    // source owners within a bounded budget across otherwise independent Take
+    // results, never row values or expression results.
+    std::shared_ptr<TakeContext> context;
+};
+
+// Fixed configuration for an explicitly reusable, worker-private Take binding.
+// The Column generation and OpContext are fixed when the binding is created;
+// only the ordered input offsets vary between scoped leases.
+struct TakeBindingOptions {
+    TargetType target_type = TargetType::None;
+    detail::ColumnFilterPtr filter;
+    std::shared_ptr<TakeContext> context;
+};
+
+// Opt-in scratch reuse, separate from ordinary immutable TakeResult objects.
+// The binding and its OpContext must outlive every InputLease. Result/accessor
+// and borrowed views obtained through a lease must not escape that lease;
+// GetOwn() is the exception because its returned owner is independent.
+// Neither a binding nor its active input is thread-safe.
+class TakeBinding {
+ public:
+    class InputLease final {
+     public:
+        InputLease(const InputLease&) = delete;
+        InputLease&
+        operator=(const InputLease&) = delete;
+
+        InputLease(InputLease&&) noexcept = default;
+        InputLease&
+        operator=(InputLease&&) noexcept = default;
+
+        const TakeResult&
+        Result() const {
+            AssertInfo(result_ != nullptr, "take input lease is empty");
+            return *result_;
+        }
+
+     private:
+        friend class TakeBinding;
+
+        InputLease(TakeBinding* binding, const TakeResult* result)
+            : result_(result, Release{binding}) {
+        }
+
+        struct Release {
+            TakeBinding* binding;
+            void
+            operator()(const TakeResult*) const noexcept {
+                binding->ReleaseInput();
+            }
+        };
+
+        std::unique_ptr<const TakeResult, Release> result_;
+    };
+
+    virtual ~TakeBinding() = default;
+    TakeBinding(const TakeBinding&) = delete;
+    TakeBinding&
+    operator=(const TakeBinding&) = delete;
+    TakeBinding(TakeBinding&&) = delete;
+    TakeBinding&
+    operator=(TakeBinding&&) = delete;
+
+    // Cold configuration changes must not destroy a binding while one of its
+    // input leases is still borrowing the result.
+    bool
+    HasActiveInput() const noexcept {
+        return busy_;
+    }
+
+    InputLease
+    Bind(OffsetView offsets) {
+        // In particular, failed nested Bind must never end the outer input.
+        AssertInfo(!busy_, "take binding already has an active input");
+        AssertInfo(
+            offsets.size >= 0, "negative take input size {}", offsets.size);
+        AssertInfo(offsets.size == 0 || offsets.data != nullptr,
+                   "take offsets are null with count {}",
+                   offsets.size);
+        busy_ = true;
+        try {
+            return InputLease(this, &BeginInput(offsets));
+        } catch (...) {
+            ReleaseInput();
+            throw;
+        }
+    }
+
+ protected:
+    TakeBinding() = default;
+
+    virtual const TakeResult&
+    BeginInput(OffsetView offsets) = 0;
+
+    // Drop all input-owned state, but retain bounded reusable scratch and the
+    // fixed source configuration. Never Clear the shared TakeContext here.
+    virtual void
+    EndInput() noexcept = 0;
+
+ private:
+    void
+    ReleaseInput() noexcept {
+        EndInput();
+        busy_ = false;
+    }
+
+    bool busy_{false};
     // Source pin strategy; owned results are independent of source pins.
     TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
     // Borrow the executor's candidate selection; excluded positions require
