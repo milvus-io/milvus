@@ -375,6 +375,7 @@ OpenIndex(bool use_async,
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = co_await DecodeEmptyEmbeddingList(use_async, source);
+        RestoreLegacyEmptyEmbListOffsets(empty.offsets, input);
         engine.SetDim(empty.dim);
         engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
         if (input.validity.has_value()) {
