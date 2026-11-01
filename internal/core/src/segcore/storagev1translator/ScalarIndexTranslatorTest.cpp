@@ -40,8 +40,9 @@ TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
         BsonInvertedIndexTranslator translator(
             {mmap, 3, 101, index_size, {}, 0, "disable", ""},
             storage::FileManagerContext{});
-        const auto [loaded, overhead] =
-            translator.estimated_byte_size_of_cell(0);
+        const auto [loaded, private_overhead, shared_overhead] =
+            translator.estimated_loading_usage({0});
+        const auto overhead = private_overhead + shared_overhead;
         EXPECT_EQ(
             loaded.memory_bytes,
             (mmap ? 0 : index_size) + index::kScalarIndexFixedResidentBytes);

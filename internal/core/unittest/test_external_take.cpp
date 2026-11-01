@@ -35,6 +35,7 @@
 #include "common/VirtualPK.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -3443,6 +3444,13 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
     ::InjectExternalSpecProperties(
         props, coll_id, "azure://core.windows.net/container/path", spec);
 
+    auto config = milvus_storage::FilesystemCache::resolve_config(
+        props, "azure://core.windows.net/container/path");
+    ASSERT_TRUE(config.ok()) << config.status().ToString();
+    EXPECT_EQ(config->credential_endpoint,
+              "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.address")),
               "core.windows.net");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.bucket_name")),
@@ -3453,9 +3461,9 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
               "client");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_tenant_id")),
               "tenant");
-    EXPECT_EQ(
-        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
-        "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
 }

@@ -212,22 +212,21 @@ DefaultValueChunkTranslator::value_size() const {
     return value_size;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-DefaultValueChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    // TODO: actually only the first cell is used, other cells share the same buffer,
-    // but for now we estimate the same size for all cells
-    auto value_size = this->value_size();
-    auto rows_begin = meta_.num_rows_until_chunk_[cid];
-    auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-    auto rows = rows_end - rows_begin;
-    auto cell_bytes = value_size * rows;
-    if (use_mmap_) {
-        return {{0, cell_bytes}, {0, 0}};
-    } else {
-        return {{cell_bytes, 0}, {0, 0}};
+milvus::cachinglayer::LoadingResourceUsage
+DefaultValueChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    // TODO: cells share a buffer, but retain the per-cell resident allowance.
+    const auto value_size = this->value_size();
+    int64_t cell_bytes = 0;
+    for (const auto cid : cids) {
+        const auto rows = meta_.num_rows_until_chunk_[cid + 1] -
+                          meta_.num_rows_until_chunk_[cid];
+        cell_bytes += value_size * rows;
     }
+    return {use_mmap_ ? cachinglayer::ResourceUsage{0, cell_bytes}
+                      : cachinglayer::ResourceUsage{cell_bytes, 0},
+            {},
+            {}};
 }
 
 const std::string&

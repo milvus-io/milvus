@@ -249,8 +249,12 @@ class ReaderTranslator final
     cell_id_of(cachinglayer::uid_t) const override {
         return 0;
     }
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        if (cids.empty()) {
+            return {};
+        }
         return {usage_, {0, 0}};
     }
     int64_t
