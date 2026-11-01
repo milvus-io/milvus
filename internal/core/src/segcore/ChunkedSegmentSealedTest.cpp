@@ -2717,13 +2717,49 @@ BuildVortexInt64ListArray(const std::vector<VortexInt64ListRow>& rows) {
     return array;
 }
 
+// One row of a nested Array<Array<Int64>> with nullable inner arrays and
+// leaves.
+using VortexInt64NestedRow = std::optional<
+    std::vector<std::optional<std::vector<std::optional<int64_t>>>>>;
+
+std::shared_ptr<arrow::Array>
+BuildVortexInt64NestedArray(const std::vector<VortexInt64NestedRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    auto inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), values);
+    arrow::ListBuilder outer(arrow::default_memory_pool(), inner);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(outer.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(outer.Append().ok());
+        for (const auto& element : *row) {
+            if (!element.has_value()) {
+                EXPECT_TRUE(inner->AppendNull().ok());
+                continue;
+            }
+            EXPECT_TRUE(inner->Append().ok());
+            for (const auto& value : *element) {
+                if (value.has_value()) {
+                    EXPECT_TRUE(values->Append(*value).ok());
+                } else {
+                    EXPECT_TRUE(values->AppendNull().ok());
+                }
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(outer.Finish(&array).ok());
+    return array;
+}
+
 VortexColumn::FileInfo
-WriteInt64ListVortexFile(const std::filesystem::path& path,
-                         FieldId field_id,
-                         const std::vector<VortexInt64ListRow>& rows,
-                         int64_t start_index,
-                         const milvus_storage::api::Properties& properties) {
-    auto array = BuildVortexInt64ListArray(rows);
+WriteArrowVortexFile(const std::filesystem::path& path,
+                     FieldId field_id,
+                     const std::shared_ptr<arrow::Array>& array,
+                     int64_t start_index,
+                     const milvus_storage::api::Properties& properties) {
     auto schema = arrow::schema(
         {arrow::field(std::to_string(field_id.get()), array->type(), true)});
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
@@ -2752,6 +2788,19 @@ WriteInt64ListVortexFile(const std::filesystem::path& path,
     info.footer_size =
         cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFooterSize, 0);
     return info;
+}
+
+VortexColumn::FileInfo
+WriteInt64ListVortexFile(const std::filesystem::path& path,
+                         FieldId field_id,
+                         const std::vector<VortexInt64ListRow>& rows,
+                         int64_t start_index,
+                         const milvus_storage::api::Properties& properties) {
+    return WriteArrowVortexFile(path,
+                                field_id,
+                                BuildVortexInt64ListArray(rows),
+                                start_index,
+                                properties);
 }
 
 }  // namespace
@@ -2881,4 +2930,162 @@ TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
             }
         }
     }
+}
+
+// A nested Array<Array<Int64>> struct sub-field with validity at every level,
+// loaded as Vortex. Row-nullable Vortex output goes through the owned Take with
+// ArrayValueView; the result must equal what BulkArrayValueAt returns for the
+// same rows.
+//   0 [[1, NULL], NULL, []]   1 NULL row   2 []
+//   3 [[NULL], [4, 5]]        4 [[6]]
+TEST(test_chunk_segment, VortexNestedArrayOutputMatchesBulkArrayValueAt) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("s[nested]");
+    field_schema.set_fieldid(101);
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Array);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(true);
+    auto* root = field_schema.mutable_type_schema();
+    root->set_nullable(true);
+    auto* inner = root->mutable_array_element();
+    inner->set_nullable(true);
+    auto* leaf = inner->mutable_array_element();
+    leaf->set_nullable(true);
+    leaf->set_leaf_type(proto::schema::DataType::Int64);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto parsed = FieldMeta::ParseFrom(field_schema);
+    const auto field = parsed.get_id();
+    ASSERT_NE(field, pk);
+    schema->AddField(std::move(parsed));
+    const auto& field_meta = (*schema)[field];
+    ASSERT_TRUE(field_meta.is_nested_array());
+    ASSERT_TRUE(field_meta.has_nullable_array_element());
+
+    // DataGen cannot generate nested Arrays; generate the primary key only.
+    auto pk_schema = std::make_shared<Schema>();
+    ASSERT_EQ(pk_schema->AddDebugField("pk", DataType::INT64), pk);
+    pk_schema->set_primary_field_id(pk);
+    constexpr int64_t rows = 5;
+    auto data = segcore::DataGen(pk_schema, rows);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    (*properties)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*properties)[PROPERTY_FS_ROOT_PATH] = std::string("/");
+    auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_segment_vortex_nested_" + std::to_string(::getpid()) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto dir_guard =
+        folly::makeGuard([&dir] { std::filesystem::remove_all(dir); });
+    using Leaf = std::vector<std::optional<int64_t>>;
+    using Row = std::vector<std::optional<Leaf>>;
+    auto first = WriteArrowVortexFile(
+        dir / "first.vx",
+        field,
+        BuildVortexInt64NestedArray(
+            {Row{Leaf{1, std::nullopt}, std::nullopt, Leaf{}}, std::nullopt}),
+        0,
+        *properties);
+    auto second = WriteArrowVortexFile(
+        dir / "second.vx",
+        field,
+        BuildVortexInt64NestedArray(
+            {Row{}, Row{Leaf{std::nullopt}, Leaf{4, 5}}, Row{Leaf{6}}}),
+        2,
+        *properties);
+    std::vector<std::string> field_names{std::to_string(field.get())};
+    auto column_group = std::make_shared<VortexColumnGroup>(
+        std::vector<VortexColumn::FileInfo>{first, second},
+        properties,
+        field_names,
+        field_names.size(),
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+        nullptr);
+    auto column = std::make_shared<VortexColumn>(field,
+                                                 field_meta,
+                                                 std::to_string(field.get()),
+                                                 properties,
+                                                 column_group);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+    initial.schema = schema;
+    initial.load_info = current->load_info;
+    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial);
+    segcore::ChunkedSegmentSealedImpl::StateDelta final;
+    final.schema = schema;
+    final.load_info = current->load_info;
+    final.commit_ts = current->commit_ts;
+    sealed->TestStageLoadFieldDataThenPublish(field,
+                                              column,
+                                              rows,
+                                              DataType::ARRAY,
+                                              schema,
+                                              runtime,
+                                              staged.get(),
+                                              current,
+                                              final,
+                                              [] {});
+
+    const std::vector<int64_t> offsets{4, 0, 1, 3, 2, 0};
+    auto result = segment->bulk_subscript(
+        nullptr, field, offsets.data(), static_cast<int64_t>(offsets.size()));
+    ASSERT_NE(result, nullptr);
+    const auto& row_valid = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(row_valid.size(), offsets.size());
+    const auto& array_data = result->scalars().array_data();
+    ASSERT_EQ(array_data.data_size(), offsets.size());
+
+    std::vector<ScalarFieldProto> expected(offsets.size());
+    column->BulkArrayValueAt(
+        nullptr,
+        [&](ScalarFieldProto&& value, size_t i) {
+            expected.at(i) = std::move(value);
+        },
+        offsets.data(),
+        offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(offsets[i]);
+        EXPECT_EQ(row_valid[i], offsets[i] != 1);
+        if (offsets[i] == 1) {
+            continue;
+        }
+        EXPECT_EQ(array_data.data(i).SerializeAsString(),
+                  expected[i].SerializeAsString());
+    }
+
+    // Row 3: [[NULL], [4, 5]]
+    ArrayValue row3(array_data.data(3), field_meta.get_array_type_schema());
+    auto view = row3.View();
+    ASSERT_FALSE(view.is_null());
+    ASSERT_EQ(view.size(), 2);
+    auto first_inner = view.array_at(0);
+    ASSERT_EQ(first_inner.size(), 1);
+    EXPECT_FALSE(first_inner.is_valid(0));
+    auto second_inner = view.array_at(1);
+    ASSERT_EQ(second_inner.size(), 2);
+    EXPECT_EQ(second_inner.get_data_unchecked<int64_t>(0), 4);
+    EXPECT_EQ(second_inner.get_data_unchecked<int64_t>(1), 5);
+    // Row 0: [[1, NULL], NULL, []]
+    ArrayValue row0(array_data.data(1), field_meta.get_array_type_schema());
+    auto view0 = row0.View();
+    ASSERT_EQ(view0.size(), 3);
+    EXPECT_TRUE(view0.is_valid(0));
+    EXPECT_FALSE(view0.is_valid(1));
+    EXPECT_TRUE(view0.is_valid(2));
+    EXPECT_EQ(view0.array_at(0).get_data_unchecked<int64_t>(0), 1);
+    EXPECT_FALSE(view0.array_at(0).is_valid(1));
+    EXPECT_TRUE(view0.array_at(2).empty());
 }
