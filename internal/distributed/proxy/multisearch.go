@@ -2,7 +2,6 @@ package grpcproxy
 
 import (
 	"context"
-	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
@@ -16,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -57,25 +55,25 @@ func proxyEntryInterceptor(limiter types.Limiter, getMetaCache func() proxy.Cach
 	}
 }
 
-func newMultiSearchExecutor(s *Server, limiter types.Limiter, getMetaCache func() proxy.Cache) *proxy.MultiSearchExecutor {
-	p := &paramtable.Get().ProxyCfg
-	limits := proxy.MultiSearchLimits{
-		MaxItems:          max(1, p.MultiSearchMaxItems.GetAsInt()),
-		Parallelism:       max(1, p.MultiSearchParallelism.GetAsInt()),
-		GlobalParallelism: max(1, p.MultiSearchGlobalParallelism.GetAsInt()),
-		MaxBatches:        max(1, p.MultiSearchMaxBatches.GetAsInt()),
-		MaxRequestBytes:   max(1024, p.MultiSearchMaxRequestBytes.GetAsInt()),
-		MaxResponseBytes:  max(1024, p.MultiSearchMaxResponseBytes.GetAsInt()),
-		Timeout:           time.Duration(max(1, p.MultiSearchTimeoutSeconds.GetAsInt())) * time.Second,
+// Configure the existing Proxy, without making the transport own batch state.
+// Alternate ProxyComponent implementations may implement MultiSearch themselves.
+func configureMultiSearch(component types.ProxyComponent, limiter types.Limiter, getMetaCache func() proxy.Cache) {
+	if node, ok := component.(interface {
+		SetMultiSearchEntry(func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error))
+	}); ok {
+		node.SetMultiSearchEntry(newMultiSearchEntry(component, limiter, getMetaCache))
 	}
+}
+
+func newMultiSearchEntry(component types.ProxyComponent, limiter types.Limiter, getMetaCache func() proxy.Cache) func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	entry := proxyEntryInterceptor(limiter, getMetaCache)
-	search := func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	return func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		// Fork mutable stats; the access-log interceptor similarly allocates
 		// an independent object. Identity, deadlines and tracing are inherited.
 		ctx = metrics.WithIndependentRPCStats(ctx)
-		resp, err := entry(ctx, req, &grpc.UnaryServerInfo{Server: s, FullMethod: milvuspb.MilvusService_Search_FullMethodName},
+		resp, err := entry(ctx, req, &grpc.UnaryServerInfo{Server: component, FullMethod: milvuspb.MilvusService_Search_FullMethodName},
 			func(ctx context.Context, req any) (any, error) {
-				return s.Search(ctx, req.(*milvuspb.SearchRequest))
+				return component.Search(ctx, req.(*milvuspb.SearchRequest))
 			})
 		if err != nil {
 			return nil, err
@@ -86,9 +84,8 @@ func newMultiSearchExecutor(s *Server, limiter types.Limiter, getMetaCache func(
 		}
 		return result, nil
 	}
-	return proxy.NewMultiSearchExecutor(limits, search)
 }
 
 func (s *Server) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error) {
-	return s.multiSearch.Execute(ctx, req)
+	return s.proxy.MultiSearch(ctx, req)
 }

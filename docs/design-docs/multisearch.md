@@ -40,9 +40,10 @@ Full gRPC error details/trailers and resumable responses are not implemented.
    timestamps. `GrpcHandler.multi_search()` uses the existing authenticated channel
    and generated `MilvusServiceStub.MultiSearch`. Metadata lookups may occur for
    request types that already require them; the searches use one MultiSearch RPC.
-3. `grpcproxy.Server.MultiSearch()` calls the bounded executor outside the DQL pool.
+3. `grpcproxy.Server.MultiSearch()` delegates to the existing `Proxy.MultiSearch()` method.
+   The Proxy owns batch limits and shared permits; the transport owns no executor.
 4. Fixed dispatcher goroutines acquire a shared permit and invoke the shared Search
-   entry chain, then `Server.Search -> Proxy.Search -> dqQueue`. A method call alone
+   entry chain, then directly `Proxy.Search -> dqQueue`. A method call alone
    does not run gRPC interceptors; the callback explicitly runs the ordinary chain.
 5. Each ordinary search task retains its existing schema resolution, scheduling,
    shard routing, execution and reduction. QueryNode and native code are unchanged.
@@ -55,6 +56,14 @@ clones and independent RPC statistics prevent mutable state sharing. The envelop
 uses authentication; each child receives database normalization, authentication,
 collection authorization, quota and existing hooks. Private Cloud billing/gateway
 behavior has not been validated. Envelope wire-byte accounting is a follow-up.
+
+The transport installs the shared Search-entry callback on the Proxy once before
+serving. It terminates directly at the same Proxy component's Search method;
+children never call back into Server.Search. Until installation, MultiSearch
+returns a retriable ServiceNotReady status rather than bypassing entry checks.
+Callback publication is atomic and admission channels cannot be reset by a
+second installation. Active batches also observe the Proxy component context's
+cancellation. These are coordination controls, not a new search worker pool.
 
 ## Bounds and limitations
 
@@ -102,7 +111,7 @@ for both binaries. GOMAXPROCS stays at four in both, making this a CPU-contentio
 stress case rather than a tuned two-core deployment. Its utilization denominator
 is the two-core quota. These samples are reported separately from four-core runs.
 
-## Recorded prototype results
+## Recorded prototype results (before the ownership refactor)
 
 At approximately 97% CPU utilization with a two-CPU budget, 128 logical requests
 in flight and groups of eight searches, two reversed-order repetitions produced:
@@ -133,7 +142,7 @@ See the [English engineering report](../../artifacts/multisearch-v2/multisearch-
 [per-run measurements](../../artifacts/multisearch-v2/performance-summary.json),
 and [verification scope](../../artifacts/multisearch-v2/verification-summary.json).
 
-## Resident Search with added MultiSearch traffic
+## Resident Search with added MultiSearch traffic (before the ownership refactor)
 
 A further experiment keeps 128 ordinary Search callers active through baseline,
 traffic injection and recovery. CPU is already approximately 97% utilized before
@@ -160,3 +169,16 @@ See the [highlighted mixed-traffic report](../../artifacts/multisearch-mixed/mix
 [PDF](../../artifacts/multisearch-mixed/mixed-report.pdf),
 [measurements](../../artifacts/multisearch-mixed/summary.json), and
 [exclusion audit](../../artifacts/multisearch-mixed/excluded-runs.json).
+
+## Proxy ownership refactor
+
+The current implementation removes `MultiSearchExecutor` and the Server field.
+`Proxy.MultiSearch` performs bounded coordination and uses the existing Search
+entry checks and task scheduler. Ordinary Search execution, the DQL scheduler,
+QueryNode execution, the public protocol and the Python SDK are unchanged by
+this refactor. The earlier performance tables above identify the previous binary;
+they are not silently attributed to the new build.
+
+The [refactor report](../../artifacts/multisearch-proxy-refactor/report.html) and
+[PDF](../../artifacts/multisearch-proxy-refactor/report.pdf) record the current
+source integration, binary identity, regression checks and fresh measurements.

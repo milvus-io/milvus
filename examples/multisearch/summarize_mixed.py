@@ -1,10 +1,19 @@
 """Aggregate mixed-load evidence; keep resident and injected latencies separate."""
 
+import argparse
 import json
 import statistics
 from pathlib import Path
 
-root = Path("artifacts/multisearch-mixed")
+parser = argparse.ArgumentParser()
+parser.add_argument("--input-dir", default="artifacts/multisearch-mixed")
+parser.add_argument(
+    "--server-binary-changed",
+    action="store_true",
+    help="mark a new build relative to the preceding report",
+)
+args = parser.parse_args()
+root = Path(args.input_dir)
 rows = []
 for p in sorted(root.glob("r[0-9]-*.json")):
     if p.name.endswith(".resources.json"):
@@ -116,7 +125,7 @@ summary = {
     "errors_all": sum(r["errors_all"] for r in rows),
     "drops": sum(r["dropped_groups"] for r in rows),
     "generator_late_groups": sum(r["generator_late_groups"] for r in rows),
-    "server_binary_changed": False,
+    "server_binary_changed": args.server_binary_changed,
 }
 (root / "summary.json").write_text(json.dumps(summary, indent=2))
 for r in aggregates:

@@ -132,3 +132,58 @@ See `artifacts/multisearch-mixed/excluded-runs.json` for the contamination and
 paired rerun audit of the recorded experiment. A clean replay produces 14 runs
 without needing these replacement runs. Original RPC/SDK behavior and server code
 are unchanged by this benchmark addition.
+
+## Current implementation: Proxy-owned coordination
+
+`Server.MultiSearch` now delegates to `Proxy.MultiSearch`. The Proxy owns shared
+batch/child admission and the coordination loop. The transport installs the
+existing Search entry chain once, ending directly at `Proxy.Search`. The
+`MultiSearchExecutor` type and its Server field were removed. The ordinary Search
+implementation, DQL scheduler and QueryNode code remain unchanged.
+
+After preparing the pinned dependencies/native libraries with the build steps
+above, the incremental build and separate local instance used for this refactor
+can be reproduced with:
+
+```bash
+source scripts/setenv.sh
+set -e
+go build -p 16 -pgo=configs/pgo/default.pgo \
+  -tags dynamic,sonic,with_jemalloc,bytedance_tango \
+  -ldflags="-checklinkname=0 -r $RPATH -X github.com/milvus-io/milvus/cmd/milvus.MilvusVersion=3.0.5-multisearch-proxy -X github.com/milvus-io/milvus/cmd/milvus.GitCommit=da46e613b1-proxy-refactor" \
+  -o bin/milvus-proxy-refactor ./cmd/main.go
+sed 's@COPY bin/milvus @COPY bin/milvus-proxy-refactor @' \
+  examples/multisearch/Dockerfile > .cache/Dockerfile.proxy-refactor
+docker build -f .cache/Dockerfile.proxy-refactor -t milvus-multisearch:v305-proxy .
+bash examples/multisearch/run.sh refactor
+mkdir -p artifacts/multisearch-proxy-refactor
+.venv/bin/python examples/multisearch/seed.py --port 29564 \
+  --output artifacts/multisearch-proxy-refactor/fixture.json
+.venv/bin/python examples/multisearch/verify.py --port 29564 \
+  --fixture artifacts/multisearch-proxy-refactor/fixture.json \
+  --output artifacts/multisearch-proxy-refactor/functional.json
+.venv/bin/python examples/multisearch/run_refactor_bench.py
+.venv/bin/python examples/multisearch/summarize_mixed.py \
+  --input-dir artifacts/multisearch-proxy-refactor --server-binary-changed
+python examples/multisearch/report_refactor.py
+```
+
+The build metadata above identifies the measured source parent; `manifest.json`
+records the exact production-source hashes and binary hash. The report generator
+also requires the recorded manifest, verification and Kubernetes result files.
+The four formal runs repeat the 480/s mixed-load pair twice with opposing order.
+The runner checks a short smoke run and restores all three owned containers' CPU
+settings. It requires the original stock and prototype containers to exist, and
+refuses to overwrite existing formal raw results. Do not execute extra commands
+inside the measured container during the test.
+
+For Kubernetes, import `milvus-multisearch:v305-proxy` into the existing owned
+Minikube node, then set deployment `proxy`'s container `proxy` to that image in
+namespace `multisearch-v305`. Wait for rollout and run `verify.py` through each
+replica, using `artifacts/multisearch-v2/kubernetes-fixture.json`. This refactor
+upgrades only the two Proxy replicas; the other existing test components remain
+on their preceding v3.0.5 prototype image. Both Proxy binary hashes are recorded.
+
+The current [report PDF](../../artifacts/multisearch-proxy-refactor/report.pdf)
+contains highlighted code, fresh validation and performance results. Older
+reports are historical; their generators read their measured source revision.

@@ -102,6 +102,13 @@ type Proxy struct {
 
 	sched *scheduler.TaskScheduler
 
+	// Batch admission belongs to this Proxy. Search execution continues to use sched.
+	multiSearchInit    sync.Once
+	multiSearchLimits  multiSearchLimits
+	multiSearchBatches chan struct{}
+	multiSearchActive  chan struct{}
+	multiSearchEntry   atomic.Pointer[multiSearchEntry]
+
 	rowIDAllocator *allocator.IDAllocator
 	tsoAllocator   *timestampAllocator
 

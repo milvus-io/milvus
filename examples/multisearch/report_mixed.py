@@ -1,6 +1,6 @@
 """Produce an English, syntax-highlighted report of the mixed-traffic experiment."""
 
-import json, textwrap
+import json, textwrap, subprocess
 from pathlib import Path
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
@@ -42,7 +42,9 @@ def snippet(s, language="go"):
 
 
 def code(path, start, end):
-    s = Path(path).read_text()
+    s = subprocess.check_output(
+        ["git", "show", "da46e613b189bb26e532eaa1bf436bf1a6cc21bb:" + path], text=True
+    )
     s = s[s.index(start) :]
     s = s[: s.index(end)] if end else s
     return snippet(s)
@@ -194,6 +196,10 @@ css = """*{box-sizing:border-box}body{background:#f3f6f8;color:#1b2c40;font:16px
     style="github-dark"
 ).get_style_defs(
     ".code-block"
+)
+body = (
+    '<p class="callout"><strong>Historical build:</strong> this report records the Server-owned coordinator at commit da46e613b1. See the <a href="../multisearch-proxy-refactor/report.html">Proxy ownership refactor report</a> for the current implementation and new-binary validation.</p>'
+    + body
 )
 (root / "mixed-report.html").write_text(
     '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MultiSearch and resident Search — CPU contention and resource sharing</title><style>'

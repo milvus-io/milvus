@@ -11,38 +11,63 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// MultiSearchLimits are fixed for the lifetime of a Proxy server.
-type MultiSearchLimits struct {
+// multiSearchLimits are fixed when the Proxy's Search entry is installed.
+type multiSearchLimits struct {
 	MaxItems, Parallelism, GlobalParallelism, MaxBatches int
 	MaxRequestBytes, MaxResponseBytes                    int
 	Timeout                                              time.Duration
 }
 
-// MultiSearchExecutor coordinates independent searches. It knows nothing about
-// schemas, shards, score reduction, or retries; search must supply the ordinary
-// Search entry checks as well as execution.
-type MultiSearchExecutor struct {
-	limits  MultiSearchLimits
-	search  func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
-	batches chan struct{}
-	active  chan struct{}
+type multiSearchEntry func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)
+
+// SetMultiSearchEntry installs the ordinary Search entry checks once, before
+// serving requests. The transport supplies the entry chain; its terminal handler
+// calls this Proxy's Search method directly. Never fall back to unchecked Search.
+func (node *Proxy) SetMultiSearchEntry(entry func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)) {
+	p := &paramtable.Get().ProxyCfg
+	node.initMultiSearch(multiSearchLimits{
+		MaxItems:          max(1, p.MultiSearchMaxItems.GetAsInt()),
+		Parallelism:       max(1, p.MultiSearchParallelism.GetAsInt()),
+		GlobalParallelism: max(1, p.MultiSearchGlobalParallelism.GetAsInt()),
+		MaxBatches:        max(1, p.MultiSearchMaxBatches.GetAsInt()),
+		MaxRequestBytes:   max(1024, p.MultiSearchMaxRequestBytes.GetAsInt()),
+		MaxResponseBytes:  max(1024, p.MultiSearchMaxResponseBytes.GetAsInt()),
+		Timeout:           time.Duration(max(1, p.MultiSearchTimeoutSeconds.GetAsInt())) * time.Second,
+	}, entry)
 }
 
-func NewMultiSearchExecutor(limits MultiSearchLimits, search func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error)) *MultiSearchExecutor {
-	return &MultiSearchExecutor{limits: limits, search: search,
-		batches: make(chan struct{}, limits.MaxBatches), active: make(chan struct{}, limits.GlobalParallelism)}
+func (node *Proxy) initMultiSearch(limits multiSearchLimits, entry multiSearchEntry) {
+	if entry == nil {
+		return
+	}
+	node.multiSearchInit.Do(func() {
+		node.multiSearchLimits = limits
+		node.multiSearchBatches = make(chan struct{}, limits.MaxBatches)
+		node.multiSearchActive = make(chan struct{}, limits.GlobalParallelism)
+		// Publish the callback last: a handler that observes it also observes
+		// the initialized limits and permits. Reconfiguration cannot reset
+		// admission limits while requests are in flight.
+		node.multiSearchEntry.Store(&entry)
+	})
 }
 
-func (e *MultiSearchExecutor) Execute(ctx context.Context, req *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error) {
+// MultiSearch coordinates a bounded set of ordinary Search calls. Only their
+// existing SearchTasks enter node.sched.DqQueue; the parent waits outside it.
+func (node *Proxy) MultiSearch(ctx context.Context, req *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error) {
 	fail := func(err error) (*milvuspb.MultiSearchResponse, error) {
 		return &milvuspb.MultiSearchResponse{Status: merr.Status(err)}, nil
 	}
-	if req == nil || len(req.GetItems()) == 0 || len(req.GetItems()) > e.limits.MaxItems {
-		return fail(merr.WrapErrParameterInvalidMsg("MultiSearch requires 1..%d items", e.limits.MaxItems))
+	entry := node.multiSearchEntry.Load()
+	if entry == nil {
+		return fail(merr.Wrap(merr.ErrServiceNotReady, "MultiSearch Search entry is not initialized"))
 	}
-	if proto.Size(req) > e.limits.MaxRequestBytes {
+	if req == nil || len(req.GetItems()) == 0 || len(req.GetItems()) > node.multiSearchLimits.MaxItems {
+		return fail(merr.WrapErrParameterInvalidMsg("MultiSearch requires 1..%d items", node.multiSearchLimits.MaxItems))
+	}
+	if proto.Size(req) > node.multiSearchLimits.MaxRequestBytes {
 		return fail(merr.WrapErrParameterTooLarge("MultiSearch request exceeds byte limit"))
 	}
 	ids := make(map[string]struct{}, len(req.Items))
@@ -59,21 +84,26 @@ func (e *MultiSearchExecutor) Execute(ctx context.Context, req *milvuspb.MultiSe
 	if err := ctx.Err(); err != nil {
 		return nil, status.FromContextError(err).Err()
 	}
+	if err := node.ctx.Err(); err != nil {
+		return nil, status.FromContextError(err).Err()
+	}
 	// Admission is fail-fast: waiting envelopes cannot grow without bound.
 	select {
-	case e.batches <- struct{}{}:
-		defer func() { <-e.batches }()
+	case node.multiSearchBatches <- struct{}{}:
+		defer func() { <-node.multiSearchBatches }()
 	default:
 		return fail(merr.ErrServiceTooManyRequests)
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.limits.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, node.multiSearchLimits.Timeout)
 	defer cancel()
+	stop := context.AfterFunc(node.ctx, cancel)
+	defer stop()
 	out := &milvuspb.MultiSearchResponse{Status: merr.Success(), Items: make([]*milvuspb.SearchOutcome, len(req.Items))}
 	var next atomic.Int64
 	var resultBytes atomic.Int64
 	var overflow atomic.Bool
 	var wg sync.WaitGroup
-	parallelism := e.limits.Parallelism
+	parallelism := node.multiSearchLimits.Parallelism
 	if requested := req.GetMaxConcurrentSearches(); requested > 0 {
 		parallelism = min(parallelism, int(requested))
 	}
@@ -88,20 +118,20 @@ func (e *MultiSearchExecutor) Execute(ctx context.Context, req *milvuspb.MultiSe
 					return
 				}
 				select {
-				case e.active <- struct{}{}:
+				case node.multiSearchActive <- struct{}{}:
 				case <-ctx.Done():
 					return
 				}
 				if ctx.Err() != nil {
-					<-e.active
+					<-node.multiSearchActive
 					return
 				}
 				item := req.Items[i]
 				// Search and entry interceptors may mutate the request. Never share
 				// caller-owned request pointers between workers (or retry attempts).
 				search := proto.Clone(item.Search).(*milvuspb.SearchRequest)
-				result, err := e.search(ctx, search)
-				<-e.active
+				result, err := (*entry)(ctx, search)
+				<-node.multiSearchActive
 				outcome := &milvuspb.SearchOutcome{Id: item.Id, Result: result}
 				if err != nil {
 					s := status.Convert(err)
@@ -111,7 +141,7 @@ func (e *MultiSearchExecutor) Execute(ctx context.Context, req *milvuspb.MultiSe
 					outcome.Result = &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("Search returned no result status"))}
 				}
 				// Reserve protobuf framing overhead as well as outcome bytes.
-				if resultBytes.Add(int64(proto.Size(outcome)+16)) > int64(e.limits.MaxResponseBytes) {
+				if resultBytes.Add(int64(proto.Size(outcome)+16)) > int64(node.multiSearchLimits.MaxResponseBytes) {
 					overflow.Store(true)
 					cancel()
 					return
@@ -121,7 +151,7 @@ func (e *MultiSearchExecutor) Execute(ctx context.Context, req *milvuspb.MultiSe
 		}()
 	}
 	wg.Wait()
-	if overflow.Load() || proto.Size(out) > e.limits.MaxResponseBytes {
+	if overflow.Load() || proto.Size(out) > node.multiSearchLimits.MaxResponseBytes {
 		return fail(merr.WrapErrParameterTooLarge("MultiSearch response exceeds byte limit; reduce item count, topK, or output fields"))
 	}
 	if err := ctx.Err(); err != nil {

@@ -14,8 +14,13 @@ p.add_argument("--name", required=True)
 p.add_argument("--mode", choices=["none", "search", "multi"], required=True)
 p.add_argument("--rate", type=int, default=0)
 p.add_argument("--smoke", action="store_true")
+p.add_argument("--target", default="localhost:29561")
+p.add_argument("--container", default="multisearch-v305-multi")
+p.add_argument("--metrics-url", default="http://localhost:19097/metrics")
+p.add_argument("--output-dir", default="artifacts/multisearch-mixed")
+p.add_argument("--fixture", default="artifacts/multisearch-v2/fixture.json")
 a = p.parse_args()
-root = Path("artifacts/multisearch-mixed")
+root = Path(a.output_dir)
 root.mkdir(exist_ok=True, parents=True)
 
 
@@ -27,7 +32,7 @@ class Docker(http.client.HTTPConnection):
 
 def stats():
     c = Docker("localhost", timeout=5)
-    c.request("GET", "/containers/multisearch-v305-multi/stats?stream=false&one-shot=true")
+    c.request("GET", f"/containers/{a.container}/stats?stream=false&one-shot=true")
     r = c.getresponse()
     assert r.status == 200
     data = json.load(r)
@@ -40,6 +45,10 @@ cmd = [
     "-c",
     "32-39",
     "bin/multisearch-mixed-load",
+    "-target",
+    a.target,
+    "-fixture",
+    a.fixture,
     "-mode",
     a.mode,
     "-rate",
@@ -69,9 +78,7 @@ while proc.poll() is None:
         row["cpu_utilization"] = (cpu - previous[1]) / 1e9 / (now - previous[0]) / 2
     previous = (now, cpu)
     try:
-        metrics = (
-            urllib.request.urlopen("http://localhost:19097/metrics", timeout=2).read().decode()
-        )
+        metrics = urllib.request.urlopen(a.metrics_url, timeout=2).read().decode()
         for line in metrics.splitlines():
             if line.startswith(
                 ("go_goroutines ", "go_threads ", "process_resident_memory_bytes ")

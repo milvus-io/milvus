@@ -1,0 +1,231 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>MultiSearch: existing Proxy ownership and validation</title><style>*{box-sizing:border-box}body{background:#f2f5f8;color:#1c3045;font:16px/1.6 system-ui,sans-serif;margin:0}main{max-width:1120px;padding:45px;margin:25px auto;background:#fff;border-radius:14px}h1{font-size:39px;line-height:1.2}h2{font-size:24px;margin-top:34px;border-top:1px solid #d8e3ec;padding-top:20px}.eyebrow{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#087e84}.lead{font-size:20px;color:#50677d}.callout{background:#edf7f7;border-left:5px solid #087e84;padding:20px}.flow{display:grid;gap:5px;margin:20px 0}.flow div{padding:9px 16px;background:#eff4f8;border-left:3px solid #31638d}table{border-collapse:collapse;width:100%;font-size:12px}td,th{padding:10px;border-bottom:1px solid #dce5ed;text-align:left}th{background:#eaf1f7}pre{background:#0d1117;color:#e6edf3;padding:18px;border-radius:7px;font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}pre code{font-size:1em}code{font-family:ui-monospace,monospace;font-size:.9em}.code-block,.code-block *{-webkit-print-color-adjust:exact;print-color-adjust:exact}footer{margin-top:25px;color:#61768b;font-size:12px}@media print{body{background:white;font-size:11px}main{margin:0;padding:0}h1{font-size:28px}h2{font-size:19px;break-after:avoid}pre{font-size:8px;break-inside:avoid}table{font-size:9px}tr,.flow{break-inside:avoid}@page{size:A4;margin:16mm}}pre { line-height: 125%; }
+td.linenos .normal { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+.code-block .hll { background-color: #6e7681 }
+.code-block { background: #0d1117; color: #e6edf3 }
+.code-block .c { color: #8b949e; font-style: italic } /* Comment */
+.code-block .err { color: #f85149 } /* Error */
+.code-block .esc { color: #e6edf3 } /* Escape */
+.code-block .g { color: #e6edf3 } /* Generic */
+.code-block .k { color: #ff7b72 } /* Keyword */
+.code-block .l { color: #a5d6ff } /* Literal */
+.code-block .n { color: #e6edf3 } /* Name */
+.code-block .o { color: #ff7b72; font-weight: bold } /* Operator */
+.code-block .x { color: #e6edf3 } /* Other */
+.code-block .p { color: #e6edf3 } /* Punctuation */
+.code-block .ch { color: #8b949e; font-style: italic } /* Comment.Hashbang */
+.code-block .cm { color: #8b949e; font-style: italic } /* Comment.Multiline */
+.code-block .cp { color: #8b949e; font-weight: bold; font-style: italic } /* Comment.Preproc */
+.code-block .cpf { color: #8b949e; font-style: italic } /* Comment.PreprocFile */
+.code-block .c1 { color: #8b949e; font-style: italic } /* Comment.Single */
+.code-block .cs { color: #8b949e; font-weight: bold; font-style: italic } /* Comment.Special */
+.code-block .gd { color: #ffa198; background-color: #490202 } /* Generic.Deleted */
+.code-block .ge { color: #e6edf3; font-style: italic } /* Generic.Emph */
+.code-block .gr { color: #ffa198 } /* Generic.Error */
+.code-block .gh { color: #79c0ff; font-weight: bold } /* Generic.Heading */
+.code-block .gi { color: #56d364; background-color: #0f5323 } /* Generic.Inserted */
+.code-block .go { color: #8b949e } /* Generic.Output */
+.code-block .gp { color: #8b949e } /* Generic.Prompt */
+.code-block .gs { color: #e6edf3; font-weight: bold } /* Generic.Strong */
+.code-block .gu { color: #79c0ff } /* Generic.Subheading */
+.code-block .gt { color: #ff7b72 } /* Generic.Traceback */
+.code-block .g-Underline { color: #e6edf3; text-decoration: underline } /* Generic.Underline */
+.code-block .kc { color: #79c0ff } /* Keyword.Constant */
+.code-block .kd { color: #ff7b72 } /* Keyword.Declaration */
+.code-block .kn { color: #ff7b72 } /* Keyword.Namespace */
+.code-block .kp { color: #79c0ff } /* Keyword.Pseudo */
+.code-block .kr { color: #ff7b72 } /* Keyword.Reserved */
+.code-block .kt { color: #ff7b72 } /* Keyword.Type */
+.code-block .ld { color: #79c0ff } /* Literal.Date */
+.code-block .m { color: #a5d6ff } /* Literal.Number */
+.code-block .s { color: #a5d6ff } /* Literal.String */
+.code-block .na { color: #e6edf3 } /* Name.Attribute */
+.code-block .nb { color: #e6edf3 } /* Name.Builtin */
+.code-block .nc { color: #f0883e; font-weight: bold } /* Name.Class */
+.code-block .no { color: #79c0ff; font-weight: bold } /* Name.Constant */
+.code-block .nd { color: #d2a8ff; font-weight: bold } /* Name.Decorator */
+.code-block .ni { color: #ffa657 } /* Name.Entity */
+.code-block .ne { color: #f0883e; font-weight: bold } /* Name.Exception */
+.code-block .nf { color: #d2a8ff; font-weight: bold } /* Name.Function */
+.code-block .nl { color: #79c0ff; font-weight: bold } /* Name.Label */
+.code-block .nn { color: #ff7b72 } /* Name.Namespace */
+.code-block .nx { color: #e6edf3 } /* Name.Other */
+.code-block .py { color: #79c0ff } /* Name.Property */
+.code-block .nt { color: #7ee787 } /* Name.Tag */
+.code-block .nv { color: #79c0ff } /* Name.Variable */
+.code-block .ow { color: #ff7b72; font-weight: bold } /* Operator.Word */
+.code-block .pm { color: #e6edf3 } /* Punctuation.Marker */
+.code-block .w { color: #6e7681 } /* Text.Whitespace */
+.code-block .mb { color: #a5d6ff } /* Literal.Number.Bin */
+.code-block .mf { color: #a5d6ff } /* Literal.Number.Float */
+.code-block .mh { color: #a5d6ff } /* Literal.Number.Hex */
+.code-block .mi { color: #a5d6ff } /* Literal.Number.Integer */
+.code-block .mo { color: #a5d6ff } /* Literal.Number.Oct */
+.code-block .sa { color: #79c0ff } /* Literal.String.Affix */
+.code-block .sb { color: #a5d6ff } /* Literal.String.Backtick */
+.code-block .sc { color: #a5d6ff } /* Literal.String.Char */
+.code-block .dl { color: #79c0ff } /* Literal.String.Delimiter */
+.code-block .sd { color: #a5d6ff } /* Literal.String.Doc */
+.code-block .s2 { color: #a5d6ff } /* Literal.String.Double */
+.code-block .se { color: #79c0ff } /* Literal.String.Escape */
+.code-block .sh { color: #79c0ff } /* Literal.String.Heredoc */
+.code-block .si { color: #a5d6ff } /* Literal.String.Interpol */
+.code-block .sx { color: #a5d6ff } /* Literal.String.Other */
+.code-block .sr { color: #79c0ff } /* Literal.String.Regex */
+.code-block .s1 { color: #a5d6ff } /* Literal.String.Single */
+.code-block .ss { color: #a5d6ff } /* Literal.String.Symbol */
+.code-block .bp { color: #e6edf3 } /* Name.Builtin.Pseudo */
+.code-block .fm { color: #d2a8ff; font-weight: bold } /* Name.Function.Magic */
+.code-block .vc { color: #79c0ff } /* Name.Variable.Class */
+.code-block .vg { color: #79c0ff } /* Name.Variable.Global */
+.code-block .vi { color: #79c0ff } /* Name.Variable.Instance */
+.code-block .vm { color: #79c0ff } /* Name.Variable.Magic */
+.code-block .il { color: #a5d6ff } /* Literal.Number.Integer.Long */</style><main><div class="eyebrow">Milvus native MultiSearch · Proxy ownership refactor · 1 November 2026</div>
+<h1>One Proxy, one existing Search execution path</h1>
+<p class="lead">Server.MultiSearch now delegates to Proxy.MultiSearch. The separate MultiSearchExecutor type and its Server field have been removed. The existing DQL scheduler still executes every child search.</p>
+<div class="callout"><b>What changed:</b> batch coordination and shared admission state now belong to the existing Proxy. The shared Search entry callback terminates directly at Proxy.Search. There is no child call back through Server.Search, no new serving endpoint, and no replacement search worker pool.</div>
+<h2>1. Integration: thin transport, Proxy-owned coordination</h2>
+<p>The public service and Python method are unchanged: MilvusClient.multi_search sends one MilvusService.MultiSearch RPC containing independent SearchRequest items. Each item chooses its own database, collection and parameters; results remain independent and ordered.</p>
+<pre class="code-block"><code><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">MultiSearch</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">MultiSearchRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">MultiSearchResponse</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">proxy</span><span class="p">.</span><span class="nx">MultiSearch</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre><div class="flow"><div>Existing gRPC Server → Proxy.MultiSearch</div><div>Validate envelope · acquire batch permit · bounded dispatch</div><div>Each child: shared Search entry checks → Proxy.Search</div><div>NewSearchTask → existing DqQueue → existing worker pool</div><div>PreExecute → QueryNode shard calls → PostExecute</div><div>Independent child outcomes → one ordered response</div></div>
+<p>The parent and its bounded dispatch goroutines stay outside the DQL worker pool. Only existing SearchTasks enter the queue. Waiting parks Go goroutines but retains state; executing tasks still occupy logical pool slots while waiting for QueryNodes. Admission limits bound pressure without establishing priority or reserving ordinary-Search capacity.</p>
+<p>The new state lives on the existing Proxy:</p><pre class="code-block"><code><span class="c1">// Fields on the existing Proxy, beside its existing scheduler.</span>
+<span class="nx">sched</span><span class="w"> </span><span class="o">*</span><span class="nx">scheduler</span><span class="p">.</span><span class="nx">TaskScheduler</span>
+<span class="nx">multiSearchInit</span><span class="w"> </span><span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
+<span class="nx">multiSearchLimits</span><span class="w"> </span><span class="nx">multiSearchLimits</span>
+<span class="nx">multiSearchBatches</span><span class="w"> </span><span class="kd">chan</span><span class="w"> </span><span class="kd">struct</span><span class="p">{}</span>
+<span class="nx">multiSearchActive</span><span class="w"> </span><span class="kd">chan</span><span class="w"> </span><span class="kd">struct</span><span class="p">{}</span>
+<span class="nx">multiSearchEntry</span><span class="w"> </span><span class="nx">atomic</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">[</span><span class="nx">multiSearchEntry</span><span class="p">]</span>
+</code></pre><h2>2. Keep ordinary Search entry checks</h2>
+<p>Calling Proxy.Search directly does not run gRPC interceptors. During startup, the transport installs the same Search entry chain used by ordinary RPCs. Its terminal handler calls the existing Proxy component directly. The chain preserves database normalization, authentication, per-collection RBAC, quota checks, hooks and independent request statistics.</p><pre class="code-block"><code><span class="kd">func</span><span class="w"> </span><span class="nx">newMultiSearchEntry</span><span class="p">(</span><span class="nx">component</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">ProxyComponent</span><span class="p">,</span><span class="w"> </span><span class="nx">limiter</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">Limiter</span><span class="p">,</span><span class="w"> </span><span class="nx">getMetaCache</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="nx">proxy</span><span class="p">.</span><span class="nx">Cache</span><span class="p">)</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">entry</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">proxyEntryInterceptor</span><span class="p">(</span><span class="nx">limiter</span><span class="p">,</span><span class="w"> </span><span class="nx">getMetaCache</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Fork mutable stats; the access-log interceptor similarly allocates</span>
+<span class="w">        </span><span class="c1">// an independent object. Identity, deadlines and tracing are inherited.</span>
+<span class="w">        </span><span class="nx">ctx</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">WithIndependentRPCStats</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+<span class="w">        </span><span class="nx">resp</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">entry</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">grpc</span><span class="p">.</span><span class="nx">UnaryServerInfo</span><span class="p">{</span><span class="nx">Server</span><span class="p">:</span><span class="w"> </span><span class="nx">component</span><span class="p">,</span><span class="w"> </span><span class="nx">FullMethod</span><span class="p">:</span><span class="w"> </span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">MilvusService_Search_FullMethodName</span><span class="p">},</span>
+<span class="w">            </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">any</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="nx">component</span><span class="p">.</span><span class="nx">Search</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="p">.(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">))</span>
+<span class="w">            </span><span class="p">})</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">resp</span><span class="p">.(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">!</span><span class="nx">ok</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">{</span><span class="nx">Status</span><span class="p">:</span><span class="w"> </span><span class="nx">merr</span><span class="p">.</span><span class="nx">Status</span><span class="p">(</span><span class="nx">merr</span><span class="p">.</span><span class="nx">WrapErrServiceInternalMsg</span><span class="p">(</span><span class="s">&quot;Search entry returned an invalid response&quot;</span><span class="p">))},</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre><p>Installation happens once. The callback is published atomically after limits and shared channels are initialized. A second installation cannot reset permits while work is active. Before installation, MultiSearch returns a retriable ServiceNotReady status; there is no unchecked Search fallback. Active batches inherit both the request deadline and cancellation of the Proxy component context.</p>
+<h2>3. Actual dispatch through the existing path</h2><p>Excerpt from Proxy.MultiSearch, after validation and batch admission. The callback below performs entry checks and invokes ordinary Proxy.Search, which constructs and enqueues its existing SearchTask.</p><pre class="code-block"><code><span class="c1">// The RPC handler and these bounded workers stay outside the DQL pool.</span>
+<span class="k">for</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">min</span><span class="p">(</span><span class="nx">parallelism</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="w">    </span><span class="k">go</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">defer</span><span class="w"> </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Done</span><span class="p">()</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Err</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">int</span><span class="p">(</span><span class="nx">next</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">select</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="nx">node</span><span class="p">.</span><span class="nx">multiSearchActive</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="kd">struct</span><span class="p">{}{}:</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Done</span><span class="p">():</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Err</span><span class="p">()</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="o">&lt;-</span><span class="nx">node</span><span class="p">.</span><span class="nx">multiSearchActive</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="nx">item</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+<span class="w">            </span><span class="c1">// Search and entry interceptors may mutate the request. Never share</span>
+<span class="w">            </span><span class="c1">// caller-owned request pointers between workers (or retry attempts).</span>
+<span class="w">            </span><span class="nx">search</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">proto</span><span class="p">.</span><span class="nx">Clone</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">Search</span><span class="p">).(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">entry</span><span class="p">)(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">search</span><span class="p">)</span>
+<span class="w">            </span><span class="o">&lt;-</span><span class="nx">node</span><span class="p">.</span><span class="nx">multiSearchActive</span>
+<span class="w">            </span><span class="nx">outcome</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchOutcome</span><span class="p">{</span><span class="nx">Id</span><span class="p">:</span><span class="w"> </span><span class="nx">item</span><span class="p">.</span><span class="nx">Id</span><span class="p">,</span><span class="w"> </span><span class="nx">Result</span><span class="p">:</span><span class="w"> </span><span class="nx">result</span><span class="p">}</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">s</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">status</span><span class="p">.</span><span class="nx">Convert</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">Result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">GrpcCode</span><span class="p">,</span><span class="w"> </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">GrpcMessage</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">int32</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">Code</span><span class="p">()),</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">Message</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">result</span><span class="p">.</span><span class="nx">Status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">Result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">{</span><span class="nx">Status</span><span class="p">:</span><span class="w"> </span><span class="nx">merr</span><span class="p">.</span><span class="nx">Status</span><span class="p">(</span><span class="nx">merr</span><span class="p">.</span><span class="nx">WrapErrServiceInternalMsg</span><span class="p">(</span><span class="s">&quot;Search returned no result status&quot;</span><span class="p">))}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="c1">// Reserve protobuf framing overhead as well as outcome bytes.</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">resultBytes</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">proto</span><span class="p">.</span><span class="nx">Size</span><span class="p">(</span><span class="nx">outcome</span><span class="p">)</span><span class="o">+</span><span class="mi">16</span><span class="p">))</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="nb">int64</span><span class="p">(</span><span class="nx">node</span><span class="p">.</span><span class="nx">multiSearchLimits</span><span class="p">.</span><span class="nx">MaxResponseBytes</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">overflow</span><span class="p">.</span><span class="nx">Store</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+<span class="w">                </span><span class="nx">cancel</span><span class="p">()</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="nx">out</span><span class="p">.</span><span class="nx">Items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">outcome</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}()</span>
+<span class="p">}</span>
+<span class="nx">wg</span><span class="p">.</span><span class="nx">Wait</span><span class="p">()</span>
+</code></pre><p>Caller-owned requests are cloned before entry processing. Each child acquires a shared permit until its Search call returns. Item status or transport errors are recorded independently. A deadline or aggregate response-size overflow fails the unary envelope, as before. Permit release does not prove all downstream work has already stopped after cancellation.</p>
+<h2>4. Validation of the rebuilt binary</h2><table><tr><th>Check</th><th>Result</th></tr>
+<tr><td>Proxy coordination tests, race enabled</td><td>12 test functions passed: independent outcomes, validation, pointer/database isolation, shared concurrency/admission, deadlines, response limits, requested concurrency, cancellation while waiting, uninitialized entry, one-time publication, Proxy-context cancellation and publication races.</td></tr>
+<tr><td>Real gRPC integration, race enabled</td><td>Proxy.MultiSearch receives the RPC. Two children charge exactly 3 + 7 Search tokens; the second is rate-limited while the first succeeds. One subsequent ordinary Search charges five more tokens. The envelope is not charged as a Search. Missing authentication is rejected before execution.</td></tr>
+<tr><td>Existing server/stream regressions and isolated statistics</td><td>Passed with race detector. All Go checks use dynamic,test and -gcflags='all=-N -l'.</td></tr>
+<tr><td>Python SDK tests</td><td>Three passed; protocol and SDK code were unchanged by this refactor.</td></tr><tr><td>Standalone Docker / 160,000 vectors</td><td>All 12 native client checks passed; server reports 3.0.5-multisearch-proxy.</td></tr><tr><td>Kubernetes Proxy replica 1</td><td>All 12 native client checks passed; server reports 3.0.5-multisearch-proxy.</td></tr><tr><td>Kubernetes Proxy replica 2</td><td>All 12 native client checks passed; server reports 3.0.5-multisearch-proxy.</td></tr></table><p>The native checks include 50-item equivalence with ordinary Search, independent databases with identical collection names, per-database RBAC, missing/invalid authentication, mixed item failures, envelope limits, deadline and recovery. Kubernetes reuses the earlier 2,048-vector distributed fixture; only the two Proxy replicas were upgraded. QueryNode and other components remain on the preceding v3.0.5 prototype image. Both new Proxy binary hashes match the standalone build.</p>
+<p>The new gRPC test initially lacked the access-logger initialization normally performed by server startup. Its fixture was corrected and the final race-enabled run passed. This was a test-fixture failure; no production logging behavior was changed.</p>
+<h2>5. Fresh mixed-traffic measurements on this binary</h2>
+<p>128 ordinary Search workers first saturate a two-CPU standalone server. A second client then adds 480 logical searches/s, using either eight concurrent Search RPCs or one eight-item MultiSearch RPC. The resident client continues through baseline, injection and recovery. Two repetitions use opposing API order; each run has 5 s warmup, 15 s baseline, 30 s injection and 15 s recovery. Steady-state statistics exclude the first three seconds of each phase.</p>
+<table><tr><th>Added API</th><th>Resident baseline QPS</th><th>Resident mixed QPS</th><th>Resident p99, ms</th><th>Injected logical/s</th><th>Resident recovery QPS</th><th>CPU baseline → mixed</th></tr><tr><td>Search</td><td>1080.0</td><td>583.8</td><td>283.68</td><td>480.3</td><td>1075.5</td><td>97.0% → 96.9%</td></tr><tr><td>MultiSearch</td><td>1088.8</td><td>615.2</td><td>275.76</td><td>480.0</td><td>1073.5</td><td>97.6% → 96.7%</td></tr></table><p>Compared with ordinary-Search injection, MultiSearch changed resident throughput retention by <b>+2.44 percentage points</b> and resident p99 by <b>-2.8%</b>. Across four formal runs, <b>280,665</b> logical searches completed, including warmup and transitions. Recorded RPC/item errors: <b>0</b>; admission drops: <b>0</b>; late-generated groups: <b>0</b>.</p><p>QPS is averaged across repetitions; p99 pools latency samples. CPU includes the whole standalone process. This repeats the resource-contention check on the new binary; it is not a matched before/after measurement proving the ownership refactor improves performance. The earlier stock-v3.0.5 comparison and 14-run mixed-traffic report remain historical evidence for their recorded binary.</p>
+<p>The fixture uses eight FLAT collections across two databases, nq=1, topK 5–8, dimensions 128/192/256, L2/IP/COSINE and bounded tmpfs storage. GOMAXPROCS remains four. Benchmark admission limits are 128 shared children/32 batches, above defaults of 64/eight. The shared host and short runs do not establish tenant fairness, production latency, PSC resilience or long-term stability. No confidence intervals are claimed.</p>
+<h2>6. Build identity and review scope</h2><pre class="code-block"><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;base&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Milvus v3.0.5 af15c807513eb6508ae22d0f3a6484e8937be1a5&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;source_parent_commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;da46e613b189bb26e532eaa1bf436bf1a6cc21bb&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;source_files_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;internal/proxy/proxy.go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;8d34e3e8d4a09197141d56394a68fb5fe288ee22f2acd07a5fd8b909268c17d4&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;internal/proxy/multisearch.go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;07275599be703c53c89f9905313412f34a81c383d6f2c2451fd90f6784253e5e&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;internal/distributed/proxy/service.go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;62904f49398a8204b65a4a29785ea8512d204c95d3e833a275976ebf51de5750&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;internal/distributed/proxy/multisearch.go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2d32a443a0049a9fd458ec783f5882cc156f182a02437730a1f29239cc56144f&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;binary_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;7adcf9232361fad36974f2aaf941bf401233addc9c700bdb08d12e41160ff85a&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;image&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;milvus-multisearch:v305-proxy&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;image_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sha256:61549c1243fde16e277e932c2380f354c58eb42df877a66e48ed19af85cd59b0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;build_tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dynamic,sonic,with_jemalloc,bytedance_tango&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;native_libraries&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;unchanged from pinned stock v3.0.5 image&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;go1.26.9&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;pgo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;configs/pgo/default.pgo is empty&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;standalone_port&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">29564</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;fixture_vectors&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">160000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;fixture_databases&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;fixture_collections&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kubernetes_namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;multisearch-v305&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kubernetes_upgraded_components&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;two Proxy replicas only; other components retain preceding v3.0.5 prototype image&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kubernetes_fixture_vectors&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2048</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;performance&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;resident_workers&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;injected_logical_qps&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">480</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group_size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;repetitions&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;order&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Search then MultiSearch; MultiSearch then Search&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;cpu_limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;server_cpuset&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;64-65&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;client_cpuset&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;32-39&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;GOMAXPROCS&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;shared_child_permits&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;batch_admission_limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;warmup_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;baseline_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;mixed_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;recovery_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;trim_each_phase_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;host_shared&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;storage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4 GiB tmpfs&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre><p>Go was rebuilt with the release tags using unchanged native libraries from the pinned stock v3.0.5 image. Focused regression tests and native standalone/Kubernetes checks were run; the full repository Go suite and C++/Rust rebuild were not. Unpublished protocol and SDK companion patches are still required. REST, async Python, Cloud gateway/billing validation, full gRPC error details and resumable partial results remain outside this prototype.</p>
+<p>The failure-path audit and raw measurements accompany this report. Previous reports are explicitly labeled historical. The PR's primary report now describes this Proxy-owned implementation.</p>
+<h2>7. Reproduce the measurements</h2><pre class="code-block"><code><span class="c1"># Follow examples/multisearch/README.md to prepare the refactor image and fixture.</span>
+.venv/bin/python<span class="w"> </span>examples/multisearch/run_refactor_bench.py
+.venv/bin/python<span class="w"> </span>examples/multisearch/summarize_mixed.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input-dir<span class="w"> </span>artifacts/multisearch-proxy-refactor<span class="w"> </span>--server-binary-changed
+python<span class="w"> </span>examples/multisearch/report_refactor.py
+</code></pre><footer>PR #54940 · Native Milvus MultiSearch · current Proxy-owned implementation</footer></main></html>

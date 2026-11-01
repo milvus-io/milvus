@@ -89,7 +89,6 @@ const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
-	multiSearch *proxy.MultiSearchExecutor
 	grpc_health_v1.UnimplementedHealthServer
 	milvuspb.UnimplementedMilvusServiceServer
 
@@ -337,7 +336,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return metaCacheProvider.GetMetaCache()
 	}
 
-	s.multiSearch = newMultiSearchExecutor(s, limiter, getMetaCache)
+	configureMultiSearch(s.proxy, limiter, getMetaCache)
 	var unaryServerOption grpc.ServerOption
 	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {

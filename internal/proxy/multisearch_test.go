@@ -20,8 +20,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func multiSearchTestLimits() MultiSearchLimits {
-	return MultiSearchLimits{MaxItems: 128, Parallelism: 4, GlobalParallelism: 6, MaxBatches: 3,
+func newMultiSearchTestProxy(limits multiSearchLimits, entry multiSearchEntry) *Proxy {
+	node := &Proxy{ctx: context.Background()}
+	node.initMultiSearch(limits, entry)
+	return node
+}
+
+func multiSearchTestLimits() multiSearchLimits {
+	return multiSearchLimits{MaxItems: 128, Parallelism: 4, GlobalParallelism: 6, MaxBatches: 3,
 		MaxRequestBytes: 1 << 20, MaxResponseBytes: 1 << 20, Timeout: time.Second}
 }
 
@@ -39,7 +45,7 @@ func TestMultiSearchIndependentOutcomes(t *testing.T) {
 		original.ExtraInfo = map[string]string{}
 	}
 	original.ExtraInfo["test"] = "preserved"
-	exec := NewMultiSearchExecutor(multiSearchTestLimits(), func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(multiSearchTestLimits(), func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		require.Empty(t, req.DbName)
 		switch req.CollectionName {
 		case "0":
@@ -52,7 +58,7 @@ func TestMultiSearchIndependentOutcomes(t *testing.T) {
 	})
 	req := multiSearchTestRequest(3)
 	before := proto.Clone(req)
-	resp, err := exec.Execute(context.Background(), req)
+	resp, err := exec.MultiSearch(context.Background(), req)
 	require.NoError(t, err)
 	require.True(t, merr.Ok(resp.Status))
 	require.Len(t, resp.Items, 3)
@@ -66,7 +72,7 @@ func TestMultiSearchIndependentOutcomes(t *testing.T) {
 
 func TestMultiSearchEnvelopeValidation(t *testing.T) {
 	var calls atomic.Int64
-	exec := NewMultiSearchExecutor(multiSearchTestLimits(), func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(multiSearchTestLimits(), func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		calls.Add(1)
 		return &milvuspb.SearchResults{Status: merr.Success()}, nil
 	})
@@ -76,7 +82,7 @@ func TestMultiSearchEnvelopeValidation(t *testing.T) {
 	large.Items[0].Search.Dsl = strings.Repeat("x", 1<<20)
 	for _, req := range []*milvuspb.MultiSearchRequest{nil, {}, multiSearchTestRequest(129), duplicate, large,
 		{Items: []*milvuspb.MultiSearchItem{nil}}, {Items: []*milvuspb.MultiSearchItem{{Id: "missing"}}}} {
-		resp, err := exec.Execute(context.Background(), req)
+		resp, err := exec.MultiSearch(context.Background(), req)
 		require.NoError(t, err)
 		require.False(t, merr.Ok(resp.Status))
 		require.Empty(t, resp.Items)
@@ -87,13 +93,13 @@ func TestMultiSearchEnvelopeValidation(t *testing.T) {
 func TestMultiSearchDatabaseAndPointerIsolation(t *testing.T) {
 	shared := &milvuspb.SearchRequest{CollectionName: "same"}
 	req := &milvuspb.MultiSearchRequest{Items: []*milvuspb.MultiSearchItem{{Id: "a", Search: shared}, {Id: "b", Search: shared}}}
-	exec := NewMultiSearchExecutor(multiSearchTestLimits(), func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(multiSearchTestLimits(), func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		require.Equal(t, "from_header", GetCurDBNameFromRequestOrContext(ctx, r))
 		r.CollectionName = "mutated"
 		return &milvuspb.SearchResults{Status: merr.Success()}, nil
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("dbname", "from_header"))
-	resp, err := exec.Execute(ctx, req)
+	resp, err := exec.MultiSearch(ctx, req)
 	require.NoError(t, err)
 	require.True(t, merr.Ok(resp.Status))
 	require.Equal(t, "same", shared.CollectionName)
@@ -106,7 +112,7 @@ func TestMultiSearchConcurrencyAndAdmission(t *testing.T) {
 	started := make(chan struct{}, 10)
 	release := make(chan struct{})
 	var active, peak atomic.Int64
-	exec := NewMultiSearchExecutor(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		n := active.Add(1)
 		defer active.Add(-1)
 		for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
@@ -122,7 +128,7 @@ func TestMultiSearchConcurrencyAndAdmission(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
-		go func() { defer wg.Done(); _, _ = exec.Execute(context.Background(), multiSearchTestRequest(2)) }()
+		go func() { defer wg.Done(); _, _ = exec.MultiSearch(context.Background(), multiSearchTestRequest(2)) }()
 	}
 	for range 3 {
 		select {
@@ -131,7 +137,7 @@ func TestMultiSearchConcurrencyAndAdmission(t *testing.T) {
 			t.Fatal("workers did not start")
 		}
 	}
-	resp, err := exec.Execute(context.Background(), multiSearchTestRequest(1))
+	resp, err := exec.MultiSearch(context.Background(), multiSearchTestRequest(1))
 	require.NoError(t, err)
 	require.Equal(t, merr.Code(merr.ErrServiceTooManyRequests), resp.Status.Code)
 	require.True(t, resp.Status.Retriable)
@@ -139,8 +145,8 @@ func TestMultiSearchConcurrencyAndAdmission(t *testing.T) {
 	close(release)
 	wg.Wait()
 	require.Zero(t, active.Load())
-	require.Empty(t, exec.active)
-	require.Empty(t, exec.batches)
+	require.Empty(t, exec.multiSearchActive)
+	require.Empty(t, exec.multiSearchBatches)
 }
 
 func TestMultiSearchDeadlineStopsDispatch(t *testing.T) {
@@ -148,20 +154,20 @@ func TestMultiSearchDeadlineStopsDispatch(t *testing.T) {
 	limits.Parallelism, limits.GlobalParallelism = 1, 1
 	limits.Timeout = 20 * time.Millisecond
 	var calls atomic.Int64
-	exec := NewMultiSearchExecutor(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		calls.Add(1)
 		<-ctx.Done()
 		return nil, status.FromContextError(ctx.Err()).Err()
 	})
-	resp, err := exec.Execute(context.Background(), multiSearchTestRequest(8))
+	resp, err := exec.MultiSearch(context.Background(), multiSearchTestRequest(8))
 	require.Nil(t, resp)
 	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
 	require.Equal(t, int64(1), calls.Load())
-	require.Empty(t, exec.active)
-	require.Empty(t, exec.batches)
+	require.Empty(t, exec.multiSearchActive)
+	require.Empty(t, exec.multiSearchBatches)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = exec.Execute(ctx, multiSearchTestRequest(1))
+	_, err = exec.MultiSearch(ctx, multiSearchTestRequest(1))
 	require.Equal(t, codes.Canceled, status.Code(err))
 	require.Equal(t, int64(1), calls.Load())
 }
@@ -169,16 +175,16 @@ func TestMultiSearchDeadlineStopsDispatch(t *testing.T) {
 func TestMultiSearchResponseBudgetAndInvalidResult(t *testing.T) {
 	limits := multiSearchTestLimits()
 	limits.MaxResponseBytes = 1024
-	exec := NewMultiSearchExecutor(limits, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(limits, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		return &milvuspb.SearchResults{Status: &commonpb.Status{Reason: strings.Repeat("x", 2048)}}, nil
 	})
-	resp, err := exec.Execute(context.Background(), multiSearchTestRequest(2))
+	resp, err := exec.MultiSearch(context.Background(), multiSearchTestRequest(2))
 	require.NoError(t, err)
 	require.Equal(t, merr.Code(merr.ErrParameterTooLarge), resp.Status.Code)
 	require.Empty(t, resp.Items)
-	require.Empty(t, exec.active)
-	exec = NewMultiSearchExecutor(limits, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) { return nil, nil })
-	resp, err = exec.Execute(context.Background(), multiSearchTestRequest(1))
+	require.Empty(t, exec.multiSearchActive)
+	exec = newMultiSearchTestProxy(limits, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) { return nil, nil })
+	resp, err = exec.MultiSearch(context.Background(), multiSearchTestRequest(1))
 	require.NoError(t, err)
 	require.Equal(t, merr.Code(merr.ErrServiceInternal), resp.Items[0].Result.Status.Code)
 }
@@ -187,11 +193,11 @@ func TestMultiSearchCrossDatabase(t *testing.T) {
 	req := multiSearchTestRequest(3)
 	req.Items[0].Search.DbName = "db_a"
 	req.Items[1].Search.DbName = "db_b"
-	exec := NewMultiSearchExecutor(multiSearchTestLimits(), func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(multiSearchTestLimits(), func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		return &milvuspb.SearchResults{Status: merr.Success(), CollectionName: GetCurDBNameFromRequestOrContext(ctx, r)}, nil
 	})
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("dbname", "fallback"))
-	resp, err := exec.Execute(ctx, req)
+	resp, err := exec.MultiSearch(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, "db_a", resp.Items[0].Result.CollectionName)
 	require.Equal(t, "db_b", resp.Items[1].Result.CollectionName)
@@ -208,7 +214,7 @@ func TestMultiSearchRequestedConcurrency(t *testing.T) {
 			started := make(chan struct{}, 12)
 			release := make(chan struct{})
 			var active, peak atomic.Int64
-			exec := NewMultiSearchExecutor(limits, func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			exec := newMultiSearchTestProxy(limits, func(ctx context.Context, r *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 				n := active.Add(1)
 				defer active.Add(-1)
 				for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
@@ -222,7 +228,7 @@ func TestMultiSearchRequestedConcurrency(t *testing.T) {
 				return &milvuspb.SearchResults{Status: merr.Success()}, nil
 			})
 			done := make(chan struct{})
-			go func() { defer close(done); _, _ = exec.Execute(context.Background(), req) }()
+			go func() { defer close(done); _, _ = exec.MultiSearch(context.Background(), req) }()
 			for range expected {
 				select {
 				case <-started:
@@ -250,7 +256,7 @@ func TestMultiSearchCancelWhileWaitingForPermit(t *testing.T) {
 	limits.Timeout = 5 * time.Second
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
-	exec := NewMultiSearchExecutor(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	exec := newMultiSearchTestProxy(limits, func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		calls.Add(1)
 		close(started)
 		select {
@@ -260,17 +266,105 @@ func TestMultiSearchCancelWhileWaitingForPermit(t *testing.T) {
 		}
 		return &milvuspb.SearchResults{Status: merr.Success()}, nil
 	})
-	go func() { defer close(finished); _, _ = exec.Execute(context.Background(), multiSearchTestRequest(1)) }()
+	go func() {
+		defer close(finished)
+		_, _ = exec.MultiSearch(context.Background(), multiSearchTestRequest(1))
+	}()
 	<-started
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	_, err := exec.Execute(ctx, multiSearchTestRequest(2))
+	_, err := exec.MultiSearch(ctx, multiSearchTestRequest(2))
 	require.Equal(t, codes.DeadlineExceeded, status.Code(err))
 	require.Equal(t, int64(1), calls.Load())
-	require.Len(t, exec.active, 1)
-	require.Len(t, exec.batches, 1)
+	require.Len(t, exec.multiSearchActive, 1)
+	require.Len(t, exec.multiSearchBatches, 1)
 	close(release)
 	<-finished
-	require.Empty(t, exec.active)
-	require.Empty(t, exec.batches)
+	require.Empty(t, exec.multiSearchActive)
+	require.Empty(t, exec.multiSearchBatches)
+}
+
+func TestMultiSearchRequiresEntryAndPublishesOnce(t *testing.T) {
+	node := &Proxy{ctx: context.Background()}
+	node.initMultiSearch(multiSearchTestLimits(), nil)
+	resp, err := node.MultiSearch(context.Background(), multiSearchTestRequest(1))
+	require.NoError(t, err)
+	require.Equal(t, merr.Code(merr.ErrServiceNotReady), resp.Status.Code)
+	require.True(t, resp.Status.Retriable)
+	require.Empty(t, resp.Items)
+
+	var calls atomic.Int64
+	node.initMultiSearch(multiSearchTestLimits(), func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		calls.Add(1)
+		return &milvuspb.SearchResults{Status: merr.Success()}, nil
+	})
+	batches, active := node.multiSearchBatches, node.multiSearchActive
+	node.initMultiSearch(multiSearchLimits{}, func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		t.Error("entry must not be replaced after publication")
+		return nil, nil
+	})
+	resp, err = node.MultiSearch(context.Background(), multiSearchTestRequest(1))
+	require.NoError(t, err)
+	require.True(t, merr.Ok(resp.Status))
+	require.Equal(t, int64(1), calls.Load())
+	require.Equal(t, batches, node.multiSearchBatches)
+	require.Equal(t, active, node.multiSearchActive)
+}
+
+func TestMultiSearchProxyCancellationReleasesAdmission(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	limits := multiSearchTestLimits()
+	limits.Parallelism, limits.GlobalParallelism = 1, 1
+	limits.Timeout = 5 * time.Second
+	started := make(chan struct{})
+	var calls atomic.Int64
+	node := &Proxy{ctx: ctx}
+	node.initMultiSearch(limits, func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		calls.Add(1)
+		close(started)
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
+	})
+	done := make(chan error, 1)
+	go func() { _, err := node.MultiSearch(context.Background(), multiSearchTestRequest(8)); done <- err }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("child did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.Equal(t, codes.Canceled, status.Code(err))
+	case <-time.After(time.Second):
+		t.Fatal("Proxy cancellation did not reach the child")
+	}
+	require.Empty(t, node.multiSearchActive)
+	require.Empty(t, node.multiSearchBatches)
+	_, err := node.MultiSearch(context.Background(), multiSearchTestRequest(1))
+	require.Equal(t, codes.Canceled, status.Code(err))
+	require.Equal(t, int64(1), calls.Load())
+}
+
+func TestMultiSearchEntryPublicationRace(t *testing.T) {
+	node := &Proxy{ctx: context.Background()}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				resp, err := node.MultiSearch(context.Background(), multiSearchTestRequest(1))
+				require.NoError(t, err)
+				require.Contains(t, []int32{0, merr.Code(merr.ErrServiceNotReady), merr.Code(merr.ErrServiceTooManyRequests)}, resp.Status.Code)
+			}
+		}()
+	}
+	node.initMultiSearch(multiSearchTestLimits(), func(context.Context, *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		return &milvuspb.SearchResults{Status: merr.Success()}, nil
+	})
+	wg.Wait()
+	require.Empty(t, node.multiSearchActive)
+	require.Empty(t, node.multiSearchBatches)
 }

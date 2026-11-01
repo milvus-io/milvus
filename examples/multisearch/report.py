@@ -5,6 +5,7 @@ import json
 import statistics
 import re
 import textwrap
+import subprocess
 from pathlib import Path
 
 from pygments import highlight
@@ -29,7 +30,13 @@ def highlighted(source, language):
 
 
 def code(path, start=None, end=None):
-    s = Path(path).read_text()
+    s = (
+        subprocess.check_output(
+            ["git", "show", "da46e613b189bb26e532eaa1bf436bf1a6cc21bb:" + path], text=True
+        )
+        if path.startswith("internal/")
+        else Path(path).read_text()
+    )
     if start:
         s = s[s.index(start) :]
     if end:
@@ -235,6 +242,10 @@ body = re.sub(
 )
 css += formatter.get_style_defs(".code-block")
 css += "pre.code-block{background:#0d1117;color:#e6edf3}pre.code-block code{font-size:1em}pre.code-block,pre.code-block *{-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+body = (
+    '<p class="callout"><strong>Historical build:</strong> this report records the Server-owned coordinator at commit da46e613b1. See the <a href="../multisearch-proxy-refactor/report.html">Proxy ownership refactor report</a> for the current implementation and new-binary validation.</p>'
+    + body
+)
 (root / "multisearch-report.html").write_text(
     '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Native Milvus MultiSearch — design and performance evidence</title><style>'
     + css
