@@ -77,13 +77,10 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 		}
 
 		policy.activeCollections.Read(collID)
-		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
-			return info.GetLevel() == datapb.SegmentLevel_L0
-		})
-		if len(levelZeroSegments) == 0 {
+		if len(segments) == 0 {
 			continue
 		}
-		labelViews := policy.groupL0ViewsByPartChan(collID, GetViewsByInfo(levelZeroSegments...), newTriggerID)
+		labelViews := policy.groupL0ViewsByPartChan(collID, GetViewsByInfo(segments...), newTriggerID)
 		if idleCollsSet.Contain(collID) {
 			idleL0Views = append(idleL0Views, labelViews...)
 		} else {
