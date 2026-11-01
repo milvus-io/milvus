@@ -555,7 +555,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 		return false
 	}
 
-	indexInfo, err := ob.broker.ListIndexes(ctx, collectionID)
+	indexInfo, indexInfoVersion, err := utils.ListIndexesWithVersion(ctx, ob.broker, collectionID)
 	if err != nil {
 		mlog.Warn(ctx, "fail to get index info of collection", mlog.Err(err))
 		return false
@@ -570,7 +570,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			return false
 		}
 
-		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, schema, schemaBarrierTs, partitions, indexInfo, indexInfoVersion) {
 			return false
 		}
 	}
@@ -578,7 +578,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
-	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo,
+	schema *schemapb.CollectionSchema, schemaBarrierTs uint64, partitions []int64, indexInfo []*indexpb.IndexInfo, indexInfoVersion int64,
 ) bool {
 	replicaID := replica.GetID()
 
@@ -598,11 +598,12 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 		Actions:      []*querypb.SyncAction{action},
 		Schema:       schema,
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:        ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
-			CollectionID:    LeaderView.CollectionID,
-			PartitionIDs:    partitions,
-			ResourceGroup:   replica.GetResourceGroup(),
-			SchemaBarrierTs: schemaBarrierTs,
+			LoadType:         ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
+			CollectionID:     LeaderView.CollectionID,
+			PartitionIDs:     partitions,
+			ResourceGroup:    replica.GetResourceGroup(),
+			SchemaBarrierTs:  schemaBarrierTs,
+			IndexInfoVersion: indexInfoVersion,
 		},
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
