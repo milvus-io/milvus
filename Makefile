@@ -275,19 +275,27 @@ meta-migration:
 INTERATION_PATH = $(PWD)/tests/integration
 CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
 
-.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.PHONY: build-cmek-fixtures build-failpoint-fixture integration-test integration-test-base integration-test-cmek integration-test-failpoint
 .NOTPARALLEL: integration-test
+
+FAILPOINT_FIXTURE_PATH ?= $(PWD)/cmake_build/failpoint-fixture
+
+build-failpoint-fixture:
+	@bash $(PWD)/scripts/build_failpoint_fixture.sh "$(FAILPOINT_FIXTURE_PATH)"
+
+integration-test-failpoint: getdeps build-failpoint-fixture
+	@env MILVUS_FAILPOINT_WORK_DIR="$(FAILPOINT_FIXTURE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh --package ./idempotency "$(INSTALL_PATH)/gotestsum --"
 
 build-cmek-fixtures:
 	@echo "Building CMEK fixture plugins ..."
 	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
 
 integration-test: MILVUS_INTEGRATION_COVERAGE_APPEND = true
-integration-test: integration-test-base integration-test-cmek
+integration-test: integration-test-base integration-test-cmek integration-test-failpoint
 
 integration-test-base: getdeps
-	@echo "Running integration tests excluding CMEK ..."
-	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
+	@echo "Running integration tests excluding CMEK and failpoint fixtures ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek --exclude-package ./idempotency "$(INSTALL_PATH)/gotestsum --")
 
 integration-test-cmek: getdeps build-cmek-fixtures
 	@echo "Running CMEK scalar-index integration tests ..."
