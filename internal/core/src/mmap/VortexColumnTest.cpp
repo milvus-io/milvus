@@ -16,6 +16,7 @@
 
 #include "mmap/VortexColumn.h"
 
+#include <array>
 #include <cstdint>
 #include <cmath>
 #include <exception>
@@ -38,8 +39,8 @@
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/SparseVortexFileSystem.h"
 #include "milvus-storage/column_groups.h"
-#include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/format/vortex/vortex_types.h"
+#include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/properties.h"
 #include "storage/Util.h"
 
@@ -54,7 +55,7 @@ constexpr int64_t kNullableRows = 16;
 
 TEST(SparseVortexFileSystemTest, DisjointWritesPreserveCachedReads) {
     const std::string path = "concurrent-cells.vortex";
-    auto fs = MakeSparseVortexFileSystem(path);
+    auto fs = MakeSparseVortexFileSystem(path, {});
     auto file_result = milvus_storage::vortex::GetVortexRangeFile(fs, path);
     ASSERT_TRUE(file_result.ok());
     auto file = std::move(file_result).ValueOrDie();
@@ -140,6 +141,54 @@ MakeProperties() {
     properties[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
     properties[PROPERTY_FS_ROOT_PATH] = std::string("/");
     return properties;
+}
+
+void
+CheckSparseVortexFileBacking(SparseVortexFileBacking backing) {
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_sparse_fs_test_" + std::to_string(::getpid()) + "_" +
+         std::to_string(static_cast<int>(backing)));
+    std::filesystem::create_directories(dir);
+    const auto file_path = dir / "sparse.vx";
+    const std::string logical_path = "sparse-test.vx";
+
+    SparseVortexFileSystemOptions options;
+    options.backing = backing;
+    options.file_path = file_path.string();
+    options.mmap_populate = true;
+    auto fs = MakeSparseVortexFileSystem(logical_path, std::move(options));
+    auto range_result =
+        milvus_storage::vortex::GetVortexRangeFile(fs, logical_path);
+    ASSERT_TRUE(range_result.ok()) << range_result.status().ToString();
+    auto range_file = std::move(range_result).ValueOrDie();
+
+    range_file->Resize(4096);
+    if (backing == SparseVortexFileBacking::Memory) {
+        ASSERT_FALSE(std::filesystem::exists(file_path));
+    } else {
+        ASSERT_TRUE(std::filesystem::exists(file_path));
+    }
+    auto status = range_file->WriteAt(128, arrow::Buffer::FromString("abc"));
+    ASSERT_TRUE(status.ok()) << status.ToString();
+
+    std::array<char, 3> out{};
+    auto read_result = range_file->ReadAt(128, out.size(), out.data());
+    ASSERT_TRUE(read_result.ok()) << read_result.status().ToString();
+    ASSERT_EQ(read_result.ValueOrDie(), static_cast<int64_t>(out.size()));
+    ASSERT_EQ(std::string(out.data(), out.size()), "abc");
+
+    range_file->Punch(128, out.size());
+    out.fill('\1');
+    read_result = range_file->ReadAt(128, out.size(), out.data());
+    ASSERT_TRUE(read_result.ok()) << read_result.status().ToString();
+    ASSERT_EQ(read_result.ValueOrDie(), static_cast<int64_t>(out.size()));
+    ASSERT_EQ(std::string(out.data(), out.size()), std::string(out.size(), 0));
+
+    range_file.reset();
+    fs.reset();
+    ASSERT_FALSE(std::filesystem::exists(file_path));
+    std::filesystem::remove_all(dir);
 }
 
 VortexColumn::FileInfo
@@ -1142,6 +1191,96 @@ CheckOrderedTake(VortexColumn& column, DataType type, TakePinPolicy policy) {
 }
 
 }  // namespace
+
+TEST(VortexColumnTest, SparseFileSystemBackingModes) {
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Memory);
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Mmap);
+    CheckSparseVortexFileBacking(SparseVortexFileBacking::Disk);
+}
+
+TEST(SparseVortexFileSystemTest, MmapCreationReportsInvalidParent) {
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_invalid_parent_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    auto local_fs = std::make_shared<arrow::fs::LocalFileSystem>();
+    auto file_result =
+        local_fs->OpenOutputStream((dir / "regular-file").string());
+    ASSERT_TRUE(file_result.ok());
+    ASSERT_TRUE(file_result.ValueOrDie()->Close().ok());
+
+    SparseVortexFileSystemOptions options;
+    options.backing = SparseVortexFileBacking::Mmap;
+    options.file_path = (dir / "regular-file" / "cache.vortex").string();
+    try {
+        MakeSparseVortexFileSystem("invalid-parent.vortex", std::move(options));
+        FAIL() << "expected sparse-file creation failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileCreateFailed);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, MmapScanTakeReloadAndCleanup) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_mmap_column_" + std::to_string(::getpid()));
+    const auto cache_dir = dir / "cache";
+    std::filesystem::create_directories(dir);
+    auto file_info = WriteVortexFile(
+        (dir / "source.vx").string(), MakeSchema(), *properties);
+    {
+        VortexColumnGroup::Options options;
+        options.sparse_file_backing = SparseVortexFileBacking::Mmap;
+        options.mmap_dir_path = cache_dir.string();
+        options.segment_id = 123;
+        auto group = std::make_shared<VortexColumnGroup>(
+            std::vector<VortexColumn::FileInfo>{file_info},
+            properties,
+            std::vector<std::string>{std::to_string(kIntFieldId)},
+            1,
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+            nullptr,
+            std::move(options));
+        FieldMeta meta(FieldName("int_field"),
+                       FieldId(kIntFieldId),
+                       DataType::INT32,
+                       false,
+                       std::nullopt);
+        VortexColumn column(FieldId(kIntFieldId),
+                            meta,
+                            std::to_string(kIntFieldId),
+                            properties,
+                            group);
+        ASSERT_TRUE(std::filesystem::is_directory(cache_dir / "vortex"));
+        EXPECT_FALSE(std::filesystem::is_empty(cache_dir / "vortex"));
+        EXPECT_EQ(CollectIntScanValues(column, 3, 5),
+                  (std::vector<int32_t>{30, 40, 50, 60, 70}));
+
+        const std::vector<int64_t> offsets{15, 0, 15, 8};
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(offsets.data(), offsets.size()));
+        auto take = column.Take(nullptr,
+                                ChunkedColumnInterface::TakeOptions{
+                                    ChunkedColumnInterface::OffsetView::From(
+                                        offsets.data(), offsets.size()),
+                                    ChunkedColumnInterface::TargetType::Int32});
+        ASSERT_NE(take, nullptr);
+        ASSERT_EQ(take->Size(), offsets.size());
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(offsets.data(), offsets.size()));
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            const auto item = take->Get<int32_t>(i);
+            ASSERT_TRUE(item.is_valid);
+            ASSERT_TRUE(item.value.has_value());
+            EXPECT_EQ(*item.value, offsets[i] * 10);
+        }
+    }
+    EXPECT_TRUE(std::filesystem::is_empty(cache_dir / "vortex"));
+    std::filesystem::remove_all(dir);
+}
 
 TEST(VortexColumnTest, ScanAndTake) {
     auto schema = MakeSchema();
