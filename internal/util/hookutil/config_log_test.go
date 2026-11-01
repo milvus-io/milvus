@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -121,7 +122,48 @@ func TestCipherStartupFailureLogsProtectConfig(t *testing.T) {
 	assert.NotContains(t, sink.String(), "cipher-path-canary")
 }
 
+func TestIgnoredCipherPathLogsProtectConfig(t *testing.T) {
+	const canary = "ignored-cipher-path-canary.so"
+	for _, tc := range []struct {
+		name    string
+		pathCpp string
+		initErr error
+	}{
+		{name: "initialized", pathCpp: "/tmp/some-cipher.so"},
+		{name: "init failed", pathCpp: "/tmp/some-cipher.so", initErr: errors.New("no kms key")},
+		{name: "idle", pathCpp: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installCipher(t, &recordingCipher{initErr: tc.initErr})
+			saveCipherKey(t, paramtable.GetCipherParams().SoPathGo.Key, canary)
+			saveCipherKey(t, paramtable.GetCipherParams().SoPathCpp.Key, tc.pathCpp)
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+
+			if tc.initErr != nil {
+				assert.Panics(t, InitOnceCipher)
+			} else {
+				assert.NotPanics(t, InitOnceCipher)
+			}
+
+			assert.Contains(t, sink.String(), "cipherPlugin.soPathGo is ignored")
+			assert.NotContains(t, sink.String(), canary)
+		})
+	}
+}
+
 func TestHookStartupFailureLogsProtectConfig(t *testing.T) {
+	const childEnv = "MILVUS_TEST_HOOK_STARTUP_FAILURE"
+	if os.Getenv(childEnv) != "1" {
+		// Start without the config watchers registered by other hook tests.
+		// Their async GetHook calls race with resetting initOnce below.
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		cmd := exec.Command(executable, "-test.run=^TestHookStartupFailureLogsProtectConfig$") // #nosec G204 -- Re-exec the current test binary with a fixed test filter.
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+		return
+	}
 	paramtable.Init()
 	params := paramtable.Get()
 	const key, canary = "opaqueSetting", "hook-startup-secret-canary"

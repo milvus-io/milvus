@@ -75,11 +75,16 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader      packed.ExternalReaderContext
-	writerFormat        string
-	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	// pluginContextSet distinguishes an explicit plaintext source from
+	// destination-schema fallback.
+	pluginContextSet  bool
+	textColumnConfigs []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary  bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	resolveTextLob    bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
+	externalReader    packed.ExternalReaderContext
+	writerFormat      string
+	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	pkStatsConfig     *PkStatsConfig
 }
 
 func (o *rwOptions) validate() error {
@@ -235,9 +240,13 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 	}
 }
 
+// WithPluginContext supplies an already-resolved storage encryption context.
+// For manifest readers, calling it with nil explicitly marks a plaintext
+// source and disables fallback to the destination schema's CMEK properties.
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+		options.pluginContextSet = true
 	}
 }
 
@@ -259,9 +268,24 @@ func WithTextRefsAsBinary() RwOption {
 	}
 }
 
+// WithResolveTextLob makes a manifest reader resolve internal TEXT LOB
+// references into ordinary UTF8 values. It is opt-in because compaction paths
+// need the physical binary references for reuse and rewrite strategies.
+func WithResolveTextLob() RwOption {
+	return func(options *rwOptions) {
+		options.resolveTextLob = true
+	}
+}
+
 func WithWriterFormat(format string) RwOption {
 	return func(options *rwOptions) {
 		options.writerFormat = format
+	}
+}
+
+func WithPkStatsConfig(config PkStatsConfig) RwOption {
+	return func(options *rwOptions) {
+		options.pkStatsConfig = &config
 	}
 }
 
@@ -345,28 +369,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		return nil, err
 	}
 
-	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
-			pluginContext = rwOptions.pluginContext
-		} else {
-			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-			if ez != nil {
-				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
-
-				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-				if len(unsafe) > 0 {
-					pluginContext = &indexcgopb.StoragePluginContext{
-						EncryptionZoneId: ez.EzID,
-						CollectionId:     ez.CollectionID,
-						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-					}
-				}
-			}
-		}
-	}
+	binlogReaderOpts, pluginContext := binlogReaderEncryption(schema, rwOptions)
 	switch rwOptions.version {
 	case StorageV1:
 		var blobsReader ChunkedBlobsReader
@@ -374,7 +377,17 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if err != nil {
 			return nil, err
 		}
-		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
+		// A caller that filtered binlogs (V1 compaction keeps only the read
+		// schema's fields) passes the segment's complete stored field set, so
+		// the struct fill can see sub-fields that were dropped since.
+		stored := rwOptions.presentFields
+		if stored == nil {
+			stored = make(map[FieldID]struct{}, len(binlogs))
+			for _, fb := range binlogs {
+				stored[fb.GetFieldID()] = struct{}{}
+			}
+		}
+		rr = newIterativeCompositeBinlogRecordReaderWithStored(schema, rwOptions.neededFields, stored, blobsReader, binlogReaderOpts...)
 	case StorageV2, StorageV3:
 		if len(binlogs) <= 0 {
 			return nil, io.EOF
@@ -393,24 +406,45 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		// StorageV2/V3 binlog: present declared defaults for absent fields like V1,
-		// sourcing physical presence from FieldBinlog.ChildFields (set by the
-		// flush/compaction writers, reliable for those segments). Import-reconstructed
-		// binlogs carry no ChildFields (FieldID is a column-group ID), so presence is
-		// not derivable there; pass the full schema through unchanged (the engine
-		// null-fills absent columns). Default-fill for the import path is a documented
-		// follow-up (issue #52771).
-		present, reliable := binlogFieldIDSet(binlogs)
-		if reliable {
-			readSchema, ferr := filterSchemaToPresentFields(schema, present)
-			if ferr != nil {
-				return nil, ferr
+		// StorageV2/V3 binlog: read only the physically present columns, then
+		// fill absent fields with their declared default (or null) like V1, and
+		// absent element-nullable struct sub-fields with N null elements taken
+		// from a present sibling. The packed engine would instead turn an absent
+		// column into null rows, silently changing a struct's element count.
+		if rwOptions.externalReader.Source != "" {
+			if present, ok := binlogFieldIDSet(binlogs); ok {
+				readSchema, ferr := filterSchemaToPresentFields(schema, present)
+				if ferr != nil {
+					return nil, ferr
+				}
+				rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
+				rr = NewAbsentFieldFillRecordReader(rr, schema, present)
+				break
 			}
-			rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
-			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
-		} else {
+			// External sources keep presence from ChildFields only.
+			for _, st := range schema.GetStructArrayFields() {
+				for _, child := range st.GetFields() {
+					if child.GetElementNullable() {
+						return nil, merr.WrapErrDataIntegrityMsg("cannot read struct field %q with element-nullable sub-field %q from external packed binlogs without ChildFields", st.GetName(), child.GetName())
+					}
+				}
+			}
 			rr = newPackedChunksRecordReader(ctx, paths, schema, rwOptions, pluginContext)
+			break
 		}
+		present := rwOptions.presentFields
+		if present == nil {
+			present, err = packedBinlogPresentFields(ctx, binlogs, schema, rwOptions.storageConfig, pluginContext)
+			if err != nil {
+				return nil, err
+			}
+		}
+		readSchema, ferr := filterSchemaToPresentFields(schema, present)
+		if ferr != nil {
+			return nil, ferr
+		}
+		rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
+		rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
 	}
@@ -428,11 +462,25 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	// WithResolveTextLob selects milvus-storage SegmentReader, whose current C
+	// API cannot receive the source backup's key-retriever context. Reject the
+	// explicit source key here even when cluster encryption is disabled; letting
+	// it fall through would silently discard the key before opening the backup.
+	// CMEK sources without TEXT/LOB use PackedReader and remain supported.
+	if rwOptions.resolveTextLob && rwOptions.pluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
+	// In snapshot-source import, neededSchema describes the destination
+	// collection. WithPluginContext marks that the source context has already
+	// been resolved, including an explicit nil for a plaintext source, so target
+	// CMEK properties are never reused to read the source. Destination encryption
+	// is applied independently by the import write path.
+	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
+		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
 			ez := hookutil.GetEzByCollProperties(neededSchema.GetProperties(), rwOptions.collectionID)
@@ -522,9 +570,8 @@ func NewTextDecodedManifestRecordReader(
 // (and struct sub-fields) whose FieldID is physically present, so the packed
 // reader is asked to read only stored columns; absent fields are then filled by
 // NewAbsentFieldFillRecordReader rather than null-synthesized by the engine.
-// A struct array field is physically all-or-nothing (add/drop/update act on the
-// whole struct), so it is kept whole or dropped whole; a partially-present struct
-// is a data-integrity violation that must never occur and is surfaced as an error.
+// A partially present struct retains its stored children so the wrapper can
+// derive the missing children's element counts from a sibling.
 func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[FieldID]struct{}) (*schemapb.CollectionSchema, error) {
 	out := proto.Clone(schema).(*schemapb.CollectionSchema)
 	fields := out.Fields[:0]
@@ -536,33 +583,124 @@ func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[
 	out.Fields = fields
 	structs := out.StructArrayFields[:0]
 	for _, st := range out.StructArrayFields {
-		presentChildren := 0
+		children := st.Fields[:0]
 		for _, f := range st.GetFields() {
 			if _, ok := present[f.GetFieldID()]; ok {
-				presentChildren++
+				children = append(children, f)
 			}
 		}
-		switch presentChildren {
-		case 0:
-			// whole struct absent: drop it here, the wrapper fills its children.
-		case len(st.GetFields()):
+		st.Fields = children
+		if len(children) > 0 {
 			structs = append(structs, st)
-		default:
-			return nil, merr.WrapErrServiceInternalMsg(
-				"struct array field %q partially present (%d of %d children): a struct array is physically all-or-nothing",
-				st.GetName(), presentChildren, len(st.GetFields()))
 		}
 	}
 	out.StructArrayFields = structs
 	return out, nil
 }
 
+// binlogReaderEncryption returns the decryption options of a binlog reader:
+// the V1 blob reader options and the plugin context of the packed readers.
+func binlogReaderEncryption(schema *schemapb.CollectionSchema, rwOptions *rwOptions) ([]BinlogReaderOption, *indexcgopb.StoragePluginContext) {
+	binlogReaderOpts := []BinlogReaderOption{}
+	pluginContext := rwOptions.pluginContext
+	if hookutil.IsClusterEncryptionEnabled() {
+		// Reader pluginContext from import tasks
+		if rwOptions.pluginContext != nil {
+			pluginContext = rwOptions.pluginContext
+		} else {
+			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+			if ez != nil {
+				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+
+				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+				if len(unsafe) > 0 {
+					pluginContext = &indexcgopb.StoragePluginContext{
+						EncryptionZoneId: ez.EzID,
+						CollectionId:     ez.CollectionID,
+						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
+					}
+				}
+			}
+		}
+	}
+	return binlogReaderOpts, pluginContext
+}
+
+// PackedBinlogPresentFields returns the field IDs physically stored in the
+// StorageV2/V3 packed binlogs of one segment; see packedBinlogPresentFields.
+// The binlogs must carry their log paths.
+func PackedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (map[FieldID]struct{}, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	_, pluginContext := binlogReaderEncryption(schema, rwOptions)
+	return packedBinlogPresentFields(ctx, binlogs, schema, rwOptions.storageConfig, pluginContext)
+}
+
+// packedBinlogPresentFields returns the field IDs physically stored in the
+// packed binlogs of one segment. FieldBinlog.ChildFields is used when every
+// FieldBinlog carries it. Binlogs written by 2.6.0/2.6.1, and binlogs rebuilt by
+// import, carry none and key FieldID by column group, so the PARQUET:field_id
+// of every column is read from each file's footer instead (metadata only, one
+// read per file) and the union is returned: a column a later file of the group
+// gained is still read, and older files are null-filled by the packed engine,
+// as with ChildFields. That null fill would turn an element-nullable struct
+// sub-field into null rows, so such a sub-field must be in every file of its
+// group or in none.
+func packedBinlogPresentFields(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext,
+) (map[FieldID]struct{}, error) {
+	if present, ok := binlogFieldIDSet(binlogs); ok {
+		return present, nil
+	}
+	elementNullable := make(map[FieldID]struct{})
+	for _, st := range schema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			if child.GetElementNullable() {
+				elementNullable[child.GetFieldID()] = struct{}{}
+			}
+		}
+	}
+	present := make(map[FieldID]struct{})
+	for _, fb := range binlogs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		paths := lo.Map(fb.GetBinlogs(), func(binlog *datapb.Binlog, _ int) string {
+			return binlog.GetLogPath()
+		})
+		if len(paths) == 0 {
+			continue
+		}
+		perFile, err := packed.GetPackedFileFieldIDs(paths, storageConfig, pluginContext)
+		if err != nil {
+			return nil, merr.Wrapf(err, "read field ids from packed binlog footers of column group %d", fb.GetFieldID())
+		}
+		files := make(map[FieldID]int)
+		for _, fieldIDs := range perFile {
+			for _, fieldID := range fieldIDs {
+				present[fieldID] = struct{}{}
+				files[fieldID]++
+			}
+		}
+		for fieldID, count := range files {
+			if _, ok := elementNullable[fieldID]; ok && count != len(paths) {
+				return nil, merr.WrapErrDataIntegrityMsg(
+					"element-nullable struct sub-field %d is stored in %d of %d files of column group %d",
+					fieldID, count, len(paths), fb.GetFieldID())
+			}
+		}
+	}
+	return present, nil
+}
+
 // binlogFieldIDSet returns the physically-present field IDs of a StorageV2/V3
 // binlog segment, taken from each FieldBinlog's ChildFields (the column group's
 // member field IDs, written by the flush/compaction writers). Presence is reliable
-// ONLY when every FieldBinlog carries ChildFields; import-reconstructed binlogs key
-// FieldID by column-group ID and set no ChildFields, so presence is not derivable —
-// the second return value is then false and the caller must read unfiltered.
+// ONLY when every FieldBinlog carries ChildFields; binlogs written by 2.6.0/2.6.1
+// and import-reconstructed binlogs key FieldID by column-group ID and set no
+// ChildFields, so the second return value is then false.
 func binlogFieldIDSet(binlogs []*datapb.FieldBinlog) (map[FieldID]struct{}, bool) {
 	present := make(map[FieldID]struct{}, len(binlogs))
 	for _, fb := range binlogs {
@@ -605,7 +743,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	}
 
 	opts := []StreamWriterOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
 		if ez != nil {
@@ -616,7 +754,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
 
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
+			if pluginContext == nil && len(unsafe) > 0 {
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
@@ -625,7 +763,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			}
 		}
 	}
-
 	switch rwOptions.version {
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
@@ -638,6 +775,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.storageConfig,
 			pluginContext,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -647,7 +785,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
+				pluginContext,
 				rwOptions.writerFormat,
+				rwOptions.pkStatsConfig,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -657,6 +797,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 			rwOptions.textRefsAsBinary,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

@@ -330,13 +330,17 @@ func TestForcePromoteSuccess(t *testing.T) {
 	balance.Register(b)
 
 	// Set up broadcaster with WithSecondaryClusterResourceKey (we are secondary)
+	var broadcastMsg message.BroadcastMutableMessage
 	mba := mock_broadcaster.NewMockBroadcastAPI(t)
-	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
-		BroadcastID: 1,
-		AppendResults: map[string]*types.AppendResult{
-			"by-dev-1": {TimeTick: 100},
-		},
-	}, nil).Maybe()
+	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		broadcastMsg = msg
+		return &types.BroadcastAppendResult{
+			BroadcastID: 1,
+			AppendResults: map[string]*types.AppendResult{
+				"by-dev-1": {TimeTick: 100},
+			},
+		}, nil
+	}).Once()
 	mba.EXPECT().Close().Return().Maybe()
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
@@ -357,6 +361,13 @@ func TestForcePromoteSuccess(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
+
+	// The control-channel copy must be pchannel-level so that the lock interceptor
+	// acquires the global write lock on the pchannel that hosts the control channel.
+	assert.Equal(t, []string{"by-dev-1_vcchan"}, broadcastMsg.BroadcastHeader().VChannels)
+	for _, msg := range broadcastMsg.WithBroadcastID(1).SplitIntoMutableMessage() {
+		assert.True(t, msg.IsPChannelLevel())
+	}
 }
 
 func TestForcePromoteIdempotent(t *testing.T) {

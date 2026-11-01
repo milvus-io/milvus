@@ -22,8 +22,9 @@
 #include "common/QueryResult.h"
 #include "common/Utils.h"
 #include "common/VectorArray.h"
+#include "exec/operator/Utils.h"
 #include "index/Utils.h"
-#include "index/VectorIndex.h"
+#include "index/vector/RangeSearchParams.h"
 #include "knowhere/expected.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "nlohmann/json.hpp"
@@ -37,7 +38,7 @@ namespace milvus::query {
 
 // For sealed segment with vector index
 CachedSearchIterator::CachedSearchIterator(
-    const milvus::index::VectorIndex& index,
+    const milvus::index::IVectorReader& reader,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
     const BitsetView& bitset,
@@ -63,12 +64,13 @@ CachedSearchIterator::CachedSearchIterator(
     }
     Init(search_info);
 
-    auto search_json = index.PrepareSearchParams(search_info);
+    auto search_params = milvus::exec::ProjectVectorSearchParams(search_info);
+    auto search_json = reader.PrepareSearchParams(search_params);
     index::CheckAndUpdateKnowhereRangeSearchParam(
-        search_info, batch_size_, index.GetMetricType(), search_json);
+        search_params, batch_size_, reader.Metric(), search_json);
 
     auto expected_iterators =
-        index.VectorIterators(query_ds, search_json, bitset, op_context);
+        reader.Iterators(query_ds, search_json, bitset, op_context);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
@@ -157,13 +159,23 @@ CachedSearchIterator::CachedSearchIterator(
     nq_ = query_ds.num_queries;
     Init(search_info);
 
-    // VECTOR_ARRAY element-level search: growing stores each row as a
-    // separate VectorArray with its own backing allocation, so we must
-    // flatten per-chunk into a contiguous buffer that knowhere can read.
-    // array_offsets_ != nullptr is the element-level signal (multi-search-
+    // VECTOR_ARRAY element-level search: growing stores one VectorArray row
+    // (or mmap VectorArrayView) per chunk slot, so we must flatten each chunk
+    // into a contiguous buffer that Knowhere can read.
+    // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
-    const bool is_element_level = search_info.array_offsets_ != nullptr;
+    const bool is_element_level =
+        search_info.struct_element_offsets_ != nullptr;
+    const auto* vector_array_column =
+        is_element_level
+            ? dynamic_cast<const segcore::ConcurrentVector<VectorArray>*>(
+                  vec_data)
+            : nullptr;
+    AssertInfo(!is_element_level || vector_array_column != nullptr,
+               "element-level growing iterator requires VECTOR_ARRAY storage");
+    const bool mmap_vector_array =
+        vector_array_column != nullptr && vector_array_column->is_mmap();
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
@@ -209,25 +221,23 @@ CachedSearchIterator::CachedSearchIterator(
             if (!is_element_level) {
                 raw_data = {range_begin, query_ds.dim, chunk_size, range_data};
             } else {
-                auto va_ptr = reinterpret_cast<const VectorArray*>(range_data);
-                int64_t total_bytes = 0;
-                int64_t total_elements = 0;
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    total_bytes += va_ptr[i].byte_size();
-                    total_elements += va_ptr[i].physical_length();
-                }
-                auto buf = std::make_unique<uint8_t[]>(total_bytes);
-                auto* ptr = buf.get();
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    milvus::fastmem::FastMemcpy(
-                        ptr, va_ptr[i].data(), va_ptr[i].byte_size());
-                    ptr += va_ptr[i].byte_size();
-                }
-                const void* flat_data = buf.get();
-                chunk_buffers_.emplace_back(std::move(buf));
-                raw_data = {
-                    element_offset, query_ds.dim, total_elements, flat_data};
-                element_offset += total_elements;
+                auto flat =
+                    mmap_vector_array
+                        ? FlattenVectorArrayRows(
+                              static_cast<const VectorArrayView*>(range_data),
+                              chunk_size,
+                              false)
+                        : FlattenVectorArrayRows(
+                              static_cast<const VectorArray*>(range_data),
+                              chunk_size,
+                              false);
+                const void* flat_data = flat.payload.get();
+                raw_data = {element_offset,
+                            query_ds.dim,
+                            flat.element_count,
+                            flat_data};
+                element_offset += flat.element_count;
+                chunk_buffers_.emplace_back(std::move(flat.payload));
             }
             AppendChunkIterators(query_ds,
                                  search_info,
@@ -276,13 +286,13 @@ CachedSearchIterator::CachedSearchIterator(
             const auto& offset_mapping = column->GetOffsetMapping();
             const bool has_offset_mapping =
                 offset_mapping.IsEnabled() &&
-                search_info.array_offsets_ == nullptr;
+                search_info.struct_element_offsets_ == nullptr;
             if (has_offset_mapping) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
-            if (search_info.array_offsets_ != nullptr) {
+            if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
                     column->VectorArrayOffsets(nullptr, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];

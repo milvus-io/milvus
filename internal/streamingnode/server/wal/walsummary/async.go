@@ -170,6 +170,7 @@ func (m *Manager) setTerminalErrorLocked(err error) bool {
 	}
 	m.terminalErr = err
 	m.notifyReadersLocked()
+	m.notifyAllTransformsLocked()
 	return true
 }
 

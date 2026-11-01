@@ -233,6 +233,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
          schema_proto.struct_array_fields()) {
+        schema->struct_field_ids_[child.name()] = FieldId(child.fieldid());
         for (const auto& sub_field : child.fields()) {
             auto field = sub_field;
             field.set_nullable(field.nullable() || child.nullable());
@@ -309,19 +310,7 @@ Schema::ConvertToArrowSchema() const {
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
         const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
-        } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
-        }
+        auto arrow_data_type = GetArrowDataType(meta);
 
         auto arrow_field = std::make_shared<arrow::Field>(
             meta.get_name().get(),
@@ -347,11 +336,6 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
         const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
         std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
         auto data_type = meta.get_data_type();
         auto is_nullable_dense_vector =
@@ -362,11 +346,8 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
             arrow_data_type = arrow::binary();
         } else if (text_lob_as_binary && data_type == DataType::TEXT) {
             arrow_data_type = arrow::binary();
-        } else if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
         } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
+            arrow_data_type = GetArrowDataType(meta);
         }
 
         auto metadata = is_nullable_dense_vector
@@ -487,22 +468,32 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
 
 FieldId
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
+    return ResolveColumnFieldIds(column_name).front();
+}
+
+std::vector<FieldId>
+Schema::ResolveColumnFieldIds(const std::string& column_name) const {
     if (is_external_collection()) {
         if (is_milvus_table_external_collection()) {
             if (auto field_id = ParseFieldIdColumnName(column_name);
                 field_id.has_value() && fields_.count(field_id.value())) {
-                return field_id.value();
+                return {field_id.value()};
             }
         }
-        for (const auto& [fid, meta] : fields_) {
+        std::vector<FieldId> field_ids;
+        for (const auto fid : field_ids_) {
+            const auto& meta = fields_.at(fid);
             if (meta.is_external_field() &&
                 meta.get_external_field() == column_name) {
-                return fid;
+                field_ids.emplace_back(fid);
             }
+        }
+        if (!field_ids.empty()) {
+            return field_ids;
         }
         if (auto field_id = ParseFieldIdColumnName(column_name);
             field_id.has_value()) {
-            return field_id.value();
+            return {field_id.value()};
         }
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "external column '{}' not found in schema",
@@ -510,7 +501,7 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
     }
     if (auto field_id = ParseFieldIdColumnName(column_name);
         field_id.has_value()) {
-        return field_id.value();
+        return {field_id.value()};
     }
     ThrowInfo(ErrorCode::DataFormatBroken,
               "column '{}' is not a valid field id",

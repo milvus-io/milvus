@@ -66,7 +66,10 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 
 // ValidateArrayOfVectorMetricType validates both element-level and EmbList metrics
 // against the ArrayOfVector element type.
-func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, metricType string) error {
+func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, elementNullable bool, metricType string) error {
+	if elementNullable && funcutil.SliceContain(EmbListMetrics, metricType) {
+		return merr.WrapErrParameterInvalidMsg("element-nullable vector array fields only support element-level metrics, metric type: %s", metricType)
+	}
 	if typeutil.IsDenseFloatVectorType(elementType) {
 		if !funcutil.SliceContain(ArrayOfVectorFloatMetrics, metricType) {
 			return merr.WrapErrParameterInvalidMsg("array of vector with float element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorFloatMetrics)
@@ -120,7 +123,8 @@ func CheckAutoIndexConfig() {
 	CheckAutoIndexHelper(autoIndexCfg.IndexParams.Key, autoIndexCfg.IndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.BinaryIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
 	CheckAutoIndexHelper(autoIndexCfg.BinaryIndexParams.Key, autoIndexCfg.DeduplicateIndexParams.GetAsJSONMap(), schemapb.DataType_BinaryVector)
-	CheckAutoIndexHelper(autoIndexCfg.SparseIndexParams.Key, autoIndexCfg.SparseIndexParams.GetAsJSONMap(), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseIPIndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_Unknown), schemapb.DataType_SparseFloatVector)
+	CheckAutoIndexHelper(autoIndexCfg.SparseBM25IndexParams.Key, GetSparseAutoIndexParams("", schemapb.FunctionType_BM25), schemapb.DataType_SparseFloatVector)
 	CheckAutoIndexHelper(autoIndexCfg.LargeTopKIndexParams.Key, autoIndexCfg.LargeTopKIndexParams.GetAsJSONMap(), schemapb.DataType_FloatVector)
 }
 

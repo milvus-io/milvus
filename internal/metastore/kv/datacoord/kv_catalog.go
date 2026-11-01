@@ -574,15 +574,6 @@ func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
 	return nil
 }
 
-func (kc *Catalog) ShouldDropChannel(ctx context.Context, channel string) bool {
-	key := buildChannelRemovePath(channel)
-	v, err := kc.MetaKv.Load(ctx, key)
-	if err != nil || v != RemoveFlagTomestone {
-		return false
-	}
-	return true
-}
-
 // ChannelExists reports whether the channel marker is active. Missing keys are
 // treated as absent; other lookup failures are returned to the caller.
 func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
@@ -597,11 +588,32 @@ func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, err
 	return v == NonRemoveFlagTomestone, nil
 }
 
-// DropChannel removes channel remove flag after whole procedure is finished
-func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
-	key := buildChannelRemovePath(channel)
-	mlog.Info(ctx, "removing channel remove path", mlog.String("channel", channel))
-	return kc.MetaKv.Remove(ctx, key)
+// RemoveDroppedChannelFlags deletes every channel removal flag whose value is
+// "removed". Older versions rewrote the flag to "removed" when a channel was
+// dropped and never deleted it. A missing flag reads the same as "removed" for
+// every reader, including older versions after a downgrade, so the delete
+// changes no behavior.
+func (kc *Catalog) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {
+	keys := make([]string, 0)
+	applyFn := func(key []byte, value []byte) error {
+		if string(value) != RemoveFlagTomestone {
+			return nil
+		}
+		ss := strings.Split(string(key), "/")
+		keys = append(keys, buildChannelRemovePath(ss[len(ss)-1]))
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, ChannelRemovePrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return 0, err
+	}
+	removeFn := func(partialKeys []string) error {
+		return kc.MetaKv.MultiRemove(ctx, partialKeys)
+	}
+	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if err := etcd.RemoveByBatchWithLimit(keys, maxTxnNum, removeFn); err != nil {
+		return 0, err
+	}
+	return len(keys), nil
 }
 
 func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
@@ -880,6 +892,40 @@ func (kc *Catalog) DropPreImportTask(ctx context.Context, taskID int64) error {
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error {
+	key := buildPreImportTaskV3Key(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error) {
+	tasks := make([]*datapb.PreImportTaskV3, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.PreImportTaskV3{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskV3Prefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) DropPreImportTaskV3(ctx context.Context, taskID int64) error {
+	key := buildPreImportTaskV3Key(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error {
 	key := buildImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
@@ -912,6 +958,58 @@ func (kc *Catalog) ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2,
 func (kc *Catalog) DropImportTask(ctx context.Context, taskID int64) error {
 	key := buildImportTaskKey(taskID)
 	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error {
+	key := buildReshardTaskKey(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error) {
+	tasks := make([]*datapb.ReshardTask, 0)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ReshardTaskPrefix+"/", kc.paginationSize, func(_ []byte, value []byte) error {
+		task := &datapb.ReshardTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	})
+	return tasks, err
+}
+
+func (kc *Catalog) DropReshardTask(ctx context.Context, taskID int64) error {
+	return kc.MetaKv.Remove(ctx, buildReshardTaskKey(taskID))
+}
+
+func (kc *Catalog) SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error {
+	key := buildImportTaskV3Key(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error) {
+	tasks := make([]*datapb.ImportTaskV3, 0)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskV3Prefix+"/", kc.paginationSize, func(_ []byte, value []byte) error {
+		task := &datapb.ImportTaskV3{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	})
+	return tasks, err
+}
+
+func (kc *Catalog) DropImportTaskV3(ctx context.Context, taskID int64) error {
+	return kc.MetaKv.Remove(ctx, buildImportTaskV3Key(taskID))
 }
 
 func (kc *Catalog) SaveCopySegmentJob(ctx context.Context, job *datapb.CopySegmentJob) error {

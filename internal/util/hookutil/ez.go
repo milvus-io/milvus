@@ -50,7 +50,7 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 
 	ezID, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, "", merr.Wrap(err, "invalid ezID in context")
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid ezID in EZ context: %s", parts[0])
 	}
 
 	return ezID, parts[1], nil
@@ -94,7 +94,13 @@ func CreateLocalEZ(ezID int64, encryptionKey string) error {
 		CipherConfigUnsafeEZK: encryptionKey,
 	}
 
-	return cipher.Init(config)
+	if err := cipher.Init(config); err != nil {
+		// The EZ id/key come from the request's plugin context; a failed local
+		// KMS init is a deterministic request/config rejection, not an
+		// unclassified worker error.
+		return merr.WrapErrParameterInvalidMsg("create local encryption zone %d: %v", ezID, err)
+	}
+	return nil
 }
 
 func RemoveEZ(ezID int64) error {

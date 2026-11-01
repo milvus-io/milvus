@@ -33,7 +33,8 @@ LoonFFIResult loon_milvus_table_create_manifest_from_segment_manifests(
     const char* external_source,
     const LoonProperties* properties,
     int has_external_primary_key,
-    char** out_manifest_path);
+    int64_t* out_committed_version,
+    int64_t* out_manifest_size);
 */
 import "C"
 
@@ -85,11 +86,14 @@ type manifestColumnGroup struct {
 	Format    string
 }
 
+// FragmentIdentity identifies a fragment by its file and row range.
 // External-table refresh assumes existing file ranges are immutable; overwrite
 // is unsupported. Properties are preserved for reads, but are deliberately not
-// hashed into fragment identity.
-func fragmentIdentity(f Fragment) string {
-	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+// hashed into fragment identity. A milvus-table fragment's file is a source
+// segment manifest path, which is identified by its revision rather than its
+// spelling (see ManifestPathKey).
+func FragmentIdentity(f Fragment) string {
+	return fmt.Sprintf("%s:%d:%d", ManifestPathKey(f.FilePath), f.StartRow, f.EndRow)
 }
 
 func sameFragmentSet(a, b []Fragment) bool {
@@ -99,10 +103,10 @@ func sameFragmentSet(a, b []Fragment) bool {
 
 	seen := make(map[string]int, len(a))
 	for _, fragment := range a {
-		seen[fragmentIdentity(fragment)]++
+		seen[FragmentIdentity(fragment)]++
 	}
 	for _, fragment := range b {
-		identity := fragmentIdentity(fragment)
+		identity := FragmentIdentity(fragment)
 		if seen[identity] == 0 {
 			return false
 		}
@@ -117,7 +121,7 @@ func manifestColumnGroupsToFragments(groups []manifestColumnGroup) []Fragment {
 
 	for _, group := range groups {
 		for _, fragment := range group.Fragments {
-			identity := fragmentIdentity(fragment)
+			identity := FragmentIdentity(fragment)
 			if _, ok := seen[identity]; ok {
 				continue
 			}
@@ -187,33 +191,25 @@ func CreateManifestForSegment(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	// Convert base path to C string
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	// Begin transaction (read_version=0 for earliest, retry_limit=10)
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(0), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return "", merr.WrapErrStorage(err, "loon_transaction_begin failed")
+	// Begin transaction at the earliest version
+	transactionHandle, err := openTransaction(ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
+		C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
+		return "", merr.WrapErrStorage(err, "loon_transaction_open failed")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
 
 	// Append files to transaction
-	result = C.loon_transaction_append_files(transactionHandle, columnGroups)
+	result := C.loon_transaction_append_files(transactionHandle, columnGroups)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_append_files failed")
 	}
 
-	// Commit transaction
-	var committedVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &committedVersion)
-	if err := HandleLoonFFIResult(result); err != nil {
+	manifestPath, err := commitTransaction(transactionHandle, basePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_commit failed")
 	}
-
-	// Return manifest path using the helper function
-	return MarshalManifestPath(basePath, int64(committedVersion)), nil
+	return manifestPath, nil
 }
 
 // CreateMilvusTableManifestFromSegmentManifests builds a target external
@@ -294,7 +290,7 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cColumnsPtr = &cColumns[0]
 	}
 
-	var outManifestPath *C.char
+	var committedVersion, manifestSize C.int64_t
 	hasExternalPrimaryKey := C.int(0)
 	if extfs.MilvusTablePKMode.usesExternalPrimaryKey() {
 		hasExternalPrimaryKey = C.int(1)
@@ -309,17 +305,13 @@ func CreateMilvusTableManifestFromSegmentManifests(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
-		&outManifestPath,
+		&committedVersion,
+		&manifestSize,
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-	if outManifestPath == nil {
-		return "", merr.WrapErrServiceInternalMsg("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
-	}
-	manifestPath := C.GoString(outManifestPath)
-	C.loon_free_cstr(outManifestPath)
-	return manifestPath, nil
+	return CommittedManifestPath(basePath, int64(committedVersion), int64(manifestSize), storageConfig.GetStorageType()), nil
 }
 
 // createColumnGroups creates storage-owned column groups, including all file properties.
@@ -634,34 +626,17 @@ func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]manifestColumnGroup, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to parse manifest path")
-	}
-
-	manifestFilePath := manifestObjectPath(basePath, version)
-
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to create properties")
-	}
-	defer C.loon_properties_free(cProperties)
-
-	cManifestFilePath := C.CString(manifestFilePath)
-	defer C.free(unsafe.Pointer(cManifestFilePath))
-
-	var manifest *C.LoonManifest
-	result := C.loon_exttable_read_manifest(cManifestFilePath, cProperties, &manifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.Wrap(err, "loon_exttable_read_manifest failed")
+		return nil, merr.Wrap(err, "failed to read manifest")
 	}
 	if manifest == nil {
-		return nil, merr.WrapErrServiceInternalMsg("loon_exttable_read_manifest returned nil manifest")
+		return nil, merr.WrapErrServiceInternalMsg("reading manifest %s returned nil", manifestPath)
 	}
 	defer C.loon_manifest_destroy(manifest)
 
 	cgroups := &manifest.column_groups
-	manifestDeltalogs, err := deltaLogsFromManifest(manifest)
+	manifestDeltalogs, err := deltaLogsFromManifest(manifestPath, manifest)
 	if err != nil {
 		return nil, merr.Wrapf(err, "read delta logs from manifest %s", manifestPath)
 	}
@@ -763,7 +738,33 @@ func readColumnGroupsFromManifest(
 	return groups, nil
 }
 
-func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
+// ReadManifestColumnGroups returns the serializable column-group descriptors
+// of the manifest revision pointed to by manifestPath. It is the exported
+// counterpart of readColumnGroupsFromManifest, used for pre-commit descriptor
+// comparison — e.g. detecting an already-applied backfill delta before a
+// replay would re-add a column that milvus-storage rejects on existing columns.
+func ReadManifestColumnGroups(manifestPath string, storageConfig *indexpb.StorageConfig) ([]ColumnGroupEntry, error) {
+	groups, err := readColumnGroupsFromManifest(manifestPath, storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ColumnGroupEntry, 0, len(groups))
+	for _, g := range groups {
+		files := make([]ColumnGroupFileEntry, 0, len(g.Fragments))
+		for _, f := range g.Fragments {
+			files = append(files, ColumnGroupFileEntry{
+				Path:       f.FilePath,
+				StartIndex: f.StartRow,
+				EndIndex:   f.EndRow,
+				Properties: f.Properties,
+			})
+		}
+		out = append(out, ColumnGroupEntry{Columns: g.Columns, Format: g.Format, Files: files})
+	}
+	return out, nil
+}
+
+func deltaLogsFromManifest(manifestPath string, manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
 	if manifest == nil {
 		return nil, nil
 	}
@@ -772,18 +773,30 @@ func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, err
 		return nil, nil
 	}
 	if manifest.delta_logs.delta_log_paths == nil || manifest.delta_logs.delta_log_num_entries == nil {
-		return nil, merr.WrapErrServiceInternalMsg("manifest has %d delta logs but missing delta log paths or entry counts", numDeltaLogs)
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"manifest %s has %d delta logs but is missing delta log paths or entry counts",
+			manifestPath,
+			numDeltaLogs,
+		)
 	}
 	cPaths := unsafe.Slice(manifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(manifest.delta_logs.delta_log_num_entries, numDeltaLogs)
 	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
 	for i, cPath := range cPaths {
-		if cPath == nil {
+		entriesNum := int64(cNumEntries[i])
+		path := ""
+		if cPath != nil {
+			path = C.GoString(cPath)
+		}
+		if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
 			continue
 		}
 		binlogs = append(binlogs, &datapb.Binlog{
-			LogPath:    C.GoString(cPath),
-			EntriesNum: int64(cNumEntries[i]),
+			LogPath:    path,
+			EntriesNum: entriesNum,
 		})
 	}
 	if len(binlogs) == 0 {
@@ -838,11 +851,6 @@ func AppendSegmentManifestColumns(
 		return oldManifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(oldManifestPath)
-	if err != nil {
-		return "", merr.Wrap(err, "failed to parse manifest path")
-	}
-
 	columnGroups, err := createColumnGroups(columns, format, fragments)
 	if err != nil {
 		return "", merr.Wrap(err, "failed to create column groups")
@@ -861,7 +869,7 @@ func AppendSegmentManifestColumns(
 		return "", merr.WrapErrServiceInternalMsg("column_group_array is nil but num_of_column_groups is %d", columnGroups.num_of_column_groups)
 	}
 
-	return CommitManifestUpdates(basePath, version, storageConfig, &ManifestUpdates{
+	return CommitManifestUpdates(oldManifestPath, storageConfig, &ManifestUpdates{
 		NewFiles: newFiles,
 	})
 }

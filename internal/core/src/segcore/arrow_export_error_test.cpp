@@ -17,9 +17,11 @@
 #include <arrow/api.h>
 #include <arrow/c/abi.h>
 #include <arrow/c/bridge.h>
+#include <arrow/io/memory.h>
 #include <folly/CancellationToken.h>
 #include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
+#include <parquet/arrow/writer.h>
 
 #include <cstdlib>
 #include <functional>
@@ -32,12 +34,14 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/Schema.h"
 #include "pb/cgo_msg.pb.h"
 #include "pb/plan.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/arrow_field_utils.h"
 #include "segcore/retrieve_result_export_c.h"
 #include "segcore/search_result_export_c.h"
@@ -46,6 +50,10 @@ namespace {
 
 using namespace milvus;
 using namespace milvus::segcore;
+
+struct ArrowTakeAccessor : ChunkedSegmentSealedImpl {
+    using ChunkedSegmentSealedImpl::ArrowToDataArray;
+};
 
 void
 CheckFailure(CStatus status, ErrorCode expected) {
@@ -221,6 +229,159 @@ TEST(ArrowExportError, UnsupportedPayloadKeepsCapabilityCode) {
     auto result = FieldDataToArrow("value", data, 0);
     ASSERT_TRUE(result.status().IsNotImplemented());
     CheckFailure(ArrowExportFailure(result.status()), NotImplemented);
+}
+
+TEST(ArrowExportNativeList, ScalarProtoArrowTakeRoundTrip) {
+    FieldMeta meta(FieldName("nested"),
+                   FieldId(101),
+                   DataType::ARRAY,
+                   DataType::INT64,
+                   true,
+                   true,
+                   std::nullopt);
+    DataArray data;
+    data.set_type(proto::schema::DataType::Array);
+    auto* arrays = data.mutable_scalars()->mutable_array_data();
+    arrays->set_element_type(proto::schema::Int64);
+    auto* row = arrays->add_data();
+    row->mutable_long_data()->add_data(9);
+    row->mutable_long_data()->add_data(0);
+    row->add_valid_data(true);
+    row->add_valid_data(false);
+    auto converted = FieldDataToArrow("nested", data, 1, false, nullptr, &meta);
+    ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+    ASSERT_TRUE(converted->second->type()->Equals(GetArrowDataType(meta)));
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(converted->second);
+    ASSERT_NE(list, nullptr);
+    auto rows =
+        ArrowListToScalarFieldProto(*list, meta.get_array_type_schema());
+    ASSERT_EQ(rows.size(), 1);
+    EXPECT_EQ(rows[0].SerializeAsString(), row->SerializeAsString());
+    auto taken =
+        ArrowTakeAccessor::ArrowToDataArray(converted->second, meta, {0}, 1);
+    ASSERT_NE(taken, nullptr);
+    EXPECT_EQ(taken->scalars().array_data().data(0).SerializeAsString(),
+              row->SerializeAsString());
+}
+
+TEST(ArrowExportNativeList, NestedNullableListRoundTrip) {
+    proto::schema::TypeSchema type;
+    type.set_nullable(true);
+    auto* nested = type.mutable_array_element();
+    nested->set_nullable(true);
+    nested->mutable_array_element()->set_leaf_type(proto::schema::Int64);
+    nested->mutable_array_element()->set_nullable(true);
+    FieldMeta meta(FieldName("nested"),
+                   FieldId(103),
+                   DataType::ARRAY,
+                   DataType::ARRAY,
+                   true,
+                   true,
+                   std::nullopt,
+                   "",
+                   "raw",
+                   type);
+    DataArray data;
+    data.set_type(proto::schema::DataType::Array);
+    auto* arrays = data.mutable_scalars()->mutable_array_data();
+    arrays->set_element_type(proto::schema::Array);
+    auto* row = arrays->add_data();
+    auto* children = row->mutable_array_data();
+    children->set_element_type(proto::schema::Int64);
+    auto* first = children->add_data();
+    first->mutable_long_data()->add_data(5);
+    first->mutable_long_data()->add_data(0);
+    first->add_valid_data(true);
+    first->add_valid_data(false);
+    children->add_data()->mutable_long_data();
+    row->add_valid_data(true);
+    row->add_valid_data(false);
+    auto converted = FieldDataToArrow("nested", data, 1, false, nullptr, &meta);
+    ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(converted->second);
+    ASSERT_NE(list, nullptr);
+    auto inner = std::dynamic_pointer_cast<arrow::ListArray>(list->values());
+    ASSERT_NE(inner, nullptr);
+    EXPECT_TRUE(inner->IsNull(1));
+    EXPECT_EQ(inner->value_length(1), 0);
+    auto output = arrow::io::BufferOutputStream::Create();
+    ASSERT_TRUE(output.ok()) << output.status().ToString();
+    auto table = arrow::Table::Make(
+        arrow::schema(
+            {arrow::field("nested", converted->second->type(), true)}),
+        {converted->second});
+    auto parquet_status = parquet::arrow::WriteTable(
+        *table, arrow::default_memory_pool(), *output, 1);
+    EXPECT_TRUE(parquet_status.ok()) << parquet_status.ToString();
+    auto taken =
+        ArrowTakeAccessor::ArrowToDataArray(converted->second, meta, {0}, 1);
+    ASSERT_NE(taken, nullptr);
+    EXPECT_EQ(taken->scalars().array_data().data(0).SerializeAsString(),
+              row->SerializeAsString());
+}
+
+TEST(ArrowExportNativeList, VectorProtoArrowTakeRoundTrip) {
+    FieldMeta meta(FieldName("embeddings"),
+                   FieldId(102),
+                   DataType::VECTOR_ARRAY,
+                   DataType::VECTOR_FLOAT,
+                   2,
+                   std::nullopt,
+                   true,
+                   true);
+    DataArray data;
+    data.set_type(proto::schema::DataType::ArrayOfVector);
+    auto* vectors = data.mutable_vectors();
+    vectors->set_dim(2);
+    auto* array = vectors->mutable_vector_array();
+    array->set_element_type(proto::schema::FloatVector);
+    auto* row = array->add_data();
+    row->set_dim(2);
+    row->add_valid_data(false);
+    row->add_valid_data(true);
+    row->mutable_float_vector()->add_data(1.0F);
+    row->mutable_float_vector()->add_data(2.0F);
+    auto converted =
+        FieldDataToArrow("embeddings", data, 1, false, nullptr, &meta);
+    ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+    ASSERT_TRUE(converted->second->type()->Equals(GetArrowDataType(meta)));
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(converted->second);
+    ASSERT_NE(list, nullptr);
+    EXPECT_TRUE(list->values()->IsNull(0));
+    EXPECT_TRUE(list->values()->IsValid(1));
+    auto taken =
+        ArrowTakeAccessor::ArrowToDataArray(converted->second, meta, {0}, 1);
+    ASSERT_NE(taken, nullptr);
+    EXPECT_EQ(taken->vectors().vector_array().data(0).SerializeAsString(),
+              row->SerializeAsString());
+}
+
+TEST(ArrowExportNativeList, LegacyFixedBinaryVectorTake) {
+    FieldMeta meta(FieldName("legacy_embeddings"),
+                   FieldId(104),
+                   DataType::VECTOR_ARRAY,
+                   DataType::VECTOR_FLOAT,
+                   2,
+                   std::nullopt,
+                   false,
+                   false);
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+            arrow::fixed_size_binary(2 * sizeof(float))));
+    auto* values =
+        static_cast<arrow::FixedSizeBinaryBuilder*>(builder.value_builder());
+    const float vector[] = {4.0F, 5.0F};
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(vector)).ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    auto taken = ArrowTakeAccessor::ArrowToDataArray(array, meta, {0}, 1);
+    ASSERT_NE(taken, nullptr);
+    const auto& row = taken->vectors().vector_array().data(0);
+    EXPECT_EQ(row.valid_data_size(), 0);
+    ASSERT_EQ(row.float_vector().data_size(), 2);
+    EXPECT_FLOAT_EQ(row.float_vector().data(0), 4.0F);
 }
 
 TEST(ArrowExportError, InternalContractsAreNotPersistedDataCorruption) {

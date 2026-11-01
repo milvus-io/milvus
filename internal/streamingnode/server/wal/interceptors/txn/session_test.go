@@ -28,6 +28,59 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestFlushAbortsRecoveredReplicaSessionsByVChannel(t *testing.T) {
+	resource.InitForTest(t)
+	builders := make(map[message.TxnID]*message.ImmutableTxnMessageBuilder)
+	for id, vchannel := range []string{"v1", "v2"} {
+		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(vchannel).
+			WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().
+			WithTxnContext(message.TxnContext{TxnID: message.TxnID(id + 1), Keepalive: message.TxnKeepaliveInfinite}).
+			WithTimeTick(1).WithLastConfirmedUseMessageID().
+			WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 10, VChannel: vchannel}).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		builders[message.TxnID(id+1)] = message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
+	}
+	m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+	cleaned := make(map[message.TxnID]int)
+	for id := range builders {
+		session, err := m.GetSessionOfTxn(id)
+		require.NoError(t, err)
+		session.RegisterCleanup(func() { cleaned[id]++ }, 1)
+	}
+	first := m.sessions[1]
+	m.FailTxnAtVChannel("v1")
+	require.Equal(t, message.TxnStateRollbacked, first.State())
+	require.True(t, first.IsExpiredOrDone(1), "LastConfirmedMessageID must be able to pass the aborted infinite-lease txn")
+	require.Equal(t, 1, cleaned[1])
+	require.Zero(t, cleaned[2])
+	require.Len(t, m.sessions, 1)
+	select {
+	case <-m.RecoverDone():
+		t.Fatal("the other VChannel still has a recovered transaction")
+	default:
+	}
+	closing := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { closing <- m.GracefulClose(ctx) }()
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return m.closed != nil
+	}, time.Second, time.Millisecond)
+	m.FailTxnAtVChannel("")
+	require.Equal(t, 1, cleaned[2])
+	require.Empty(t, m.sessions)
+	select {
+	case <-m.RecoverDone():
+	default:
+		t.Fatal("flush must release the recovered-segment flush barrier")
+	}
+	m.FailTxnAtVChannel("")
+	require.Equal(t, map[message.TxnID]int{1: 1, 2: 1}, cleaned)
+	require.NoError(t, <-closing, "flush must wake a concurrently closing manager")
+}
+
 func TestSession(t *testing.T) {
 	resource.InitForTest(t)
 	ctx := context.Background()
@@ -57,10 +110,10 @@ func TestSession(t *testing.T) {
 	assert.NoError(t, err)
 	err = session.AddNewMessage(ctx, 0)
 	assert.NoError(t, err)
-	session.AddNewMessageDoneAndKeepalive(0)
+	session.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 	// Test Commit.
-	err = session.RequestCommitAndWait(ctx, 0)
+	err = session.RequestCommitAndWait(ctx, 0, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, message.TxnStateOnCommit, session.state)
 	session.CommitDone()
@@ -74,12 +127,12 @@ func TestSession(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
-	err = session.RequestCommitAndWait(ctx, 0)
+	err = session.RequestCommitAndWait(ctx, 0, 0)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 
 	// Test Commit Expired
-	err = session.RequestCommitAndWait(ctx, expiredTs)
+	err = session.RequestCommitAndWait(ctx, expiredTs, 0)
 	assert.Error(t, err)
 	serr = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, serr.Code)
@@ -123,7 +176,7 @@ func TestManager(t *testing.T) {
 			}, 0)
 			switch i % 3 {
 			case 0:
-				err := session.RequestCommitAndWait(context.Background(), 0)
+				err := session.RequestCommitAndWait(context.Background(), 0, 0)
 				session.CommitDone()
 				assert.NoError(t, err)
 			case 1:
@@ -191,13 +244,23 @@ func TestManagerRecoverAndFailAll(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(1)))
 
 	m := NewTxnManager(types.PChannelInfo{Name: "test"}, builders)
+	insertOnly, err := m.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	require.True(t, insertOnly.IsInsertOnly(), "replayed Insert bodies preserve commit classification")
+	empty, err := m.GetSessionOfTxn(2)
+	require.NoError(t, err)
+	require.False(t, empty.IsInsertOnly())
 	select {
 	case <-m.RecoverDone():
 		t.Errorf("txn manager should not be recovered")
 	case <-time.After(1 * time.Millisecond):
 	}
 
+	first := m.sessions[1]
 	m.FailTxnAtVChannel("v1")
+	require.Equal(t, message.TxnStateRollbacked, first.State())
+	require.True(t, first.IsExpiredOrDone(beginMsg1.TimeTick()), "force-fail must resolve the session without waiting for its lease")
+	require.Equal(t, message.TxnStateInFlight, m.sessions[2].State())
 	select {
 	case <-m.RecoverDone():
 		t.Errorf("txn manager should not be recovered")
@@ -224,7 +287,7 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 		cleanupCalled.Inc()
 	}, 0)
 
-	err := session.RequestCommitAndWait(context.Background(), 11)
+	err := session.RequestCommitAndWait(context.Background(), 11, 0)
 	require.NoError(t, err)
 
 	session.RejectCommit()
@@ -238,7 +301,38 @@ func TestTxnSessionRejectCommitAdmission(t *testing.T) {
 	require.Equal(t, int32(1), cleanupCalled.Load())
 }
 
-func TestRollbackAllInFlightTransactions(t *testing.T) {
+func TestSuccessfulBodiesDetermineInsertOnlyCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bodies     []message.MessageType
+		insertOnly bool
+	}{
+		{"insert-only", []message.MessageType{message.MessageTypeInsert, message.MessageTypeInsert}, true},
+		{"insert-delete", []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete}, false},
+		{"delete-insert", []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, false},
+		{"delete-only", []message.MessageType{message.MessageTypeDelete}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics := metricsutil.NewTxnMetrics("commit-classification-test")
+			defer metrics.Close()
+			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
+			defer session.Cleanup()
+			for _, typ := range tc.bodies {
+				require.NoError(t, session.AddNewMessage(t.Context(), 11))
+				session.AddNewMessageDoneAndKeepalive(11, typ)
+			}
+			// A failed append must not change the committed body classification.
+			require.NoError(t, session.AddNewMessage(t.Context(), 12))
+			session.AddNewMessageFail()
+			require.NoError(t, session.RequestCommitAndWait(t.Context(), 13, 0))
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly())
+			session.CommitDone()
+			require.Equal(t, tc.insertOnly, session.IsInsertOnly(), "ACK projection retains classification after session cleanup")
+		})
+	}
+}
+
+func TestFailAllTransactions(t *testing.T) {
 	resource.InitForTest(t)
 
 	t.Run("RollbackWithNoSessions", func(t *testing.T) {
@@ -246,7 +340,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		<-m.RecoverDone()
 
 		// Should not panic and handle empty case
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 	})
 
 	t.Run("RollbackWithActiveSessions", func(t *testing.T) {
@@ -271,7 +365,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		m.mu.Unlock()
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()
@@ -302,7 +396,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		session2.RegisterCleanup(func() {
 			cleanupCalled.Inc()
 		}, 0)
-		err = session2.RequestCommitAndWait(context.Background(), 0)
+		err = session2.RequestCommitAndWait(context.Background(), 0, 0)
 		assert.NoError(t, err)
 		session2.CommitDone()
 
@@ -314,10 +408,14 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		}, 0)
 		err = session3.AddNewMessage(context.Background(), 0)
 		assert.NoError(t, err)
-		session3.AddNewMessageDoneAndKeepalive(0)
+		session3.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
+
+		require.Equal(t, message.TxnStateRollbacked, session1.State())
+		require.Equal(t, message.TxnStateCommitted, session2.State())
+		require.Equal(t, message.TxnStateRollbacked, session3.State())
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()
@@ -349,7 +447,7 @@ func TestRollbackAllInFlightTransactions(t *testing.T) {
 		}
 
 		// Rollback all in-flight transactions
-		m.RollbackAllInFlightTransactions()
+		m.FailTxnAtVChannel("")
 
 		// Verify all sessions are cleaned up
 		m.mu.Lock()

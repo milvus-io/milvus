@@ -28,10 +28,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -68,23 +70,21 @@ func (s *indexTaskSuite) SetupSuite() {
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-					},
-				},
-			},
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	segments.SetSegment(s.segID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			NumOfRows:     65535,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     65535,
+			Level:         datapb.SegmentLevel_L2,
 		},
+	})
+	s.mt = &meta{
+		segments:  segments,
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 }
@@ -175,7 +175,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 			IndexState:   commonpb.IndexState_Unissued,
 			NumRows:      65535,
 		})
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
 		cluster := session.NewMockCluster(s.T())
 		it.CreateTaskOnWorker(1, cluster)
 		// The task must reach a terminal state in meta, otherwise GC keeps the
@@ -188,7 +188,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 	})
 
 	s.Run("index not exist", func() {
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		s.mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = true
 		defer func() {
 			s.mt.indexMeta.indexes[s.collID][s.indexID].IsDeleted = false
@@ -249,6 +249,36 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 
 		it.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+	})
+
+	s.Run("unsupported v2 worker fails durably", func() {
+		job, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		original := model.CloneSegmentIndex(job)
+		defer s.mt.indexMeta.segmentBuildInfo.Add(original)
+		originalSegment := s.mt.segments.GetSegment(s.segID)
+		defer s.mt.segments.SetSegment(s.segID, originalSegment)
+		segment := originalSegment.Clone()
+		segment.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/2/1179", 1)
+		segment.StorageVersion = storage.StorageV3
+		s.mt.segments.SetSegment(s.segID, segment)
+		job.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+		s.mt.indexMeta.segmentBuildInfo.Add(job)
+		it.IndexStorePathVersion = job.IndexStorePathVersion
+		it.SetState(indexpb.JobState_JobStateInit, "")
+		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		s.mt.indexMeta.catalog = catalogMock
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(
+			merr.Wrapf(merr.ErrServiceUnimplemented, "worker does not support segment-rooted indexes"))
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
+		it.CreateTaskOnWorker(1, cluster)
+		s.Equal(commonpb.IndexState_Failed, it.IndexState)
+		stored, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		s.Equal(commonpb.IndexState_Failed, stored.IndexState)
+		s.Contains(stored.FailReason, "does not support segment-rooted indexes")
 	})
 }
 
@@ -323,29 +353,27 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			mt := &meta{
-				segments: &SegmentsInfo{
-					segments: map[int64]*SegmentInfo{
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     tc.numRows,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     tc.numRows,
-								Level:         datapb.SegmentLevel_L2,
-								Binlogs: []*datapb.FieldBinlog{{
-									FieldID: s.fieldID,
-									Binlogs: []*datapb.Binlog{{
-										EntriesNum: tc.numRows,
-										MemorySize: tc.numRows*4 + tc.innerVectorCount*elementBytes + 1,
-									}},
+				segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+					s.segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            s.segID,
+							CollectionID:  s.collID,
+							PartitionID:   s.partID,
+							InsertChannel: "ch1",
+							NumOfRows:     tc.numRows,
+							State:         commonpb.SegmentState_Flushed,
+							MaxRowNum:     tc.numRows,
+							Level:         datapb.SegmentLevel_L2,
+							Binlogs: []*datapb.FieldBinlog{{
+								FieldID: s.fieldID,
+								Binlogs: []*datapb.Binlog{{
+									EntriesNum: tc.numRows,
+									MemorySize: tc.numRows*4 + tc.innerVectorCount*elementBytes + 1,
 								}},
-							},
+							}},
 						},
 					},
-				},
+				}),
 				indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 			}
 			mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -402,22 +430,20 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     enoughRows,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     enoughRows,
-						Level:         datapb.SegmentLevel_L2,
-					},
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            s.segID,
+					CollectionID:  s.collID,
+					PartitionID:   s.partID,
+					InsertChannel: "ch1",
+					NumOfRows:     enoughRows,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     enoughRows,
+					Level:         datapb.SegmentLevel_L2,
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -466,23 +492,21 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     enoughRows,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     enoughRows,
-						Level:         datapb.SegmentLevel_L2,
-						SchemaVersion: 0,
-					},
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            s.segID,
+					CollectionID:  s.collID,
+					PartitionID:   s.partID,
+					InsertChannel: "ch1",
+					NumOfRows:     enoughRows,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     enoughRows,
+					Level:         datapb.SegmentLevel_L2,
+					SchemaVersion: 0,
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -531,27 +555,25 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     enoughRows,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     enoughRows,
-						Level:         datapb.SegmentLevel_L2,
-						SchemaVersion: 1,
-						// Recovered StorageV3 segment: empty in-memory Binlogs, but the
-						// manifest is authoritative and the worker build reads it.
-						StorageVersion: storage.StorageV3,
-						ManifestPath:   "files/manifest/1/1",
-					},
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:            s.segID,
+					CollectionID:  s.collID,
+					PartitionID:   s.partID,
+					InsertChannel: "ch1",
+					NumOfRows:     enoughRows,
+					State:         commonpb.SegmentState_Flushed,
+					MaxRowNum:     enoughRows,
+					Level:         datapb.SegmentLevel_L2,
+					SchemaVersion: 1,
+					// Recovered StorageV3 segment: empty in-memory Binlogs, but the
+					// manifest is authoritative and the worker build reads it.
+					StorageVersion: storage.StorageV3,
+					ManifestPath:   "files/manifest/1/1",
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
@@ -658,6 +680,99 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.False(estimate.emptyOnStaleSchema)
 }
 
+func (s *indexTaskSuite) TestFieldSchemaForIndexBuildFollowsStructNullability() {
+	for _, parentNullable := range []bool{false, true} {
+		child := &schemapb.FieldSchema{
+			FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+			Nullable: !parentNullable,
+		}
+		schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: parentNullable, Fields: []*schemapb.FieldSchema{child},
+		}}}
+		buildField := fieldSchemaForIndexBuild(schema, child)
+		s.Equal(parentNullable, buildField.GetNullable())
+		s.NotSame(child, buildField)
+		s.Equal(!parentNullable, child.GetNullable())
+
+		child.Nullable = parentNullable
+		s.Same(child, fieldSchemaForIndexBuild(schema, child))
+	}
+	plain := &schemapb.FieldSchema{FieldID: s.fieldID + 1, Nullable: false}
+	s.Same(plain, fieldSchemaForIndexBuild(&schemapb.CollectionSchema{}, plain))
+}
+
+func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: false, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, current, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, nil, schema, child))
+	// A non-element-nullable child cannot have been added by online schema
+	// evolution. Its missing binlog is not evidence of an empty added field.
+	child.ElementNullable = false
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	// A whole nullable struct added after the segment was written: its old
+	// rows are null struct rows, so the missing binlog is an empty field even
+	// for a child that is not element-nullable.
+	child.Nullable = true
+	schema.StructArrayFields[0].Nullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	child.ElementNullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+
+	// Top-level non-nullable fields retain the existing missing-binlog error.
+	topLevel := &schemapb.FieldSchema{FieldID: s.fieldID + 1, DataType: schemapb.DataType_ArrayOfVector}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+	topLevel.Nullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+}
+
+// A nullable struct added with AddCollectionStructField after a segment was
+// flushed: its ordinary (not element-nullable) ArrayOfVector child has no
+// binlog in that segment, and the index build must treat it as empty instead
+// of failing the task.
+func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForAddedNullableStruct() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: true, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	// The segment-version and missing-binlog conditions still apply.
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	_, err = estimateVectorArrayElementCountForIndexBuild(current, schema, child)
+	s.ErrorIs(err, errVectorArrayFieldBinlogNotFound)
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
+}
+
 func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
 	const dim = 128
 
@@ -667,6 +782,8 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	}
 	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
 	s.True(ok)
+	segIndex.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	base := fmt.Sprintf("/local/legacy/insert_log/%d/%d/%d", s.collID, s.partID, s.segID)
 
 	childField := &schemapb.FieldSchema{
 		Name:        "events[embedding]",
@@ -701,10 +818,12 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	req, err := it.prepareJobRequest(
 		context.Background(),
 		&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:           s.segID,
-			CollectionID: s.collID,
-			PartitionID:  s.partID,
-			NumOfRows:    4,
+			ID:             s.segID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			NumOfRows:      4,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(base, 7),
 		}},
 		segIndex,
 		[]*commonpb.KeyValuePair{
@@ -714,7 +833,9 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 		"HNSW",
 	)
 
-	s.NoError(err)
+	s.Require().NoError(err)
+	s.Equal(fmt.Sprintf("%s/_index/%d/%d", base, s.taskID, segIndex.IndexVersion+1), req.GetIndexFilePrefix())
+	s.Equal(segIndex.IndexStorePathVersion, req.GetIndexStorePathVersion())
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())
@@ -829,19 +950,17 @@ func (s *indexTaskSuite) TestQueryTaskOnWorker() {
 // state into the shared suite meta.
 func (s *indexTaskSuite) newInProgressTaskWithMeta(catalog *catalogmocks.DataCoordCatalog) (*indexBuildTask, *meta) {
 	mt := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           s.segID,
-						CollectionID: s.collID,
-						PartitionID:  s.partID,
-						NumOfRows:    65535,
-						State:        commonpb.SegmentState_Flushed,
-					},
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			s.segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           s.segID,
+					CollectionID: s.collID,
+					PartitionID:  s.partID,
+					NumOfRows:    65535,
+					State:        commonpb.SegmentState_Flushed,
 				},
 			},
-		},
+		}),
 		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	// Mutate the stored record in place: GetIndexJob returns a clone.
@@ -882,7 +1001,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorkerAbortsWhenTargetDropped() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		it, mt := s.newInProgressTaskWithMeta(catalog)
-		mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
@@ -897,7 +1016,7 @@ func (s *indexTaskSuite) TestQueryTaskOnWorkerAbortsWhenTargetDropped() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		it, mt := s.newInProgressTaskWithMeta(catalog)
-		delete(mt.segments.segments, s.segID)
+		mt.segments.DropSegment(s.segID)
 
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().DropIndex(int64(1), s.taskID).Return(nil)
@@ -1034,8 +1153,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
 		return newIndexBuildTask(t, 1, s.mt, newHandler(), cm, newIndexEngineVersionManager())
 	}
 
-	s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
-	defer func() { s.mt.segments.segments[s.segID].Stats = nil }()
+	s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
+	defer func() { s.mt.segments.GetSegment(s.segID).Stats = nil }()
 
 	cases := []struct {
 		name       string
@@ -1064,7 +1183,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
 	}
 	for _, tc := range cases {
 		s.Run(tc.name, func() {
-			s.mt.segments.segments[s.segID].Stats = &datapb.Statistics{
+			s.mt.segments.GetSegment(s.segID).Stats = &datapb.Statistics{
 				NullCounts: tc.nullCounts,
 			}
 			catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
@@ -1127,4 +1246,89 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestArraySortSoftwareGate() {
+	resetJSONVersionTargets(s.T())
+	gate := &Params.DataCoordCfg.EnableArraySortIndex
+	previousGate := gate.GetValue()
+	s.T().Cleanup(func() { s.NoError(Params.Save(gate.Key, previousGate)) })
+
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_FloatVector} {
+		for _, savedGate := range []string{"", "true", "false"} {
+			s.Run(dataType.String()+"/saved="+savedGate, func() {
+				catalog := catalogmocks.NewDataCoordCatalog(s.T())
+				mt := &meta{
+					indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+				}
+				segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+				s.Require().True(ok)
+				indexType := "HYBRID"
+				if dataType == schemapb.DataType_FloatVector {
+					indexType = "FLAT"
+				}
+				definition := mt.indexMeta.indexes[s.collID][s.indexID]
+				definition.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}}
+				definition.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
+				if savedGate != "" && dataType != schemapb.DataType_FloatVector {
+					// A saved or user-supplied value in either bag must not bypass
+					// the current coordinator gate. C++ merges type params last.
+					definition.IndexParams = append(definition.IndexParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
+					definition.TypeParams = append(definition.TypeParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
+				}
+				field := &schemapb.FieldSchema{
+					Name: "values", FieldID: s.fieldID, DataType: dataType,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+				}
+				if dataType == schemapb.DataType_Array {
+					field.ElementType = schemapb.DataType_Int64
+				}
+				handler := NewNMockHandler(s.T())
+				handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+					ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
+				}, nil)
+				cm := mocks.NewChunkManager(s.T())
+				cm.EXPECT().RootPath().Return("root")
+				versions := jsonArrayVersionManager(s.T(), common.CurrentScalarIndexEngineVersion)
+				it := newIndexBuildTask(segIndex, 1, mt, handler, cm, versions)
+				segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+					ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4,
+				}}
+				// Reuse the same existing index definition across an upgrade and
+				// an explicit disable. Each new segment/retry resolves the gate anew.
+				for _, currentGate := range []string{"false", "true", "false"} {
+					s.Require().NoError(Params.Save(gate.Key, currentGate))
+					req, err := it.prepareJobRequest(context.Background(), segment, segIndex,
+						mt.indexMeta.GetIndexParams(s.collID, s.indexID), indexType)
+					s.Require().NoError(err)
+					value, err := getIndexParam(req.GetIndexParams(), enableArraySortIndexKey)
+					if dataType == schemapb.DataType_FloatVector {
+						s.Error(err, "do not send an unknown scalar option to Knowhere")
+					} else {
+						s.NoError(err)
+						s.Equal(currentGate, value)
+						count := 0
+						for _, param := range req.GetIndexParams() {
+							if param.GetKey() == enableArraySortIndexKey {
+								count++
+							}
+						}
+						s.Equal(1, count)
+					}
+					_, err = getIndexParam(req.GetTypeParams(), enableArraySortIndexKey)
+					s.Error(err, "schema params must not override the coordinator gate")
+					s.Equal(common.CurrentScalarIndexEngineVersion, req.GetCurrentScalarIndexVersion())
+					for _, params := range [][]*commonpb.KeyValuePair{definition.IndexParams, definition.TypeParams} {
+						value, err := getIndexParam(params, enableArraySortIndexKey)
+						if savedGate == "" || dataType == schemapb.DataType_FloatVector {
+							s.Error(err)
+						} else {
+							s.NoError(err)
+							s.Equal(savedGate, value, "build-time override must not mutate saved metadata")
+						}
+					}
+				}
+			})
+		}
+	}
 }

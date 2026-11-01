@@ -2,12 +2,19 @@ package snview
 
 import (
 	"context"
+	"reflect"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
@@ -31,7 +38,8 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //
 // Every view pushed via ApplyViews is guaranteed to eventually produce a
 // response (via OnReport callback), provided the StreamingNodeResourceManager
-// fulfills its liveness contracts (see StreamingNodeResourceManager doc).
+// fulfills its liveness contracts (see StreamingNodeResourceManager doc) and
+// queries eventually stop renewing a view requested Down.
 // The response paths are:
 //
 // View does not exist in handler:
@@ -55,15 +63,20 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     Response depends on prior Release's OnDropped callback.
 //   - Dropped, SM in Dropped: responds immediately with Dropped re-report.
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
+//   - Down while Up: response waits for the serving lease and active calls.
+//     Repeated Down pushes update the callback without renewing the lease.
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
-	mu       sync.Mutex
-	closed   bool
-	ctx      context.Context
-	pchannel string
-	shards   map[qviews.ShardID]*snShardView
-	catalog  metastore.StreamingNodeCataLog
-	resMgr   StreamingNodeResourceManager
+	replicas       *replicaDirectory
+	mu             sync.Mutex
+	closed         bool
+	ctx            context.Context
+	pchannel       string
+	shards         map[qviews.ShardID]*snShardView
+	catalog        metastore.StreamingNodeCataLog
+	resMgr         StreamingNodeResourceManager
+	localOptimizer optimizer.LocalOptimizer
+	leaseDuration  time.Duration
 }
 
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
@@ -76,11 +89,14 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
-		ctx:      ctx,
-		pchannel: pchannel,
-		shards:   make(map[qviews.ShardID]*snShardView),
-		catalog:  catalog,
-		resMgr:   resMgr,
+		replicas:       newReplicaDirectory(),
+		ctx:            ctx,
+		pchannel:       pchannel,
+		shards:         make(map[qviews.ShardID]*snShardView),
+		catalog:        catalog,
+		resMgr:         resMgr,
+		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		leaseDuration:  max(0, paramtable.Get().QueryViewCfg.LeaseDuration.GetAsDurationByParse()),
 	}
 
 	grouped := make(map[qviews.ShardID]map[qviews.QueryViewVersion]*snQueryViewStateMachine)
@@ -101,11 +117,31 @@ func recoverSNQueryViewHandler(
 
 	for shardID, shardViews := range grouped {
 		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
+		shard.replicas = h.replicas
+		for _, entry := range shard.views {
+			shard.publishReplicaLocked(entry)
+		}
+		shard.leaseDuration = h.leaseDuration
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
 	}
-	for _, shard := range h.shards {
-		shard.startRecovery()
+	views = slices.Clone(views)
+	// A vchannel runtime is shared by replicas. Register the oldest recovered
+	// view first across all replicas, not just within each shard.
+	slices.SortFunc(views, func(a, b *viewpb.QueryViewOfShard) int {
+		av := qviews.FromProtoQueryViewVersion(a.GetMeta().GetVersion())
+		bv := qviews.FromProtoQueryViewVersion(b.GetMeta().GetVersion())
+		if av.GT(bv) {
+			return 1
+		}
+		if bv.GT(av) {
+			return -1
+		}
+		return 0
+	})
+	for _, view := range views {
+		shard := h.shards[qviews.NewShardIDFromQVMeta(view.GetMeta())]
+		shard.startRecoveryVersions([]qviews.QueryViewVersion{qviews.FromProtoQueryViewVersion(view.GetMeta().GetVersion())})
 	}
 
 	return h
@@ -160,6 +196,9 @@ func (h *SNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 }
 
 func (h *SNQueryViewHandler) CloseForHandoff() {
+	if h.replicas != nil {
+		h.replicas.Close()
+	}
 	h.mu.Lock()
 	h.closed = true
 	shards := make([]*snShardView, 0, len(h.shards))
@@ -183,13 +222,15 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &snShardView{
-			ctx:      h.ctx,
-			pchannel: h.pchannel,
-			shardID:  shardID,
-			views:    make(map[qviews.QueryViewVersion]*snViewEntry),
-			catalog:  h.catalog,
-			resMgr:   h.resMgr,
-			onEmpty:  h.makeOnEmpty(shardID),
+			replicas:      h.replicas,
+			ctx:           h.ctx,
+			pchannel:      h.pchannel,
+			shardID:       shardID,
+			views:         make(map[qviews.QueryViewVersion]*snViewEntry),
+			catalog:       h.catalog,
+			resMgr:        h.resMgr,
+			onEmpty:       h.makeOnEmpty(shardID),
+			leaseDuration: h.leaseDuration,
 		}
 		h.shards[shardID] = shard
 	}
@@ -204,4 +245,69 @@ func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func(*snShardVi
 			delete(h.shards, shardID)
 		}
 	}
+}
+
+type QueryViewLease struct {
+	Version qviews.QueryViewVersion
+	Meta    *viewpb.QueryViewMeta
+	View    *viewpb.QueryViewOfShard
+	// Renew extends timed Up retention while this call still owns its reference.
+	Renew   func()
+	Release func()
+}
+
+func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qviews.ShardID) (*QueryViewLease, error) {
+	return h.acquireUpViewForSchema(ctx, shardID, nil)
+}
+
+// AcquireUpViewAtSchema selects the newest Up view of one exact read schema.
+// Version zero is an exact version, not a latest selector.
+func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID qviews.ShardID, schema int32) (*QueryViewLease, error) {
+	return h.acquireUpViewForSchema(ctx, shardID, &schema)
+}
+
+func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		h.mu.Lock()
+		var candidates []*snShardView
+		if shard := h.shards[shardID]; shard != nil {
+			candidates = append(candidates, shard)
+		} else if shardID.ReplicaID == qviews.UnknownReplicaID {
+			for id, candidate := range h.shards {
+				if id.VChannel == shardID.VChannel {
+					candidates = append(candidates, candidate)
+				}
+			}
+		}
+		h.mu.Unlock()
+		// Check every replica before waiting: a recovering replica must not
+		// hide an already servable one. Never nest shard locks under h.mu.
+		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
+		for _, candidate := range candidates {
+			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema)
+			if lease != nil {
+				return lease, nil
+			}
+			if changed != nil {
+				waits = append(waits, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(changed)})
+			} else if !viewerror.AsViewError(err).IsViewNotFound() {
+				return nil, err
+			}
+		}
+		if len(waits) == 1 {
+			return nil, viewerror.NewViewNotFound("latest up query view %s is not found", shardID.String())
+		}
+		// Wake on any replica's progress, without polling or waiter goroutines.
+		if chosen, _, _ := reflect.Select(waits); chosen == 0 {
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// AcquireReplicaWatchStream observes local eligibility without a View lease.
+func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
+	return h.replicas.AcquireStream(ctx, pchannel, unavailable)
 }

@@ -20,12 +20,12 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -35,13 +35,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	util "github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -184,6 +184,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
 	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
 		return err
 	}
@@ -256,31 +259,15 @@ func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*query
 		return nil, nil
 	}
 
-	// validate analyzer params at any streaming node
-	// and set file resource ids to schema
-	err := retry.Do(ctx, func() error {
-		if c.fileResourceObserver == nil {
-			return nil
-		}
-		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
-			return err
-		}
-		return nil
-	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	infos := make([]*streamingpb.StreamingAnalyzerInfo, 0, len(analyzerInfos))
+	for _, info := range analyzerInfos {
+		infos = append(infos, &streamingpb.StreamingAnalyzerInfo{Params: info.GetParams(), Field: info.GetField(), Name: info.GetName()})
+	}
+	resp, err := streaming.WAL().AnalyzerClient().ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: infos})
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
-		AnalyzerInfos: analyzerInfos,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return nil, err
-	}
 	return resp.GetResourceIds(), nil
 }
 
@@ -576,28 +563,40 @@ func createMilvusTableSnapshotStorageConfig() *indexpb.StorageConfig {
 			StorageType: params.CommonCfg.StorageType.GetValue(),
 			// External collections may reference an s3:// source even when the
 			// primary storage is local, so the connection cap still applies.
-			MaxConnections: uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+			MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+			TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	}
 	return &indexpb.StorageConfig{
-		Address:           params.MinioCfg.Address.GetValue(),
-		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-		BucketName:        params.MinioCfg.BucketName.GetValue(),
-		RootPath:          params.MinioCfg.RootPath.GetValue(),
-		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-		StorageType:       params.CommonCfg.StorageType.GetValue(),
-		Region:            params.MinioCfg.Region.GetValue(),
-		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-		SslTlsMinVersion:  params.MinioCfg.SslTLSMinVersion.GetValue(),
-		UseCrc32CChecksum: params.MinioCfg.UseCRC32C.GetAsBool(),
+		Address:                     params.MinioCfg.Address.GetValue(),
+		AccessKeyID:                 params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey:             params.MinioCfg.SecretAccessKey.GetValue(),
+		UseSSL:                      params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:                   params.MinioCfg.SslCACert.GetValue(),
+		BucketName:                  params.MinioCfg.BucketName.GetValue(),
+		RootPath:                    params.MinioCfg.RootPath.GetValue(),
+		UseIAM:                      params.MinioCfg.UseIAM.GetAsBool(),
+		IAMEndpoint:                 params.MinioCfg.IAMEndpoint.GetValue(),
+		StorageType:                 params.CommonCfg.StorageType.GetValue(),
+		Region:                      params.MinioCfg.Region.GetValue(),
+		UseVirtualHost:              params.MinioCfg.UseVirtualHost.GetAsBool(),
+		CloudProvider:               params.MinioCfg.CloudProvider.GetValue(),
+		RequestTimeoutMs:            params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+		MaxConnections:              uint32(params.MinioCfg.MaxConnections.GetAsInt()),
+		GcpCredentialJSON:           params.MinioCfg.GcpCredentialJSON.GetValue(),
+		SslTlsMinVersion:            params.MinioCfg.SslTLSMinVersion.GetValue(),
+		UseCrc32CChecksum:           params.MinioCfg.UseCRC32C.GetAsBool(),
+		TalonMode:                   params.CommonCfg.StorageTalonMode.GetAsUint32(),
+		TalonSmallReadThreshold:     params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+		TalonCoordinator:            params.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonBlockSize:              params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+		TalonMaxIdlePerAddr:         params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+		TalonEnableForExternalTable: params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 	}
 }
 
@@ -680,12 +679,6 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 
 	t.appendConsistecyLevel()
 	if err := t.appendNamespaceShardingEnabled(); err != nil {
-		return err
-	}
-	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
-		return err
-	}
-	if err := common.ValidateRLSForceRequiresEnabled(t.Req.GetProperties()...); err != nil {
 		return err
 	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)

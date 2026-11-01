@@ -197,13 +197,11 @@ func (t *clusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 
-		var metricMutation *segMetricMutation
-		_, metricMutation, err = t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), t.result)
+		_, err = t.meta.CompleteCompactionMutation(context.TODO(), t.GetTaskProto(), t.result)
 		if err != nil {
 			mlog.Warn(context.TODO(), "CompleteCompactionMutation for clustering compaction task failed", mlog.Err(err))
 			return
 		}
-		metricMutation.commit()
 		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setTmpSegments(resultSegmentIDs))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
@@ -460,7 +458,11 @@ func (t *clusteringCompactionTask) processMetaSaved() error {
 	// its TmpSegments will be empty, so skip the stats task, to build index.
 	if len(t.GetTaskProto().GetTmpSegments()) == 0 {
 		mlog.Info(context.TODO(), "tmp segments is nil, skip stats task")
-		return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
+		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing)); err != nil {
+			return err
+		}
+		notifySegmentIndexBuild(t.GetTaskProto().GetResultSegments()...)
+		return nil
 	}
 	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic))
 }
@@ -508,7 +510,11 @@ func (t *clusteringCompactionTask) processStats() error {
 		mlog.Int64s("tmp segments", t.GetTaskProto().GetTmpSegments()),
 		mlog.Int64s("result segments", resultSegments))
 
-	return t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments))
+	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing), setResultSegments(resultSegments)); err != nil {
+		return err
+	}
+	notifySegmentIndexBuild(resultSegments...)
+	return nil
 }
 
 // this is just a temporary solution. A more long-term solution should be for the datanode

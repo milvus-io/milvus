@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/consumer"
 	"github.com/milvus-io/milvus/internal/distributed/streaming/internal/producer"
+	resumablereplicas "github.com/milvus-io/milvus/internal/distributed/streaming/internal/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -33,6 +34,7 @@ func newWALAccesser(c *clientv3.Client) *walAccesserImpl {
 		clusterID:            paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		streamingCoordClient: streamingCoordClient,
 		handlerClient:        handlerClient,
+		replicaClient:        resumablereplicas.NewResumingClient(handlerClient.AcquireReplicaWatchStream),
 		producerMutex:        sync.Mutex{},
 		producers:            make(map[string]*producer.ResumableProducer),
 
@@ -55,6 +57,7 @@ type walAccesserImpl struct {
 	// All services
 	streamingCoordClient client.Client
 	handlerClient        handler.HandlerClient
+	replicaClient        *resumablereplicas.Client
 
 	producerMutex         sync.Mutex
 	producers             map[string]*producer.ResumableProducer
@@ -158,6 +161,9 @@ func (w *walAccesserImpl) Broadcast() Broadcast {
 // Close closes all the wal accesser.
 func (w *walAccesserImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
+	if w.replicaClient != nil {
+		w.replicaClient.Close()
+	}
 	w.lifetime.Wait()
 
 	w.producerMutex.Lock()
@@ -202,4 +208,12 @@ func (s errScanner) Error() error {
 }
 
 func (s errScanner) Close() {
+}
+
+func (w *walAccesserImpl) AnalyzerClient() AnalyzerClient {
+	return w.handlerClient
+}
+
+func (w *walAccesserImpl) SchemaClient() SchemaClient {
+	return schemaClient{handlerClient: w.handlerClient}
 }

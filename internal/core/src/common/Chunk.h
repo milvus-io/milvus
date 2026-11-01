@@ -185,6 +185,8 @@ class Chunk {
         }
     }
 
+    // Map a logical row offset to its compact physical row slot. This does
+    // not map logical ARRAY elements to compact vector payload positions.
     int64_t
     PhysicalOffsetOf(int64_t logical_offset) const {
         AssertInfo(logical_offset >= 0 && logical_offset < row_nums_,
@@ -262,12 +264,13 @@ class FixedWidthChunk : public Chunk {
                     uint64_t size,
                     uint64_t element_size,
                     bool nullable,
-                    std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
+                    std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
+                    size_t payload_offset = 0)
         : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
           dim_(dim),
           element_size_(element_size) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
-        data_start_ = data_ + null_bitmap_bytes_num;
+        data_start_ = data_ + null_bitmap_bytes_num + payload_offset;
     };
 
     milvus::SpanBase
@@ -320,10 +323,12 @@ class StringChunk : public Chunk {
                 char* data,
                 uint64_t size,
                 bool nullable,
-                std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard)
+                std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
+                size_t payload_offset = 0)
         : Chunk(row_nums, data, size, nullable, chunk_mmap_guard) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
-        offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
+        offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num +
+                                               payload_offset);
     }
 
     std::string_view
@@ -538,6 +543,13 @@ class ArrayChunk : public Chunk {
                   "ArrayChunk::ValueAt is not supported");
     }
 
+    // Element count of row idx, read from the offsets table without
+    // touching the element data.
+    uint32_t
+    LengthAt(int64_t idx) const {
+        return offsets_lens_[2 * idx + 1];
+    }
+
  private:
     milvus::DataType element_type_;
     uint32_t* offsets_lens_;
@@ -550,14 +562,40 @@ class ArrayChunk : public Chunk {
 //   However, each row (array of vectors) can contain a variable number of these fixed-dimension vectors.
 //
 // Due to these characteristics, the data layout is simpler:
-// [offsets_lens][all_vector_data_concatenated]
+// Legacy: [row_bitmap?][(byte_offset, physical_count)*rows][final_offset]
+//         [all_vector_data_concatenated].
+// Element-nullable: the same header, followed by [logical_count*rows]
+//         [element_bitmap for all logical elements][compact valid vectors].
+// Null rows have zero logical and physical elements. The offsets exposed by
+// Offsets() count physical vectors, not logical elements.
+// offsets_ and logical_offsets_ are prefix sums computed on the heap when the
+// chunk is constructed; neither vector is stored in the mmap file.
+// Stored byte offsets and counts are uint32_t; byte offsets are from the chunk
+// start. Bitmaps are LSB-first (1 = valid). No alignment padding is inserted.
+// One zero byte (MMAP_ARRAY_PADDING) follows the payload, outside final_offset.
 //
-// Example:
-// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
-// create a VectorArrayChunk for these arrays. The data block might look like this:
+// Legacy example (FloatVector, dim=3, nullable=false, element_nullable=false):
+// Rows: [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]],
+//       [[13, 14, 15], [16, 17, 18]].
+// [offsets_lens][all_vector_data_concatenated][padding]
+// [28, 3, 64, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] [0x00]
+// Header=28 bytes, each vector=12 bytes, payload=72 bytes, total size=101 bytes.
+// Offsets() = [0, 3, 4, 6].
 //
-// [offsets_lens][all_vector_data_concatenated]
-// [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+// Element-nullable example (FloatVector, dim=2, nullable=true, element_nullable=true):
+// Rows: [[1, 2], null, [3, 4]], null, [], [null], [[5, 6]].
+// [row_bitmap][offsets_lens][logical_count][element_bitmap][compact_vector_data][padding]
+// [0xFD] [66, 2, 82, 0, 82, 0, 82, 0, 82, 1, 90] [3, 0, 0, 1, 1] [0x15] [1, 2, 3, 4, 5, 6] [0x00]
+// Row bits 0..4: [1, 0, 1, 1, 1]; unused high bits remain 1 in the row bitmap.
+// Element bits 0..4: [1, 0, 1, 0, 1]; unused high bits are 0 in the element bitmap.
+// Byte starts: row_bitmap=0, offsets_lens=1, logical_count=45,
+// element_bitmap=65, payload=66, padding=90; total size=91 bytes.
+// Sizes: 1 + 44 + 20 + 1 + (3 vectors * 8 bytes) + 1 bytes, respectively.
+// Offsets() = [0, 2, 2, 2, 2, 3]; logical_offsets_ = [0, 3, 3, 3, 4, 5].
+// Row 1 (null) and row 2 (empty) differ only in the row bitmap.
+// Row 3 has logical_count=1, physical_count=0, and one invalid element bit.
+// Row 4 starts at byte 82, right after row 0's two vectors: rows 1-3 own no
+// payload, so their byte offsets repeat 82 and Offsets() stays at 2 until row 4.
 class VectorArrayChunk : public Chunk {
  public:
     VectorArrayChunk(int64_t dim,
@@ -566,13 +604,53 @@ class VectorArrayChunk : public Chunk {
                      uint64_t size,
                      milvus::DataType element_type,
                      std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard,
-                     bool nullable)
+                     bool nullable,
+                     bool element_nullable = false)
         : Chunk(row_nums, data, size, nullable, chunk_mmap_guard),
           dim_(dim),
-          element_type_(element_type) {
-        auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
+          element_type_(element_type),
+          element_nullable_(element_nullable) {
+        const uint64_t rows = row_nums_;
+        const uint64_t null_bitmap_bytes_num = nullable_ ? (rows + 7) / 8 : 0;
+        // Header: [row_bitmap?][(byte_offset, physical_count)*rows]
+        // [final_offset], then [logical_count*rows] when element-nullable.
+        uint64_t header_end =
+            null_bitmap_bytes_num + (rows * 2 + 1) * sizeof(uint32_t);
+        if (element_nullable_) {
+            header_end += rows * sizeof(uint32_t);
+        }
+        if (row_nums_ < 0 || size < header_end) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VectorArrayChunk size {} is too small for the header "
+                      "of {} rows ({} bytes)",
+                      size,
+                      row_nums_,
+                      header_end);
+        }
         offsets_lens_ =
             reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
+        uint64_t payload_begin = header_end;
+        if (element_nullable_) {
+            const auto* logical_lengths = offsets_lens_ + rows * 2 + 1;
+            uint64_t logical_count = 0;
+            for (uint64_t i = 0; i < rows; ++i) {
+                logical_count += logical_lengths[i];
+            }
+            payload_begin += (logical_count + 7) / 8;
+        }
+        const uint64_t payload_start = offsets_lens_[0];
+        const uint64_t payload_end = offsets_lens_[rows * 2];
+        if (payload_start < payload_begin || payload_end < payload_start ||
+            payload_end > size) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VectorArrayChunk of {} rows has payload [{}, {}) that "
+                      "does not fit between metadata end {} and chunk size {}",
+                      row_nums_,
+                      payload_start,
+                      payload_end,
+                      payload_begin,
+                      size);
+        }
 
         auto offset = 0;
         offsets_.reserve(row_nums_ + 1);
@@ -580,6 +658,17 @@ class VectorArrayChunk : public Chunk {
         for (int64_t i = 0; i < row_nums_; i++) {
             offset += offsets_lens_[i * 2 + 1];
             offsets_.push_back(offset);
+        }
+        if (element_nullable_) {
+            logical_lengths_ = offsets_lens_ + row_nums_ * 2 + 1;
+            element_bitmap_ =
+                reinterpret_cast<uint8_t*>(logical_lengths_ + row_nums_);
+            logical_offsets_.reserve(row_nums_ + 1);
+            logical_offsets_.push_back(0);
+            for (int64_t i = 0; i < row_nums_; ++i) {
+                logical_offsets_.push_back(logical_offsets_.back() +
+                                           logical_lengths_[i]);
+            }
         }
     }
 
@@ -651,7 +740,13 @@ class VectorArrayChunk : public Chunk {
 
     const size_t*
     Offsets() const {
+        // Prefix counts of physically stored vectors (null elements excluded).
         return offsets_.data();
+    }
+
+    bool
+    IsElementNullable() const {
+        return element_nullable_;
     }
 
  private:
@@ -662,13 +757,28 @@ class VectorArrayChunk : public Chunk {
         auto len = offsets_lens_[idx_off + 1];
         auto next_offset = offsets_lens_[idx_off + 2];
         auto data_ptr = data_ + offset;
+        if (element_nullable_) {
+            return VectorArrayView(data_ptr,
+                                   dim_,
+                                   logical_lengths_[idx],
+                                   next_offset - offset,
+                                   element_type_,
+                                   TargetBitmapView(element_bitmap_,
+                                                    logical_offsets_[idx],
+                                                    logical_lengths_[idx]),
+                                   true);
+        }
         return VectorArrayView(
             data_ptr, dim_, len, next_offset - offset, element_type_);
     }
     int64_t dim_;
     uint32_t* offsets_lens_;
+    uint32_t* logical_lengths_{nullptr};
+    uint8_t* element_bitmap_{nullptr};
     milvus::DataType element_type_;
+    bool element_nullable_{false};
     std::vector<size_t> offsets_;
+    std::vector<size_t> logical_offsets_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

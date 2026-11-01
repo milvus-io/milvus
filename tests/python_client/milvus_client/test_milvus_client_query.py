@@ -681,11 +681,8 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-limit error
         """
         client = self._client()
-        # milvus strips leading/trailing whitespace before echoing the value
-        # in the error message, so " " becomes "" in `limit [<displayed>] is invalid`
-        displayed = limit.strip() if isinstance(limit, str) else limit
-        error = {ct.err_code: 1, ct.err_msg: f"limit [{displayed}] is invalid"}
-        self.query(
+        error = {ct.err_code: 1, ct.err_msg: "limit ["}
+        res, _ = self.query(
             client,
             INVALID_SHARED_COLLECTION,
             filter=default_search_exp,
@@ -694,6 +691,9 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        # Older redact versions trim the space; newer versions preserve it.
+        displayed_values = (limit, "") if limit == " " else (limit,)
+        assert any(f"limit [{value}] is invalid" in res.message for value in displayed_values), res.message
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [-1, 67890])
@@ -732,11 +732,8 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         expected: raise invalid-offset error
         """
         client = self._client()
-        # milvus strips leading/trailing whitespace before echoing the value
-        # in the error message, so " " becomes "" in `offset [<displayed>] is invalid`
-        displayed = offset.strip() if isinstance(offset, str) else offset
-        error = {ct.err_code: 1, ct.err_msg: f"offset [{displayed}] is invalid"}
-        self.query(
+        error = {ct.err_code: 1, ct.err_msg: "offset ["}
+        res, _ = self.query(
             client,
             INVALID_SHARED_COLLECTION,
             filter=default_search_exp,
@@ -745,6 +742,9 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        # Older redact versions trim the space; newer versions preserve it.
+        displayed_values = (offset, "") if offset == " " else (offset,)
+        assert any(f"offset [{value}] is invalid" in res.message for value in displayed_values), res.message
 
 
 class TestMilvusClientQueryValid(TestMilvusClientV2Base):

@@ -326,13 +326,10 @@ func IsEnable(conf map[string]string) bool {
 
 type Response any
 
-func PostRequest[T Response](req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
-	return PostRequestWithContext[T](context.Background(), req, url, headers, timeoutMs)
-}
-
-// PostRequestWithContext sends a JSON request with both the caller's context
-// and the configured request timeout.
-func PostRequestWithContext[T Response](ctx context.Context, req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
+func PostRequest[T Response](ctx context.Context, req any, url string, headers map[string]string, timeoutMs int64) (*T, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -404,6 +401,10 @@ func retrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 		body, err = send(req)
 		if err == nil {
 			return body, nil
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 
 		// Don't sleep after the last retry attempt

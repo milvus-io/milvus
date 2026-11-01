@@ -29,6 +29,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Consts.h"
+#include "common/ChunkWriter.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -39,13 +40,15 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexStats.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "storage/artifact/ArtifactStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
+#include "mmap/ChunkedColumn.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -65,6 +68,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -279,8 +283,12 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
     auto builder = std::make_shared<JsonKeyStats>(ctx, false);
     builder->Build(build_config);
 
-    auto create_index_result = builder->Upload(build_config);
-    auto index_files = create_index_result->GetIndexFiles();
+    const auto create_index_result = builder->Upload(build_config);
+    std::vector<std::string> index_files;
+    index_files.reserve(create_index_result.Files().size());
+    for (const auto& file : create_index_result.Files()) {
+        index_files.push_back(file.file_name);
+    }
 
     Config load_config;
     load_config["index_files"] = index_files;
@@ -1469,4 +1477,152 @@ TEST(JsonStatsThreeValuedAuditTest,
                 true,
                 std::vector<proto::plan::GenericValue>{value})));
     }
+}
+
+namespace {
+class ShreddedOnlyGroupByColumn : public ChunkedVariableColumn<Json> {
+ public:
+    using ChunkedVariableColumn<Json>::ChunkedVariableColumn;
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext*, int64_t) const override {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "valid shredded group-by must not access raw JSON");
+    }
+};
+
+class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
+ public:
+    ShreddedOnlyGroupBySegment(SchemaPtr schema,
+                               std::shared_ptr<JsonKeyStats> stats,
+                               FieldId field,
+                               std::shared_ptr<ChunkedColumnInterface> column)
+        : ChunkedSegmentSealedImpl(schema,
+                                   empty_index_meta,
+                                   segcore::SegcoreConfig::default_config(),
+                                   66),
+          stats_(std::move(stats)),
+          field_(field),
+          column_(std::move(column)) {
+    }
+
+    bool
+    HasFieldData(FieldId field) const override {
+        return field == field_;
+    }
+
+    int64_t
+    get_row_count() const override {
+        return stats_->Count();
+    }
+
+    std::shared_ptr<JsonKeyStats>
+    GetJsonStats(milvus::OpContext*, FieldId) const override {
+        return stats_;
+    }
+
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field) const override {
+        return field == field_ ? column_ : nullptr;
+    }
+
+ private:
+    std::shared_ptr<JsonKeyStats> stats_;
+    FieldId field_;
+    std::shared_ptr<ChunkedColumnInterface> column_;
+};
+}  // namespace
+
+TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":"one","n":9223372036854775807,"b":true,"":{"a/b":{"~key":"x"}}})",
+        R"({"s":"two\n\u4e2d","n":-9223372036854775808,"b":false,"":{"a/b":{"~key":"y"}}})",
+        R"({"s":"one","n":-17,"b":true,"":{"a/b":{"~key":"x"}}})",
+    };
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1266,
+                                          2266,
+                                          3266,
+                                          field.get(),
+                                          5266,
+                                          1);
+    arrow::BinaryBuilder builder;
+    for (const auto& document : documents) {
+        ASSERT_TRUE(builder.Append(document).ok());
+    }
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(create_chunk((*schema)[field], {array}, false));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{static_cast<int64_t>(documents.size())},
+            "shredded_group_by",
+            std::move(chunks)),
+        nullptr);
+    auto column = std::make_shared<ShreddedOnlyGroupByColumn>(std::move(slot),
+                                                              (*schema)[field]);
+    ShreddedOnlyGroupBySegment segment(
+        schema, std::move(stats), field, std::move(column));
+    auto strings = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "/s", DataType::VARCHAR);
+    auto integers = exec::GetDataGetter<int64_t, Json>(
+        nullptr, segment, field, "/n", DataType::INT64);
+    auto booleans = exec::GetDataGetter<bool, Json>(
+        nullptr, segment, field, "/b", DataType::BOOL);
+    auto nested = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "//a~1b/~0key", DataType::VARCHAR);
+    std::map<std::string, int> groups;
+    for (auto row : {2, 0, 1, 0}) {
+        Json raw{simdjson::padded_string(documents[row])};
+        EXPECT_EQ(strings->Get(row), raw.at<std::string_view>("/s").value());
+        EXPECT_EQ(integers->Get(row), raw.at<int64_t>("/n").value());
+        EXPECT_EQ(booleans->Get(row), raw.at<bool>("/b").value());
+        EXPECT_EQ(nested->Get(row),
+                  raw.at<std::string_view>("//a~1b/~0key").value());
+        ++groups[strings->Get(row).value()];
+    }
+    EXPECT_EQ(groups["one"], 3);
+    EXPECT_EQ(groups["two\n中"], 1);
+    EXPECT_EQ((exec::GetDataGetter<int8_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT8)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int16_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT16)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int32_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT32)
+                   ->Get(2)),
+              -17);
+}
+
+TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":""})", R"({"s":"value"})", R"({"s":null})", R"({})"};
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1267,
+                                          2267,
+                                          3267,
+                                          field.get(),
+                                          5267,
+                                          1);
+    auto reader = stats->CreateShreddingReader("/s", JSONType::STRING, 4);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_FALSE(reader->Get(nullptr, 0).has_value());
+    ASSERT_TRUE(reader->Get(nullptr, 1).has_value());
+    EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 1)), "value");
+    EXPECT_FALSE(reader->Get(nullptr, 2).has_value());
+    EXPECT_FALSE(reader->Get(nullptr, 3).has_value());
+    Json raw{simdjson::padded_string(documents[0])};
+    EXPECT_EQ(raw.at<std::string_view>("/s").value(), "");
 }

@@ -533,6 +533,12 @@ class Schema {
     FieldId
     ResolveColumnFieldId(const std::string& column_name) const;
 
+    // Resolve every logical field backed by one physical manifest column.
+    // External schemas may intentionally map multiple fields to the same
+    // external_field.
+    std::vector<FieldId>
+    ResolveColumnFieldIds(const std::string& column_name) const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
@@ -617,6 +623,17 @@ class Schema {
     // Find the first array field belonging to a struct (cached)
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
+
+    // Field ID of the struct array field itself. Only schemas parsed from a
+    // CollectionSchema proto know it.
+    std::optional<FieldId>
+    GetStructFieldId(const std::string& struct_name) const {
+        auto it = struct_field_ids_.find(struct_name);
+        if (it == struct_field_ids_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
 
     DataType
     GetFieldType(const FieldId& field_id) const {
@@ -712,6 +729,9 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+
+    // struct_name -> field ID of the struct array field (built in ParseFrom)
+    std::unordered_map<std::string, FieldId> struct_field_ids_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

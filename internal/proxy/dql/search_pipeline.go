@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -48,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -695,7 +695,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	// analysis of searchWithAggPipe makes these unreachable, but surfacing
 	// them as service-internal errors is cheaper than a process-level panic
 	// if a future refactor breaks the wire.
-	if len(inputs) == 0 {
+	if len(inputs) < 2 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
 	}
 	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
@@ -707,7 +707,11 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx)
+	metrics, ok := inputs[1].([]string)
+	if !ok || len(metrics) != 1 {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
+	}
+	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -1164,7 +1168,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			Status: merr.Success(),
 			Results: &schemapb.SearchResultData{
 				NumQueries:     op.nq,
-				TopK:           op.topK,
+				TopK:           0,
 				FieldsData:     make([]*schemapb.FieldData, 0),
 				Scores:         []float32{},
 				Ids:            &schemapb.IDs{},
@@ -1220,7 +1224,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
-	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
 
 	timestamp          uint64
@@ -1272,17 +1275,16 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
-	collectionName := t.rlsCollectionName
+	collectionName := t.resolvedCollectionName
 	if collectionName == "" {
 		collectionName = t.request.GetCollectionName()
 	}
-	dbName := t.rlsDBName
+	dbName := t.resolvedDBName
 	if dbName == "" {
 		dbName = t.request.GetDbName()
 	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
-		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,
@@ -1342,11 +1344,6 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
 	plan.Namespace = op.planNamespace
-	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
-	// not resolve a separate Query-action policy for this internal retrieval.
-	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
-		return nil, segcore.StorageCost{}, err
-	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -1380,7 +1377,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		fastSkip:       true,
 		reQuery:        true,
 		node:           op.node,
-		skipRuntimeRLS: true,
+		internalTask:   true,
 		chMgr:          op.node.ChMgr(),
 	}
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)
@@ -1514,25 +1511,65 @@ func PickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fields []*schemapb.F
 	// on the payload type then see no vector column -- searching by IDs that
 	// all name null-vector rows failed on exactly that.
 	//
-	// Capacity 0: the seeding is all that is needed here. Sizing by the ID
-	// count would reserve dim*size for a dense vector column even when every
-	// picked row is null and nothing is ever appended.
-	fieldsData := typeutil.PrepareResultFieldData(fields, 0)
+	// A vector source with neither validity nor payload, as a nullable vector
+	// with every row null may come, takes no rows, so only the seeding is
+	// reserved for it.
+	fieldsData := make([]*schemapb.FieldData, len(fields))
+	for i, field := range fields {
+		rows := int64(size)
+		if field.GetVectors() != nil && len(typeutil.GetFieldDataValidData(field)) == 0 {
+			if n, err := funcutil.GetNumRowOfFieldData(field); err == nil && n == 0 {
+				rows = 0
+			}
+		}
+		fieldsData[i] = typeutil.PrepareResultFieldData(fields[i:i+1], rows)[0]
+	}
 	idxComputer := typeutil.NewFieldDataIdxComputerWithSchema(fields, schema)
 
 	rowIdxs := make([]int64, 0, size)
 	for i := 0; i < size; i++ {
 		id := typeutil.GetPK(ids, int64(i))
-		if _, ok := pkOffset[id]; !ok {
+		offset, ok := pkOffset[id]
+		if !ok {
 			return nil, merr.WrapErrInconsistentRequery(fmt.Sprintf("incomplete query result, missing id %s, len(searchIDs) = %d, len(queryIDs) = %d, collection=%d",
 				id, typeutil.GetSizeOfIDs(ids), len(pkOffset), collectionID))
 		}
-		rowIdxs = append(rowIdxs, int64(pkOffset[id]))
+		rowIdxs = append(rowIdxs, int64(offset))
 	}
 
-	fieldIdxsByOutput := computeFieldIdxsByOriginalOrder(rowIdxs, idxComputer.Compute)
-	for i, rowIdx := range rowIdxs {
-		typeutil.AppendFieldData(fieldsData, fields, rowIdx, fieldIdxsByOutput[i]...)
+	// Gather one column at a time, which gives the same output as
+	// AppendFieldData row by row without its per-row dispatch. A row's data
+	// index differs from its row index only for a compact nullable vector,
+	// which stores no payload for a null row. A data index of -1 marks a
+	// nullable vector without validity, whose every row reads as null.
+	dataIdxs := make([]int64, 0, size)
+	for j, field := range fields {
+		validData := typeutil.GetFieldDataValidData(field)
+		skipNull := field.GetVectors() != nil && field.GetVectors().GetVectorArray() == nil
+		dataIdxs = idxComputer.ColumnDataIdxs(j, rowIdxs, dataIdxs[:0])
+		kept := dataIdxs[:0]
+		allNull := false
+		for i, dataIdx := range dataIdxs {
+			if dataIdx < 0 {
+				allNull = true
+				continue
+			}
+			if skipNull && len(validData) > 0 && !validData[rowIdxs[i]] {
+				continue
+			}
+			kept = append(kept, dataIdx)
+		}
+		typeutil.AppendFieldDataByColumn(fieldsData[j], field, kept, rowIdxs)
+		if allNull {
+			typeutil.SetFieldDataValidData(fieldsData[j], make([]bool, len(rowIdxs)))
+		}
+		// A prepared sparse column starts at Dim 0. AppendFieldData raises it
+		// to the widest appended row; the column append does not.
+		if sparse := fieldsData[j].GetVectors().GetSparseFloatVector(); sparse != nil {
+			for _, row := range sparse.GetContents() {
+				sparse.Dim = max(sparse.Dim, typeutil.SparseFloatRowDim(row))
+			}
+		}
 	}
 
 	return fieldsData, nil
@@ -1682,7 +1719,11 @@ func (op *hybridAssembleOperator) run(ctx context.Context, span trace.Span, inpu
 		}
 	}
 
-	fieldsData := make([]*schemapb.FieldData, len(templateFields))
+	sources := make([][]*schemapb.FieldData, len(reducedResults))
+	for i, r := range reducedResults {
+		sources[i] = r.GetResults().GetFieldsData()
+	}
+	fieldsData := typeutil.PresizeAppendFieldData(int64(numReranked), sources...)
 	for i, loc := range locs {
 		srcFields := reducedResults[loc.resultIdx].GetResults().GetFieldsData()
 		typeutil.AppendFieldData(fieldsData, srcFields, int64(loc.rowIdx), fieldIdxsByOutput[i]...)
@@ -3057,7 +3098,7 @@ var searchWithAggPipe = &pipelineDef{
 		},
 		{
 			name:    "agg",
-			inputs:  []string{"reduced"},
+			inputs:  []string{"reduced", "metrics"},
 			outputs: []string{pipelineOutput},
 			opName:  aggOp,
 		},

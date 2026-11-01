@@ -23,10 +23,12 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/ArrayValue.h"
 #include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -38,6 +40,70 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/Record.h"
 #include "segcore/Utils.h"
+
+TEST(Util_Segcore, CompactNullStructSubFieldRows) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    const int32_t lengths[] = {3, 0, 0};
+    auto valid = [](int64_t row) { return row != 2; };
+
+    FieldMeta scalar(FieldName("items[scalar]"),
+                     FieldId(1501),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     true,
+                     true,
+                     std::nullopt);
+    auto scalar_data =
+        CreateNullStructSubFieldDataArray(scalar, lengths, 3, valid);
+    ASSERT_EQ(scalar_data->scalars().array_data().data_size(), 2);
+    const auto& scalar_row = scalar_data->scalars().array_data().data(0);
+    EXPECT_EQ(scalar_row.long_data().data_size(), 0);
+    EXPECT_EQ(scalar_row.valid_data_size(), 3);
+    auto scalar_value =
+        ArrayValue::FromProto(scalar_row, scalar.get_array_type_schema());
+    EXPECT_EQ(scalar_value.size(), 3);
+
+    proto::schema::TypeSchema nested_type;
+    nested_type.set_nullable(true);
+    auto* inner = nested_type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int32);
+    FieldMeta nested(FieldName("items[nested]"),
+                     FieldId(1502),
+                     DataType::ARRAY,
+                     DataType::ARRAY,
+                     true,
+                     true,
+                     std::nullopt,
+                     "",
+                     LOCAL_FORMAT_RAW,
+                     nested_type);
+    auto nested_data =
+        CreateNullStructSubFieldDataArray(nested, lengths, 3, valid);
+    const auto& nested_row = nested_data->scalars().array_data().data(0);
+    EXPECT_EQ(nested_row.array_data().data_size(), 0);
+    EXPECT_EQ(nested_row.valid_data_size(), 3);
+    auto nested_value = ArrayValue::FromProto(nested_row, nested_type);
+    EXPECT_EQ(nested_value.size(), 3);
+
+    FieldMeta vectors(FieldName("items[vectors]"),
+                      FieldId(1503),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      4,
+                      std::nullopt,
+                      true,
+                      true);
+    auto vector_data =
+        CreateNullStructSubFieldDataArray(vectors, lengths, 3, valid);
+    ASSERT_EQ(vector_data->vectors().vector_array().data_size(), 2);
+    milvus::VectorArray value(vector_data->vectors().vector_array().data(0),
+                              true);
+    EXPECT_EQ(value.length(), 3);
+    EXPECT_EQ(value.physical_length(), 0);
+}
 
 TEST(Util_Segcore, UpperBound) {
     using milvus::Timestamp;
@@ -238,6 +304,64 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     ASSERT_TRUE(merged_valid_data[2]);
     ASSERT_TRUE(merged_valid_data[3]);
     ASSERT_TRUE(merged_valid_data[4]);
+}
+
+TEST(Util_Segcore, MergeDataArrayPreservesAllNullVectorMetadata) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    for (auto data_type : {DataType::VECTOR_FLOAT,
+                           DataType::VECTOR_BINARY,
+                           DataType::VECTOR_FLOAT16,
+                           DataType::VECTOR_BFLOAT16,
+                           DataType::VECTOR_INT8}) {
+        SCOPED_TRACE(fmt::format("data_type={}", data_type));
+        constexpr int64_t dim = 16;
+        auto schema = std::make_shared<Schema>();
+        auto vec = schema->AddDebugField("embeddings",
+                                         data_type,
+                                         dim,
+                                         data_type == DataType::VECTOR_BINARY
+                                             ? knowhere::metric::HAMMING
+                                             : knowhere::metric::L2,
+                                         true);
+        auto& field_meta = (*schema)[vec];
+        auto source = CreateEmptyVectorDataArray(0, field_meta);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        auto expected_data_case = source->vectors().data_case();
+        std::map<FieldId, std::unique_ptr<DataArray>> output_fields;
+        output_fields[vec] = std::move(source);
+
+        // Both empty output and non-empty, entirely null output must carry
+        // enough metadata to serve as the template for a later shard.
+        for (size_t count : {0, 2}) {
+            SCOPED_TRACE(count);
+            std::vector<MergeBase> merge_bases;
+            for (size_t row = 0; row < count; ++row) {
+                merge_bases.emplace_back(&output_fields, row);
+            }
+            auto merged = MergeDataArray(merge_bases, field_meta);
+            DataArray decoded;
+            ASSERT_TRUE(decoded.ParseFromString(merged->SerializeAsString()));
+            EXPECT_EQ(decoded.field_id(), vec.get());
+            EXPECT_EQ(decoded.type(), proto::schema::DataType(data_type));
+            EXPECT_EQ(decoded.vectors().dim(), dim);
+            EXPECT_EQ(decoded.vectors().data_case(), expected_data_case);
+            const auto& valid_data = GetFieldDataRowValidData(decoded);
+            ASSERT_EQ(valid_data.size(), count);
+            for (auto valid : valid_data) {
+                EXPECT_FALSE(valid);
+            }
+            // No physical vector values should be allocated for null rows.
+            auto expected = CreateEmptyVectorDataArray(0, field_meta);
+            for (size_t row = 0; row < count; ++row) {
+                MutableFieldDataRowValidData(expected.get())->Add(false);
+            }
+            EXPECT_EQ(decoded.SerializeAsString(),
+                      expected->SerializeAsString());
+        }
+    }
 }
 
 TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {

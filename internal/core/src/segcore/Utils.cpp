@@ -22,6 +22,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -40,11 +41,13 @@
 #include "folly/FBVector.h"
 #include "glog/logging.h"
 #include "google/protobuf/descriptor.h"
-#include "index/Index.h"
-#include "index/IndexInfo.h"
+#include "index/IndexTypeAdapter.h"
+#include "index/Families.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
+#include "index/contracts/Registry.h"
+#include "index/ParamUtils.h"
 #include "index/Utils.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/sparse_utils.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -52,6 +55,7 @@
 #include "pb/schema.pb.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/Types.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "storage/ChunkManager.h"
@@ -102,7 +106,8 @@ InitEmptyVectorArrayRow(proto::schema::VectorField* row,
 int64_t
 GetArrayLeafRawDataSize(
     const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
-    DataType element_type) {
+    DataType element_type,
+    bool native_width = false) {
     int64_t result = 0;
     switch (element_type) {
         case DataType::BOOL:
@@ -111,7 +116,17 @@ GetArrayLeafRawDataSize(
             }
             break;
         case DataType::INT8:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int8_t) : sizeof(int));
+            }
+            break;
         case DataType::INT16:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int16_t) : sizeof(int));
+            }
+            break;
         case DataType::INT32:
             for (const auto& row : rows) {
                 result += row.int_data().data_size() * sizeof(int);
@@ -162,9 +177,10 @@ GetNestedArrayRawDataSize(
     int64_t result = static_cast<int64_t>(offsets_size);
     const auto& element_schema = type_schema.array_element();
     if (element_schema.has_leaf_type()) {
-        return result +
-               GetArrayLeafRawDataSize(
-                   rows, static_cast<DataType>(element_schema.leaf_type()));
+        return result + GetArrayLeafRawDataSize(
+                            rows,
+                            static_cast<DataType>(element_schema.leaf_type()),
+                            true);
     }
 
     for (const auto& row : rows) {
@@ -315,7 +331,9 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         array_data, field_meta.get_array_type_schema());
                 } else {
                     result += GetArrayLeafRawDataSize(
-                        array_data, field_meta.get_element_type());
+                        array_data,
+                        field_meta.get_element_type(),
+                        field_meta.is_native_list_array());
                 }
                 break;
             }
@@ -394,6 +412,94 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         scalar_array->mutable_valid_data()->Resize(count, false);
     }
     return data_array;
+}
+
+std::unique_ptr<DataArray>
+CreateNullStructSubFieldDataArray(
+    const FieldMeta& field_meta,
+    const int32_t* lengths,
+    int64_t count,
+    const std::function<bool(int64_t)>& row_valid) {
+    AssertInfo(field_meta.is_native_list_array(),
+               "struct sub-field {} must be a native list",
+               field_meta.get_id().get());
+    auto result = std::make_unique<DataArray>();
+    result->set_field_id(field_meta.get_id().get());
+    result->set_type(
+        static_cast<proto::schema::DataType>(field_meta.get_data_type()));
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        auto* vectors = result->mutable_vectors();
+        vectors->set_dim(field_meta.get_dim());
+        auto* rows = vectors->mutable_vector_array();
+        rows->set_dim(field_meta.get_dim());
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            AssertInfo(lengths[i] >= 0,
+                       "struct sub-field row {} has negative length",
+                       i);
+            AssertInfo(field_meta.is_nullable() || valid,
+                       "non-nullable struct sub-field has null row {}",
+                       i);
+            AssertInfo(valid || lengths[i] == 0,
+                       "null struct row {} has {} elements",
+                       i,
+                       lengths[i]);
+            if (field_meta.is_nullable()) {
+                vectors->add_valid_data(valid);
+            }
+            if (!valid) {
+                continue;
+            }
+            auto* row = rows->add_data();
+            row->set_dim(field_meta.get_dim());
+            InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+            row->mutable_valid_data()->Resize(lengths[i], false);
+        }
+    } else {
+        auto* scalars = result->mutable_scalars();
+        auto* rows = scalars->mutable_array_data();
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            AssertInfo(lengths[i] >= 0,
+                       "struct sub-field row {} has negative length",
+                       i);
+            AssertInfo(field_meta.is_nullable() || valid,
+                       "non-nullable struct sub-field has null row {}",
+                       i);
+            AssertInfo(valid || lengths[i] == 0,
+                       "null struct row {} has {} elements",
+                       i,
+                       lengths[i]);
+            if (field_meta.is_nullable()) {
+                scalars->add_valid_data(valid);
+            }
+            if (!valid) {
+                continue;
+            }
+            auto* row = rows->add_data();
+            if (field_meta.is_nested_array()) {
+                auto leaf_type =
+                    static_cast<DataType>(field_meta.get_array_type_schema()
+                                              .array_element()
+                                              .array_element()
+                                              .leaf_type());
+                row->mutable_array_data()->set_element_type(
+                    static_cast<proto::schema::DataType>(leaf_type));
+            } else {
+                auto* typed_row = row;
+                SetUpScalarFieldData(typed_row,
+                                     field_meta.get_element_type(),
+                                     field_meta.get_element_type(),
+                                     0);
+            }
+            row->mutable_valid_data()->Resize(lengths[i], false);
+        }
+    }
+    return result;
 }
 
 void
@@ -889,14 +995,16 @@ std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
-    auto data_array = std::make_unique<DataArray>();
+    // Initialize vector metadata even if all selected rows are null. Later
+    // shard reduction can use this column as its output-field template.
+    auto data_array = field_meta.is_vector()
+                          ? CreateEmptyVectorDataArray(0, field_meta)
+                          : std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
     auto nullable = field_meta.is_nullable();
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
-    if (field_meta.is_vector()) {
-        data_array->mutable_vectors();
-    } else {
+    if (!field_meta.is_vector()) {
         data_array->mutable_scalars();
     }
     auto* dst_valid_data =
@@ -1092,9 +1200,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
     return data_array;
 }
 
-// TODO: split scalar IndexBase with knowhere::Index
 std::unique_ptr<DataArray>
-ReverseDataFromIndex(const index::IndexBase* index,
+ReverseDataFromIndex(const index::IIndexReaderBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta) {
@@ -1109,204 +1216,88 @@ ReverseDataFromIndex(const index::IndexBase* index,
         valid_data.resize(count);
     }
 
+    auto gather = [&]<typename Input,
+                      typename Output = index::owned_t<Input>>() {
+        auto* reader =
+            dynamic_cast<const index::IScalarValueReader<Input>*>(index);
+        AssertInfo(reader != nullptr,
+                   "index reader for field {} does not support value lookup",
+                   field_meta.get_id().get());
+        std::vector<Output> values(count);
+        reader->Gather(
+            seg_offsets, count, [&](int64_t i, const Input* value, bool valid) {
+                if (nullable) {
+                    valid_data[i] = valid;
+                }
+                if (valid) {
+                    AssertInfo(value != nullptr,
+                               "index reader returned a null value for valid "
+                               "row {}",
+                               i);
+                    values[i] = *value;
+                }
+            });
+        return values;
+    };
+
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
-            using IndexType = index::ScalarIndex<bool>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<bool> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<bool>();
             auto obj = scalar_array->mutable_bool_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT8: {
-            using IndexType = index::ScalarIndex<int8_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int8_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int8_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT16: {
-            using IndexType = index::ScalarIndex<int16_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int16_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int16_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT32: {
-            using IndexType = index::ScalarIndex<int32_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int32_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int32_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT64: {
-            using IndexType = index::ScalarIndex<int64_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int64_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int64_t>();
             auto obj = scalar_array->mutable_long_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::FLOAT: {
-            using IndexType = index::ScalarIndex<float>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<float> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<float>();
             auto obj = scalar_array->mutable_float_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::DOUBLE: {
-            using IndexType = index::ScalarIndex<double>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<double> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<double>();
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::TIMESTAMPTZ: {
-            using IndexType = index::ScalarIndex<int64_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int64_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int64_t>();
             auto obj = scalar_array->mutable_timestamptz_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::VARCHAR: {
-            using IndexType = index::ScalarIndex<std::string>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<std::string> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<std::string_view>();
             auto obj = scalar_array->mutable_string_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::GEOMETRY: {
-            using IndexType = index::ScalarIndex<std::string>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<std::string> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<std::string_view>();
             auto obj = scalar_array->mutable_geometry_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
@@ -1437,53 +1428,54 @@ getCellDataType(bool is_vector, bool is_index) {
     }
 }
 
-void
-LoadIndexData(milvus::tracer::TraceContext& ctx,
-              milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx) {
-    auto& index_params = load_index_info->index_params;
-    auto field_type = load_index_info->field_type;
-    auto engine_version = load_index_info->index_engine_version;
+bool
+CanLazyCreateSealedIndexSlot(const LoadIndexInfo& load_index_info) {
+    if (!SegcoreConfig::default_config().get_lazy_index_slot_enabled() ||
+        load_index_info.field_id < START_USER_FIELDID) {
+        return false;
+    }
+    const auto type = load_index_info.index_params.find(index::INDEX_TYPE);
+    if (type == load_index_info.index_params.end()) {
+        return false;
+    }
+    const bool is_vector = IsVectorDataType(load_index_info.field_type);
+    return getCacheWarmupPolicy(load_index_info.warmup_policy,
+                                is_vector,
+                                /*is_index=*/true) ==
+           CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+}
 
-    milvus::index::CreateIndexInfo index_info;
-    index_info.field_type = load_index_info->field_type;
-    index_info.field_name = load_index_info->schema.name();
-    index_info.index_engine_version = engine_version;
+namespace {
 
-    auto config = milvus::index::ParseConfigFromIndexParams(
-        load_index_info->index_params);
+Config
+PrepareSealedIndexLoadConfig(const LoadIndexInfo& load_index_info) {
+    auto& index_params = load_index_info.index_params;
+    auto field_type = load_index_info.field_type;
+    auto engine_version = load_index_info.index_engine_version;
+
+    auto config =
+        milvus::index::ParseConfigFromIndexParams(load_index_info.index_params);
     auto load_priority_str = config[milvus::LOAD_PRIORITY].get<std::string>();
     auto priority_for_load = milvus::PriorityForLoad(load_priority_str);
     config[milvus::LOAD_PRIORITY] = priority_for_load;
-
-    // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
-    // Use value_or(1) for unit test without setting this value
-    index_info.scalar_index_engine_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(1);
-
-    index_info.tantivy_index_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config, milvus::index::TANTIVY_INDEX_VERSION)
-            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
+    config[milvus::index::INDEX_FILES] = load_index_info.index_files;
 
     LOG_INFO(
         "[collection={}][segment={}][field={}][enable_mmap={}][load_"
         "priority={}] load index {}, "
         "mmap_dir_path={}",
-        load_index_info->collection_id,
-        load_index_info->segment_id,
-        load_index_info->field_id,
-        load_index_info->enable_mmap,
+        load_index_info.collection_id,
+        load_index_info.segment_id,
+        load_index_info.field_id,
+        load_index_info.enable_mmap,
         load_priority_str,
-        load_index_info->index_id,
-        load_index_info->mmap_dir_path);
+        load_index_info.index_id,
+        load_index_info.mmap_dir_path);
     // get index type
     if (!(index_params.find("index_type") != index_params.end())) {
         ThrowInfo(ErrorCode::DataFormatBroken, "index type is empty");
     }
-    index_info.index_type = index_params.at("index_type");
+    const auto& index_type = index_params.at("index_type");
 
     // get metric type
     if (milvus::IsVectorDataType(field_type)) {
@@ -1491,10 +1483,9 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "metric type is empty for vector index");
         }
-        index_info.metric_type = index_params.at("metric_type");
     }
 
-    if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
+    if (index_type == milvus::index::NGRAM_INDEX_TYPE) {
         if (!(index_params.find(milvus::index::MIN_GRAM) !=
               index_params.end())) {
             ThrowInfo(ErrorCode::DataFormatBroken,
@@ -1505,31 +1496,144 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "max_gram is empty for ngram index");
         }
-
-        // get min_gram and max_gram and convert to uintptr_t
-        milvus::index::NgramParams ngram_params{};
-        ngram_params.loading_index = true;
-        ngram_params.min_gram =
-            std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MIN_GRAM)
-                           .value());
-        ngram_params.max_gram =
-            std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MAX_GRAM)
-                           .value());
-        index_info.ngram_params = std::make_optional(ngram_params);
     }
 
-    if (index_info.index_type == milvus::index::FMINDEX_INDEX_TYPE) {
-        milvus::index::FMIndexParams fmindex_params{};
-        // Load-time query behavior must come from the persisted FM blob. In
-        // particular, sa_sample_rate is part of the blob format and is validated
-        // by LoadView/Deserialize; reparsing an external index param here creates
-        // a second source of truth and can fail an otherwise valid load on stale
-        // metadata. The constructor defaults are build-only placeholders.
-        index_info.fmindex_params = std::make_optional(fmindex_params);
+    // Old persisted index_params need not contain a nested flag. The legacy
+    // factory derived the coordinate domain from the schema field name, so do
+    // the same at this boundary and pass one normalized config downstream.
+    if (!milvus::IsVectorDataType(field_type)) {
+        const auto schema_nested =
+            milvus::IsStructSubField(load_index_info.schema.name());
+        auto adapted = milvus::index::AdaptIndexType({
+            .index_type = index_type,
+            .field_type = field_type,
+            .element_type = load_index_info.element_type,
+            .index_engine_version = engine_version,
+            .params = std::move(config),
+            .is_nested = schema_nested,
+            .is_text_match = false,
+        });
+        config = std::move(adapted.params);
+        // Persisted index_params never carry nullability, and an artifact
+        // without a validity sidecar rebuilds validity from its postings only
+        // when the field is nullable. Use the build boundary's rule: a typed
+        // JSON projection is nullable unless its cast is JSON or ARRAY_*.
+        bool nullable = load_index_info.schema.nullable();
+        if (field_type == DataType::JSON) {
+            const auto cast = JsonCastType::FromString(
+                config.at(JSON_CAST_TYPE).get<std::string>());
+            if (cast.data_type() != JsonCastType::DataType::JSON &&
+                cast.data_type() != JsonCastType::DataType::ARRAY) {
+                nullable = true;
+            }
+        }
+        config["nullable"] = nullable;
     }
+    return config;
+}
 
+}  // namespace
+
+void
+PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
+    // Validate load parameters without inspecting the artifact or deriving its
+    // reader contract. HYBRID's concrete family is resolved on first use.
+    (void)PrepareSealedIndexLoadConfig(load_index_info);
+    AssertInfo(GetDefaultArrowFileSystem() != nullptr,
+               "arrow file system is nullptr");
+    load_index_info.index_family.clear();
+    load_index_info.index_value_type = DataType::NONE;
+    load_index_info.index_caps = {};
+    auto metadata = std::make_shared<LoadIndexInfo>(load_index_info);
+    // The decision and policy belong to this generation, even after a config refresh.
+    metadata->warmup_policy = "disable";
+    load_index_info.cache_index.reset();
+    load_index_info.lazy_index_factory =
+        [metadata = std::move(metadata)](milvus::OpContext* op_ctx) {
+            CheckCancellation(op_ctx,
+                              metadata->segment_id,
+                              metadata->field_id,
+                              "CreateSealedIndexCacheSlot");
+            // Keep each attempt private: cancellation must not retain a half-created slot.
+            auto attempt = *metadata;
+            milvus::tracer::TraceContext trace_ctx{};
+            LoadIndexData(trace_ctx, &attempt, op_ctx);
+            CheckCancellation(op_ctx,
+                              metadata->segment_id,
+                              metadata->field_id,
+                              "CreateSealedIndexCacheSlot");
+            return IndexInventory::ResolvedData{std::move(attempt.index_family),
+                                                attempt.index_value_type,
+                                                attempt.index_caps,
+                                                std::move(attempt.cache_index)};
+        };
+}
+
+IndexRegistration
+MakeSealedIndexRegistration(const LoadIndexInfo& info) {
+    IndexRegistration registration{IndexKey{
+        FieldId(info.field_id), IndexIdentity::PreBuiltIndex(info.index_id)}};
+    const auto type = info.index_params.find(index::INDEX_TYPE);
+    bool is_ngram = !info.index_family.empty()
+                        ? info.index_family == index::families::kNgram
+                        : type != info.index_params.end() &&
+                              type->second == index::NGRAM_INDEX_TYPE;
+    if (info.field_type == DataType::JSON) {
+        const auto path = info.index_params.find(JSON_PATH);
+        const auto cast = info.index_params.find(JSON_CAST_TYPE);
+        AssertInfo(
+            path != info.index_params.end() && cast != info.index_params.end(),
+            "loaded JSON index for field {} lacks normalized path or "
+            "cast metadata",
+            info.field_id);
+        if (info.index_family.empty()) {
+            // Registration needs the runtime kind, but no artifact inspection.
+            // The adapter also handles NGRAM spellings that load as INVERTED.
+            const auto adapted = index::AdaptIndexType({
+                .index_type = info.index_params.at(index::INDEX_TYPE),
+                .field_type = info.field_type,
+                .element_type = info.element_type,
+                .index_engine_version = info.index_engine_version,
+                .params = index::ParseConfigFromIndexParams(info.index_params),
+                .is_nested = IsStructSubField(info.schema.name()),
+                .is_text_match = false,
+            });
+            is_ngram = adapted.family == index::families::kNgram;
+        }
+        const auto cast_type = JsonCastType::FromString(cast->second);
+        // Full JSON uses the json_flat reader, including its NGRAM spelling.
+        is_ngram =
+            is_ngram && cast_type.data_type() != JsonCastType::DataType::JSON;
+        registration.json_path = path->second;
+        registration.json_cast_type = index::RuntimeJsonCastType(
+            is_ngram ? index::NGRAM_INDEX_TYPE : "", cast_type);
+    }
+    registration.kind = IsVectorDataType(info.field_type) ? IndexKind::Vector
+                        : is_ngram                        ? IndexKind::Ngram
+                                                          : IndexKind::Scalar;
+    return registration;
+}
+
+IndexCapabilityEntry
+MakeSealedIndexCapability(const LoadIndexInfo& info) {
+    AssertInfo(!info.index_family.empty(),
+               "loaded index for field {} has no resolved family",
+               info.field_id);
+    auto registration = MakeSealedIndexRegistration(info);
+    IndexCapabilityEntry meta{registration.key};
+    meta.json_path = std::move(registration.json_path);
+    meta.json_cast_type = registration.json_cast_type;
+    meta.family = info.index_family;
+    meta.value_type = info.index_value_type;
+    meta.caps = info.index_caps;
+    return meta;
+}
+
+void
+LoadIndexData(milvus::tracer::TraceContext& ctx,
+              milvus::segcore::LoadIndexInfo* load_index_info,
+              milvus::OpContext* op_ctx) {
+    auto config = PrepareSealedIndexLoadConfig(*load_index_info);
     // init file manager
     milvus::storage::FieldDataMeta field_meta{load_index_info->collection_id,
                                               load_index_info->partition_id,
@@ -1542,13 +1646,11 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->index_version};
     index_meta.index_store_path_version =
         load_index_info->index_store_path_version;
-    config[milvus::index::INDEX_FILES] = load_index_info->index_files;
-
-    if (load_index_info->field_type == milvus::DataType::JSON) {
-        index_info.json_cast_type = milvus::JsonCastType::FromString(
-            config.at(JSON_CAST_TYPE).get<std::string>());
-        index_info.json_path = config.at(JSON_PATH).get<std::string>();
+    if (!load_index_info->index_files.empty()) {
+        const auto& file = load_index_info->index_files.front();
+        index_meta.index_file_prefix = file.substr(0, file.rfind('/'));
     }
+
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
@@ -1559,14 +1661,17 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     file_manager_context.set_for_loading_index(true);
 
     // use cache layer to load vector/scalar index
-    std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-        translator = std::make_unique<
-            milvus::segcore::storagev1translator::SealedIndexTranslator>(
-            index_info, load_index_info, ctx, file_manager_context, config);
+    auto translator = std::make_unique<
+        milvus::segcore::storagev1translator::SealedIndexTranslator>(
+        load_index_info, ctx, file_manager_context, config, op_ctx);
+    load_index_info->index_family = translator->Family();
+    load_index_info->index_value_type = translator->ValueType();
+    load_index_info->index_caps = translator->Caps();
 
     load_index_info->cache_index =
-        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-            std::move(translator), op_ctx);
+        milvus::cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<index::IIndexReaderBase>(std::move(translator),
+                                                      op_ctx);
 }
 
 FieldDataPtr
@@ -1716,9 +1821,10 @@ sortEqualScoresOneNQ(size_t nq_begin,
     size_t start = nq_begin;
     while (start < nq_end) {
         size_t end = start + 1;
-        while (end < nq_end &&
-               std::fabs(search_result->distances_[end] -
-                         search_result->distances_[start]) < EPSILON) {
+        // Only identical scores can share a PK-sorted run. Grouping merely
+        // close scores would detach PKs/offsets from their original scores.
+        while (end < nq_end && search_result->distances_[end] ==
+                                   search_result->distances_[start]) {
             ++end;
         }
 

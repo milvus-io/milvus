@@ -214,7 +214,21 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
+    # Match Linux CI: do not refresh every recipe revision during a normal build.
+    # An upstream recipe revision can change transitive requirements without a
+    # Milvus source change, making a previously valid dependency graph fail.
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20"
+
+    # Recover caches updated by the old -u behavior. This Conan Center recipe
+    # requires aws-c-common/0.14.5, conflicting with the SDK's 0.14.0 graph.
+    # Remove only the known-bad revision; the internal remote has a compatible
+    # revision, so no unrelated Conan packages or binaries are discarded.
+    bad_event_stream_revision=7efb08d7203c90891cc0a2a36d38f4ce
+    bad_event_stream_ref="aws-c-event-stream/0.7.1#${bad_event_stream_revision}"
+    if "$CONAN" list "$bad_event_stream_ref" -c -f json | grep -Fq "\"${bad_event_stream_revision}\":"; then
+        echo "Removing incompatible cached Conan recipe: ${bad_event_stream_ref}"
+        "$CONAN" remove "$bad_event_stream_ref" --confirm
+    fi
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include
@@ -308,20 +322,13 @@ mkdir -p ${ROOT_DIR}/internal/core/output/lib
 mkdir -p ${ROOT_DIR}/internal/core/output/include
 
 pushd ${ROOT_DIR}/cmake_build/thirdparty
-if command -v cargo >/dev/null 2>&1; then
-    echo "cargo exists"
-    unameOut="$(uname -s)"
-    case "${unameOut}" in
-        Darwin*)
-          echo "running on mac os, reinstall rust 1.92"
-          # github will install rust 1.74 by default.
-          # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
-          rustup install 1.92
-          rustup default 1.92;;
-        *)
-          echo "not running on mac os, no need to reinstall rust";;
-    esac
+if command -v rustup >/dev/null 2>&1; then
+    # Corrosion selects this exact toolchain; an existing cargo from an older
+    # builder image does not satisfy the storage bridge's Rust requirement.
+    if ! rustup run 1.94.1 rustc --version >/dev/null 2>&1; then
+        rustup toolchain install 1.94.1 --profile minimal || { echo 'rust 1.94.1 install failed'; exit 1; }
+    fi
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.92 -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.94.1 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi

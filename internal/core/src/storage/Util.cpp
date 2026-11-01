@@ -14,14 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -75,6 +81,8 @@
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "milvus-storage/common/arrow_util.h"
+#include "parquet/arrow/reader.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
@@ -91,6 +99,7 @@ namespace milvus::storage {
 namespace {
 
 std::atomic<bool> external_vector_partial_null_as_row_null{false};
+std::atomic<int64_t> external_sparse_conversion_memory_limit{256LL << 20};
 
 }  // namespace
 
@@ -103,6 +112,22 @@ SetExternalVectorPartialNullAsRowNull(bool enabled) {
 bool
 GetExternalVectorPartialNullAsRowNull() {
     return external_vector_partial_null_as_row_null.load(
+        std::memory_order_relaxed);
+}
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    if (bytes <= 0) {
+        return false;
+    }
+    external_sparse_conversion_memory_limit.store(bytes,
+                                                  std::memory_order_relaxed);
+    return true;
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return external_sparse_conversion_memory_limit.load(
         std::memory_order_relaxed);
 }
 
@@ -119,7 +144,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
                              int64_t dim,
                              bool nullable,
                              DataType element_type,
-                             const FieldMeta& field_meta);
+                             const FieldMeta& field_meta,
+                             bool preserve_array_element_validity = false);
 
 enum class CloudProviderType : int8_t {
     UNKNOWN = 0,
@@ -383,12 +409,15 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto value_builder =
-                    static_cast<arrow::FixedSizeBinaryBuilder*>(
+                auto* fixed_builder =
+                    dynamic_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
-                AssertInfo(value_builder != nullptr,
-                           "value_builder must be FixedSizeBinaryBuilder for "
-                           "VectorArray");
+                auto* binary_builder = dynamic_cast<arrow::BinaryBuilder*>(
+                    list_builder->value_builder());
+                AssertInfo(
+                    fixed_builder != nullptr || binary_builder != nullptr,
+                    "VectorArray value builder must be "
+                    "FixedSizeBinaryBuilder or BinaryBuilder");
 
                 DataType element_type = DataType::NONE;
                 auto append_vector_array = [&](const VectorArray& array) {
@@ -423,11 +452,33 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                             status.ToString());
                     }
 
-                    int num_vectors = array.physical_length();
-                    if (num_vectors > 0) {
-                        auto ast = value_builder->AppendValues(
+                    AssertInfo(array.is_element_nullable() ==
+                                   (binary_builder != nullptr),
+                               "VectorArray element validity does not match "
+                               "Arrow builder type");
+                    if (binary_builder != nullptr) {
+                        const auto width = vector_bytes_per_element(
+                            array.get_element_type(), array.dim());
+                        auto bits = array.element_validity_view();
+                        size_t physical = 0;
+                        for (int j = 0; j < array.length(); ++j) {
+                            auto ast =
+                                bits[j] ? binary_builder->Append(
+                                              reinterpret_cast<const uint8_t*>(
+                                                  array.data()) +
+                                                  physical++ * width,
+                                              width)
+                                        : binary_builder->AppendNull();
+                            if (!ast.ok()) {
+                                ThrowInfo(storage::ArrowStatusToErrorCode(ast),
+                                          "Failed to append vector element: {}",
+                                          ast.ToString());
+                            }
+                        }
+                    } else if (array.physical_length() > 0) {
+                        auto ast = fixed_builder->AppendValues(
                             reinterpret_cast<const uint8_t*>(array.data()),
-                            num_vectors);
+                            array.physical_length());
                         if (!ast.ok()) {
                             ThrowInfo(
                                 milvus::storage::ArrowStatusToErrorCode(ast),
@@ -552,6 +603,18 @@ CreateArrowBuilder(DataType data_type) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta) {
+    auto result = arrow::MakeBuilder(GetArrowDataType(field_meta));
+    if (!result.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(result),
+                  "failed to create Arrow builder for field {}: {}",
+                  field_meta.get_name().get(),
+                  result.status().ToString());
+    }
+    return std::shared_ptr<arrow::ArrayBuilder>(std::move(*result));
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
@@ -765,6 +828,12 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta) {
+    return arrow::schema({arrow::field(
+        "val", GetArrowDataType(field_meta), field_meta.is_nullable())});
 }
 
 std::shared_ptr<arrow::Schema>
@@ -1312,6 +1381,12 @@ ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
+        conf.talon_mode = storage_config.talon_mode;
+        conf.talon_small_read_threshold =
+            storage_config.talon_small_read_threshold;
+        conf.talon_coordinator = storage_config.talon_coordinator;
+        conf.talon_block_size = storage_config.talon_block_size;
+        conf.talon_max_idle_per_addr = storage_config.talon_max_idle_per_addr;
     }
     return conf;
 }
@@ -1618,20 +1693,76 @@ FetchFieldData(ChunkManager* cm, const std::vector<std::string>& remote_files) {
     return field_datas;
 }
 
-std::vector<FieldDataPtr>
-GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
-                           int64_t field_id,
-                           DataType data_type,
-                           DataType element_type,
-                           int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs,
-                           size_t max_rows /*=0*/,
-                           size_t offset /*=0*/) {
+namespace {
+
+int64_t
+ParseBinlogSequence(const std::string& path) {
+    const auto slash = path.find_last_of('/');
+    const auto name = std::string_view(path).substr(
+        slash == std::string::npos ? 0 : slash + 1);
+    int64_t sequence = 0;
+    const auto [end, error] =
+        std::from_chars(name.data(), name.data() + name.size(), sequence);
+    if (name.empty() || error != std::errc{} ||
+        end != name.data() + name.size()) {
+        ThrowInfo(DataFormatBroken,
+                  "insert binlog path has a non-numeric filename: {}",
+                  path);
+    }
+    return sequence;
+}
+
+}  // namespace
+
+void
+SortBinlogPaths(std::vector<std::string>& paths) {
+    if (paths.size() == 1) {
+        ParseBinlogSequence(paths.front());
+        return;
+    }
+    std::vector<std::pair<int64_t, std::string>> sequenced;
+    sequenced.reserve(paths.size());
+    for (auto& path : paths) {
+        sequenced.emplace_back(ParseBinlogSequence(path), std::move(path));
+    }
+    std::sort(sequenced.begin(),
+              sequenced.end(),
+              [](const auto& left, const auto& right) {
+                  return left.first < right.first;
+              });
+    for (size_t i = 0; i < sequenced.size(); ++i) {
+        paths[i] = std::move(sequenced[i].second);
+    }
+}
+
+// Shared implementation of the storage-v2 read path. A positive `max_rows`
+// keeps #50088's partial download: only the row groups covering
+// [offset, offset + max_rows) are read, and the visit ends once that many rows
+// have been handed to the visitor. `max_rows == 0` visits every row group.
+VisitOutcome
+detail::VisitFieldDataFromStorageV2Paged(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor,
+    size_t max_rows,
+    size_t offset,
+    size_t window_bytes) {
     if (!(remote_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "[StorageV2] remote files size is 0");
     }
-    std::vector<FieldDataPtr> field_data_list;
+    AssertInfo(static_cast<bool>(visitor),
+               "[StorageV2] field-data visitor is empty");
+    AssertInfo(window_bytes > 0,
+               "[StorageV2] read window byte limit must be positive");
+    const auto slice_size = FILE_SLICE_SIZE.load();
+    AssertInfo(slice_size > 0, "[StorageV2] file slice size must be positive");
+    const auto parallel_degree =
+        std::max<uint64_t>(1, DEFAULT_FIELD_MAX_MEMORY_LIMIT / slice_size);
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
@@ -1641,8 +1772,13 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "[StorageV2] remote files size is 0");
         }
-        int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
-        column_group_files[group_id] = remote_chunk_files;
+        auto files = remote_chunk_files;
+        // This is the common boundary for BuildSession primary/optional
+        // fields and the memory/disk cache readers used by stats builds.
+        // Normalize once per group before metadata lookup or row delivery.
+        SortBinlogPaths(files);
+        const auto group_id = ExtractGroupIdFromPath(files.front());
+        column_group_files[group_id] = std::move(files);
     }
 
     std::vector<std::string> remote_chunk_files;
@@ -1677,7 +1813,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             "[StorageV2] field {} not found in any column group, return "
             "empty result set",
             field_id);
-        return field_data_list;
+        return VisitOutcome::FieldMissing;
     }
     if (!(remote_chunk_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
@@ -1703,24 +1839,17 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             "result set",
             field_id,
             column_group_id);
-        return field_data_list;
+        return VisitOutcome::FieldMissing;
     }
 
     AssertInfo(fs != nullptr,
                "[StorageV2] storage v2 arrow file system is not initialized");
 
-    // set up channel for arrow reader
-    auto field_data_info = FieldDataInfo();
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-    field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
-
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     size_t total_num_rows = 0;
-    bool is_full = false;
-    for (auto& column_group_file : remote_chunk_files) {
+
+    for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        std::vector<std::vector<int64_t>> row_group_lists;
         auto result = milvus_storage::FileRowGroupReader::Make(
             fs,
             column_group_file,
@@ -1738,11 +1867,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto row_group_num = row_group_meta_data_vector.size();
         LOG_DEBUG("[StorageV2] row_group_num: {}", row_group_num);
 
-        std::vector<int64_t> all_row_groups(row_group_num);
+        // Row groups this call has to read. Without a row budget that is
+        // every group; with one it is the window covering
+        // [offset, offset + max_rows) (#50088).
+        std::vector<int64_t> selected_row_groups(row_group_num);
         if (max_rows == 0) {
-            std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+            std::iota(
+                selected_row_groups.begin(), selected_row_groups.end(), 0);
         } else {
-            all_row_groups.clear();
+            selected_row_groups.clear();
             // Find the starting row group by walking through cumulative row
             // counts. Row groups can have different sizes, so we cannot assume
             // uniform size based on the first row group.
@@ -1762,25 +1895,42 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                     "[StorageV2] start_row_group {} is beyond group num {}",
                     start_row_group,
                     row_group_num);
-                return field_data_list;
+                return VisitOutcome::Exhausted;
             }
             LOG_DEBUG("[StorageV2] starting in row group: {}", start_row_group);
             size_t total_rows = 0;
             for (size_t i = start_row_group; i < row_group_num; i++) {
                 size_t num_rows = row_group_meta_data_vector.Get(i).row_num();
                 total_rows += num_rows;
-                all_row_groups.push_back(i);
+                selected_row_groups.push_back(static_cast<int64_t>(i));
                 if (total_rows >= max_rows) {
                     LOG_DEBUG("[StorageV2] ending in row group: {}", i);
                     break;
                 }
             }
         }
-        row_group_lists.push_back(std::move(all_row_groups));
 
-        // create a schema with only the field id
+        // Preserve nullability while the bounded parallel loader reads the
+        // selected row groups. LoadWithStrategy publishes blocks in row-group
+        // order, regardless of the order in which its worker tasks finish.
         auto field_schema = reader->schema()->field(col_offset)->Copy();
-        auto arrow_schema = arrow::schema({field_schema});
+        if (data_type == DataType::ARRAY &&
+            field_schema->type()->id() == arrow::Type::LIST) {
+            const auto outer =
+                std::static_pointer_cast<arrow::ListType>(field_schema->type());
+            bool nullable_element = outer->value_field()->nullable();
+            if (outer->value_type()->id() == arrow::Type::LIST) {
+                const auto inner = std::static_pointer_cast<arrow::ListType>(
+                    outer->value_type());
+                nullable_element |= inner->value_field()->nullable();
+            }
+            if (nullable_element) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "scalar index build on element-nullable array "
+                          "field {} is not supported yet",
+                          field_id);
+            }
+        }
         auto status = reader->Close();
         if (!status.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(status),
@@ -1790,82 +1940,172 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                           " with error: " + status.ToString());
         }
 
-        // split row groups for parallel reading
-        auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
-            parallel_degree);
-        auto load_future = pool.Submit([&]() {
-            return LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                    field_data_info.arrow_reader_channel,
-                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                    std::move(strategy),
-                                    row_group_lists,
-                                    fs,
-                                    nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
-        });
-        // read field data from channel
-        try {
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (field_data_info.arrow_reader_channel->pop(r)) {
-                size_t num_rows = 0;
-                std::vector<std::shared_ptr<arrow::ChunkedArray>>
-                    chunked_arrays;
-                for (const auto& table_info : r->arrow_tables) {
-                    num_rows += table_info.table->num_rows();
-                    chunked_arrays.push_back(
-                        table_info.table->column(col_offset));
-                }
-                auto field_data =
-                    storage::CreateFieldData(data_type,
-                                             element_type,
-                                             field_schema->nullable(),
-                                             dim,
-                                             num_rows);
-                for (const auto& chunked_array : chunked_arrays) {
-                    field_data->FillFieldData(chunked_array);
-                }
-                field_data_list.push_back(field_data);
-                total_num_rows += num_rows;
-                if (max_rows > 0 && total_num_rows >= max_rows) {
-                    LOG_DEBUG(
-                        "[StorageV2] max_rows: {} reached, total rows: {}",
-                        max_rows,
-                        total_num_rows);
-                    is_full = true;
+        for (size_t begin = 0; begin < selected_row_groups.size();) {
+            size_t end = begin;
+            size_t used_bytes = 0;
+            while (end < selected_row_groups.size()) {
+                const auto group_bytes =
+                    row_group_meta_data_vector.Get(selected_row_groups[end])
+                        .memory_size();
+                if (end > begin && (group_bytes == 0 ||
+                                    group_bytes > window_bytes - used_bytes)) {
                     break;
                 }
+                ++end;
+                // A row group is indivisible. Unknown (zero) sizes are also
+                // isolated, so they cannot make an entire file appear free.
+                if (group_bytes == 0 || group_bytes >= window_bytes) {
+                    break;
+                }
+                used_bytes += group_bytes;
             }
-            if (is_full) {
-                // The background load task captures locals by reference and
-                // may still be pushing into the bounded channel. Drain and
-                // join before leaving scope to avoid use-after-free (#46958).
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (field_data_info.arrow_reader_channel->pop(discard)) {
+            std::vector<int64_t> row_groups(selected_row_groups.begin() + begin,
+                                            selected_row_groups.begin() + end);
+            auto channel =
+                std::make_shared<ArrowReaderChannel>(parallel_degree);
+            auto load_future =
+                pool.Submit([channel,
+                             column_group_file,
+                             fs,
+                             parallel_degree,
+                             row_groups = std::move(row_groups)]() mutable {
+                    auto strategy =
+                        std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+                            parallel_degree);
+                    std::vector<std::vector<int64_t>> row_group_lists;
+                    row_group_lists.emplace_back(std::move(row_groups));
+                    LoadWithStrategy(
+                        std::vector<std::string>{column_group_file},
+                        channel,
+                        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                        std::move(strategy),
+                        row_group_lists,
+                        fs,
+                        nullptr,
+                        milvus::proto::common::LoadPriority::HIGH);
+                });
+
+            bool channel_exhausted = false;
+            auto drain = [&] {
+                // The producer can be blocked pushing into the bounded channel,
+                // including its close marker. Consume it before joining (#46958).
+                if (!channel_exhausted) {
+                    std::shared_ptr<milvus::ArrowDataWrapper> pending;
+                    while (channel->pop(pending)) {
+                    }
+                    channel_exhausted = true;
                 }
                 DrainFuture(load_future);
-                break;
-            }
-        } catch (...) {
-            // The load task captures this frame by reference and may be
-            // blocked pushing into the bounded channel. Unblock it, then
-            // wait for it to finish before unwinding (see #46958).
+            };
             try {
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (field_data_info.arrow_reader_channel->pop(discard)) {
+                std::shared_ptr<milvus::ArrowDataWrapper> r;
+                while (channel->pop(r)) {
+                    size_t num_rows = 0;
+                    std::vector<std::shared_ptr<arrow::ChunkedArray>>
+                        chunked_arrays;
+                    chunked_arrays.reserve(r->arrow_tables.size());
+                    for (const auto& table_info : r->arrow_tables) {
+                        num_rows += table_info.table->num_rows();
+                        chunked_arrays.push_back(
+                            table_info.table->column(col_offset));
+                    }
+                    auto field_data =
+                        storage::CreateFieldData(data_type,
+                                                 element_type,
+                                                 field_schema->nullable(),
+                                                 dim,
+                                                 num_rows);
+                    for (const auto& chunked_array : chunked_arrays) {
+                        field_data->FillFieldData(chunked_array);
+                    }
+                    if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                        drain();
+                        return VisitOutcome::Stopped;
+                    }
+                    total_num_rows += num_rows;
+                    if (max_rows > 0 && total_num_rows >= max_rows) {
+                        LOG_DEBUG(
+                            "[StorageV2] max_rows: {} reached, total rows: {}",
+                            max_rows,
+                            total_num_rows);
+                        drain();
+                        return VisitOutcome::Exhausted;
+                    }
                 }
+                channel_exhausted = true;
+                load_future.get();
             } catch (...) {
+                drain();
+                throw;
             }
-            DrainFuture(load_future);
-            throw;
+            // No prefetch: the current producer and every reader it owns
+            // have finished before the next window can be submitted.
+            begin = end;
         }
-        // access underlying feature to get exception if any
-        load_future.get();
+    }
+    return VisitOutcome::Exhausted;
+}
+
+VisitOutcome
+VisitFieldDataFromStorageV2(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor) {
+    return detail::VisitFieldDataFromStorageV2Paged(remote_files,
+                                                    field_id,
+                                                    data_type,
+                                                    element_type,
+                                                    dim,
+                                                    std::move(fs),
+                                                    visitor,
+                                                    /*max_rows=*/0,
+                                                    /*offset=*/0);
+}
+
+std::vector<FieldDataPtr>
+GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
+                           int64_t field_id,
+                           DataType data_type,
+                           DataType element_type,
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs,
+                           size_t max_rows /*=0*/,
+                           size_t offset /*=0*/) {
+    std::vector<FieldDataPtr> field_data_list;
+    const auto outcome = detail::VisitFieldDataFromStorageV2Paged(
+        remote_files,
+        field_id,
+        data_type,
+        element_type,
+        dim,
+        std::move(fs),
+        [&](FieldDataPtr field_data) {
+            field_data_list.push_back(std::move(field_data));
+            return VisitControl::Continue;
+        },
+        max_rows,
+        offset);
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+        case VisitOutcome::FieldMissing:
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue storage-v2 visitor stopped early");
     }
     return field_data_list;
 }
 
-void
-IterateFieldDataFromManifest(
+// Shared implementation of the manifest read paths. `max_rows == 0` streams
+// the whole column through the record batch reader; a positive `max_rows`
+// takes the chunk-reader page starting at `offset` (#50088). The public
+// entry points below fix the paging arguments for their own contract.
+static VisitOutcome
+VisitFieldDataFromManifestPaged(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
     const FieldDataMeta& field_meta,
@@ -1873,13 +2113,15 @@ IterateFieldDataFromManifest(
     int64_t dim,
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
-    const std::function<void(FieldDataPtr)>& consumer,
+    const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes,
     size_t max_rows,
     size_t offset) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
+    AssertInfo(static_cast<bool>(visitor),
+               "manifest field-data visitor is empty");
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -1918,7 +2160,7 @@ IterateFieldDataFromManifest(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return;
+        return VisitOutcome::FieldMissing;
     }
 
     std::vector<std::string> needed_columns = {column_name};
@@ -1941,7 +2183,16 @@ IterateFieldDataFromManifest(
     std::shared_ptr<arrow::Schema> reader_schema = nullptr;
     if (!is_external) {
         std::shared_ptr<arrow::Schema> arrow_schema;
-        if (IsVectorDataType(data_type.value())) {
+        if ((data_type.value() == DataType::ARRAY ||
+             data_type.value() == DataType::VECTOR_ARRAY) &&
+            (field_meta.field_schema.element_nullable() ||
+             field_meta.field_schema.has_type_schema())) {
+            auto schema = field_meta.field_schema;
+            if (schema.fieldid() == 0) {
+                schema.set_fieldid(field_meta.field_id);
+            }
+            arrow_schema = CreateArrowSchema(FieldMeta::ParseFrom(schema));
+        } else if (IsVectorDataType(data_type.value())) {
             if (data_type.value() == DataType::VECTOR_ARRAY) {
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
@@ -2016,13 +2267,9 @@ IterateFieldDataFromManifest(
     //
     // The decode tasks go to the LOW pool, not MIDDLE. Every production
     // caller of this function is an index build (DiskFileManagerImpl /
-    // MemFileManagerImpl), i.e. background batch work, while MIDDLE is where
-    // ReduceHelper submits search reduce tasks and then blocks on
-    // future.get(). In standalone both share one ThreadPools singleton, so
-    // submitting a whole decode window to MIDDLE would queue CPU-bound
-    // tasks ahead of reduce and hold search latency up for the entire
-    // download phase. LOW carries only background segment loads and, being
-    // CPU_NUM-sized, still saturates the cores for this CPU-bound decode.
+    // MemFileManagerImpl), i.e. background batch work. Keep decode off the
+    // MIDDLE pool used by batch field and index loading. LOW's default
+    // CPU_NUM-sized capacity is sufficient for this CPU-bound decode.
     // Invariant this relies on: the calling thread blocks on decode futures,
     // so this function must not be called from a LOW-pool thread. Index
     // build tasks enter segcore from Go, so no caller does today.
@@ -2078,16 +2325,36 @@ IterateFieldDataFromManifest(
         auto t1 = now_ns();
         pending_bytes -= pending.front().second;
         pending.pop_front();
-        consumer(std::move(field_data));
+        const auto control = visitor(std::move(field_data));
         auto t2 = now_ns();
         decode_wait_ns += t1 - t0;
         consume_ns += t2 - t1;
         consume_max_ns = std::max(consume_max_ns, t2 - t1);
+        return control;
+    };
+
+    auto drain_after_stop = [&]() {
+        std::exception_ptr first_failure;
+        while (!pending.empty()) {
+            try {
+                pending.front().first.get();
+            } catch (...) {
+                if (!first_failure) {
+                    first_failure = std::current_exception();
+                }
+            }
+            pending_bytes -= pending.front().second;
+            pending.pop_front();
+        }
+        if (first_failure) {
+            std::rethrow_exception(first_failure);
+        }
     };
 
     auto data_type_v = data_type.value();
     auto element_type_v = element_type.value();
-    if (max_rows == 0) {  //read all with record batches
+    bool stopped = false;
+    if (max_rows == 0) {  // read all with record batches
         auto reader_result = reader->get_record_batch_reader("");
         if (!reader_result.ok()) {
             auto error = milvus_storage::ToSegcoreError(reader_result.status());
@@ -2096,8 +2363,7 @@ IterateFieldDataFromManifest(
                       error.what());
         }
         auto record_batch_reader = reader_result.ValueOrDie();
-        while (true) {
-            std::shared_ptr<arrow::RecordBatch> batch;
+        while (!stopped) {
             auto fetch_start = now_ns();
             auto status = record_batch_reader->ReadNext(&batch);
             auto fetch_elapsed = now_ns() - fetch_start;
@@ -2120,10 +2386,11 @@ IterateFieldDataFromManifest(
                 continue;
             }
 
-            // Charge this slice's arrow input bytes against the byte budget (see
-            // the note on the budget above for why input, not decoded, bytes).
-            // A record batch may share a large row-group backing buffer with
-            // adjacent slices, so count only the ranges this slice references.
+            // Charge this slice's arrow input bytes against the byte budget
+            // (see the note on the budget above for why input, not decoded,
+            // bytes). A record batch may share a large row-group backing
+            // buffer with adjacent slices, so count only the ranges this
+            // slice references.
             auto batch_bytes = EstimateRecordBatchBytes(*batch);
 
             auto decode_future = pool.Submit([batch,
@@ -2163,14 +2430,23 @@ IterateFieldDataFromManifest(
             while (pending.size() > 1 &&
                    (pending_bytes > max_inflight_bytes ||
                     pending.size() >= max_inflight_batches)) {
-                deliver_front();
+                if (deliver_front() == VisitControl::Stop) {
+                    stopped = true;
+                    break;
+                }
+            }
+            if (stopped) {
+                break;
             }
             // Opportunistically deliver whatever is already done, keeping
             // consumer-side work (e.g. disk writes) interleaved with fetching.
             while (!pending.empty() &&
                    pending.front().first.wait_for(std::chrono::seconds(0)) ==
                        std::future_status::ready) {
-                deliver_front();
+                if (deliver_front() == VisitControl::Stop) {
+                    stopped = true;
+                    break;
+                }
             }
         }
     } else {  // read specific rows with chunk_reader
@@ -2205,7 +2481,7 @@ IterateFieldDataFromManifest(
             LOG_DEBUG("[StorageV3] offset: {} is beyond total_rows: {}",
                       offset,
                       segment_total_rows);
-            return;
+            return VisitOutcome::Exhausted;
         }
         int64_t effective_rows = std::min(static_cast<int64_t>(max_rows),
                                           segment_total_rows - signed_offset);
@@ -2305,7 +2581,10 @@ IterateFieldDataFromManifest(
             auto field_data = CreateFieldData(
                 data_type_v, element_type_v, nullable, dim, num_rows);
             field_data->FillFieldData(chunked_array);
-            consumer(std::move(field_data));
+            if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                stopped = true;
+                break;
+            }
             consumed_rows += num_rows;
             ++batch_count;
             if (consumed_rows >= effective_rows) {
@@ -2317,8 +2596,19 @@ IterateFieldDataFromManifest(
         }
     }
 
-    while (!pending.empty()) {
-        deliver_front();
+    if (stopped) {
+        // These decodes were submitted before the stop decision. They receive
+        // no callback, but get() still preserves the first real failure rather
+        // than turning it into cancellation or hiding it behind normal Stop.
+        drain_after_stop();
+    } else {
+        while (!pending.empty()) {
+            if (deliver_front() == VisitControl::Stop) {
+                stopped = true;
+                drain_after_stop();
+                break;
+            }
+        }
     }
 
     if (batch_count > 0) {
@@ -2338,6 +2628,69 @@ IterateFieldDataFromManifest(
             decode_wait_ns / 1'000'000,
             consume_ns / 1'000'000,
             consume_max_ns / 1'000'000);
+    }
+    return stopped ? VisitOutcome::Stopped : VisitOutcome::Exhausted;
+}
+
+VisitOutcome
+VisitFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const FieldDataVisitor& visitor,
+    int64_t max_inflight_bytes) {
+    return VisitFieldDataFromManifestPaged(manifest_path,
+                                           loon_ffi_properties,
+                                           field_meta,
+                                           data_type,
+                                           dim,
+                                           element_type,
+                                           std::move(storage_column_mapping),
+                                           visitor,
+                                           max_inflight_bytes,
+                                           /*max_rows=*/0,
+                                           /*offset=*/0);
+}
+
+void
+IterateFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const std::function<void(FieldDataPtr)>& consumer,
+    int64_t max_inflight_bytes,
+    size_t max_rows,
+    size_t offset) {
+    const auto outcome = VisitFieldDataFromManifestPaged(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        data_type,
+        dim,
+        element_type,
+        std::move(storage_column_mapping),
+        [&](FieldDataPtr field_data) {
+            consumer(std::move(field_data));
+            return VisitControl::Continue;
+        },
+        max_inflight_bytes,
+        max_rows,
+        offset);
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+        case VisitOutcome::FieldMissing:
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue manifest visitor stopped early");
     }
 }
 
@@ -2481,22 +2834,24 @@ OpenTextFieldSegmentReader(
     return std::move(reader_result.ValueOrDie());
 }
 
-std::vector<FieldDataPtr>
-GetTextFieldDatasFromManifest(
+VisitOutcome
+VisitTextFieldDataFromManifest(
     const std::string& manifest_path,
     const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
-    const FieldDataMeta& field_meta) {
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor) {
     AssertInfo(loon_ffi_properties != nullptr,
                "loon ffi properties is null when read text field data from "
                "manifest");
+    AssertInfo(static_cast<bool>(visitor),
+               "manifest TEXT field-data visitor is empty");
 
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
 
     std::string column_name = std::to_string(field_meta.field_id);
 
     if (!ManifestContainsColumn(loon_manifest, column_name)) {
-        LOG_INFO("TEXT field {} not found in manifest", field_meta.field_id);
-        return {};
+        return VisitOutcome::FieldMissing;
     }
 
     auto reader = OpenTextFieldSegmentReader(manifest_path,
@@ -2505,8 +2860,8 @@ GetTextFieldDatasFromManifest(
                                              field_meta,
                                              column_name);
 
-    std::vector<FieldDataPtr> field_datas;
-    while (true) {
+    bool stopped = false;
+    while (!stopped) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto status = reader->ReadNext(&batch);
         if (!status.ok()) {
@@ -2540,7 +2895,7 @@ GetTextFieldDatasFromManifest(
                                           1,
                                           num_rows);
         field_data->FillFieldData(chunked_array);
-        field_datas.push_back(field_data);
+        stopped = visitor(std::move(field_data)) == VisitControl::Stop;
     }
 
     auto status = reader->Close();
@@ -2552,6 +2907,34 @@ GetTextFieldDatasFromManifest(
                   error.what());
     }
 
+    return stopped ? VisitOutcome::Stopped : VisitOutcome::Exhausted;
+}
+
+std::vector<FieldDataPtr>
+GetTextFieldDatasFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta) {
+    std::vector<FieldDataPtr> field_datas;
+    const auto outcome = VisitTextFieldDataFromManifest(
+        manifest_path,
+        loon_ffi_properties,
+        field_meta,
+        [&](FieldDataPtr field_data) {
+            field_datas.push_back(std::move(field_data));
+            return VisitControl::Continue;
+        });
+    switch (outcome) {
+        case VisitOutcome::Exhausted:
+            break;
+        case VisitOutcome::FieldMissing:
+            LOG_INFO("TEXT field {} not found in manifest",
+                     field_meta.field_id);
+            break;
+        case VisitOutcome::Stopped:
+            ThrowInfo(UnexpectedError,
+                      "always-continue manifest TEXT visitor stopped early");
+    }
     return field_datas;
 }
 
@@ -2635,6 +3018,54 @@ GetFieldIDList(FieldId column_group_id,
                   status.ToString());
     }
     return field_id_list;
+}
+
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath) {
+    // Opening the reader reads the footer only; no column data is fetched.
+    auto reader_result = milvus_storage::MakeArrowFileReader(
+        *fs, filepath, GetReaderProperties(), GetArrowReaderProperties());
+    if (!reader_result.ok()) {
+        // Keep the classification the filesystem attached (a transient
+        // storage failure stays retriable, a missing object stays permanent).
+        ThrowInfo(ArrowStatusToErrorCode(reader_result.status()),
+                  "failed to read footer of packed file {}: {}",
+                  filepath,
+                  reader_result.status().ToString());
+    }
+    std::shared_ptr<arrow::Schema> file_schema;
+    auto status = reader_result.ValueOrDie()->GetSchema(&file_schema);
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "failed to read schema of packed file {}: {}",
+                  filepath,
+                  status.ToString());
+    }
+    std::vector<int64_t> field_ids;
+    field_ids.reserve(file_schema->num_fields());
+    for (const auto& field : file_schema->fields()) {
+        auto metadata = field->metadata();
+        std::string value;
+        if (metadata != nullptr) {
+            auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
+            if (result.ok()) {
+                value = result.ValueUnsafe();
+            }
+        }
+        char* end = nullptr;
+        errno = 0;
+        auto field_id = std::strtoll(value.c_str(), &end, 10);
+        if (value.empty() || *end != '\0' || errno == ERANGE) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "column {} of packed file {} has no valid {} metadata",
+                      field->name(),
+                      filepath,
+                      milvus_storage::ARROW_FIELD_ID_KEY);
+        }
+        field_ids.push_back(field_id);
+    }
+    return field_ids;
 }
 
 std::string
@@ -3281,30 +3712,120 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     // List variants -> LIST (recursively canonicalize values)
     if (tid == arrow::Type::LARGE_LIST || tid == arrow::Type::LIST_VIEW ||
         tid == arrow::Type::LIST) {
+        const auto& data = array->data();
+        if (array->offset() < 0 || array->length() < 0 ||
+            array->offset() >
+                std::numeric_limits<int64_t>::max() - array->length() ||
+            data->buffers.empty()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: invalid list range");
+        }
+        auto require_buffer_range = [&](size_t index,
+                                        uint64_t count,
+                                        size_t width) {
+            if (count == 0) {
+                return;
+            }
+            const auto first = static_cast<uint64_t>(array->offset());
+            if (data->buffers.size() <= index ||
+                data->buffers[index] == nullptr ||
+                data->buffers[index]->size() < 0 ||
+                first > static_cast<uint64_t>(data->buffers[index]->size()) /
+                            width ||
+                count > static_cast<uint64_t>(data->buffers[index]->size()) /
+                                width -
+                            first) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list buffer {} is "
+                          "shorter than the declared range",
+                          index);
+            }
+        };
+        const auto& bitmap = data->buffers[0];
+        if (bitmap == nullptr && data->null_count > 0) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: null list has no bitmap");
+        }
+        if (bitmap != nullptr) {
+            const auto bits = static_cast<uint64_t>(array->offset()) +
+                              static_cast<uint64_t>(array->length());
+            const auto bytes = bits / 8 + (bits % 8 != 0);
+            if (bitmap->size() < 0 ||
+                bytes > static_cast<uint64_t>(bitmap->size())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list validity buffer "
+                          "is shorter than the declared range");
+            }
+        }
+        require_buffer_range(
+            1,
+            static_cast<uint64_t>(array->length()) +
+                (tid == arrow::Type::LIST_VIEW ? 0 : 1),
+            tid == arrow::Type::LARGE_LIST ? sizeof(int64_t) : sizeof(int32_t));
+        if (tid == arrow::Type::LIST_VIEW) {
+            require_buffer_range(
+                2, static_cast<uint64_t>(array->length()), sizeof(int32_t));
+        }
         std::shared_ptr<arrow::Array> values;
         std::vector<std::pair<int64_t, int64_t>> ranges;
         ranges.reserve(array->length());
+        auto append_range = [&](int64_t i, int64_t start, int64_t length) {
+            if (values == nullptr || values->length() < 0 || start < 0 ||
+                length < 0 || start > values->length() ||
+                length > values->length() - start) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list row {} exceeds "
+                          "child values",
+                          i);
+            }
+            if (array->IsNull(i) && length != 0) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: null list row {} has "
+                          "a non-empty child range",
+                          i);
+            }
+            ranges.emplace_back(start, start + length);
+        };
         if (tid == arrow::Type::LIST) {
             auto la = std::static_pointer_cast<arrow::ListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else if (tid == arrow::Type::LARGE_LIST) {
             auto la = std::static_pointer_cast<arrow::LargeListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else {
             auto lv = std::static_pointer_cast<arrow::ListViewArray>(array);
             values = lv->values();
             for (int64_t i = 0; i < lv->length(); ++i) {
                 int64_t s = lv->value_offset(i);
-                ranges.emplace_back(s, s + lv->value_length(i));
+                append_range(i, s, lv->value_length(i));
             }
+        }
+
+        if (values == nullptr) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: list has no child values");
         }
 
         auto canonical_values = CanonicalizeArrowVariants(values);
@@ -3331,7 +3852,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             if (!array->IsNull(i)) {
                 auto [s, e] = ranges[i];
                 int64_t len = e - s;
-                if (!(cur + len <= INT32_MAX)) {
+                if (len > INT32_MAX - cur) {
                     ThrowInfo(
                         ErrorCode::DataFormatBroken,
                         "CanonicalizeArrowVariants: int32 offset overflow");
@@ -3370,7 +3891,8 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
         auto offsets_buf =
             std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
         return std::make_shared<arrow::ListArray>(
-            arrow::list(canonical_values->type()),
+            arrow::list(
+                array->type()->field(0)->WithType(canonical_values->type())),
             array->length(),
             offsets_buf,
             concat_values,
@@ -3515,10 +4037,10 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays) {
     return result;
 }
 
-DataType
-ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
-                             const FieldMeta& field_meta) {
-    switch (values->type_id()) {
+std::optional<DataType>
+ArrowListElementTypeToMilvus(
+    const std::shared_ptr<arrow::DataType>& arrow_type) {
+    switch (arrow_type->id()) {
         case arrow::Type::BOOL:
             return DataType::BOOL;
         case arrow::Type::INT8:
@@ -3538,10 +4060,7 @@ ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
         case arrow::Type::STRING_VIEW:
             return DataType::STRING;
         default:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "unsupported array element arrow type{}: {}",
-                      FieldErrorSuffix(field_meta),
-                      values->type()->ToString());
+            return std::nullopt;
     }
 }
 
@@ -3553,10 +4072,107 @@ IsCompatibleArrayElementType(DataType actual_type, DataType expected_type) {
     return actual_type == DataType::STRING && IsStringDataType(expected_type);
 }
 
+DataType
+ArrowListElementTypeToMilvus(const std::shared_ptr<arrow::Array>& values,
+                             const FieldMeta& field_meta) {
+    auto data_type = ArrowListElementTypeToMilvus(values->type());
+    if (!data_type.has_value()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "unsupported array element arrow type{}: {}",
+                  FieldErrorSuffix(field_meta),
+                  values->type()->ToString());
+    }
+    return data_type.value();
+}
+
+bool
+IsCompatibleArrayElementArrowType(
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType expected_type) {
+    const auto actual_data_type = ArrowListElementTypeToMilvus(actual_type);
+    return actual_data_type.has_value() &&
+           IsCompatibleArrayElementType(actual_data_type.value(),
+                                        expected_type);
+}
+
+DataType
+TypeSchemaArrayElementType(const proto::schema::TypeSchema& type) {
+    AssertInfo(type.has_array_element(),
+               "nested ARRAY type schema is missing an array element");
+    const auto& element = type.array_element();
+    if (element.has_array_element()) {
+        return DataType::ARRAY;
+    }
+    AssertInfo(element.has_leaf_type(),
+               "nested ARRAY type schema is missing a leaf type");
+    return DataType(element.leaf_type());
+}
+
+proto::schema::ScalarField
+ArrowNestedListToScalarFieldProto(
+    const std::shared_ptr<arrow::ListArray>& list_array,
+    int64_t row_index,
+    const proto::schema::TypeSchema& type,
+    const FieldMeta& field_meta) {
+    const auto expected_element_type = TypeSchemaArrayElementType(type);
+    const auto values = list_array->values();
+    if (expected_element_type != DataType::ARRAY) {
+        const auto actual_element_type =
+            ArrowListElementTypeToMilvus(values, field_meta);
+        if (!IsCompatibleArrayElementType(actual_element_type,
+                                          expected_element_type)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array element type mismatch{}, expected {}, actual {}",
+                      FieldErrorSuffix(field_meta),
+                      expected_element_type,
+                      actual_element_type);
+        }
+        const auto start = list_array->value_offset(row_index);
+        const auto end = list_array->value_offset(row_index + 1);
+        // TODO(local-format): Preserve nullable scalar leaves when completing
+        // native Vortex nested ARRAY normalization; keep Raw behavior unchanged.
+        return ArrowListToScalarFieldProto(list_array, row_index, false);
+    }
+
+    if (values->type_id() != arrow::Type::LIST) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "nested array element type mismatch{}, expected Arrow "
+                  "list, actual {}",
+                  FieldErrorSuffix(field_meta),
+                  values->type()->ToString());
+    }
+    const auto nested = std::static_pointer_cast<arrow::ListArray>(values);
+    const auto& child_type = type.array_element();
+
+    proto::schema::ScalarField result;
+    auto* data = result.mutable_array_data();
+    data->set_element_type(static_cast<proto::schema::DataType>(
+        TypeSchemaArrayElementType(child_type)));
+    const auto start = list_array->value_offset(row_index);
+    const auto end = list_array->value_offset(row_index + 1);
+    data->mutable_data()->Reserve(static_cast<int>(end - start));
+    for (auto index = start; index < end; ++index) {
+        auto* child = data->add_data();
+        if (nested->IsNull(index)) {
+            if (!child_type.nullable()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "non-nullable nested array{} contains null row {}",
+                          FieldErrorSuffix(field_meta),
+                          index);
+            }
+            continue;
+        }
+        *child = ArrowNestedListToScalarFieldProto(
+            nested, index, child_type, field_meta);
+    }
+    return result;
+}
+
 arrow::ArrayVector
 ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
                             DataType element_type,
-                            const FieldMeta& field_meta) {
+                            const FieldMeta& field_meta,
+                            bool preserve_element_validity) {
     arrow::ArrayVector result;
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
@@ -3565,15 +4181,26 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             continue;
         }
         auto list_arr = std::static_pointer_cast<arrow::ListArray>(arr);
-        auto actual_element_type =
-            ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
-        if (!(IsCompatibleArrayElementType(actual_element_type,
-                                           element_type))) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "array element type mismatch{}, expected {}, actual {}",
-                      FieldErrorSuffix(field_meta),
-                      element_type,
-                      actual_element_type);
+        const auto nested = field_meta.is_nested_array();
+        if (nested) {
+            if (!(element_type == DataType::ARRAY)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "nested ARRAY{} must have ARRAY element type, got {}",
+                          FieldErrorSuffix(field_meta),
+                          element_type);
+            }
+        } else {
+            const auto actual_element_type =
+                ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
+            if (!(IsCompatibleArrayElementType(actual_element_type,
+                                               element_type))) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "array element type mismatch{}, expected {}, actual {}",
+                    FieldErrorSuffix(field_meta),
+                    element_type,
+                    actual_element_type);
+            }
         }
         arrow::BinaryBuilder builder;
         auto status = builder.Reserve(list_arr->length());
@@ -3585,11 +4212,20 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             if (list_arr->IsNull(i)) {
                 status = builder.AppendNull();
             } else {
-                auto start = list_arr->value_offset(i);
-                auto end = list_arr->value_offset(i + 1);
-                ValidateNoNullValuesInRange(
-                    list_arr->values(), start, end, "array list");
-                auto proto = ArrowListToScalarFieldProto(list_arr, i);
+                proto::schema::ScalarField proto;
+                if (nested) {
+                    proto = ArrowNestedListToScalarFieldProto(
+                        list_arr,
+                        i,
+                        field_meta.get_array_type_schema(),
+                        field_meta);
+                } else {
+                    proto = ArrowListToScalarFieldProto(
+                        list_arr,
+                        i,
+                        preserve_element_validity &&
+                            field_meta.is_element_nullable());
+                }
                 std::string serialized;
                 proto.SerializeToString(&serialized);
                 status = builder.Append(serialized);
@@ -3698,7 +4334,8 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
 // FieldMeta overload: extracts parameters and delegates.
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta) {
+                       const FieldMeta& field_meta,
+                       bool preserve_array_element_validity) {
     auto dt = field_meta.get_data_type();
     int64_t dim = (IsVectorDataType(dt) && !IsSparseFloatVectorDataType(dt))
                       ? field_meta.get_dim()
@@ -3706,8 +4343,13 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
     auto element_type = IsVectorArrayDataType(dt) || IsArrayDataType(dt)
                             ? field_meta.get_element_type()
                             : DataType::NONE;
-    return NormalizeExternalArrowByType(
-        array, dt, dim, field_meta.is_nullable(), element_type, field_meta);
+    return NormalizeExternalArrowByType(array,
+                                        dt,
+                                        dim,
+                                        field_meta.is_nullable(),
+                                        element_type,
+                                        field_meta,
+                                        preserve_array_element_validity);
 }
 
 // Load path: batch wrapper.
@@ -3775,13 +4417,354 @@ AssertExternalArrowType(const std::shared_ptr<arrow::Array>& array,
               array->type()->ToString());
 }
 
+// External sparse columns use ordinary Arrow containers. Normalize them once
+// at the shared boundary used by index build, load, take and size sampling.
+static std::shared_ptr<arrow::Array>
+NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
+                              const FieldMeta& field_meta) {
+    auto invalid = [&](int64_t row, const std::string& reason) {
+        ThrowInfo(DataFormatBroken,
+                  "invalid external sparse vector{}, batch row {}: {}",
+                  FieldErrorSuffix(field_meta),
+                  row,
+                  reason);
+    };
+    auto check_status = [&](const arrow::Status& status) {
+        if (!status.ok()) {
+            ThrowInfo(
+                status.IsOutOfMemory() ? MemAllocateFailed : UnexpectedError,
+                "building external sparse vector{}: {}",
+                FieldErrorSuffix(field_meta),
+                status.ToString());
+        }
+    };
+    using SparseRow = knowhere::sparse::SparseRow<SparseValueType>;
+    using Entry = std::pair<uint32_t, SparseValueType>;
+    const auto element_size = static_cast<int64_t>(SparseRow::element_size());
+    const auto type_id = array->type_id();
+    const bool binary = type_id == arrow::Type::BINARY ||
+                        type_id == arrow::Type::BINARY_VIEW ||
+                        type_id == arrow::Type::LARGE_BINARY;
+    if (binary && field_meta.get_external_field().empty()) {
+        // Preserve the trusted internal/generated path, including variants.
+        return CanonicalizeArrowVariants(array);
+    }
+    auto binary_view = [&](int64_t row) -> std::string_view {
+        switch (type_id) {
+            case arrow::Type::BINARY_VIEW:
+                return std::static_pointer_cast<arrow::BinaryViewArray>(array)
+                    ->GetView(row);
+            case arrow::Type::LARGE_BINARY:
+                return std::static_pointer_cast<arrow::LargeBinaryArray>(array)
+                    ->GetView(row);
+            default:
+                return std::static_pointer_cast<arrow::BinaryArray>(array)
+                    ->GetView(row);
+        }
+    };
+    std::shared_ptr<arrow::Array> indices, values;
+    std::shared_ptr<arrow::Array> index_lists, value_lists;
+    std::shared_ptr<arrow::MapArray> map;
+    auto list_values = [&](const std::shared_ptr<arrow::Array>& list) {
+        if (list->type_id() == arrow::Type::LIST) {
+            return std::static_pointer_cast<arrow::ListArray>(list)->values();
+        }
+        if (list->type_id() == arrow::Type::LARGE_LIST) {
+            return std::static_pointer_cast<arrow::LargeListArray>(list)
+                ->values();
+        }
+        invalid(-1, "indices and values must be list or large_list arrays");
+        return std::shared_ptr<arrow::Array>{};
+    };
+    if (array->type_id() == arrow::Type::MAP) {
+        map = std::static_pointer_cast<arrow::MapArray>(array);
+        indices = map->keys();
+        values = map->items();
+    } else if (array->type_id() == arrow::Type::STRUCT) {
+        auto st = std::static_pointer_cast<arrow::StructArray>(array);
+        index_lists = st->GetFieldByName("indices");
+        value_lists = st->GetFieldByName("values");
+        if (st->num_fields() != 2 || !index_lists || !value_lists) {
+            invalid(-1, "struct must contain exactly 'indices' and 'values'");
+        }
+        indices = list_values(index_lists);
+        values = list_values(value_lists);
+    } else if (!binary) {
+        AssertExternalArrowType(
+            array, "binary, map or struct<indices, values>", field_meta);
+    }
+    const auto index_type = indices ? indices->type_id() : arrow::Type::NA;
+    if (!binary && index_type != arrow::Type::INT32 &&
+        index_type != arrow::Type::UINT32 && index_type != arrow::Type::INT64 &&
+        index_type != arrow::Type::UINT64) {
+        invalid(-1, "indices must be int32, uint32, int64 or uint64");
+    }
+    const auto value_type = values ? values->type_id() : arrow::Type::NA;
+    if (!binary && value_type != arrow::Type::FLOAT &&
+        value_type != arrow::Type::DOUBLE) {
+        invalid(-1, "values must be float32 or float64");
+    }
+    auto list_range = [](const std::shared_ptr<arrow::Array>& list,
+                         int64_t row) -> std::pair<int64_t, int64_t> {
+        if (list->type_id() == arrow::Type::LIST) {
+            auto a = std::static_pointer_cast<arrow::ListArray>(list);
+            return {a->value_offset(row), a->value_length(row)};
+        }
+        auto a = std::static_pointer_cast<arrow::LargeListArray>(list);
+        return {a->value_offset(row), a->value_length(row)};
+    };
+
+    struct RowRange {
+        int64_t count = 0;
+        int64_t index_start = 0;
+        int64_t value_start = 0;
+        const uint8_t* bytes = nullptr;
+    };
+    auto row_range = [&](int64_t row) -> RowRange {
+        if (binary) {
+            auto bytes = binary_view(row);
+            if (bytes.size() % element_size != 0) {
+                invalid(row, "Invalid size for sparse row data");
+            }
+            return {static_cast<int64_t>(bytes.size() / element_size),
+                    0,
+                    0,
+                    reinterpret_cast<const uint8_t*>(bytes.data())};
+        }
+        if (map) {
+            return {map->value_length(row),
+                    map->value_offset(row),
+                    map->value_offset(row)};
+        }
+        const bool indices_null = index_lists->IsNull(row);
+        const bool values_null = value_lists->IsNull(row);
+        if (indices_null && values_null) {
+            return {};  // A present struct with two null lists is empty.
+        }
+        if (indices_null || values_null) {
+            invalid(row, "indices or values is null in a valid row");
+        }
+        auto [start, size] = list_range(index_lists, row);
+        auto [other_start, other_size] = list_range(value_lists, row);
+        if (size != other_size) {
+            invalid(row, "indices and values have different lengths");
+        }
+        return {size, start, other_start};
+    };
+    auto read_entry =
+        [&](int64_t row, const RowRange& range, int64_t j) -> Entry {
+        if (binary) {
+            uint32_t index;
+            SparseValueType value;
+            const auto* bytes = range.bytes + j * element_size;
+            std::memcpy(&index, bytes, sizeof(index));
+            std::memcpy(&value, bytes + sizeof(index), sizeof(value));
+            return {index, value};
+        }
+        const auto i = range.index_start + j;
+        const auto v = range.value_start + j;
+        if (indices->IsNull(i) || values->IsNull(v)) {
+            invalid(row, "null index or weight");
+        }
+        uint64_t index = 0;
+        switch (index_type) {
+            case arrow::Type::INT32:
+                index =
+                    std::static_pointer_cast<arrow::Int32Array>(indices)->Value(
+                        i);
+                break;
+            case arrow::Type::UINT32:
+                index = std::static_pointer_cast<arrow::UInt32Array>(indices)
+                            ->Value(i);
+                break;
+            case arrow::Type::INT64:
+                index =
+                    std::static_pointer_cast<arrow::Int64Array>(indices)->Value(
+                        i);
+                break;
+            case arrow::Type::UINT64:
+                index = std::static_pointer_cast<arrow::UInt64Array>(indices)
+                            ->Value(i);
+                break;
+            default:
+                break;  // Types were checked before processing any rows.
+        }
+        // Negative signed values become large uint64 values and fail here.
+        if (index >= std::numeric_limits<uint32_t>::max()) {
+            invalid(row, "index must be in [0, 2^32-1)");
+        }
+        double value =
+            value_type == arrow::Type::FLOAT
+                ? std::static_pointer_cast<arrow::FloatArray>(values)->Value(v)
+                : std::static_pointer_cast<arrow::DoubleArray>(values)->Value(
+                      v);
+        if (!std::isfinite(value) || value < 0 ||
+            value > std::numeric_limits<float>::max()) {
+            invalid(row, "weight must be finite, non-negative and fit float32");
+        }
+        return {static_cast<uint32_t>(index),
+                static_cast<SparseValueType>(value)};
+    };
+    auto row_is_sorted = [&](int64_t row, const RowRange& range) {
+        bool sorted = true;
+        if (binary) {
+            if (const auto* error = ValidateSparseRow(
+                    range.bytes, range.count * element_size, true, &sorted)) {
+                invalid(row, error);
+            }
+        } else {
+            uint32_t previous = 0;
+            for (int64_t j = 0; j < range.count; ++j) {
+                auto [index, value] = read_entry(row, range, j);
+                if (j > 0 && index <= previous) {
+                    sorted = false;
+                }
+                previous = index;
+            }
+        }
+        return sorted;
+    };
+
+    // Preflight without per-row allocations: validate values, size the output
+    // and find the largest sort buffer. Recheck ordering when encoding a mixed
+    // batch instead of retaining an unbounded array of row descriptors.
+    int64_t output_bytes = 0;
+    int64_t max_count = 0;
+    int64_t max_unsorted_count = 0;
+    bool all_sorted = true;
+    for (int64_t row = 0; row < array->length(); ++row) {
+        if (array->IsNull(row)) {
+            if (!field_meta.is_nullable()) {
+                invalid(row, "null in a non-nullable field");
+            }
+            continue;
+        }
+        auto range = row_range(row);
+        if (range.count >
+            (arrow::BinaryBuilder::memory_limit() - output_bytes) /
+                element_size) {
+            ThrowInfo(InsufficientResource,
+                      "external sparse vector batch exceeds binary capacity{}",
+                      FieldErrorSuffix(field_meta));
+        }
+        output_bytes += range.count * element_size;
+        max_count = std::max(max_count, range.count);
+        if (!row_is_sorted(row, range)) {
+            all_sorted = false;
+            max_unsorted_count = std::max(max_unsorted_count, range.count);
+        }
+    }
+    if (type_id == arrow::Type::BINARY && all_sorted) {
+        return array;
+    }
+
+    const auto block_count =
+        std::min<int64_t>(binary ? max_unsorted_count : max_count, 1024);
+    auto padded_bytes = [](uint64_t bytes) {
+        constexpr uint64_t alignment = arrow::kDefaultBufferAlignment;
+        return SaturatingAdd(bytes, alignment - 1) / alignment * alignment;
+    };
+    const auto rows =
+        std::max<uint64_t>(array->length(), arrow::kMinBuilderCapacity);
+    const auto offset_bytes = padded_bytes(SaturatingMultiply(
+        SaturatingAdd(rows, uint64_t{1}), uint64_t{sizeof(int32_t)}));
+    // Charge both offset buffers conservatively: Finish may shrink the reserved
+    // buffer. Account for Arrow padding, validity bits, sort scratch and encoding
+    // scratch. Source buffers and allocator bookkeeping are not owned here.
+    uint64_t required_bytes = padded_bytes(output_bytes);
+    required_bytes = SaturatingAdd(
+        required_bytes, SaturatingMultiply(offset_bytes, uint64_t{2}));
+    required_bytes =
+        SaturatingAdd(required_bytes, padded_bytes((rows + 7) / 8));
+    required_bytes = SaturatingAdd(
+        required_bytes, uint64_t(max_unsorted_count) * sizeof(Entry));
+    required_bytes =
+        SaturatingAdd(required_bytes, uint64_t(block_count) * element_size);
+    const auto budget = GetExternalSparseConversionMemoryLimit();
+    if (required_bytes > static_cast<uint64_t>(budget)) {
+        // This conversion size is unsupported under the configured limit.
+        // Unsupported terminates index tasks; ConfigInvalid would retry them.
+        // Actual allocation failures remain transient MemAllocateFailed errors.
+        ThrowInfo(Unsupported,
+                  "external sparse vector conversion{} requires {} bytes, "
+                  "budget {} bytes "
+                  "(common.storage.externalSparseVector.conversionMemoryLimit)",
+                  FieldErrorSuffix(field_meta),
+                  required_bytes,
+                  budget);
+    }
+
+    // Reserve each buffer once, after validation and admission. In particular,
+    // no whole-row scratch is allocated for ordered Map/Struct inputs.
+    std::vector<Entry> entries;
+    entries.reserve(max_unsorted_count);
+    SparseRow block(block_count);
+    arrow::BinaryBuilder builder;
+    check_status(builder.Reserve(array->length()));
+    check_status(builder.ReserveData(output_bytes));
+    auto append_row = [&](int64_t count, auto&& entry_at) {
+        check_status(builder.AppendEmptyValue());
+        for (int64_t offset = 0; offset < count; offset += block_count) {
+            const auto length = std::min(block_count, count - offset);
+            for (int64_t j = 0; j < length; ++j) {
+                auto [index, value] = entry_at(offset + j);
+                block.set_at(j, index, value);
+            }
+            check_status(builder.ExtendCurrent(
+                static_cast<const uint8_t*>(block.data()),
+                static_cast<int32_t>(length * element_size)));
+        }
+    };
+    for (int64_t row = 0; row < array->length(); ++row) {
+        if (array->IsNull(row)) {
+            check_status(builder.AppendNull());
+            continue;
+        }
+        auto range = row_range(row);
+        if (all_sorted || row_is_sorted(row, range)) {
+            if (binary) {
+                check_status(builder.Append(binary_view(row)));
+            } else {
+                append_row(range.count, [&](int64_t j) {
+                    return read_entry(row, range, j);
+                });
+            }
+            continue;
+        }
+        entries.clear();
+        for (int64_t j = 0; j < range.count; ++j) {
+            entries.push_back(read_entry(row, range, j));
+        }
+        std::sort(
+            entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+        for (size_t j = 1; j < entries.size(); ++j) {
+            if (entries[j - 1].first == entries[j].first) {
+                invalid(row, "duplicate index");
+            }
+        }
+        append_row(range.count, [&](int64_t j) { return entries[j]; });
+    }
+    std::shared_ptr<arrow::Array> result;
+    check_status(builder.Finish(&result));
+    return result;
+}
+
 static std::shared_ptr<arrow::Array>
 NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
                              DataType data_type,
                              int64_t dim,
                              bool nullable,
                              DataType element_type,
-                             const FieldMeta& field_meta) {
+                             const FieldMeta& field_meta,
+                             bool preserve_array_element_validity) {
+    // Sparse conversion must inspect the original buffers before allocating:
+    // canonicalizing BinaryView/LargeBinary here would bypass its budget.
+    if (IsSparseFloatVectorDataType(data_type)) {
+        return NormalizeExternalSparseVector(array_in, field_meta);
+    }
+
     // Single view-variant elimination pass: STRING_VIEW/LARGE_STRING -> STRING,
     // BINARY_VIEW/LARGE_BINARY -> BINARY, LARGE_LIST/LIST_VIEW -> LIST
     // (recursive into list inner). Downstream branches only need to dispatch
@@ -3802,11 +4785,11 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
 
     ValidateScalarArrowType(data_type, array, field_meta);
 
-    if (IsSparseFloatVectorDataType(data_type)) {
-        if (type_id == arrow::Type::BINARY) {
-            return array;
+    if (field_meta.is_native_list_array()) {
+        if (type_id != arrow::Type::LIST) {
+            AssertExternalArrowType(array, "list", field_meta);
         }
-        AssertExternalArrowType(array, "binary", field_meta);
+        return array;
     }
 
     // Dense vectors
@@ -3832,6 +4815,14 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
         if (type_id == arrow::Type::LIST) {
+            if (field_meta.is_element_nullable()) {
+                auto list = std::dynamic_pointer_cast<arrow::ListArray>(array);
+                if (std::dynamic_pointer_cast<arrow::BinaryArray>(
+                        list->values()) == nullptr) {
+                    AssertExternalArrowType(array, "list<binary>", field_meta);
+                }
+                return array;
+            }
             auto result = NormalizeVectorArrayInner(
                 {array}, element_type, dim, field_meta);
             return result[0];
@@ -3868,8 +4859,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
     }
     // Array: List -> Protobuf Binary
     if (data_type == DataType::ARRAY && type_id == arrow::Type::LIST) {
-        auto result =
-            ConvertListToProtobufBinary({array}, element_type, field_meta);
+        auto result = ConvertListToProtobufBinary(
+            {array}, element_type, field_meta, preserve_array_element_validity);
         return result[0];
     }
     if (data_type == DataType::ARRAY && type_id == arrow::Type::BINARY) {
@@ -3885,11 +4876,15 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
 
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
-                            int64_t row_index) {
+                            int64_t row_index,
+                            bool element_nullable) {
     proto::schema::ScalarField sf;
     int64_t start = list_array->value_offset(row_index);
     int64_t end = list_array->value_offset(row_index + 1);
     auto values = list_array->values();
+    if (!element_nullable) {
+        ValidateNoNullValuesInRange(values, start, end, "array list");
+    }
 
     switch (values->type_id()) {
         case arrow::Type::BOOL: {
@@ -3966,6 +4961,12 @@ ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
                 ErrorCode::Unsupported,
                 "Unsupported element type for ArrowListToScalarFieldProto: {}",
                 values->type()->ToString());
+    }
+    if (element_nullable) {
+        sf.mutable_valid_data()->Reserve(static_cast<int>(end - start));
+        for (int64_t j = start; j < end; ++j) {
+            sf.add_valid_data(values->IsValid(j));
+        }
     }
     return sf;
 }

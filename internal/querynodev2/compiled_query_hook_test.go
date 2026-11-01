@@ -87,34 +87,15 @@ func TestInitHookUsesTheCompiledInQueryHook(t *testing.T) {
 	assert.Equal(t, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue(), h.tuningWith[0])
 }
 
-// Two tuners for the same search is a deployment mistake, and it is reported
-// rather than silently resolved by start-up order. It is also the one hook
-// failure that is fatal whatever autoIndex.enable says, so it carries a
-// distinguishable error.
-func TestInitHookRefusesACompiledInQueryHookBesideAPlugin(t *testing.T) {
-	node := installQueryHook(t, &recordingQueryHook{})
-	saveQueryNodeKey(t, paramtable.Get().QueryNodeCfg.SoPath.Key, "/tmp/some-tuner.so")
+// A compiled-in query hook is used and queryNode.soPath is ignored.
+func TestInitHookIgnoresQueryNodeSoPathBesideACompiledInQueryHook(t *testing.T) {
+	h := &recordingQueryHook{}
+	node := installQueryHook(t, h)
+	saveQueryNodeKey(t, paramtable.Get().QueryNodeCfg.SoPath.Key, "/tmp/no-such-tuner.so")
 
-	err := node.initHook()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only one can")
-	assert.True(t, errors.Is(err, errQueryHookConflict),
-		"the conflict must be recognizable, or Init cannot make it fatal on its own")
-	assert.Nil(t, node.queryHook)
-}
+	require.NoError(t, node.initHook())
 
-// The conflict stops the QueryNode whatever autoIndex.enable is; every other
-// hook failure is fatal only when auto index is on.
-func TestHookInitIsFatal(t *testing.T) {
-	saveQueryNodeKey(t, paramtable.Get().AutoIndexConfig.Enable.Key, "false")
-	assert.True(t, hookInitIsFatal(errQueryHookConflict),
-		"a configured-both-ways hook is fatal even with auto index off")
-	assert.False(t, hookInitIsFatal(errors.New("fail to set the plugin path")),
-		"an absent hook is not fatal when auto index is off")
-
-	saveQueryNodeKey(t, paramtable.Get().AutoIndexConfig.Enable.Key, "true")
-	assert.True(t, hookInitIsFatal(errors.New("fail to set the plugin path")),
-		"with auto index on, any hook failure is fatal")
+	assert.Same(t, h, node.queryHook, "the compiled-in hook is used; the path is not loaded")
 }
 
 // With nothing compiled in - a stock binary - nothing changes: an empty

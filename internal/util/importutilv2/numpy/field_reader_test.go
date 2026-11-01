@@ -18,19 +18,25 @@ package numpy
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -599,6 +605,65 @@ func TestNullableFP16BF16VectorFromFloatNumpyUsesLogicalRows(t *testing.T) {
 			assert.Equal(t, []bool{true, true}, validData.([]bool))
 		})
 	}
+}
+
+// TestMalformedNumpyHeaderReturnsError pins that header shapes npyio assumes away
+// -- no trailing newline (it slices on bytes.LastIndexByte), a header shorter
+// than the declared length, and an out-of-range declared length -- become normal
+// input errors at the reader boundary instead of panicking the import worker and
+// (in standalone) the process.
+func TestMalformedNumpyHeaderReturnsError(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID:    101,
+		Name:       "vec",
+		DataType:   schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}}}
+	declared := func(v1 bool, n uint32) []byte {
+		buf := new(bytes.Buffer)
+		buf.Write([]byte{0x93, 'N', 'U', 'M', 'P', 'Y'})
+		if v1 {
+			buf.Write([]byte{1, 0})
+			_ = binary.Write(buf, binary.LittleEndian, uint16(n))
+		} else {
+			buf.Write([]byte{2, 0})
+			_ = binary.Write(buf, binary.LittleEndian, n)
+		}
+		return buf.Bytes()
+	}
+
+	cases := map[string][]byte{
+		// The reported crash: a header of the declared length with no trailing newline.
+		"missing newline": append(declared(true, 78), bytes.Repeat([]byte(" "), 78)...),
+		// The declared header runs past the end of the file.
+		"truncated header": append(declared(true, 78), bytes.Repeat([]byte(" "), 10)...),
+		// A v2 length above the parser's bound.
+		"oversized header": declared(false, maxHeaderLen+1),
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			cm := mocks.NewChunkManager(t)
+			cm.EXPECT().Reader(mock.Anything, "vec.npy").
+				Return(importcommon.CustomMockReader(bytes.NewReader(payload)), nil)
+			require.NotPanics(t, func() {
+				_, err := CreateReaders(context.Background(), cm, schema, []string{"vec.npy"})
+				require.Error(t, err)
+				require.True(t, errors.Is(err, merr.ErrImportFailed),
+					"malformed input must be an input error: %v", err)
+			})
+		})
+	}
+
+	// parseHeader is the safety net for a parser panic the prefix check does not
+	// know about (or a caller that opens a .npy without CreateReaders): the panic
+	// becomes an error instead of a process exit.
+	t.Run("parser panic is contained", func(t *testing.T) {
+		payload := append(declared(true, 78), bytes.Repeat([]byte(" "), 78)...)
+		require.NotPanics(t, func() {
+			_, err := parseHeader(bytes.NewReader(payload))
+			require.Error(t, err)
+		})
+	})
 }
 
 func TestNumpyValidateHeaderError(t *testing.T) {

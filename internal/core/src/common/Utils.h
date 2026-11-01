@@ -47,22 +47,29 @@ namespace milvus {
 #define VEC_FIELD_DATA(data_array, type) \
     (data_array->vectors().type##_vector().data())
 
+// Row validity has two wire locations: the legacy FieldData.valid_data and the
+// field-specific ScalarField/VectorField.valid_data. Components built before
+// the field-specific location existed read and update only the legacy one and
+// forward the field-specific one untouched, so the legacy location is
+// authoritative whenever it is set. The Go side follows the same rules in
+// pkg/util/typeutil/field_data.go.
 inline const google::protobuf::RepeatedField<bool>&
 GetFieldDataRowValidData(const DataArray& field_data) {
-    // New payloads normally store validity in the field-specific ScalarField
-    // or VectorField. FieldData.valid_data is kept as a fallback for legacy
-    // payloads that do not contain field-specific validity.
-    if (field_data.has_scalars() &&
-        field_data.scalars().valid_data_size() > 0) {
+    if (field_data.valid_data_size() > 0) {
+        return field_data.valid_data();
+    }
+    if (field_data.has_scalars()) {
         return field_data.scalars().valid_data();
     }
-    if (field_data.has_vectors() &&
-        field_data.vectors().valid_data_size() > 0) {
+    if (field_data.has_vectors()) {
         return field_data.vectors().valid_data();
     }
     return field_data.valid_data();
 }
 
+// Returns the field-specific row validity for the caller to fill, clearing the
+// legacy location. SyncFieldDataRowValidData must run before the DataArray
+// leaves segcore so that the legacy location carries the same mask.
 inline google::protobuf::RepeatedField<bool>*
 MutableFieldDataRowValidData(DataArray* field_data) {
     field_data->clear_valid_data();
@@ -79,6 +86,33 @@ MutableFieldDataRowValidData(DataArray* field_data) {
         return field_data->mutable_vectors()->mutable_valid_data();
     }
     return field_data->mutable_scalars()->mutable_valid_data();
+}
+
+// Writes the authoritative row validity (see GetFieldDataRowValidData) to both
+// the legacy and the field-specific location. Call it on every DataArray that
+// segcore hands to Go.
+inline void
+SyncFieldDataRowValidData(DataArray* field_data) {
+    if (field_data->has_struct_arrays()) {
+        for (auto& sub_field :
+             *field_data->mutable_struct_arrays()->mutable_fields()) {
+            SyncFieldDataRowValidData(&sub_field);
+        }
+        return;
+    }
+    google::protobuf::RepeatedField<bool>* field_specific = nullptr;
+    if (field_data->has_scalars()) {
+        field_specific = field_data->mutable_scalars()->mutable_valid_data();
+    } else if (field_data->has_vectors()) {
+        field_specific = field_data->mutable_vectors()->mutable_valid_data();
+    } else {
+        return;
+    }
+    if (field_data->valid_data_size() > 0) {
+        *field_specific = field_data->valid_data();
+    } else {
+        *field_data->mutable_valid_data() = *field_specific;
+    }
 }
 
 using CheckDataValid = std::function<bool(size_t)>;
@@ -375,46 +409,66 @@ EscapeBraces(const std::string& input) {
     return result;
 }
 
+// Return nullptr for valid data, otherwise a static reason. Callers decide the
+// error code and context. Validation neither allocates nor copies the row.
+// When is_sorted is supplied, report ordering instead of rejecting it. The
+// caller must sort and reject duplicate indices before consuming such a row.
+[[nodiscard]] inline const char*
+ValidateSparseRow(const void* data,
+                  size_t size,
+                  bool validate_values = true,
+                  bool* is_sorted = nullptr) {
+    if (is_sorted) {
+        *is_sorted = true;
+    }
+    const auto element_size =
+        knowhere::sparse::SparseRow<SparseValueType>::element_size();
+    if (size % element_size != 0) {
+        return "Invalid size for sparse row data";
+    }
+    // Length is a memory-safety requirement even for trusted values.
+    if (!validate_values) {
+        return nullptr;
+    }
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    uint32_t previous = 0;
+    for (size_t offset = 0; offset < size; offset += element_size) {
+        uint32_t index;
+        SparseValueType value;
+        // Arrow values need not be aligned for integer or float reads.
+        std::memcpy(&index, bytes + offset, sizeof(index));
+        std::memcpy(&value, bytes + offset + sizeof(index), sizeof(value));
+        if (!std::isfinite(value)) {
+            return "Invalid sparse row: NaN or Inf value";
+        }
+        if (value < 0) {
+            return "Invalid sparse row: negative value";
+        }
+        if (index == std::numeric_limits<uint32_t>::max()) {
+            return "Invalid sparse row: id should be smaller than uint32 max";
+        }
+        if (offset > 0 && index <= previous) {
+            if (!is_sorted) {
+                return "Invalid sparse row: id should be strict ascending";
+            }
+            *is_sorted = false;
+        }
+        previous = index;
+    }
+    return nullptr;
+}
+
 inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
-    // Length is a memory-safety requirement even when value validation is off.
-    // Check before allocating a whole number of cells and copying all bytes.
-    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
-        0) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "Invalid size for sparse row data");
+    if (const auto* error = ValidateSparseRow(data, size, validate)) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "{}", error);
     }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
-    if (validate) {
-        for (size_t i = 0; i < num_elements; ++i) {
-            auto element = row[i];
-            if (!(std::isfinite(element.val))) {
-                ThrowInfo(ErrorCode::DataFormatBroken,
-                          "Invalid sparse row: NaN or Inf value");
-            }
-            if (!(element.val >= 0)) {
-                ThrowInfo(ErrorCode::DataFormatBroken,
-                          "Invalid sparse row: negative value");
-            }
-            if (!(element.id < std::numeric_limits<uint32_t>::max())) {
-                ThrowInfo(
-                    ErrorCode::DataFormatBroken,
-                    "Invalid sparse row: id should be smaller than uint32 max");
-            }
-            if (i > 0) {
-                if (!(row[i - 1].id < element.id)) {
-                    ThrowInfo(
-                        ErrorCode::DataFormatBroken,
-                        "Invalid sparse row: id should be strict ascending");
-                }
-            }
-        }
-    }
     return row;
 }
 

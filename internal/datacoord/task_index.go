@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,10 +42,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const enableArraySortIndexKey = "enable_array_sort_index"
 
 type indexBuildTask struct {
 	*model.SegmentIndex
@@ -64,17 +68,19 @@ var _ globalTask.Task = (*indexBuildTask)(nil)
 var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
 
 func fieldSchemaForIndexBuild(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) *schemapb.FieldSchema {
-	if field == nil || field.GetNullable() {
+	if field == nil {
 		return field
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		if !structField.GetNullable() {
-			continue
-		}
 		for _, subField := range structField.GetFields() {
 			if subField.GetFieldID() == field.GetFieldID() {
+				if field.GetNullable() == structField.GetNullable() {
+					return field
+				}
+				// A struct sub-field shares its parent's row validity, including
+				// when the parent is non-nullable.
 				buildField := proto.Clone(field).(*schemapb.FieldSchema)
-				buildField.Nullable = true
+				buildField.Nullable = structField.GetNullable()
 				return buildField
 			}
 		}
@@ -175,12 +181,6 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
 	ctx := it.meta.ctx
-	// Manifest publication is opt-in and exclusive with the etcd record: off
-	// (the default) is the pure legacy path and must produce no manifest index
-	// entry at all, so the decline happens before any other inspection.
-	if !writeSegmentIndexToManifest() {
-		return false, nil
-	}
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
 	}
@@ -202,6 +202,13 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	}
 	segIdx, ok := it.meta.indexMeta.GetIndexJob(it.BuildID)
 	if !ok || segIdx == nil {
+		return false, nil
+	}
+	// Creation pins both placement and publication mode in the path version:
+	// v2 builds publish to manifests, while v0/v1 builds finish in etcd.
+	// Consult the durable task, not the current switch or the worker's result,
+	// so mode changes and coordinator restarts cannot redirect an active build.
+	if !metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
 		return false, nil
 	}
 	// The index definition can be dropped while the build runs: GC's
@@ -423,6 +430,11 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
+		if metautil.IsSegmentRooted(req.GetIndexStorePathVersion()) && errors.Is(err, merr.ErrServiceUnimplemented) {
+			if updateErr := it.UpdateStateWithMeta(indexpb.JobState_JobStateFailed, err.Error()); updateErr != nil {
+				log.Warn(ctx, "failed to persist unsupported index task failure", mlog.Err(updateErr))
+			}
+		}
 		return
 	}
 
@@ -469,9 +481,8 @@ func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, s
 		return vectorArrayElementCountEstimate{vectorCount: count}, nil
 	}
 	if isMissingVectorArrayFieldOnStaleSchema(err, segment, schema, field) {
-		// A nullable field added after this segment was written has no binlog in the
-		// stale segment. For index build purposes it contributes zero vectors and
-		// should be fake-finished by the threshold check below.
+		// An added sub-field has no binlog in an older segment even when its
+		// parent struct is non-nullable. It contributes zero indexed vectors.
 		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
 	}
 	if errors.Is(err, errVectorArrayFieldBinlogNotFound) && segment.GetManifestPath() != "" {
@@ -528,12 +539,22 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 }
 
 func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	return errors.Is(err, errVectorArrayFieldBinlogNotFound) &&
-		segment != nil &&
-		schema != nil &&
-		field != nil &&
-		field.GetNullable() &&
-		segment.GetSchemaVersion() < schema.GetVersion()
+	if !errors.Is(err, errVectorArrayFieldBinlogNotFound) || segment == nil || schema == nil || field == nil || segment.GetSchemaVersion() >= schema.GetVersion() {
+		return false
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == field.GetFieldID() {
+				// Two schema changes leave an old segment without this child's
+				// binlog: adding the child to an existing struct (the child is
+				// element-nullable) and adding the whole nullable struct with
+				// AddCollectionStructField (its old rows are null struct rows,
+				// whatever the child's element_nullable).
+				return structField.GetNullable() || subField.GetElementNullable()
+			}
+		}
+	}
+	return field.GetNullable()
 }
 
 func fieldBinlogContainsField(fieldBinlog *datapb.FieldBinlog, fieldID int64) bool {
@@ -626,6 +647,17 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 	buildField := fieldSchemaForIndexBuild(schema, field)
 
+	if typeutil.IsArrayType(field.GetDataType()) || typeutil.IsJSONType(field.GetDataType()) {
+		// Resolve the software gate for every build, including new segments of an
+		// existing HYBRID index. Neither saved index nor schema params may override it.
+		params = DeleteParams(params, []string{enableArraySortIndexKey})
+		typeParams = DeleteParams(typeParams, []string{enableArraySortIndexKey})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   enableArraySortIndexKey,
+			Value: strconv.FormatBool(Params.DataCoordCfg.EnableArraySortIndex.GetAsBool()),
+		})
+	}
+
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1
 	dataType := field.GetDataType()
@@ -655,8 +687,8 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
 	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
-	// Create the job request. The path layout (v0/v1) is propagated via
-	// IndexStorePathVersion; C++ indexbuilder assembles the remote prefix locally.
+	// Legacy layouts are assembled by C++; segment-rooted builds below carry
+	// the complete prefix derived from the owning manifest, including legacy bases.
 	// external_source is passed raw (AWS-form or Milvus-form). C++ indexbuilder
 	// InjectExternalSpecProperties handles Tier-1/2 endpoint derivation + AWS-form swap.
 	req := &workerpb.CreateJobRequest{
@@ -692,6 +724,18 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 
 	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+	if metautil.IsSegmentRooted(segIndex.IndexStorePathVersion) {
+		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return nil, merr.Wrap(err, "resolve segment manifest for index build")
+		}
+		if base == "" {
+			return nil, merr.WrapErrServiceInternalMsg("segment-rooted index requires a manifest base, segmentID=%d", segment.GetID())
+		}
+		req.IndexFilePrefix = metautil.NewIndexPathBuilder(it.chunkManager.RootPath(), segIndex.IndexStorePathVersion,
+			segIndex.CollectionID, segIndex.PartitionID, segIndex.SegmentID, segIndex.BuildID, req.IndexVersion).
+			WithManifestPath(segment.GetManifestPath()).BuildPrefix()
+	}
 
 	return req, nil
 }

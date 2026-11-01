@@ -21,16 +21,17 @@
 #include "index/Meta.h"
 #include "log/Log.h"
 #include "common/resource_c.h"
-#include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "pb/schema.pb.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentLoadInfo.h"
+#include "segcore/default_fs.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
@@ -53,6 +54,14 @@ SegmentLoadInfo::GetColumnGroups() const {
     column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
     return column_groups_;
+}
+
+void
+SegmentLoadInfo::InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
+    if (source.HasManifestPath() &&
+        ::IsSameLoonManifestPath(source.GetManifestPath(), GetManifestPath())) {
+        column_groups_ = source.column_groups_;
+    }
 }
 
 // Looks up a storage column in the cached manifest column groups only.
@@ -695,8 +704,77 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
     }
 }
 
+void
+SegmentLoadInfo::ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known) {
+    if (GetStorageVersion() != STORAGE_V2 || HasManifestPath()) {
+        return;
+    }
+    auto same_files = [](const proto::segcore::FieldBinlog& a,
+                         const proto::segcore::FieldBinlog& b) {
+        if (a.binlogs_size() != b.binlogs_size()) {
+            return false;
+        }
+        for (int j = 0; j < a.binlogs_size(); j++) {
+            if (a.binlogs(j).log_path() != b.binlogs(j).log_path()) {
+                return false;
+            }
+        }
+        return true;
+    };
+    milvus_storage::ArrowFileSystemPtr fs;
+    std::shared_ptr<arrow::Schema> arrow_schema;
+    bool changed = false;
+    for (int i = 0; i < info_.binlog_paths_size(); i++) {
+        auto* binlog = info_.mutable_binlog_paths(i);
+        // A group id at or above START_USER_FIELDID is the id of its only
+        // field, as the loader assumes.
+        if (binlog->child_fields_size() > 0 ||
+            binlog->fieldid() >= START_USER_FIELDID ||
+            binlog->binlogs_size() == 0) {
+            continue;
+        }
+        const auto* resolved =
+            known != nullptr ? known->GetFieldBinlog(FieldId(binlog->fieldid()))
+                             : nullptr;
+        if (resolved != nullptr && resolved->child_fields_size() > 0 &&
+            same_files(*resolved, *binlog)) {
+            *binlog->mutable_child_fields() = resolved->child_fields();
+            changed = true;
+            continue;
+        }
+        if (fs == nullptr) {
+            fs = milvus::segcore::GetDefaultArrowFileSystem();
+            arrow_schema = schema_->ConvertToArrowSchema();
+        }
+        // The loader reads the group's field ids from its first file.
+        std::vector<std::string> files;
+        for (const auto& log : binlog->binlogs()) {
+            files.push_back(log.log_path());
+        }
+        storage::SortByPath(files);
+        auto field_ids = storage::GetFieldIDList(
+            FieldId(binlog->fieldid()), files[0], arrow_schema, fs);
+        for (size_t k = 0; k < field_ids.size(); k++) {
+            binlog->add_child_fields(field_ids.Get(k));
+        }
+        changed = true;
+    }
+    if (changed) {
+        BuildFieldBinlogCache();
+    }
+}
+
 std::set<FieldId>
 SegmentLoadInfo::CollectDataFields() const {
+    auto fields = CollectRowColumnFields();
+    for (const auto& field_id : field_index_has_raw_data_) {
+        fields.insert(field_id);
+    }
+    return fields;
+}
+
+std::set<FieldId>
+SegmentLoadInfo::CollectRowColumnFields() const {
     std::set<FieldId> fields;
 
     for (int i = 0; i < GetBinlogPathCount(); i++) {
@@ -709,10 +787,6 @@ SegmentLoadInfo::CollectDataFields() const {
         for (auto child_id : child_fields) {
             fields.emplace(child_id);
         }
-    }
-
-    for (const auto& field_id : field_index_has_raw_data_) {
-        fields.insert(field_id);
     }
 
     if (HasManifestPath()) {
@@ -993,7 +1067,10 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     if (HasManifestPath()) {
         AssertInfo(new_info.HasManifestPath(),
                    "manifest could only be updated with other manifest");
-        if (GetManifestPath() != new_info.GetManifestPath()) {
+        // Compare revisions, not text: another spelling of the same manifest
+        // revision must not reload anything.
+        if (!::IsSameLoonManifestPath(GetManifestPath(),
+                                      new_info.GetManifestPath())) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }

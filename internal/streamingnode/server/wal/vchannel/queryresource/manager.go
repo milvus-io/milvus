@@ -1,0 +1,595 @@
+package queryresource
+
+import (
+	"context"
+	"sync"
+
+	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+)
+
+type ViewBuilder func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool)
+
+type Config struct {
+	ChunkManager     storage.ChunkManager
+	Builders         []QueryRuntimeModuleBuilder
+	Scheduler        nodescheduler.Scheduler
+	Dispatcher       *Dispatcher
+	LoadInfoProvider LoadInfoProvider
+}
+
+type Manager struct {
+	chunkManager   storage.ChunkManager
+	partitionStats map[partitionStatsKey]*partitionStatsResource
+	mu             sync.Mutex
+	// Detached builds must stop before their resources can be closed.
+	releasing sync.WaitGroup
+
+	builders         []QueryRuntimeModuleBuilder
+	scheduler        nodescheduler.Scheduler
+	dispatcher       *Dispatcher
+	loadInfoProvider LoadInfoProvider
+
+	refs    map[qviews.QueryViewKey]queryViewRef
+	runtime *QueryRuntime
+	task    *scheduledBuild
+	err     error
+	closed  bool
+	// Admission watermark, distinct from the minimum retained reclamation version.
+	latestDataVersion qviews.DataVersion
+}
+
+type queryViewRef struct {
+	resources      *viewResources
+	prepared       bool
+	statsResources []*partitionStatsResource
+	// Published once after successful preparation; borrowed read-only by queries.
+	statsSnapshots  map[int64]*storage.PartitionStatsSnapshot
+	meta            *viewpb.QueryViewMeta
+	onReady         func()
+	onUnrecoverable func()
+}
+
+func NewManager(config Config) *Manager {
+	return &Manager{
+		chunkManager:     config.ChunkManager,
+		builders:         defaultQueryRuntimeModuleBuilders(config.Builders),
+		scheduler:        config.Scheduler,
+		dispatcher:       config.Dispatcher,
+		loadInfoProvider: config.LoadInfoProvider,
+	}
+}
+
+// AcquireLocked registers a query view reference and starts runtime building
+// when needed. The caller should hold the owning VChannel state lock so build
+// observes a consistent DataView snapshot.
+func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
+	if req.Meta == nil || req.Meta.GetVersion() == nil || req.Meta.GetVersion().GetDataVersion() == nil {
+		panic("query view meta version is nil")
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		panic("vchannel query resource is closed")
+	}
+	if _, ok := m.refs[req.Key]; !ok {
+		version := req.Key.QueryViewVersion.DataVersion
+		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
+			m.mu.Unlock()
+			m.Reject(req)
+			return
+		}
+		if version.GT(m.latestDataVersion) {
+			m.latestDataVersion = version
+		}
+		if m.refs == nil {
+			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
+		}
+		m.refs[req.Key] = queryViewRef{
+			statsResources:  m.acquirePartitionStatsLocked(snviewAcquireStats{req.Meta.GetCollectionId(), req.Meta.GetVchannel(), req.PartitionStats}),
+			meta:            proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
+			onReady:         req.OnReady,
+			onUnrecoverable: req.OnUnrecoverable,
+		}
+		if m.runtime == nil && m.task == nil {
+			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
+		} else if m.runtime != nil && m.task == nil && m.err == nil {
+			ref := m.refs[req.Key]
+			ref.resources = m.runtime.bindView(ref.meta)
+			m.refs[req.Key] = ref
+			m.submitReadyLocked(req.Key, ref)
+		}
+	}
+	m.mu.Unlock()
+}
+
+// A published-schema placement repair may arrive after a newer schema. Its
+// exact retained base is still pinned by an existing view, so sharing that base
+// does not rewind resource reclamation. Unretained older bases remain rejected.
+func (m *Manager) retainsReadBaseLocked(meta *viewpb.QueryViewMeta) bool {
+	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
+	for key, ref := range m.refs {
+		if key.QueryViewVersion.DataVersion.EQ(version) && ref.meta.GetSchemaVersion() == meta.GetSchemaVersion() &&
+			ref.meta.GetLoadInfoVersion() == meta.GetLoadInfoVersion() {
+			return true
+		}
+	}
+	return false
+}
+
+// TryBuildLocked retries a deferred query runtime build after the owning
+// VChannel state changes. The caller should hold the owning VChannel lock.
+func (m *Manager) TryBuildLocked(build ViewBuilder) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.err != nil || len(m.refs) == 0 || m.runtime != nil || m.task != nil {
+		return
+	}
+	m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
+}
+
+func (m *Manager) Release(req snview.ReleaseResource) {
+	var runtime *QueryRuntime
+	var task *scheduledBuild
+	var advanceRuntime *QueryRuntime
+	var advance qviews.DataVersion
+	var hasAdvance bool
+	var resources *viewResources
+
+	m.mu.Lock()
+	if ref, ok := m.refs[req.Key]; ok {
+		resources = ref.resources
+		if resources != nil {
+			resources.retire()
+		}
+		m.releasePartitionStatsLocked(ref.statsResources)
+		delete(m.refs, req.Key)
+		advance, hasAdvance = minQueryViewDataVersion(m.refs)
+		advanceRuntime = m.runtime
+	}
+	if len(m.refs) == 0 {
+		runtime, task = m.takeRuntimeLocked()
+	}
+	if m.runtime != nil && m.task == nil {
+		m.runtime.mu.Lock()
+		retained := make(map[uint64]bool, len(m.refs))
+		for _, ref := range m.refs {
+			retained[ref.meta.GetLoadInfoVersion()] = true
+		}
+		for version := range m.runtime.partitionScopes {
+			if !retained[version] {
+				delete(m.runtime.partitionScopes, version)
+			}
+		}
+		m.runtime.mu.Unlock()
+	}
+	if runtime != nil || task != nil {
+		m.releasing.Add(1)
+	}
+	// Keep reference removal and watermark delivery ordered across replicas.
+	// BeforeRelease may read object storage and remains outside this lock.
+	if hasAdvance && advanceRuntime != nil {
+		advanceRuntime.Advance(advance)
+	}
+	m.mu.Unlock()
+	cancelTask(task)
+	if task != nil {
+		// Release can run under the shard/owner lock. Neither that caller nor
+		// a scheduler worker may wait for a build that needs the same lock/worker.
+		go func() {
+			defer m.releasing.Done()
+			_, _ = task.Result()
+			runtime.Close()
+			m.submitCallback(req.OnDropped)
+		}()
+		return
+	}
+	if runtime != nil {
+		runtime.stop()
+		m.scheduler.Submit(resourceReleaseTask{runtime: runtime, resources: resources, closeRuntime: true, onDropped: func() {
+			defer m.releasing.Done()
+			if req.OnDropped != nil {
+				req.OnDropped()
+			}
+		}})
+	} else if hasAdvance && advanceRuntime != nil {
+		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped})
+	} else {
+		m.submitCallback(req.OnDropped)
+	}
+}
+
+// Reject completes an acquisition that cannot be reconstructed without
+// registering a QueryView reference. The callback is submitted to the node
+// scheduler to preserve the asynchronous ResourceManager contract.
+func (m *Manager) Reject(req snview.AcquireResource) {
+	m.submitCallback(req.OnUnrecoverable)
+}
+
+func (m *Manager) QueryRuntime(key qviews.QueryViewKey) (*QueryRuntime, bool) {
+	if m == nil {
+		return nil, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.refs[key]; !ok {
+		return nil, false
+	}
+	if m.task != nil || m.runtime == nil || m.err != nil {
+		return nil, false
+	}
+	return m.runtime, true
+}
+
+func (m *Manager) ReadRuntime(key qviews.QueryViewKey) (*ReadRuntime, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ref, ok := m.refs[key]
+	if !ok || !ref.prepared || m.task != nil || m.runtime == nil || m.err != nil {
+		return nil, false
+	}
+	if len(ref.statsResources) > 0 && ref.statsSnapshots == nil {
+		return nil, false
+	}
+	runtime, ok := ref.resources.readRuntime()
+	if !ok {
+		return nil, false
+	}
+	runtime.partitionStats = ref.statsSnapshots
+	return runtime, true
+}
+
+func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
+	if m == nil {
+		return qviews.DataVersion{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return minQueryViewDataVersion(m.refs)
+}
+
+func (m *Manager) Close() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.closed = true
+	runtime, task := m.takeRuntimeLocked()
+	for _, ref := range m.refs {
+		m.releasePartitionStatsLocked(ref.statsResources)
+	}
+	m.refs = nil
+	m.mu.Unlock()
+
+	cancelTask(task)
+	if task != nil {
+		_, _ = task.Result()
+	}
+	runtime.Close()
+	m.releasing.Wait()
+}
+
+func (m *Manager) ObserveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
+	m.mu.Lock()
+	runtime := m.runtime
+	m.mu.Unlock()
+	if runtime != nil {
+		// A plain immutable message keeps its data alive without retaining a
+		// persistence Ack handle, so query consumption cannot delay completion.
+		runtime.ObserveEvent(ctx, event)
+	}
+}
+
+func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder) bool {
+	if build == nil {
+		panic("query resource view builder is nil")
+	}
+	view, ok := build(meta)
+	if !ok {
+		return false
+	}
+	if m.scheduler == nil {
+		m.scheduler = nodescheduler.Get()
+	}
+	if m.dispatcher == nil {
+		panic("query resource dispatcher is nil")
+	}
+	runtime := newQueryRuntime(m.dispatcher, m.newModules()...)
+	m.runtime = runtime
+	withOwnerLock := view.WithResourceEventLock
+	var task *resourceBuildTask
+	task = newResourceBuildTask(func(ctx context.Context) (*QueryRuntime, error) {
+		if err := ctx.Err(); err != nil {
+			return runtime, err
+		}
+		if runtime == nil {
+			// Each retry captures a fresh snapshot and installs its live observer in
+			// the same owner critical section. Never Prepare a partially built module.
+			var captureErr error
+			capture := func() {
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				if m.closed || m.task == nil || m.task.task != task || len(m.refs) == 0 {
+					captureErr = context.Canceled
+					return
+				}
+				var ok bool
+				view, ok = build(m.oldestQueryViewMetaLocked())
+				if !ok {
+					captureErr = nodescheduler.ErrDelay
+					return
+				}
+				runtime = newQueryRuntime(m.dispatcher, m.newModules()...)
+				m.runtime = runtime
+			}
+			if withOwnerLock != nil {
+				withOwnerLock(capture)
+			} else {
+				capture()
+			}
+			if captureErr != nil {
+				return nil, captureErr
+			}
+		}
+		resolved, err := m.resolveLoadInfo(ctx, view)
+		if err == nil {
+			err = runtime.Initialize(ctx, resolved)
+		}
+		if err == nil {
+			return runtime, nil
+		}
+		// Close outside the owner/manager locks, also waking a producer blocked on
+		// the failed runtime's full event queue before the next snapshot capture.
+		runtime.Close()
+		m.mu.Lock()
+		if m.runtime == runtime {
+			m.runtime = nil
+		}
+		m.mu.Unlock()
+		runtime = nil
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !retryablePreparationError(err) {
+			return nil, err
+		}
+		mlog.Warn(ctx, "retry query runtime preparation", mlog.FieldVChannel(view.VChannel), mlog.Err(err))
+		return nil, errors.Mark(merr.Wrap(err, "initialize query runtime"), nodescheduler.ErrDelay)
+	})
+	m.task = scheduleResourceBuild(m.scheduler, task, m.finishBuild)
+	m.err = nil
+	return true
+}
+
+func (m *Manager) oldestQueryViewMetaLocked() *viewpb.QueryViewMeta {
+	var oldest qviews.QueryViewVersion
+	var meta *viewpb.QueryViewMeta
+	for key, ref := range m.refs {
+		if meta == nil || oldest.GT(key.QueryViewVersion) {
+			oldest = key.QueryViewVersion
+			meta = ref.meta
+		}
+	}
+	return meta
+}
+
+func (m *Manager) resolveLoadInfo(ctx context.Context, view walview.VChannelWALView) (walview.VChannelWALView, error) {
+	if view.LoadInfoVersion == 0 || m.loadInfoProvider == nil {
+		return view, nil
+	}
+	loadInfo, err := m.loadInfoProvider.QueryViewLoadInfo(ctx, view.CollectionID, view.LoadInfoVersion)
+	if err != nil {
+		return view, err
+	}
+	// A resolved empty list means no loaded partitions; nil in a WAL-only
+	// snapshot retains the legacy unrestricted scope.
+	view.PartitionIDs = append([]int64{}, loadInfo.PartitionIDs...)
+	view.LoadFields = loadInfo.LoadFields
+	view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, loadInfo.RequiredFields)
+	view.IndexInfos = loadInfo.IndexInfos
+	return view, nil
+}
+
+func (m *Manager) newModules() []QueryRuntimeModule {
+	modules := make([]QueryRuntimeModule, 0, len(m.builders))
+	for _, builder := range m.builders {
+		if builder == nil {
+			continue
+		}
+		module, err := builder.NewRuntime()
+		if err != nil {
+			panic(merr.Wrap(err, "create query runtime module"))
+		}
+		if module != nil {
+			modules = append(modules, module)
+		}
+	}
+	return modules
+}
+
+func (m *Manager) finishBuild(task *scheduledBuild) {
+	runtime, err := task.task.Result()
+	var unrecoverable []func()
+	var failedRuntime *QueryRuntime
+	m.mu.Lock()
+	if m.task != task {
+		m.mu.Unlock()
+		runtime.Close()
+		return
+	}
+	m.task = nil
+	if err != nil {
+		m.err = err
+		failedRuntime, m.runtime = m.runtime, nil
+		if !errors.Is(err, context.Canceled) {
+			for _, ref := range m.refs {
+				unrecoverable = append(unrecoverable, ref.onUnrecoverable)
+			}
+		}
+	} else {
+		m.runtime = runtime
+		m.err = nil
+		for key, ref := range m.refs {
+			ref.resources = runtime.bindView(ref.meta)
+			m.refs[key] = ref
+			m.submitReadyLocked(key, ref)
+		}
+	}
+	if len(m.refs) == 0 {
+		runtime, task = m.takeRuntimeLocked()
+	} else {
+		runtime, task = nil, nil
+	}
+	m.mu.Unlock()
+
+	cancelTask(task)
+	runtime.Close()
+	failedRuntime.Close()
+	for _, callback := range unrecoverable {
+		m.submitCallback(callback)
+	}
+}
+
+// Capture the registration while holding Manager.mu. A delayed task must never
+// borrow a new same-key registration while retaining the old callback.
+func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
+	if ref.onReady == nil {
+		return
+	}
+	m.scheduler.Submit(resourceReadyTask{
+		ref: ref, runtime: m.runtime,
+		manager: m,
+		key:     key,
+		onReady: ref.onReady,
+	})
+}
+
+func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {
+	m.mu.Lock()
+	current, ok := m.refs[key]
+	ready := ok && current.meta == ref.meta && runtime != nil && m.runtime == runtime && m.task == nil && m.err == nil
+	m.mu.Unlock()
+	if !ready {
+		return nil
+	}
+
+	// Schema transitions are applied on the WAL path; fence that path before
+	// checking the target revision and refreshing shared search index metadata.
+	// Modules prepare changed load scopes before this view can become Ready.
+	err := func() error {
+		ctx, end, err := ref.resources.begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer end()
+		for _, resource := range ref.statsResources {
+			if err := resource.prepare(ctx, m.chunkManager); err != nil {
+				return err
+			}
+		}
+		if err := runtime.PrepareQueryView(ctx); err != nil {
+			return err
+		}
+		if err := ref.resources.prepare(ctx, m.loadInfoProvider); err != nil {
+			return err
+		}
+
+		if err := runtime.CheckWriteSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
+			return err
+		}
+		return runtime.PrepareIndexMeta(ctx, ref.meta, m.loadInfoProvider)
+	}()
+	if err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		if errors.Is(err, context.Canceled) {
+			m.mu.Lock()
+			currentRef, ok := m.refs[key]
+			obsolete := !ok || currentRef.meta != ref.meta || m.runtime != runtime
+			m.mu.Unlock()
+			// Last release cancels resource loading independently of this task.
+			// Only an obsolete registration can treat that cancellation as completion.
+			if obsolete {
+				return nil
+			}
+			return err
+		}
+		if !retryablePreparationError(err) {
+			m.mu.Lock()
+			currentRef, ok := m.refs[key]
+			current := ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
+			m.mu.Unlock()
+			if current && ref.onUnrecoverable != nil {
+				ref.onUnrecoverable()
+			}
+			return nil
+		}
+		return errors.Mark(err, nodescheduler.ErrDelay)
+	}
+	m.mu.Lock()
+	currentRef, ok := m.refs[key]
+	// Meta is cloned on registration, so its identity distinguishes a released
+	// acquisition from a later registration even if the QueryViewKey is reused.
+	ready = ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
+	if ready {
+		currentRef.prepared = true
+		m.refs[key] = currentRef
+	}
+	if ready && currentRef.statsSnapshots == nil && len(currentRef.statsResources) > 0 {
+		currentRef.statsSnapshots = collectPartitionStatsSnapshots(currentRef.statsResources)
+		m.refs[key] = currentRef
+	}
+	m.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	onReady()
+	return nil
+}
+
+func retryablePreparationError(err error) bool {
+	if errors.Is(err, nodescheduler.ErrDelay) || merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	}
+	return false
+}
+
+func (m *Manager) submitCallback(callback func()) {
+	if callback == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.scheduler == nil {
+		m.scheduler = nodescheduler.Get()
+	}
+	scheduler := m.scheduler
+	m.mu.Unlock()
+	scheduler.Submit(resourceCallbackTask(callback))
+}
+
+func (m *Manager) takeRuntimeLocked() (*QueryRuntime, *scheduledBuild) {
+	runtime, task := m.runtime, m.task
+	m.runtime = nil
+	m.task = nil
+	m.err = nil
+	return runtime, task
+}

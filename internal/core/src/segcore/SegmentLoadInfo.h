@@ -30,7 +30,7 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "index/IndexFactory.h"
+#include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "milvus-storage/column_groups.h"
 #include "pb/common.pb.h"
@@ -602,6 +602,23 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    // Field IDs of the segment's row columns (binlogs and column groups of
+    // the manifest), including fields that are no longer in the schema.
+    // Unlike CollectDataFields it leaves out fields that only an index with
+    // raw data provides: such an index can be built from a field's default
+    // for a segment that has no row column of it, so it does not show when
+    // the segment's rows were written.
+    [[nodiscard]] std::set<FieldId>
+    GetRowColumnFieldIds() const {
+        return CollectRowColumnFields();
+    }
+
+    // Whether an index of the field provides its raw data.
+    [[nodiscard]] bool
+    FieldIndexHasRawData(FieldId field_id) const {
+        return field_index_has_raw_data_.count(field_id) > 0;
+    }
+
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||
@@ -800,14 +817,18 @@ class SegmentLoadInfo {
     HasManifestColumn(const std::string& column_name) const;
 
     // Reuses manifest column groups when another load info points at the same
-    // manifest path.
+    // manifest revision.
     void
-    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
-        if (source.HasManifestPath() &&
-            source.GetManifestPath() == GetManifestPath()) {
-            column_groups_ = source.column_groups_;
-        }
-    }
+    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source);
+
+    // StorageV2 binlogs written by 2.6.0/2.6.1 carry no child_fields and key a
+    // multi-field column group by a group id below START_USER_FIELDID, so the
+    // fields it stores are known only from its packed file footer. Every load
+    // diff keys fields by child_fields, so fill them in from the footer before
+    // computing one. A group whose files match one already resolved in
+    // `known` reuses its child_fields instead of reading the footer again.
+    void
+    ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest
@@ -1172,33 +1193,18 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            auto index_type_it =
-                load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto scalar_version_it = load_index_info.index_params.find(
-                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
-            auto scalar_v3 =
-                !IsVectorDataType(load_index_info.field_type) &&
-                scalar_version_it != load_index_info.index_params.end() &&
-                std::stoi(scalar_version_it->second) >= 3;
-            auto needs_file_context =
-                scalar_v3 ||
-                (!IsVectorDataType(load_index_info.field_type) &&
-                 index_type_it != load_index_info.index_params.end() &&
-                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
-            auto request =
-                milvus::index::IndexFactory::GetInstance().IndexLoadResource(
-                    load_index_info.field_type,
-                    load_index_info.element_type,
-                    load_index_info.index_engine_version,
-                    load_index_info.index_size,
-                    load_index_info.index_params,
-                    load_index_info.enable_mmap,
-                    load_index_info.num_rows,
-                    load_index_info.dim);
-            if (!needs_file_context) {
-                load_index_info.load_resource_request = request;
-            }
-            if (milvus::index::IndexFactory::CanUseIndexRawDataForField(
+            // Use metadata-only estimates for capabilities, not as an override
+            // of the translator's file-aware loading resource estimate.
+            auto request = milvus::index::IndexLoadResource(
+                load_index_info.field_type,
+                load_index_info.element_type,
+                load_index_info.index_engine_version,
+                load_index_info.index_size,
+                load_index_info.index_params,
+                load_index_info.enable_mmap,
+                load_index_info.num_rows,
+                load_index_info.dim);
+            if (milvus::index::CanUseIndexRawDataForField(
                     load_index_info.field_type, request.has_raw_data)) {
                 field_index_has_raw_data_.insert(field_id);
             }
@@ -1237,6 +1243,10 @@ class SegmentLoadInfo {
 
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
+
+    // Binlog and manifest column-group fields, without index raw data.
+    [[nodiscard]] std::set<FieldId>
+    CollectRowColumnFields() const;
 
     ProtoType info_;
 

@@ -17,6 +17,8 @@
 package schemautil
 
 import (
+	"strings"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -30,12 +32,16 @@ const (
 	AlterSchemaAddField AlterSchemaAddKind = iota + 1
 	AlterSchemaAddFunction
 	AlterSchemaAddFunctionField
+	AlterSchemaAddStructSubField
 )
 
 type AlterSchemaAddPlan struct {
 	Kind     AlterSchemaAddKind
 	Field    *schemapb.FieldSchema
 	Function *schemapb.FunctionSchema
+	// StructPath is the parent struct s of a struct sub-field add, parsed
+	// from the field name s[b]; Field keeps the full name s[b].
+	StructPath string
 	// Index meta bound to the newly added field, parsed from
 	// FieldInfo.index_name/extra_params. A vector-type function output field
 	// always materializes a bound index so that bump-schema-version compaction
@@ -51,6 +57,11 @@ func (p *AlterSchemaAddPlan) HasField() bool {
 
 func (p *AlterSchemaAddPlan) HasFunction() bool {
 	return p != nil && p.Function != nil
+}
+
+// SubFieldName returns b of a struct sub-field add whose field name is s[b].
+func (p *AlterSchemaAddPlan) SubFieldName() string {
+	return strings.TrimSuffix(strings.TrimPrefix(p.Field.GetName(), p.StructPath+"["), "]")
 }
 
 func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaRequest_AddRequest) (*AlterSchemaAddPlan, error) {
@@ -70,6 +81,7 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	var field *schemapb.FieldSchema
 	var indexName string
 	var indexExtraParams []*commonpb.KeyValuePair
+	var structPath string
 	if len(fieldInfos) == 1 {
 		fieldInfo := fieldInfos[0]
 		if fieldInfo == nil || fieldInfo.GetFieldSchema() == nil {
@@ -78,14 +90,26 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 		field = fieldInfo.GetFieldSchema()
 		indexName = fieldInfo.GetIndexName()
 		indexExtraParams = fieldInfo.GetExtraParams()
+		var err error
+		if structPath, err = ParseStructSubFieldName(field.GetName()); err != nil {
+			return nil, err
+		}
 	}
-
 	var function *schemapb.FunctionSchema
 	if len(funcSchemas) == 1 {
 		function = funcSchemas[0]
 		if function == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("function schema is nil")
 		}
+	}
+	if structPath != "" {
+		if function != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("adding a struct sub-field cannot be combined with a function")
+		}
+		if indexName != "" || len(indexExtraParams) != 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("binding an index while adding a struct sub-field is not supported yet")
+		}
+		return &AlterSchemaAddPlan{Kind: AlterSchemaAddStructSubField, Field: field, StructPath: structPath}, nil
 	}
 
 	switch {
@@ -104,6 +128,44 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("fieldInfos and function schema are both empty")
 	}
+}
+
+// ParseStructSubFieldName parses the name of a field to add. A name s[b] adds
+// sub-field b to struct s and returns s; a name without brackets adds a
+// top-level field and returns "". Only one level is supported in this release.
+func ParseStructSubFieldName(name string) (string, error) {
+	open := strings.IndexByte(name, '[')
+	if open < 0 {
+		if strings.IndexByte(name, ']') >= 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		return "", nil
+	}
+	structName, rest := name[:open], name[open:]
+	segments := 0
+	for rest != "" {
+		end := strings.IndexByte(rest, ']')
+		if rest[0] != '[' || end < 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		segment := rest[1:end]
+		if segment == "" || strings.IndexByte(segment, '[') >= 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		segments++
+		rest = rest[end+1:]
+	}
+	if structName == "" {
+		return "", invalidStructSubFieldName(name)
+	}
+	if segments > 1 {
+		return "", merr.WrapErrParameterInvalidMsg("nested struct is not supported: field name %q must be struct_name[sub_field_name]", name)
+	}
+	return structName, nil
+}
+
+func invalidStructSubFieldName(name string) error {
+	return merr.WrapErrParameterInvalidMsg("invalid struct sub-field name %q: must be struct_name[sub_field_name]", name)
 }
 
 func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {

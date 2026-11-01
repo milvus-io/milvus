@@ -53,7 +53,7 @@ func (c *Client) Rerank(ctx context.Context, model string, query string, documen
 		"query":     query,
 		"documents": documents,
 	}
-	response, err := models.PostRequestWithContext[[]RerankResult](ctx, request, base.String(), headers, timeoutMs)
+	response, err := models.PostRequest[[]RerankResult](ctx, request, base.String(), headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

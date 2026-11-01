@@ -612,6 +612,11 @@ class ConcurrentVectorImpl : public VectorBase {
         if (physical_index == -1) {
             return nullptr;
         }
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
+        }
         auto chunk_id = physical_index / size_per_chunk_;
         auto chunk_offset = physical_index % size_per_chunk_;
         auto data =
@@ -626,6 +631,11 @@ class ConcurrentVectorImpl : public VectorBase {
                          ssize_t physical_index) const {
         if (physical_index == -1) {
             return nullptr;
+        }
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
         }
         auto chunk_id = physical_index / size_per_chunk_;
         auto chunk_offset = physical_index % size_per_chunk_;
@@ -645,6 +655,10 @@ class ConcurrentVectorImpl : public VectorBase {
             AssertInfo(!chunks_ptr_->is_mmap(),
                        "mmap nested ARRAY rows must be accessed through "
                        "view_element()");
+        } else if constexpr (std::is_same_v<Type, VectorArray>) {
+            AssertInfo(!chunks_ptr_->is_mmap(),
+                       "mmap VECTOR_ARRAY rows must be accessed through "
+                       "view_physical_element()");
         }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
@@ -690,6 +704,20 @@ class ConcurrentVectorImpl : public VectorBase {
     ChunkSnapshot
     acquire_chunks() const override {
         return chunks_ptr_->acquire();
+    }
+
+    // The growing vector index needs a typed owner for the same chunk storage
+    // used by this column. Sharing this handle does not copy any values. It
+    // lets a DataView callback retain the storage without retaining the
+    // Segment or this ConcurrentVector wrapper.
+    std::shared_ptr<ChunkVectorBase<Type>>
+    share_chunk_storage() const {
+        return chunks_ptr_;
+    }
+
+    int64_t
+    elements_per_row() const {
+        return elements_per_row_;
     }
 
     bool
@@ -814,7 +842,7 @@ class ConcurrentVectorImpl : public VectorBase {
     // HasFieldData/empty) dereference it without holding chunk locks. The
     // swap that backs share_chunk_storage() happens INSIDE the container,
     // under its own mutex.
-    ChunkVectorPtr<Type> chunks_ptr_ = nullptr;
+    std::shared_ptr<ChunkVectorBase<Type>> chunks_ptr_ = nullptr;
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 
     const bool use_mapping_storage_;
@@ -949,6 +977,13 @@ class ConcurrentVector<VectorArray>
               std::move(mmap_descriptor),
               valid_data_ptr,
               use_mapping_storage) {
+    }
+
+    VectorArrayView
+    view_physical_element(ssize_t physical_index) const {
+        auto chunk_id = physical_index / size_per_chunk_;
+        auto chunk_offset = physical_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
 };
 

@@ -13,11 +13,13 @@
 
 #include <arrow/api.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 
 namespace milvus::segcore {
 
@@ -25,16 +27,81 @@ namespace {
 
 constexpr const char* kMilvusFieldIDMetadataKey = "milvus.field_id";
 
+// ProtoBackedBuffer is an arrow::Buffer that borrows memory owned by something
+// else -- here, the protobuf DataArray a retrieve result was built into -- and
+// keeps that owner alive for exactly as long as Arrow can still reach the
+// bytes.
+//
+// Arrow's own Buffer(data, size) constructor is non-owning, so a buffer built
+// that way would dangle the moment the result object went away. Holding the
+// owner as a member is what makes the alias safe: ExportRecordBatch's C release
+// callback owns the RecordBatch, which owns the ArrayData, which owns this
+// buffer, which owns the protobuf storage. Release on the Go side unwinds the
+// whole chain.
+class ProtoBackedBuffer : public arrow::Buffer {
+ public:
+    ProtoBackedBuffer(const uint8_t* data, int64_t size, ProtoOwner owner)
+        : arrow::Buffer(data, size), owner_(std::move(owner)) {
+    }
+
+ private:
+    ProtoOwner owner_;
+};
+
+// AliasedArray wraps a contiguous, null-free protobuf payload as an Arrow array
+// of `type` without copying.
+//
+// The caller is responsible for having checked that the payload's layout is
+// byte-identical to Arrow's value buffer for `type`; this helper only does the
+// wrapping. The validity buffer is left null, which is Arrow's representation
+// of "no nulls" and is why this is restricted to the null-free case.
+arrow::Result<std::shared_ptr<arrow::Array>>
+AliasedArray(const std::shared_ptr<arrow::DataType>& type,
+             const uint8_t* data,
+             int64_t num_rows,
+             int64_t num_bytes,
+             const ProtoOwner& owner) {
+    auto buffer = std::make_shared<ProtoBackedBuffer>(data, num_bytes, owner);
+    auto array_data = arrow::ArrayData::Make(
+        type, num_rows, {nullptr, std::move(buffer)}, /*null_count=*/0);
+    return arrow::MakeArray(array_data);
+}
+
+// CanAlias is the single gate for every aliasing branch: an owner must have
+// been supplied, and the column must have no validity bitmap. A column that has
+// one is compacted by MergeDataArray -- its physical payload holds only the
+// valid rows -- so its layout is not Arrow's and the copying path must run.
+inline bool
+CanAlias(const milvus::DataArray& field_data, const ProtoOwner& owner) {
+    return owner != nullptr &&
+           milvus::GetFieldDataRowValidData(field_data).empty();
+}
+
 // BuildFixedWidthArray builds an Arrow Array from a fixed-width protobuf repeated field.
 template <typename BuilderType, typename DataContainer>
 arrow::Result<std::shared_ptr<arrow::Array>>
-BuildFixedWidthArray(const DataContainer& data,
-                     const milvus::DataArray& field_data,
-                     size_t total_valid) {
+BuildFixedWidthArray(
+    const DataContainer& data,
+    const milvus::DataArray& field_data,
+    size_t total_valid,
+    const ProtoOwner& owner = nullptr,
+    const std::shared_ptr<arrow::DataType>& alias_type = nullptr) {
     AssertInfo(static_cast<size_t>(data.size()) >= total_valid,
                "field data length {} is smaller than expected row count {}",
                data.size(),
                total_valid);
+    // Alias when the protobuf element type IS the Arrow element type. The
+    // caller passes alias_type only for those; BOOL (byte-per-element vs
+    // bit-packed) and INT8/INT16 (widened to int32 in protobuf) pass nullptr
+    // and keep copying.
+    if (alias_type != nullptr && CanAlias(field_data, owner)) {
+        using Elem = typename DataContainer::value_type;
+        return AliasedArray(alias_type,
+                            reinterpret_cast<const uint8_t*>(data.data()),
+                            static_cast<int64_t>(total_valid),
+                            static_cast<int64_t>(total_valid * sizeof(Elem)),
+                            owner);
+    }
     const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
     if (has_valid_data) {
@@ -82,6 +149,19 @@ BuildVarLenArray(const DataContainer& data,
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
+    // Reserve the VALUE buffer too, not just offsets+validity. builder.Reserve
+    // covers the latter only, so without this the value buffer grows by
+    // doubling and every varchar/JSON/geometry column pays roughly one extra
+    // copy of its own bytes, per segment. The Go counterpart (gatherVarLen)
+    // does the same pre-pass for the same reason.
+    int64_t value_bytes = 0;
+    for (size_t i = 0; i < total_valid; ++i) {
+        if (has_valid_data && !valid_data[i]) {
+            continue;
+        }
+        value_bytes += static_cast<int64_t>(data[i].size());
+    }
+    ARROW_RETURN_NOT_OK(builder.ReserveData(value_bytes));
     for (size_t i = 0; i < total_valid; ++i) {
         if (has_valid_data && !valid_data[i]) {
             ARROW_RETURN_NOT_OK(builder.AppendNull());
@@ -118,6 +198,16 @@ BuildCompactVarLenArray(const DataContainer& data,
 
     BuilderType builder;
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
+    // Reserve the VALUE buffer too, not just offsets+validity. builder.Reserve
+    // covers the latter only, so without this the value buffer grows by
+    // doubling and every varchar/JSON/geometry column pays roughly one extra
+    // copy of its own bytes, per segment. The Go counterpart (gatherVarLen)
+    // does the same pre-pass for the same reason.
+    int64_t value_bytes = 0;
+    for (int i = 0; i < data.size(); ++i) {
+        value_bytes += static_cast<int64_t>(data[i].size());
+    }
+    ARROW_RETURN_NOT_OK(builder.ReserveData(value_bytes));
     size_t physical = 0;
     for (size_t i = 0; i < total_valid; ++i) {
         if (has_valid_data && !valid_data[i]) {
@@ -136,7 +226,13 @@ BuildCompactVarLenArray(const DataContainer& data,
 
 CStatus
 ArrowExportFailure(const arrow::Status& status) {
-    AssertInfo(!status.ok(), "ArrowExportFailure requires a failed status");
+    return milvus::FailureCStatus(ArrowExportErrorCode(status),
+                                  status.ToString());
+}
+
+milvus::ErrorCode
+ArrowExportErrorCode(const arrow::Status& status) {
+    AssertInfo(!status.ok(), "ArrowExportErrorCode requires a failed status");
     auto code = milvus::ErrorCode::UnexpectedError;
     switch (status.code()) {
         case arrow::StatusCode::OutOfMemory:
@@ -161,7 +257,7 @@ ArrowExportFailure(const arrow::Status& status) {
             // SegcoreError; they must not be stringified through this path.
             break;
     }
-    return milvus::FailureCStatus(code, status.ToString());
+    return code;
 }
 
 std::shared_ptr<arrow::KeyValueMetadata>
@@ -210,9 +306,10 @@ EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta,
         case milvus::DataType::GEOMETRY:
             return arrow::binary();
         case milvus::DataType::VECTOR_ARRAY: {
-            return milvus::GetArrowDataTypeForVectorArray(
-                field_meta.get_element_type(), field_meta.get_dim());
+            return milvus::GetArrowDataType(field_meta);
         }
+        case milvus::DataType::ARRAY:
+            return milvus::GetArrowDataType(field_meta);
         default: {
             int dim = 1;
             if (field_meta.is_vector() &&
@@ -235,26 +332,229 @@ namespace {
 template <typename RawPtr>
 arrow::Result<std::shared_ptr<arrow::Array>>
 BuildDenseVectorArray(RawPtr raw,
+                      int64_t payload_bytes,
                       int32_t byte_width,
                       const milvus::DataArray& field_data,
-                      size_t total_valid) {
+                      size_t total_valid,
+                      const ProtoOwner& owner = nullptr) {
     auto type = arrow::fixed_size_binary(byte_width);
+    // The payload must actually hold the rows we are about to publish. Both
+    // branches below do pointer arithmetic off `raw`, and the aliasing branch
+    // additionally hands Arrow a Buffer whose declared size would then be a
+    // lie -- the over-read surfaces in Go, far from the cause. The nullable
+    // branch is compacted, so there the bound is valid_count, not total_valid.
+    {
+        const auto& vd = milvus::GetFieldDataRowValidData(field_data);
+        int64_t needed = static_cast<int64_t>(total_valid);
+        if (!vd.empty()) {
+            // Same invariant the fixed-width and var-len builders assert: the
+            // bitmap describes exactly the rows being published. Without it,
+            // counting over a LONGER bitmap would demand more payload than the
+            // copy loop below actually reads and could reject a valid query.
+            AssertInfo(static_cast<size_t>(vd.size()) == total_valid,
+                       "valid_data length {} does not match expected row "
+                       "count {}",
+                       vd.size(),
+                       total_valid);
+            needed = std::count(vd.begin(), vd.end(), true);
+        }
+        AssertInfo(payload_bytes >= needed * byte_width,
+                   "dense vector payload is {} bytes but {} rows of width {} "
+                   "need {}",
+                   payload_bytes,
+                   needed,
+                   byte_width,
+                   needed * byte_width);
+    }
+    // Dense, null-free and already in Arrow's value-buffer layout -- see the
+    // AppendValues comment below, which this supersedes when an owner makes
+    // aliasing sound. This is the single biggest win available: on the retrieve
+    // path the dominant column is a dense vector, so this removes a full copy
+    // of nearly the whole payload.
+    if (CanAlias(field_data, owner)) {
+        return AliasedArray(type,
+                            reinterpret_cast<const uint8_t*>(raw),
+                            static_cast<int64_t>(total_valid),
+                            static_cast<int64_t>(total_valid) * byte_width,
+                            owner);
+    }
     arrow::FixedSizeBinaryBuilder builder(type);
     ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
     const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
     const bool has_valid_data = !valid_data.empty();
-    size_t physical = 0;
-    for (size_t i = 0; i < total_valid; ++i) {
-        if (has_valid_data && !valid_data[i]) {
-            ARROW_RETURN_NOT_OK(builder.AppendNull());
-            continue;
+
+    if (!has_valid_data) {
+        // Dense and no nulls: the source is already exactly the Arrow value
+        // buffer's layout, so copy it in one call.
+        //
+        // The per-row loop below is correct but costs a function call, a
+        // bounds check and a validity-bitmap append for every row. On the
+        // retrieve path the dominant column is a dense float vector, so that
+        // was 1000 separate 512-byte memcpys per 1000-row batch instead of
+        // one. Measured as the bulk of the Arrow export's deficit against
+        // protobuf serialization at the CGO boundary.
+        //
+        // This cannot be hoisted into the nullable case: MergeDataArray
+        // compacts nullable vectors, so there the physical buffer holds only
+        // the valid rows and the logical/physical indices diverge.
+        ARROW_RETURN_NOT_OK(
+            builder.AppendValues(raw, static_cast<int64_t>(total_valid)));
+    } else {
+        size_t physical = 0;
+        for (size_t i = 0; i < total_valid; ++i) {
+            if (!valid_data[i]) {
+                ARROW_RETURN_NOT_OK(builder.AppendNull());
+                continue;
+            }
+            ARROW_RETURN_NOT_OK(builder.Append(raw + physical * byte_width));
+            ++physical;
         }
-        ARROW_RETURN_NOT_OK(builder.Append(raw + physical * byte_width));
-        ++physical;
     }
     std::shared_ptr<arrow::Array> arr;
     ARROW_RETURN_NOT_OK(builder.Finish(&arr));
     return arr;
+}
+
+arrow::Status
+AppendProtoList(const milvus::ScalarFieldProto& row,
+                const milvus::proto::schema::TypeSchema& type,
+                arrow::ListBuilder* builder) {
+    ARROW_RETURN_NOT_OK(builder->Append());
+    const auto& child_type = type.array_element();
+    auto* child = builder->value_builder();
+    if (child_type.has_array_element()) {
+        if (row.data_case() != milvus::ScalarFieldProto::kArrayData) {
+            return arrow::Status::Invalid(
+                "nested ARRAY row has wrong proto type");
+        }
+        const auto& children = row.array_data().data();
+        if (type.array_element().nullable() &&
+            row.valid_data_size() != children.size()) {
+            return arrow::Status::Invalid(
+                "nested ARRAY validity length mismatch");
+        }
+        if (!child_type.nullable() && row.valid_data_size() != 0) {
+            return arrow::Status::Invalid(
+                "non-nullable nested ARRAY has validity");
+        }
+        auto* nested = static_cast<arrow::ListBuilder*>(child);
+        for (int i = 0; i < children.size(); ++i) {
+            if (child_type.nullable() && !row.valid_data(i)) {
+                ARROW_RETURN_NOT_OK(nested->AppendNull());
+            } else {
+                ARROW_RETURN_NOT_OK(
+                    AppendProtoList(children.Get(i), child_type, nested));
+            }
+        }
+        return arrow::Status::OK();
+    }
+
+    const auto leaf = static_cast<milvus::DataType>(child_type.leaf_type());
+    int count = 0;
+    switch (leaf) {
+        case milvus::DataType::BOOL:
+            count = row.bool_data().data_size();
+            break;
+        case milvus::DataType::INT8:
+        case milvus::DataType::INT16:
+        case milvus::DataType::INT32:
+            count = row.int_data().data_size();
+            break;
+        case milvus::DataType::INT64:
+            count = row.long_data().data_size();
+            break;
+        case milvus::DataType::FLOAT:
+            count = row.float_data().data_size();
+            break;
+        case milvus::DataType::DOUBLE:
+            count = row.double_data().data_size();
+            break;
+        case milvus::DataType::STRING:
+        case milvus::DataType::VARCHAR:
+            count = row.string_data().data_size();
+            break;
+        default:
+            return arrow::Status::NotImplemented("unsupported ARRAY leaf");
+    }
+    const auto expected_case = [&]() {
+        switch (leaf) {
+            case milvus::DataType::BOOL:
+                return milvus::ScalarFieldProto::kBoolData;
+            case milvus::DataType::INT8:
+            case milvus::DataType::INT16:
+            case milvus::DataType::INT32:
+                return milvus::ScalarFieldProto::kIntData;
+            case milvus::DataType::INT64:
+                return milvus::ScalarFieldProto::kLongData;
+            case milvus::DataType::FLOAT:
+                return milvus::ScalarFieldProto::kFloatData;
+            case milvus::DataType::DOUBLE:
+                return milvus::ScalarFieldProto::kDoubleData;
+            default:
+                return milvus::ScalarFieldProto::kStringData;
+        }
+    }();
+    if (row.data_case() != expected_case) {
+        return arrow::Status::Invalid("ARRAY row has wrong proto leaf type");
+    }
+    if (child_type.nullable() && row.valid_data_size() != count) {
+        return arrow::Status::Invalid("ARRAY leaf validity length mismatch");
+    }
+    if (!child_type.nullable() && row.valid_data_size() != 0) {
+        return arrow::Status::Invalid("non-nullable ARRAY leaf has validity");
+    }
+    for (int i = 0; i < count; ++i) {
+        if (child_type.nullable() && !row.valid_data(i)) {
+            ARROW_RETURN_NOT_OK(child->AppendNull());
+            continue;
+        }
+        switch (leaf) {
+            case milvus::DataType::BOOL:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::BooleanBuilder*>(child)->Append(
+                        row.bool_data().data(i)));
+                break;
+            case milvus::DataType::INT8:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::Int8Builder*>(child)->Append(
+                        row.int_data().data(i)));
+                break;
+            case milvus::DataType::INT16:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::Int16Builder*>(child)->Append(
+                        row.int_data().data(i)));
+                break;
+            case milvus::DataType::INT32:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::Int32Builder*>(child)->Append(
+                        row.int_data().data(i)));
+                break;
+            case milvus::DataType::INT64:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::Int64Builder*>(child)->Append(
+                        row.long_data().data(i)));
+                break;
+            case milvus::DataType::FLOAT:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::FloatBuilder*>(child)->Append(
+                        row.float_data().data(i)));
+                break;
+            case milvus::DataType::DOUBLE:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::DoubleBuilder*>(child)->Append(
+                        row.double_data().data(i)));
+                break;
+            case milvus::DataType::STRING:
+            case milvus::DataType::VARCHAR:
+                ARROW_RETURN_NOT_OK(
+                    static_cast<arrow::StringBuilder*>(child)->Append(
+                        row.string_data().data(i)));
+                break;
+            default:
+                break;
+        }
+    }
+    return arrow::Status::OK();
 }
 
 }  // namespace
@@ -264,7 +564,9 @@ arrow::Result<
 FieldDataToArrow(const std::string& field_name,
                  const milvus::DataArray& field_data,
                  size_t total_valid,
-                 bool preserve_integer_width) {
+                 bool preserve_integer_width,
+                 const ProtoOwner& owner,
+                 const milvus::FieldMeta* field_meta) {
     if (field_data.has_vectors()) {
         const auto& vectors = field_data.vectors();
         int64_t dim = vectors.dim();
@@ -275,7 +577,12 @@ FieldDataToArrow(const std::string& field_name,
             ARROW_ASSIGN_OR_RAISE(
                 auto arr,
                 BuildDenseVectorArray(
-                    raw, byte_width, field_data, total_valid));
+                    raw,
+                    static_cast<int64_t>(fv.size() * sizeof(float)),
+                    byte_width,
+                    field_data,
+                    total_valid,
+                    owner));
             return std::make_pair(
                 arrow::field(field_name, arrow::fixed_size_binary(byte_width)),
                 arr);
@@ -286,8 +593,12 @@ FieldDataToArrow(const std::string& field_name,
             auto raw = reinterpret_cast<const uint8_t*>(bv.data());
             ARROW_ASSIGN_OR_RAISE(
                 auto arr,
-                BuildDenseVectorArray(
-                    raw, byte_width, field_data, total_valid));
+                BuildDenseVectorArray(raw,
+                                      static_cast<int64_t>(bv.size()),
+                                      byte_width,
+                                      field_data,
+                                      total_valid,
+                                      owner));
             return std::make_pair(
                 arrow::field(field_name, arrow::fixed_size_binary(byte_width)),
                 arr);
@@ -298,8 +609,12 @@ FieldDataToArrow(const std::string& field_name,
             auto raw = reinterpret_cast<const uint8_t*>(f16v.data());
             ARROW_ASSIGN_OR_RAISE(
                 auto arr,
-                BuildDenseVectorArray(
-                    raw, byte_width, field_data, total_valid));
+                BuildDenseVectorArray(raw,
+                                      static_cast<int64_t>(f16v.size()),
+                                      byte_width,
+                                      field_data,
+                                      total_valid,
+                                      owner));
             return std::make_pair(
                 arrow::field(field_name, arrow::fixed_size_binary(byte_width)),
                 arr);
@@ -310,8 +625,12 @@ FieldDataToArrow(const std::string& field_name,
             auto raw = reinterpret_cast<const uint8_t*>(bf16v.data());
             ARROW_ASSIGN_OR_RAISE(
                 auto arr,
-                BuildDenseVectorArray(
-                    raw, byte_width, field_data, total_valid));
+                BuildDenseVectorArray(raw,
+                                      static_cast<int64_t>(bf16v.size()),
+                                      byte_width,
+                                      field_data,
+                                      total_valid,
+                                      owner));
             return std::make_pair(
                 arrow::field(field_name, arrow::fixed_size_binary(byte_width)),
                 arr);
@@ -322,8 +641,12 @@ FieldDataToArrow(const std::string& field_name,
             auto raw = reinterpret_cast<const uint8_t*>(i8v.data());
             ARROW_ASSIGN_OR_RAISE(
                 auto arr,
-                BuildDenseVectorArray(
-                    raw, byte_width, field_data, total_valid));
+                BuildDenseVectorArray(raw,
+                                      static_cast<int64_t>(i8v.size()),
+                                      byte_width,
+                                      field_data,
+                                      total_valid,
+                                      owner));
             return std::make_pair(
                 arrow::field(field_name, arrow::fixed_size_binary(byte_width)),
                 arr);
@@ -358,6 +681,64 @@ FieldDataToArrow(const std::string& field_name,
                 default:
                     return arrow::Status::NotImplemented(
                         "unsupported VectorArray element type");
+            }
+            if (field_meta != nullptr && field_meta->is_element_nullable()) {
+                auto inner = std::make_shared<arrow::BinaryBuilder>();
+                arrow::ListBuilder builder(arrow::default_memory_pool(), inner);
+                const auto& row_valid =
+                    milvus::GetFieldDataRowValidData(field_data);
+                if (!row_valid.empty() && row_valid.size() != total_valid) {
+                    return arrow::Status::Invalid(
+                        "VECTOR_ARRAY row validity length mismatch");
+                }
+                const auto valid_count =
+                    row_valid.empty()
+                        ? total_valid
+                        : static_cast<size_t>(std::count(
+                              row_valid.begin(), row_valid.end(), true));
+                const bool compact_rows =
+                    static_cast<size_t>(va.data_size()) == valid_count &&
+                    valid_count != total_valid;
+                if (static_cast<size_t>(va.data_size()) != total_valid &&
+                    !compact_rows) {
+                    return arrow::Status::Invalid(
+                        "VECTOR_ARRAY row count does not match validity");
+                }
+                size_t physical_row = 0;
+                for (size_t i = 0; i < total_valid; ++i) {
+                    if (!row_valid.empty() && !row_valid[i]) {
+                        ARROW_RETURN_NOT_OK(builder.AppendNull());
+                        continue;
+                    }
+                    milvus::VectorArray row(
+                        va.data(compact_rows ? physical_row++ : i), true);
+                    if (row.get_element_type() !=
+                            field_meta->get_element_type() ||
+                        row.dim() != field_meta->get_dim()) {
+                        return arrow::Status::Invalid(
+                            "VECTOR_ARRAY row type or dimension does not match "
+                            "schema");
+                    }
+                    ARROW_RETURN_NOT_OK(builder.Append());
+                    size_t physical = 0;
+                    auto validity = row.element_validity_view();
+                    for (int j = 0; j < row.length(); ++j) {
+                        if (!validity[j]) {
+                            ARROW_RETURN_NOT_OK(inner->AppendNull());
+                        } else {
+                            ARROW_RETURN_NOT_OK(inner->Append(
+                                reinterpret_cast<const uint8_t*>(row.data()) +
+                                    physical++ * byte_width,
+                                byte_width));
+                        }
+                    }
+                }
+                std::shared_ptr<arrow::Array> arr;
+                ARROW_RETURN_NOT_OK(builder.Finish(&arr));
+                return std::make_pair(
+                    arrow::field(field_name,
+                                 milvus::GetArrowDataType(*field_meta)),
+                    arr);
             }
             auto value_type = arrow::fixed_size_binary(byte_width);
             auto inner_builder =
@@ -418,7 +799,11 @@ FieldDataToArrow(const std::string& field_name,
             std::shared_ptr<arrow::Array> arr;
             ARROW_RETURN_NOT_OK(list_builder.Finish(&arr));
             return std::make_pair(
-                arrow::field(field_name, arrow::list(value_type)), arr);
+                arrow::field(field_name,
+                             field_meta != nullptr
+                                 ? milvus::GetArrowDataType(*field_meta)
+                                 : arrow::list(value_type)),
+                arr);
         }
         return arrow::Status::NotImplemented(
             "unsupported vector type in Arrow export");
@@ -457,36 +842,51 @@ FieldDataToArrow(const std::string& field_name,
         }
         ARROW_ASSIGN_OR_RAISE(
             auto arr,
-            BuildFixedWidthArray<arrow::Int32Builder>(
-                scalars.int_data().data(), field_data, total_valid));
+            BuildFixedWidthArray<arrow::Int32Builder>(scalars.int_data().data(),
+                                                      field_data,
+                                                      total_valid,
+                                                      owner,
+                                                      arrow::int32()));
         return std::make_pair(arrow::field(field_name, arrow::int32()), arr);
     }
     if (scalars.has_long_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.long_data().data(), field_data, total_valid));
+        ARROW_ASSIGN_OR_RAISE(auto arr,
+                              BuildFixedWidthArray<arrow::Int64Builder>(
+                                  scalars.long_data().data(),
+                                  field_data,
+                                  total_valid,
+                                  owner,
+                                  arrow::int64()));
         return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
     }
     if (scalars.has_timestamptz_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::Int64Builder>(
-                scalars.timestamptz_data().data(), field_data, total_valid));
+        ARROW_ASSIGN_OR_RAISE(auto arr,
+                              BuildFixedWidthArray<arrow::Int64Builder>(
+                                  scalars.timestamptz_data().data(),
+                                  field_data,
+                                  total_valid,
+                                  owner,
+                                  arrow::int64()));
         return std::make_pair(arrow::field(field_name, arrow::int64()), arr);
     }
     if (scalars.has_float_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::FloatBuilder>(
-                scalars.float_data().data(), field_data, total_valid));
+        ARROW_ASSIGN_OR_RAISE(auto arr,
+                              BuildFixedWidthArray<arrow::FloatBuilder>(
+                                  scalars.float_data().data(),
+                                  field_data,
+                                  total_valid,
+                                  owner,
+                                  arrow::float32()));
         return std::make_pair(arrow::field(field_name, arrow::float32()), arr);
     }
     if (scalars.has_double_data()) {
-        ARROW_ASSIGN_OR_RAISE(
-            auto arr,
-            BuildFixedWidthArray<arrow::DoubleBuilder>(
-                scalars.double_data().data(), field_data, total_valid));
+        ARROW_ASSIGN_OR_RAISE(auto arr,
+                              BuildFixedWidthArray<arrow::DoubleBuilder>(
+                                  scalars.double_data().data(),
+                                  field_data,
+                                  total_valid,
+                                  owner,
+                                  arrow::float64()));
         return std::make_pair(arrow::field(field_name, arrow::float64()), arr);
     }
     if (scalars.has_string_data()) {
@@ -515,14 +915,48 @@ FieldDataToArrow(const std::string& field_name,
         const auto& ad = scalars.array_data();
         const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
         const bool has_valid_data = !valid_data.empty();
+        if (field_meta != nullptr && field_meta->is_native_list_array()) {
+            if (ad.data_size() < total_valid ||
+                (has_valid_data && valid_data.size() != total_valid)) {
+                return arrow::Status::Invalid(
+                    "native-list ARRAY row count or validity length mismatch");
+            }
+            auto result =
+                arrow::MakeBuilder(milvus::GetArrowDataType(*field_meta));
+            if (!result.ok())
+                return result.status();
+            auto builder = std::move(*result);
+            auto* list = dynamic_cast<arrow::ListBuilder*>(builder.get());
+            if (list == nullptr) {
+                return arrow::Status::TypeError(
+                    "native-list ARRAY schema did not produce a ListBuilder");
+            }
+            const auto type = field_meta->get_array_type_schema();
+            for (size_t i = 0; i < total_valid; ++i) {
+                if (has_valid_data && !valid_data[i]) {
+                    ARROW_RETURN_NOT_OK(list->AppendNull());
+                    continue;
+                }
+                ARROW_RETURN_NOT_OK(AppendProtoList(ad.data(i), type, list));
+            }
+            std::shared_ptr<arrow::Array> arr;
+            ARROW_RETURN_NOT_OK(builder->Finish(&arr));
+            return std::make_pair(
+                arrow::field(field_name, milvus::GetArrowDataType(*field_meta)),
+                arr);
+        }
         arrow::BinaryBuilder builder;
         ARROW_RETURN_NOT_OK(builder.Reserve(total_valid));
+        // Hoisted: SerializeToString clears and reuses the capacity, so after
+        // the first row this is allocation-free. Declared inside the loop it
+        // cost a construct/destruct, and a malloc/free for anything past the
+        // small-string threshold, per row.
+        std::string serialized;
         for (size_t i = 0; i < total_valid; ++i) {
             if (has_valid_data && !valid_data[i]) {
                 ARROW_RETURN_NOT_OK(builder.AppendNull());
                 continue;
             }
-            std::string serialized;
             if (!ad.data(i).SerializeToString(&serialized)) {
                 return arrow::Status::SerializationError(
                     "failed to serialize ArrayArray element");

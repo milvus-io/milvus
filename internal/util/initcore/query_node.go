@@ -58,6 +58,10 @@ func InitQueryNode(ctx context.Context) error {
 
 // doInitQueryNodeOnce initializes query node once.
 func doInitQueryNodeOnce(ctx context.Context) error {
+	if err := InitStorageRuntime(); err != nil {
+		return err
+	}
+
 	nodeID := paramtable.GetNodeID()
 
 	// Deprecated compatibility shim for common.visibilityFilterEnabled. The
@@ -171,8 +175,6 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		UpdateExprResCacheConfig()
 	}
 
-	ApplyArrowIOThreadPoolCapacity("querynode", "init")
-
 	cStorageV2CellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.StorageV2CellTargetSizeBytes.GetAsInt64())
 	C.SetStorageV2CellTargetSizeBytes(cStorageV2CellTargetSizeBytes)
 	if err := registerQueryNodeAsyncLoadThreadPoolConfig(ctx, paramtable.Get(), updateStorageV2AsyncLoadThreadPoolSize); err != nil {
@@ -191,6 +193,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 	if err := InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
+	if err := InitExternalSparseConversionConfig(paramtable.Get()); err != nil {
 		return err
 	}
 

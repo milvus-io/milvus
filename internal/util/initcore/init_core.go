@@ -147,7 +147,7 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
 	}
 	return InitRemoteArrowFileSystem(params)
 }
@@ -163,13 +163,25 @@ func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
 }
 
 func InitLocalArrowFileSystem(path string) error {
+	return initLocalArrowFileSystem(path, paramtable.Get())
+}
+
+func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	storageConfig := C.CStorageConfig{
-		root_path:    cRootPath,
-		storage_type: cStorageType,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -189,6 +201,8 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -203,26 +217,32 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:                cAddress,
-		bucket_name:            cBucketName,
-		access_key_id:          cAccessKey,
-		access_key_value:       cAccessValue,
-		root_path:              cRootPath,
-		storage_type:           cStorageType,
-		iam_endpoint:           cIamEndPoint,
-		cloud_provider:         cCloudProvider,
-		useSSL:                 C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:              cSslCACert,
-		useIAM:                 C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:              cLogLevel,
-		region:                 cRegion,
-		useVirtualHost:         C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:       C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json:    cGcpCredentialJSON,
-		use_custom_part_upload: true,
-		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:        cTLSMinVersion,
-		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		use_custom_part_upload:          true,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -256,6 +276,8 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -270,25 +292,31 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:             cAddress,
-		bucket_name:         cBucketName,
-		access_key_id:       cAccessKey,
-		access_key_value:    cAccessValue,
-		root_path:           cRootPath,
-		storage_type:        cStorageType,
-		iam_endpoint:        cIamEndPoint,
-		cloud_provider:      cCloudProvider,
-		useSSL:              C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:           cSslCACert,
-		useIAM:              C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:           cLogLevel,
-		region:              cRegion,
-		useVirtualHost:      C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json: cGcpCredentialJSON,
-		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:     cTLSMinVersion,
-		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -404,6 +432,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
@@ -480,6 +509,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
@@ -622,6 +652,24 @@ func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
 			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
 	}
 	return nil
+}
+
+// InitExternalSparseConversionConfig applies the startup-only budget shared by
+// external load, take, index build and field-size sampling.
+func InitExternalSparseConversionConfig(params *paramtable.ComponentParam) error {
+	item := &params.CommonCfg.ExternalSparseConversionMemoryLimit
+	limit, err := strconv.ParseInt(strings.TrimSpace(item.GetValue()), 10, 64)
+	if err != nil || limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("%s must be a positive byte count, got %q", item.Key, item.GetValue())
+	}
+	if !bool(C.SetExternalSparseConversionMemoryLimit(C.int64_t(limit))) {
+		return merr.WrapErrParameterInvalidMsg("%s must be positive, got %d", item.Key, limit)
+	}
+	return nil
+}
+
+func externalSparseConversionMemoryLimit() int64 {
+	return int64(C.GetExternalSparseConversionMemoryLimit())
 }
 
 func externalVectorPartialNullAsRowNullEnabled() bool {
@@ -841,6 +889,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyIndexSlotEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
@@ -849,6 +898,15 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
 	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
 	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
+	sparseIPAlgo := C.CString(params.QueryNodeCfg.InterimIndexSparseIPAlgo.GetValue())
+	defer C.free(unsafe.Pointer(sparseIPAlgo))
+	sparseBM25Algo := C.CString(params.QueryNodeCfg.InterimIndexSparseBM25Algo.GetValue())
+	defer C.free(unsafe.Pointer(sparseBM25Algo))
+	status = C.SegcoreSetSparseInterimIndexAlgorithms(sparseIPAlgo, sparseBM25Algo)
+	if err := HandleCStatus(&status, "SegcoreSetSparseInterimIndexAlgorithms failed"); err != nil {
 		return err
 	}
 

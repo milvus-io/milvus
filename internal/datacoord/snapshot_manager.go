@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,7 +167,7 @@ type SnapshotManager interface {
 	//   - error: If snapshot not found or read fails
 	DescribeSnapshot(ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error)
 
-	// ListSnapshots returns a list of snapshot names for the specified collection/partition.
+	// ListSnapshots returns lightweight snapshot summaries for the specified collection/partition.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
@@ -174,9 +175,9 @@ type SnapshotManager interface {
 	//   - partitionID: Filter by partition ID (0 = all partitions)
 	//
 	// Returns:
-	//   - snapshots: List of snapshot names
+	//   - snapshots: Summaries ordered by create_ts descending, then name ascending
 	//   - error: If listing fails
-	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error)
+	ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error)
 
 	// Restore operations
 
@@ -563,22 +564,31 @@ func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, collectionID in
 	return snapshotData, nil
 }
 
-// ListSnapshots returns a list of snapshot names for the specified collection/partition.
+// ListSnapshots returns lightweight snapshot summaries for the specified collection/partition.
 //
 // Note: proxy/task_snapshot.go:438 hard-rejects empty collection_name before
 // the request reaches this layer, so collectionID is guaranteed to be non-zero
 // here. The db-level aggregation branch (collectionID==0 && dbID!=0) that used
 // to live here was unreachable via any public API and has been removed.
 // getDBCollectionIDs is still used by ListRestoreJobs for db-level job filtering.
-func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]string, error) {
-	mlog.Info(context.TODO(), "list snapshots request received")
+func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+	mlog.Info(ctx, "list snapshots request received")
 
 	snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collectionID, partitionID)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to list snapshots", mlog.Err(err))
+		mlog.Error(ctx, "failed to list snapshots", mlog.Err(err))
 		return nil, err
 	}
 
+	slices.SortFunc(snapshots, func(a, b *datapb.SnapshotSummary) int {
+		if a.GetCreateTs() > b.GetCreateTs() {
+			return -1
+		}
+		if a.GetCreateTs() < b.GetCreateTs() {
+			return 1
+		}
+		return strings.Compare(a.GetName(), b.GetName())
+	})
 	return snapshots, nil
 }
 
@@ -1196,6 +1206,10 @@ func (sm *snapshotManager) RestoreIndexes(
 
 		// Validate the index params (basic validation without JSON path parsing)
 		if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
+		}
+
+		if err := checkOrdinaryArraySortIndex(typeutil.GetField(coll.GetSchema(), index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
@@ -1960,7 +1974,7 @@ func (sm *snapshotManager) calculateTimeCost(job CopySegmentJob) uint64 {
 
 // checkJSONPathIndexVersion rejects JSON path indexes with STL_SORT, BITMAP,
 // or HYBRID if the cluster's scalar index engine version is below
-// MinScalarIndexVersionForJsonPathMultiType.
+// the existing scalar/packed-array format threshold, or the software gate is off.
 func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 	indexType := GetIndexType(index.IndexParams)
 	if indexType != indexparamcheck.IndexSTLSORT &&
@@ -1974,13 +1988,17 @@ func (sm *snapshotManager) checkJSONPathIndexVersion(index *model.Index) error {
 		return nil
 	}
 
+	if err := checkJSONArrayIndexEnabled(indexType, indexParams[common.JSONCastTypeKey]); err != nil {
+		return err
+	}
 	if sm.indexEngineVersionManager != nil {
 		resolved := sm.indexEngineVersionManager.ResolveScalarIndexVersion()
-		if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+		required := requiredJSONPathIndexVersion(indexType, indexParams[common.JSONCastTypeKey])
+		if resolved < required {
 			return merr.WrapErrParameterInvalidMsg(
 				"JSON path index with %s requires scalar index engine version >= %d, "+
 					"current resolved version: %d; please complete the rolling upgrade first",
-				indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+				indexType, required, resolved)
 		}
 	}
 	return nil

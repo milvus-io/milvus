@@ -188,3 +188,7 @@ func (w *roWALAdaptorImpl) forceCancelAfterGracefulTimeout() {
 		w.availableCancel()
 	})
 }
+
+func (w *roWALAdaptorImpl) TransformLog() wal.TransformLogAccesser {
+	return wal.NewTransformLogErrorAccesser(status.NewUnrecoverableError("transform subscriptions require a read-write WAL"))
+}

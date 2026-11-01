@@ -83,6 +83,7 @@ func init() {
 		for _, entry := range entries {
 			metricsList = append(metricsList, metrics.FilesystemMetrics{
 				DisplayKey:              entry.DisplayKey,
+				Source:                  entry.Source,
 				ReadCount:               entry.ReadCount,
 				WriteCount:              entry.WriteCount,
 				ReadBytes:               entry.ReadBytes,
@@ -110,6 +111,24 @@ type component interface {
 	Prepare() error
 	Run() error
 	Stop() error
+}
+
+// stopOnceComponent runs the wrapped component's Stop at most once. A component
+// can be stopped by the /management/stop API (e.g. the coordinator hand-off of a
+// rolling upgrade) and again by the shutdown sequence when the process receives
+// SIGTERM; component Stop implementations are not idempotent. A concurrent
+// second caller blocks until the first Stop returns and gets the same error.
+type stopOnceComponent struct {
+	component
+	once sync.Once
+	err  error
+}
+
+func (c *stopOnceComponent) Stop() error {
+	c.once.Do(func() {
+		c.err = c.component.Stop()
+	})
+	return c.err
 }
 
 func cleanLocalDir(path string) {
@@ -291,7 +310,7 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 				mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
 				return nil, err
 			} else {
-				componentMap[role] = component
+				componentMap[role] = &stopOnceComponent{component: component}
 				mlog.Info(context.TODO(), "component is ready", mlog.String("role", role))
 			}
 		}
@@ -502,6 +521,13 @@ func (mr *MilvusRoles) Run() {
 
 	mr.setupLogger()
 	defer mlog.Cleanup()
+
+	// All components, including coordinator manifest readers, must see the
+	// configured runtime before any Rust bridge can initialize Tokio lazily.
+	if err := initcore.InitStorageRuntime(); err != nil {
+		mlog.Error(ctx, "failed to initialize storage runtime", mlog.Err(err))
+		panic(err)
+	}
 
 	// Worker nodes (querynode, datanode, streamingnode) host no credential
 	// metadata, so without this their management plane and pprof would answer

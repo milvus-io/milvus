@@ -1,11 +1,14 @@
 use super::fetch;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
+#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ipadic"))]
+use crate::error::TantivyBindingError;
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::ipadic::IpadicBuilder;
 
 #[cfg(feature = "lindera-ipadic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(not(feature = "lindera-ipadic"))]
+#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-ipadic")))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, IpadicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -13,6 +16,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
             e.to_string()
         ))
     })
+}
+
+// Online download is compiled out; only a dictionary already built under
+// `build_dir` can be used.
+#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-ipadic")))]
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::ensure_prebuilt(params, "ipadic")
 }
 
 #[cfg(not(feature = "lindera-ipadic"))]
@@ -53,7 +63,7 @@ pub fn load_ipadic(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "lindera-ipadic", feature = "analyzer-remote-tls")))]
 mod tests {
     use super::load_ipadic;
     use env_logger;
@@ -65,5 +75,27 @@ mod tests {
 
         let result = load_ipadic("/var/lib/milvus/dict/lindera".to_string(), vec![]);
         assert!(result.is_ok(), "err: {}", result.err().unwrap())
+    }
+}
+
+#[cfg(all(
+    test,
+    not(feature = "analyzer-remote-tls"),
+    not(feature = "lindera-ipadic")
+))]
+mod remote_tls_disabled_tests {
+    use super::load_ipadic;
+
+    #[test]
+    fn test_load_ipadic_remote_tls_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = load_ipadic(dir.path().to_str().unwrap().to_string(), vec![]);
+        let err = result
+            .err()
+            .expect("load must fail without a prebuilt dict");
+        assert!(
+            err.to_string().contains("analyzer-remote-tls"),
+            "unexpected error: {err}"
+        );
     }
 }

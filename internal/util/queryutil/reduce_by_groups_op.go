@@ -41,7 +41,7 @@ import (
 // in PostExecute skips FieldId=0 (not in schema map).
 //
 // Unlike proxy's version, this does NOT reorganize output fields (no outputMap).
-// groupLimit: -1 for unlimited (when ORDER BY will do topK downstream),
+// groupLimit: -1 for unlimited (when groups need a later cross-source merge),
 // >0 to truncate groups.
 func NewDeduplicateByGroupsOperator(
 	schema *schemapb.CollectionSchema,
@@ -53,11 +53,19 @@ func NewDeduplicateByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, groupLimit, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Merge(ctx, partials)
 		if err != nil {
 			return nil, err
 		}
 
-		return []any{agg.AggResult2internalResult(reducedRes)}, nil
+		wire, err := reducer.EncodePartial(reducedRes)
+		if err != nil {
+			return nil, err
+		}
+		return []any{wire}, nil
 	})
 }

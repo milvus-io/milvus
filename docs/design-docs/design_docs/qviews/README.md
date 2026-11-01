@@ -23,16 +23,20 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 3. **StreamingNode is no longer responsible for Search/Query logic forwarding**: Proxy uses a two-phase query approach — it generates a query plan on StreamingNode, then sends the query plan to designated QueryNodes to complete the query, and performs all distributed Reduce operations itself.
 4. **StreamingNode no longer actively applies incremental delete data**: After LoadSegment, QueryNode proactively subscribes to the corresponding Delete data from StreamingNode and applies Delete data on its own.
 
+The query execution components include [versioned partition statistics and
+segment pruning](query/segment_pruning.md), including conservative fallback,
+per-worker/subquery selection, and empty-shard MVCC/result normalization.
+
 ## 3. Two-Phase Query Process
 
-TODO(query/query_client.md): add the detailed query-path flow, service boundary,
-client orchestration, and shard discovery design when the query path is picked.
-TODO(query/query_plan.md): add the node-side Phase 1 planning design when that
-module is picked.
-TODO(query/query_execution.md): add the node-side Phase 2 execution design when
-that module is picked.
+The following end-to-end flow describes the target architecture. The current
+components include SN execution and an injectable
+[query client](query/query_client.md). They do not switch production Proxy
+routing or activate the new Coordinator runtime. QN execution/resource preparation
+and scoped WAL barrier production are separate dependencies; this extraction
+only supplies their query contracts.
 
-1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
+1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
    - Includes MVCC
    - Query optimization (BM25, Segment filtering, etc.)
    - Query view version
@@ -40,6 +44,48 @@ that module is picked.
    - StreamingNode and QueryNode execute query operations using Segments under the corresponding view version
    - Proxy reduces all results and returns them to the user
 3. If a node failure or view invalidation occurs during the process, the query is canceled and retried directly.
+
+### Current SN implementation
+
+- **Phase 1:** `GetQueryPlan` acquires the highest available Up view at the exact request
+  SchemaVersion, resolves
+  query MVCC, performs request/BM25 optimization and selects the plan's workers.
+  `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
+  [consistency-level discussion](#13-consistency-implementation-consistency-level)
+  for the current routing limits.
+- **Phase 2:** `SearchOnView` and `QueryOnView` acquire the explicit Up version,
+  wait for Growing/Transform MVCC, and pin segments selected by DataVersion and
+  partition scope. The [serving lease](query_view_lease.md) protects the view
+  during acquisition; handles retain resources during execution.
+- **Execution dependency:** the new QueryView scheduler and resource path invoke
+  legacy `querynodev2/tasks.SearchTask` / `QueryTask.ExecuteOnSegments` directly
+  inside SN, with `querypb` request and collection/segment adapters. This reuses
+  task execution and reduction, not the old QueryNode scheduler. TODO(#40451):
+  replace these adapters with shared execution accepting plans and pinned
+  segcore handles directly. With `common.interface.zeroCopy` enabled, both SN
+  adapters and legacy `LocalSegment` objects use Arrow batch field refill.
+  `fetchFieldsAsRecord` pins/unpins LocalSegments locally and borrows SN
+  CSegments protected by the outer query task handles. These handles remain held
+  through execution and Arrow-to-proto conversion; the adapter does not release them.
+  Boost scorers follow the same ownership rule: SN adapters borrow the pinned
+  CSegments through asynchronous scoring, while LocalSegments keep their local
+  pin/unpin protocol. Both execute the shared segcore scoring implementation.
+- **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
+  Production Proxy wiring
+  remains integration work. See [plan/schema/snapshot contracts](query/query_plan.md).
+
+Key source paths: `internal/streamingnode/server/queryplan/server.go`,
+`internal/streamingnode/server/wal/adaptor/query_plan.go`,
+`internal/streamingnode/server/wal/snview/query_task_provider.go`,
+`internal/streamingnode/server/viewquery/{scheduler,executor,runner}.go`, and
+`internal/views/viewquery/server.go`.
+
+For hybrid search, Phase 1 builds independent mutable sub-requests for the
+optimizer. Once optimization succeeds, it transfers each temporary request's
+placeholder, serialized plan and partition slice back to its sub-request and
+clears those fields in the temporary request. No optimizer retains these slices
+after the transfer. Phase 2 expands independent sub-requests again for concurrent
+execution; the ownership transfer changes no RPC fields or query semantics.
 
 ### Advantages
 
@@ -77,6 +123,10 @@ recovery, reference protection, and GC behavior are documented in
 [DataView Design](data_view.md).
 
 ### 5.1 Overview
+
+The extracted [DataView schema certification](data_view_schema.md) contract
+binds new QueryViews to the supported read schema of their selected DataView.
+Pending DDL schema targets gate preparation rather than overriding that identity.
 
 The storage view contains all complete, non-duplicate loadable Sealed Segment
 data ([B1] and [A1]). A version number DataVersion is introduced:
@@ -229,6 +279,9 @@ Key constraints:
 - Workflows across multiple view versions are completely independent, but through Coord state machine constraints, each node has at most one view in Preparing state.
 - QueryNode loss is handled only for active QN-targeted syncs: in Preparing it makes the view Unrecoverable, and in Dropping it counts that QN cleanup as complete. StreamingNode unavailability is handled by channel assignment, not by the QueryView per-view state machine.
 
+The SN renewable serving lease delays local Up → Down during active use; see
+[StreamingNode QueryView Serving Lease](query_view_lease.md).
+
 ## 8. Incremental Query Segment Lifecycle
 
 In the target QueryView integration, incremental Segments generated from WAL on
@@ -253,8 +306,11 @@ resource if its DataVersion has `streaming_version < S1`.
 The recovery-storage implementation binds the first Flush DataVersion in
 DataCoord SegmentInfo and StreamingNode SegmentAssignmentMeta as
 `sealed_at_data_version`. Retried commits return this immutable version.
-QueryView-driven resource retention and physical Segment GC remain separate
-integration work; recording the binding alone does not enable this release rule.
+The current SN QueryRuntime integration uses this binding to filter query
+membership, advances reclamation by the minimum retained DataVersion, and pins
+physical resources for active queries. See the
+[SN WAL input view](../wal/streamingnode_vchannel_wal_view.md) for preparation,
+readiness and retention; the binding alone is not sufficient without this wiring.
 
 ## 9. Historical Query Segment Lifecycle
 
@@ -292,14 +348,20 @@ lifecycle.
 TODO(qnview/querynode_queryview_resource_preparation.md): add the QueryNode-side
 sealed segment resource preparation design when that resource module is picked.
 
-Example: If view A is unreasonable and causes OOM on a node, it is marked as Unrecoverable, but view A still exists on the node and already-loaded resources are not rolled back. After Coord detects this, the Balancer generates a new view B and pushes both views for atomic modification (A Dropped, B Preparing). Resources in (A diff B) are released, resources in (B diff A) are loaded, and resources in A∩B are retained.
+Target coordination example: if a node cannot satisfy view A's resource
+requirements, it reports A as Unrecoverable. Coord can prepare a replacement B
+and arrange A's cleanup. Successful shared resources may be reused according to
+their ownership rules; this does not require retaining a failed partial SN
+bootstrap. The current SN builder closes failed partial modules and constructs
+a fresh runtime on a locally retryable attempt. A process killed by OOM cannot
+report a view failure; node failure detection must handle that case.
 
-TODO(snview/streamingnode_resource_manager.md): add the StreamingNode query
-runtime manager design when that resource module is picked.
-TODO(snview/growing_segment_runtime.md): add the StreamingNode growing segment
-runtime design when that resource module is picked.
-TODO(snview/idf_oracle_runtime.md): add the StreamingNode IDF oracle runtime
-design when that resource module is picked.
+[SN WAL input view and QueryRuntime preparation](../wal/streamingnode_vchannel_wal_view.md)
+describes the implemented resource manager, GrowingRuntime bootstrap, readiness
+barriers and retention. Later load-info/schema changes and historical load-info
+resolution remain explicitly deferred there.
+[StreamingNode IDF Oracle Runtime](snview/idf_oracle_runtime.md) defines the
+single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 
 ## 11. Coord and Node Interactions
 
@@ -307,6 +369,10 @@ design when that resource module is picked.
 
 - **Coord**: Obtains global information, computes and generates QueryViews, and advances the state machine. No longer manages resource preparation workflows.
 - **Node**: Responsible for preparing resources required by QueryViews and reporting resource preparation status.
+- **Failure ownership**: Worknodes retry locally recoverable failures. Coord
+  handles failures that cannot be resolved by the current node/view, including
+  resource shortages requiring placement or allocation changes. See the
+  [contract and current gaps](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership).
 
 ### 11.2 Component Modules
 
@@ -320,11 +386,16 @@ design when that resource module is picked.
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
 | Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
-| Streaming Node | Pure Delete Stream Manager | Acting as subscription server, publishing Delete data to QueryNodes. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+| Streaming Node | TransformLog adaptor | Local Summary-backed SN bootstrap is wired; remote QN publication remains planned. See [TransformLog](../wal/transform_log.md). |
 | Streaming Node | Growing Segment Manager | Incremental data management, maintaining Growing Segment lifecycle |
 | Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
-| Query Node | Pure Delete Stream Manager | Acting as subscription client, applying Delete data to each Segment. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+| Query Node | Pure Delete Stream Manager | Planned remote subscription client applying Delete data to each Segment; not wired by this SN extraction. |
+
+The extracted coordinator's background scheduling uses
+[Collection-batched Balancer Reconciliation](balancer_scanning.md): cache-owned
+scanners retain a directory slice across batches, and local work can run between
+collection checkpoints. Production activation remains separate integration work.
 
 ### 11.3 SyncQueryView RPC
 
@@ -332,7 +403,7 @@ The sole RPC that unifies the synchronization layer behavior of StreamingNode
 and QueryNode. See the definitions of `ViewSyncService`, `SyncRequest`,
 `SyncResponse`, and related messages in
 [view.proto](../../../../pkg/proto/view.proto).
-TODO(syncer.md): add the Coord-side transport design when the syncer is picked.
+See [Syncer](syncer.md) for the Coord-side transport design.
 
 RPC rules:
 - The QueryView list is atomically applied to the local QueryViewManager.
@@ -349,26 +420,49 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ## 13. Consistency Implementation (Consistency Level)
 
-### Consistency Levels
+### Current primary routing
 
-| Level | MvccTimestamp Generation Logic |
-|---|---|
-| **Strong** | Proxy requests a query plan from the primary SN. SN obtains the maximum ts of messages written to the current WAL VChannel as MvccTimestamp (if ts has not yet triggered timeticksync, trigger it proactively) |
-| **Bounded** | Proxy requests from any SN. Primary SN → same as Strong; Replica SN → obtains the maximum ts of the current WAL subscription stream VChannel |
-| **Session** | Same as Strong |
-| **Eventual** | Same as Bounded |
+The query client discovers eligible replicas through the primary SN's
+[replica directory](query/replica_discovery.md), selects an explicit ReplicaID,
+and still plans through that primary WAL owner. Strong and Session
+are sent as Strong; Bounded and Eventually preserve the requested enum.
+`wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
+prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
+writes, Eventually can reuse the current complete snapshot, and Bounded also
+requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
+also requires RW access. WAL-secondary routing remains future work; QueryView replicas on the current
+owner are selected explicitly and support shard-level failover.
 
-Key changes:
+Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
+[Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with
+write-side conflict and history checks, without a separate read certificate.
+
+Target changes:
 - GuaranteeTS assignment logic is moved down to StreamingNode, obtained from the WAL system.
 - MvccTimestamp and GuaranteeTS are merged and always kept consistent.
 - ts will trend toward LSN rather than system time in the future.
 
 ## 14. Pure Delete Stream
 
-StreamingNode already implements Pub-Sub capability. PureDeleteStreamManager wraps and optimizes on top of it:
+The current [TransformLog adaptor](../wal/transform_log.md) wraps WALSummary
+reads. Local SN bootstrap uses bounded replay; subsequent SN events arrive via
+the VChannel live path. The local unbounded mode has scoped notifications, but
+remote QN subscriptions and their retention integration remain planned.
+
+The following describes future pure-delete consumption options, not enabled
+QN behavior in this extraction:
 
 - During Recovery, pure delete stream subscriptions use batch processing for merging.
 - L0 is used on StreamingNode.
 - Bloom filter filtering + batch merge of delete data at the Node level.
 - Remote Load L0 (conflicts with Bloom filter filtering; choose one of the two).
 - Subscription catch-up merging.
+
+## 15. TODO: DDL Query Visibility
+
+[Truncate and Partition Drop Query Visibility](ddl_visibility.md) records the
+agreed follow-up: typed TransformLog entries delivered to the affected SN/QN
+consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
+uses a QueryView handoff fence (QueryCoord target update in the legacy model).
+The MVCC extension and distributed delivery are outside the current SN query
+extraction PR; a progress barrier alone does not implement DDL visibility.

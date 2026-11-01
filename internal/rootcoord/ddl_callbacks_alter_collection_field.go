@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -87,6 +88,16 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	if err != nil {
 		return err
 	}
+	// The struct sub-field origin marker is internal; a property request can
+	// neither set nor delete it.
+	propertyKeys := make([]string, 0, len(req.GetProperties())+len(req.GetDeleteKeys()))
+	for _, prop := range req.GetProperties() {
+		propertyKeys = append(propertyKeys, prop.GetKey())
+	}
+	propertyKeys = append(propertyKeys, req.GetDeleteKeys()...)
+	if err := schemautil.RejectStructSubFieldOriginMarkerKeys(req.GetFieldName(), propertyKeys...); err != nil {
+		return err
+	}
 	oldFieldPropertiesMap := common.CloneKeyValuePairs(oldFieldProperties).ToMap()
 	var desc *commonpb.KeyValuePair = nil
 	for _, prop := range req.GetProperties() {
@@ -103,7 +114,8 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 
 	newFieldProperties := common.NewKeyValuePairs(oldFieldPropertiesMap)
-	if newFieldProperties.Equal(oldFieldProperties) && desc == nil {
+	propertiesChanged := !newFieldProperties.Equal(oldFieldProperties)
+	if !propertiesChanged && desc == nil {
 		// if there's no change, return nil directly to promise idempotent.
 		return errIgnoredAlterCollection
 	}
@@ -138,9 +150,6 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 		if err := checkNestedArrayTypeSchemaCapacity(targetField); err != nil {
 			return err
 		}
-	}
-	if err := validateRLSPoliciesWithSchema(coll.RLSPolicies, schema); err != nil {
-		return err
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -15,9 +16,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/bm25"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -39,7 +42,8 @@ type FunctionRunnerManager interface {
 	// "WAL-"+vchannel while delegator uses "DELEGATOR-"+vchannel.
 	// Invalid function metadata is returned synchronously. Runner initialization
 	// failures are logged and retried by later requests instead of failing
-	// collection recovery.
+	// collection recovery. Runners requiring pull preparation initialize on
+	// first use so a background prewarm cannot keep shared resource I/O alive.
 	Alloc(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
 	// Update moves an allocated lifecycle key to a newer schema version and
@@ -119,17 +123,22 @@ type functionRunnerVersion struct {
 }
 
 type functionRunnerEntry struct {
-	mu       sync.RWMutex
-	schema   *schemapb.CollectionSchema
-	function *schemapb.FunctionSchema
-	runner   FunctionRunner
-	init     *functionRunnerInit
-	closed   bool
+	// Share preparation through native completion, not just the native build.
+	initialization syncutil.FlightGroup[struct{}, struct{}]
+
+	mu        sync.RWMutex
+	schema    *schemapb.CollectionSchema
+	function  *schemapb.FunctionSchema
+	runner    FunctionRunner
+	resources *fileresource.Resources
+	init      *functionRunnerInit
+	closed    bool
 }
 
 type functionRunnerInit struct {
-	done chan struct{}
-	err  error
+	resources *fileresource.Resources
+	done      chan struct{}
+	err       error
 }
 
 func newFunctionRunnerCollectionEntry(collectionID int64) *functionRunnerCollectionEntry {
@@ -166,6 +175,13 @@ func (e *functionRunnerCollectionEntry) allocOrUpdate(
 		// New lookups can no longer reach these entries. Let existing callbacks
 		// release their runner leases without blocking the schema update.
 		go closeFunctionRunnerEntries(staleRunnerEntries)
+	}
+	// Only the new pull preparation requires a requesting RPC to own its wait.
+	// Preserve prewarming for all other runner paths.
+	if fileresource.IsPullEnabled() {
+		runnerEntries = lo.Filter(runnerEntries, func(entry *functionRunnerEntry, _ int) bool {
+			return !entry.needsFileResources()
+		})
 	}
 	if len(runnerEntries) == 0 {
 		return nil
@@ -297,8 +313,16 @@ func runWithRunnerEntries(
 	// The read locks are shared, so concurrent materialization is still allowed;
 	// concrete runners protect their own mutable state.
 	runners := make([]FunctionRunner, 0, len(runnerEntries))
+	deferred, _ := ctx.Value(deferredPreparationKey{}).(bool)
 	for _, runnerEntry := range runnerEntries {
-		runner, unlock, err := runnerEntry.GetRunner(ctx)
+		var runner FunctionRunner
+		var unlock func()
+		var err error
+		if deferred {
+			runner, unlock, err = runnerEntry.getReadyRunner()
+		} else {
+			runner, unlock, err = runnerEntry.GetRunner(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -343,28 +367,91 @@ func (e *functionRunnerEntry) GetRunner(ctx context.Context) (FunctionRunner, fu
 	return e.runner, e.mu.RUnlock, nil
 }
 
+func (e *functionRunnerEntry) needsFileResources() bool {
+	if len(e.schema.GetFileResourceIds()) > 0 {
+		return true
+	}
+	for _, fieldID := range e.function.GetInputFieldIds() {
+		if analyzerMayUseFileResources(typeutil.GetField(e.schema, fieldID)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *functionRunnerEntry) ensureRunner(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if e.isReady() {
+	e.mu.RLock()
+	closed, ready := e.closed, e.isReadyLocked()
+	e.mu.RUnlock()
+	if closed {
+		return errFunctionRunnerEntryRemoved
+	}
+	if ready {
 		return nil
 	}
 
-	init, runInit, err := e.getOrCreateInit()
+	_, err := e.initialization.Do(ctx, struct{}{}, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, e.initialize(ctx)
+	})
+	return err
+}
+
+func (e *functionRunnerEntry) initialize(ctx context.Context) error {
+	e.mu.RLock()
+	closed, ready, init := e.closed, e.isReadyLocked(), e.init
+	e.mu.RUnlock()
+	if closed {
+		return errFunctionRunnerEntryRemoved
+	}
+	if ready {
+		return nil
+	}
+	if init != nil {
+		// All earlier callers may have canceled while native construction was
+		// running. Rejoin that build without repeating its successful preparation.
+		return e.waitInit(ctx, init)
+	}
+	resources := &fileresource.Resources{}
+	if e.needsFileResources() {
+		params := make([]string, 0, len(e.function.GetInputFieldIds()))
+		for _, fieldID := range e.function.GetInputFieldIds() {
+			field := typeutil.GetField(e.schema, fieldID)
+			if multiParams, ok := getMultiAnalyzerParams(field); ok && e.function.GetType() == schemapb.FunctionType_BM25 {
+				params = append(params, multiParams)
+			} else {
+				params = append(params, getAnalyzerParams(field))
+			}
+		}
+		var err error
+		resources, err = fileresource.Acquire(ctx, e.schema.GetFileResourceIds(), params...)
+		if err != nil {
+			return merr.Wrap(err, "acquire function file resources")
+		}
+	}
+
+	init, runInit, err := e.getOrCreateInit(ctx)
 	if err != nil {
+		resources.Close()
 		return err
 	}
 	if init == nil {
+		resources.Close()
 		return nil
 	}
 	if runInit {
+		// The native build owns this lease even when every RPC stops waiting.
+		init.resources = resources
 		go e.runInit(init)
+	} else {
+		resources.Close()
 	}
 	return e.waitInit(ctx, init)
 }
 
-func (e *functionRunnerEntry) getOrCreateInit() (*functionRunnerInit, bool, error) {
+func (e *functionRunnerEntry) getOrCreateInit(ctx context.Context) (*functionRunnerInit, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -373,6 +460,11 @@ func (e *functionRunnerEntry) getOrCreateInit() (*functionRunnerInit, bool, erro
 	}
 	if e.isReadyLocked() {
 		return nil, false, nil
+	}
+	// Check cancellation under the publication lock. An abandoned preparation
+	// cannot start a build after its replacement has observed no native init.
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	init := e.init
 	if init == nil {
@@ -393,7 +485,7 @@ func (e *functionRunnerEntry) waitInit(ctx context.Context, init *functionRunner
 }
 
 func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
-	runner, err := BuildEmbeddingRunner(e.schema, e.function)
+	runner, err := BuildEmbeddingRunner(e.schema, e.function, init.resources.ExtraInfo())
 	if err == nil && runner == nil {
 		err = errors.New("function runner is nil")
 	}
@@ -407,28 +499,36 @@ func (e *functionRunnerEntry) runInit(init *functionRunnerInit) {
 		if runner != nil {
 			runner.Close()
 		}
+		init.resources.Close()
 		init.err = err
 		return
 	}
 	if e.closed {
 		init.err = errFunctionRunnerEntryRemoved
 		runner.Close()
+		init.resources.Close()
 		return
 	}
 
 	e.runner = runner
+	e.resources = init.resources
 	init.err = nil
 }
 
 func (e *functionRunnerEntry) Close() {
 	e.mu.Lock()
 	runner := e.runner
+	resources := e.resources
+	e.resources = nil
 	e.runner = nil
 	e.closed = true
 	e.mu.Unlock()
 
 	if runner != nil {
 		runner.Close()
+	}
+	if resources != nil {
+		resources.Close()
 	}
 }
 
@@ -802,6 +902,7 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return true, run(analyzer)
 	}
 
+	resourceIDs := append([]int64(nil), versionRunners.schema.GetFileResourceIds()...)
 	field := typeutil.GetField(versionRunners.schema, fieldID)
 	if field != nil {
 		field = proto.Clone(field).(*schemapb.FieldSchema)
@@ -814,7 +915,16 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		return false, nil
 	}
 
-	analyzer, err := NewAnalyzerRunner(field)
+	resources := &fileresource.Resources{}
+	var err error
+	if len(resourceIDs) > 0 || analyzerMayUseFileResources(field) {
+		resources, err = fileresource.Acquire(ctx, resourceIDs, getAnalyzerParams(field))
+		if err != nil {
+			return true, err
+		}
+	}
+	defer resources.Close()
+	analyzer, err := NewAnalyzerRunner(field, resources.ExtraInfo())
 	if err != nil {
 		return true, err
 	}
@@ -822,6 +932,18 @@ func (e *functionRunnerCollectionEntry) RunWithAnalyzer(
 		defer runner.Close()
 	}
 	return true, run(analyzer)
+}
+
+// analyzerMayUseFileResources is deliberately conservative for explicit config.
+// Empty resource IDs alone are insufficient for older schemas and MinHash,
+// whose tokenizer is constructed even without enable_analyzer. The default
+// analyzer has no external resources; leave all other parsing to native code.
+func analyzerMayUseFileResources(field *schemapb.FieldSchema) bool {
+	if _, ok := getMultiAnalyzerParams(field); ok {
+		return true
+	}
+	params := strings.TrimSpace(getAnalyzerParams(field))
+	return params != "" && params != "{}"
 }
 
 func (m *functionRunnerManager) getOrCreateEntry(collectionID int64) *functionRunnerCollectionEntry {
@@ -953,7 +1075,7 @@ func (m *functionRunnerManager) Close() {
 	closeFunctionRunnerEntries(runnerEntries)
 }
 
-func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (FunctionRunner, error) {
+func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, extraInfo ...string) (FunctionRunner, error) {
 	if schema == nil {
 		return nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
 	}
@@ -966,7 +1088,7 @@ func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.Functi
 
 	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
 	fn = proto.Clone(fn).(*schemapb.FunctionSchema)
-	return NewFunctionRunner(schema, fn)
+	return NewFunctionRunner(schema, fn, extraInfo...)
 }
 
 func BuildEmbeddingRunners(schema *schemapb.CollectionSchema) ([]FunctionRunner, error) {
@@ -1045,6 +1167,13 @@ func embeddingFunctions(schema *schemapb.CollectionSchema) []*schemapb.FunctionS
 	return functions
 }
 
+// FunctionSignature identifies reusable function semantics independently of
+// unrelated collection fields and the collection schema version.
+func FunctionSignature(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, error) {
+	signature, _, _, err := embeddingFunctionMetadata(schema, fn)
+	return signature, err
+}
+
 func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, []int64, []int64, error) {
 	if schema == nil {
 		return "", nil, nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
@@ -1071,6 +1200,9 @@ func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.F
 	writeInt64s(hasher, "output_ids", outputIDs)
 	writeStrings(hasher, "output_names", outputNames)
 	writeKeyValuePairs(hasher, "fn_params", fn.GetParams())
+	resourceIDs := append([]int64(nil), schema.GetFileResourceIds()...)
+	sort.Slice(resourceIDs, func(i, j int) bool { return resourceIDs[i] < resourceIDs[j] })
+	writeInt64s(hasher, "resource_ids", resourceIDs)
 
 	resolvedInputIDs := append([]int64(nil), inputIDs...)
 	for _, fieldID := range inputIDs {

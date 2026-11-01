@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -384,7 +385,7 @@ func TestProjectDescribeCollectionSchema_CopyOnWriteAndFinalization(t *testing.T
 		}},
 	}
 
-	projected, err := projectDescribeCollectionSchema(source, true)
+	projected, err := ProjectDescribeCollectionSchema(source, true)
 	assert.NoError(t, err)
 	assert.Len(t, projected.GetFields(), 2)
 	assert.Same(t, ordinaryField, projected.GetFields()[0], "ordinary immutable fields should not be cloned")
@@ -404,6 +405,38 @@ func TestProjectDescribeCollectionSchema_CopyOnWriteAndFinalization(t *testing.T
 	assert.NotContains(t, projected.GetExternalSpec(), "SECRET")
 	assert.Equal(t, int32(7), projected.GetVersion())
 	assert.Equal(t, "db", projected.GetDbName())
+}
+
+// The struct sub-field origin marker is internal and never reaches users.
+func TestProjectDescribeCollectionSchemaStripsStructSubFieldOriginMarker(t *testing.T) {
+	added := &schemapb.FieldSchema{
+		FieldID:    common.StartOfUserFieldID + 2,
+		Name:       "profile[added]",
+		DataType:   schemapb.DataType_Array,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	schemautil.MarkAddedStructSubField(added)
+	source := &schemapb.CollectionSchema{
+		Name: "collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: common.StartOfUserFieldID,
+			Name:    "profile",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID:    common.StartOfUserFieldID + 1,
+				Name:       "profile[original]",
+				DataType:   schemapb.DataType_Array,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			}, added},
+		}},
+	}
+
+	projected, err := ProjectDescribeCollectionSchema(source, true)
+	assert.NoError(t, err)
+	for _, field := range projected.GetStructArrayFields()[0].GetFields() {
+		assert.False(t, schemautil.IsAddedStructSubField(field), field.GetName())
+		assert.Equal(t, []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}, field.GetTypeParams())
+	}
+	assert.True(t, schemautil.IsAddedStructSubField(added), "the cached schema keeps the marker")
 }
 
 func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
@@ -461,17 +494,13 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return proto.Clone(raw).(*milvuspb.DescribeCollectionResponse), nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
-	remoteResp := remoteTask.result
+	remoteResp := remoteTask.Result()
 	assert.NoError(t, finalizeDescribeCollectionResponse(remoteResp))
 
 	cacheSchema := proto.Clone(raw.GetSchema()).(*schemapb.CollectionSchema)
@@ -513,14 +542,10 @@ func TestDescribeCollectionCachedAndRemoteNotFoundStatusEquivalent(t *testing.T)
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(notFound)}, nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
 
@@ -530,7 +555,7 @@ func TestDescribeCollectionCachedAndRemoteNotFoundStatusEquivalent(t *testing.T)
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	assert.True(t, proto.Equal(remoteTask.result.GetStatus(), cachedResp.GetStatus()))
+	assert.True(t, proto.Equal(remoteTask.Result().GetStatus(), cachedResp.GetStatus()))
 	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, cachedResp.GetStatus().GetErrorCode())
 	assert.Equal(t, merr.Code(merr.ErrCollectionNotFound), cachedResp.GetStatus().GetCode())
 	assert.Equal(t, "true", cachedResp.GetStatus().GetExtraInfo()[merr.InputErrorFlagKey])
@@ -548,14 +573,10 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 	mix.SetDescribeCollectionFunc(func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(notFound)}, nil
 	})
-	remoteTask := &describeCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
-			DbName: database, CollectionName: collectionName,
-		},
-		ctx: ctx, mixCoord: mix,
-	}
+	remoteTask := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+		DbName: database, CollectionName: collectionName,
+	})
 	assert.NoError(t, remoteTask.PreExecute(ctx))
 	assert.NoError(t, remoteTask.Execute(ctx))
 
@@ -565,7 +586,7 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 
-	assert.True(t, proto.Equal(remoteTask.result.GetStatus(), cachedResp.GetStatus()))
+	assert.True(t, proto.Equal(remoteTask.Result().GetStatus(), cachedResp.GetStatus()))
 	assert.ErrorIs(t, merr.Error(cachedResp.GetStatus()), merr.ErrDatabaseNotFound)
 	// The deprecated ErrorCode enum cannot represent database-not-found; the
 	// typed Code below is the authoritative wire value.

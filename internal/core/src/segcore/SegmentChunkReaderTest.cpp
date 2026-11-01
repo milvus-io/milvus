@@ -172,7 +172,7 @@ TEST(SegmentChunkReader, GrowingConjunctSkipKeepsNextBatchCorrect) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
 
     proto::plan::GenericValue gate_bound;
     gate_bound.set_int64_val(kBatch);
@@ -281,17 +281,32 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
     }
 
  protected:
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* ctx) const override {
-        auto pin = ChunkedVariableColumn::MakeTakeCellPin(ctx);
-        return [pin = std::move(pin), stats = stats_](int64_t chunk) {
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                if (stats_->fail_pin) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "injected string Take failure");
+                }
+                ++stats_->pins;
+            }
+            return ChunkedVariableColumn::MakeTakeCellAccess(ctx,
+                                                             batch_cell_ids);
+        }
+        auto access =
+            ChunkedVariableColumn::MakeTakeCellAccess(ctx, batch_cell_ids);
+        return TakeCellPin([pin = std::move(std::get<TakeCellPin>(access)),
+                            stats = stats_](int64_t chunk) {
             if (stats->fail_pin) {
                 ThrowInfo(ErrorCode::FileReadFailed,
                           "injected string Take failure");
             }
             ++stats->pins;
             return pin(chunk);
-        };
+        });
     }
 
  private:
@@ -312,19 +327,25 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
         return Column(field);
     }
     int64_t
-    num_chunk_data(FieldId field) const override {
+    num_chunk_data(FieldId field, OpContext* = nullptr) const override {
         return Column(field)->num_chunks();
     }
     int64_t
-    chunk_size(FieldId field, int64_t chunk) const override {
+    chunk_size(FieldId field,
+               int64_t chunk,
+               OpContext* = nullptr) const override {
         return Column(field)->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId field, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId field,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return Column(field)->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return Column(field)->GetChunkIDByOffset(offset);
     }
     int64_t
@@ -362,24 +383,28 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
 
 class ReaderStringSnapshot : public SegmentReadSnapshot {
  public:
-    explicit ReaderStringSnapshot(
-        std::shared_ptr<ChunkedColumnInterface> column)
-        : column_(std::move(column)) {
+    ReaderStringSnapshot(std::shared_ptr<ChunkedColumnInterface> column,
+                         SchemaPtr schema)
+        : column_(std::move(column)), schema_(std::move(schema)) {
     }
     int64_t
-    chunk_size(FieldId, int64_t chunk) const override {
+    chunk_size(FieldId, int64_t chunk, OpContext* = nullptr) const override {
         return column_->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return column_->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t offset) const override {
+    get_chunk_by_offset(FieldId,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return column_->GetChunkIDByOffset(offset);
     }
     int64_t
-    num_chunk_data(FieldId) const override {
+    num_chunk_data(FieldId, OpContext* = nullptr) const override {
         return column_->num_chunks();
     }
     int64_t
@@ -391,10 +416,20 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         ++column_reads;
         return {column_, FieldSkipMetricsView{}};
     }
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "string test snapshot does not support struct offsets");
+    }
+    SchemaPtr
+    get_schema_snapshot() const override {
+        return schema_;
+    }
     mutable int64_t column_reads = 0;
 
  private:
     std::shared_ptr<ChunkedColumnInterface> column_;
+    SchemaPtr schema_;
 };
 
 class SegmentChunkReaderStringTest
@@ -519,11 +554,11 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 0, pos = 0;
     constexpr int64_t batch = 17;
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     for (int64_t start = 0; start < expected_.size(); start += batch) {
         const auto count = std::min<int64_t>(batch, expected_.size() - start);
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, count, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, count, &scan_state);
         for (int64_t i = 0; i < count; ++i) {
             Check(accessor(), start + i);
         }
@@ -541,24 +576,26 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
-    ReaderStringSnapshot snapshot(column_);
+    ReaderStringSnapshot snapshot(column_, schema_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     int64_t chunk = 1, pos = 0;
     for (int64_t row = 8192; row < 8196; row += 2) {
         auto scan = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(scan(), row);
         Check(scan(), row + 1);
     }
     auto chunk_accessor =
-        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1, {});
+        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     Check(chunk_accessor(0), 8192);
     const std::vector<int32_t> offsets{8198, 0, 8198};
-    auto take = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(offsets.data(), offsets.size()), {});
+    auto take = reader.GetDataAccessorByOffsets(
+        DataType::VARCHAR,
+        field_,
+        OffsetView::From(offsets.data(), offsets.size()));
     for (int64_t i = 0; i < offsets.size(); ++i) {
         Check(take(i), offsets[i]);
     }
@@ -575,7 +612,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
         // Non-nullable columns short-circuit inside ApplyValidDataInChunk.
         return;
     }
-    ReaderStringSnapshot snapshot(column_);
+    ReaderStringSnapshot snapshot(column_, schema_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
@@ -696,7 +733,7 @@ TEST_P(SegmentChunkReaderStringTest, OneAccessorCanScanAcrossManyWindows) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 0, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 17);
+        DataType::VARCHAR, field_, chunk, pos, 17);
     for (int64_t i = 0; i < expected_.size(); ++i) {
         Check(accessor(), i);
     }
@@ -708,8 +745,10 @@ TEST_P(SegmentChunkReaderStringTest,
        SparseTakePreservesOrderDuplicatesAndNulls) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     const std::vector<int32_t> offsets{8192, 8198, 8192, 16, 0, 16, 8218};
-    auto accessor = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(offsets.data(), offsets.size()), {});
+    auto accessor = reader.GetDataAccessorByOffsets(
+        DataType::VARCHAR,
+        field_,
+        OffsetView::From(offsets.data(), offsets.size()));
     for (int i = 0; i < offsets.size(); ++i) {
         Check(accessor(i), offsets[i]);
     }
@@ -722,8 +761,7 @@ TEST_P(SegmentChunkReaderStringTest,
 TEST_P(SegmentChunkReaderStringTest,
        RandomChunkAccessorKeepsBorrowedDataPinned) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    auto accessor =
-        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1, {});
+    auto accessor = reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     auto value = accessor(0);
     column_->ManualEvictCache();
     EXPECT_FALSE(lifetimes_[1].expired());
@@ -740,7 +778,7 @@ TEST_P(SegmentChunkReaderStringTest,
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 1, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 2);
+        DataType::VARCHAR, field_, chunk, pos, 2);
     auto value = accessor();
     column_->ManualEvictCache();
     EXPECT_FALSE(lifetimes_[1].expired());
@@ -756,11 +794,11 @@ TEST_P(SegmentChunkReaderStringTest,
 TEST_P(SegmentChunkReaderStringTest,
        PersistentScanUsesConfiguredPinLifetimeAcrossWindows) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    StringScanState scan_state;
+    ColumnScanState scan_state;
     int64_t chunk = 1, pos = 0;
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(accessor(), 8192);
         Check(accessor(), 8193);
     }
@@ -769,7 +807,7 @@ TEST_P(SegmentChunkReaderStringTest,
     SegcoreConfig::default_config().set_scan_cursor_owns_pin(!CursorOwnsPin());
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(accessor(), 8194);
         Check(accessor(), 8195);
         column_->ManualEvictCache();
@@ -792,8 +830,10 @@ TEST_P(SegmentChunkReaderStringTest, TakeOwnsItsPinAfterColumnRelease) {
     ChunkDataAccessor accessor;
     {
         SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-        accessor = reader.GetStringDataAccessorByOffsets(
-            field_, OffsetView::From(offsets.data(), offsets.size()), {});
+        accessor = reader.GetDataAccessorByOffsets(
+            DataType::VARCHAR,
+            field_,
+            OffsetView::From(offsets.data(), offsets.size()));
     }
     auto value = accessor(0);
     column_->ManualEvictCache();
@@ -811,7 +851,7 @@ TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
     stats_->fail_pin = true;
     int64_t chunk = 0, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 17);
+        DataType::VARCHAR, field_, chunk, pos, 17);
     try {
         accessor();
         FAIL() << "expected injected scan failure";
@@ -820,8 +860,8 @@ TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
     }
     EXPECT_EQ(pos, 0);
     const int32_t offset = 1;
-    auto take = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(&offset, 1), {});
+    auto take = reader.GetDataAccessorByOffsets(
+        DataType::VARCHAR, field_, OffsetView::From(&offset, 1));
     try {
         take(0);
         FAIL() << "expected injected Take failure";

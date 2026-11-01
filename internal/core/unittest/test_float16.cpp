@@ -32,7 +32,6 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/VectorIndex.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -61,7 +60,6 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace knowhere;
 
-using milvus::index::VectorIndex;
 using milvus::segcore::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 100 * 1000;
@@ -128,7 +126,7 @@ TEST(Float16, ExecWithoutPredicateFlat) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     auto vec_ptr = dataset.get_col<float16>(vec_fid);
 
     auto num_queries = 5;
@@ -178,7 +176,7 @@ TEST(Float16, GetVector) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        dataset.SharedRaw());
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto result = segment->bulk_subscript(
@@ -257,7 +255,7 @@ TEST(Float16, ExecWithPredicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str = handle.ParseSearch(
@@ -344,7 +342,7 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     auto vec_ptr = dataset.get_col<bfloat16>(vec_fid);
 
     auto num_queries = 5;
@@ -395,7 +393,7 @@ TEST(BFloat16, GetVector) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        dataset.SharedRaw());
         auto num_inserted = (i + 1) * per_batch;
         auto ids_ds = GenRandomIds(num_inserted);
         auto result = segment->bulk_subscript(
@@ -473,7 +471,7 @@ TEST(BFloat16, ExecWithPredicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str = handle.ParseSearch(

@@ -16,9 +16,13 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <vector>
+
+#include "arrow/array/array_nested.h"
 
 #include "common/Types.h"
 #include "pb/schema.pb.h"
@@ -28,6 +32,22 @@ namespace milvus {
 
 class ArrayValue;
 class ColumnarArrayChunk;
+
+// Count logical leaf elements in one scalar ARRAY row, including null leaves.
+size_t
+GetLeafElementCount(const ScalarFieldProto& row, DataType data_type);
+
+// Copy native-list rows directly into owning ArrayValues without materializing
+// intermediate ScalarFieldProto rows.
+std::vector<ArrayValue>
+ArrowListToArrayValues(const arrow::ListArray& rows,
+                       std::shared_ptr<const proto::schema::TypeSchema> type);
+
+// Materialize Arrow native-list rows using the same validity and placeholder
+// rules as ColumnarArrayChunk::OutputRange.
+std::vector<ScalarFieldProto>
+ArrowListToScalarFieldProto(const arrow::ListArray& rows,
+                            const proto::schema::TypeSchema& type);
 
 // Builds one immutable columnar recursive ARRAY block directly in growing mmap
 // storage. The returned Chunk tree is a read-only view over the allocation;

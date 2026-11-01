@@ -117,6 +117,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"IncorrectParameterFormat":  ErrIncorrectParameterFormat,
 		"MissingRequiredParameters": ErrMissingRequiredParameters,
 		"InvalidInsertData":         ErrInvalidInsertData,
+		"FieldInvalidName":          ErrFieldInvalidName,
 	}
 	for name, err := range inputSentinels {
 		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
@@ -153,6 +154,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		801, 802, // Database: num limit / invalid name
 		1100, 1101, 1102, // Parameter: invalid / missing / too large
 		1400, 1401, 1402, // Privilege
+		1701,                   // FieldInvalidName
 		1800, 1801, 1802, 1804, // Auth / parameter format / insert data
 		2100, // ImportFailed
 		2201, // QueryPlan

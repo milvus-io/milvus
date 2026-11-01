@@ -18,6 +18,7 @@
 #include <exception>
 #include <future>
 #include <iosfwd>
+#include <iterator>
 #include <map>
 #include <filesystem>
 #include <memory>
@@ -29,6 +30,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 #include "segcore/default_fs.h"
@@ -39,9 +41,10 @@
 #include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -55,10 +58,9 @@
 #include "common/Utils.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
-#include "index/Index.h"
-#include "index/TextMatchIndex.h"
 #include "index/Utils.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "index/growing/GrowingVectorSource.h"
 #include "knowhere/comp/index_param.h"
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
@@ -75,7 +77,6 @@
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/DeletedRecord.h"
-#include "segcore/FieldIndexing.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
@@ -113,6 +114,132 @@ MapValidVectorOffsets(const VectorBase& vec,
                    "Valid vector offsets must map to stored rows");
     }
     return physical_offsets;
+}
+
+constexpr int64_t kPendingValidityBlockRows = 4096;
+
+template <typename IsValid>
+std::vector<int64_t>
+BuildValidityPrefix(int64_t row_count, IsValid&& is_valid) {
+    AssertInfo(
+        row_count >= 0, "negative pending vector row count {}", row_count);
+    std::vector<int64_t> prefix;
+    prefix.reserve(
+        static_cast<size_t>(row_count / kPendingValidityBlockRows +
+                            (row_count % kPendingValidityBlockRows != 0)));
+
+    int64_t valid_count = 0;
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (i % kPendingValidityBlockRows == 0) {
+            prefix.push_back(valid_count);
+        }
+        valid_count += is_valid(i) ? 1 : 0;
+    }
+    return prefix;
+}
+
+template <typename IsValid>
+int64_t
+PhysicalRowsBefore(const std::vector<int64_t>& prefix,
+                   int64_t logical_offset,
+                   IsValid&& is_valid) {
+    AssertInfo(logical_offset >= 0,
+               "negative pending vector logical offset {}",
+               logical_offset);
+    const auto block = logical_offset / kPendingValidityBlockRows;
+    AssertInfo(block < static_cast<int64_t>(prefix.size()),
+               "pending vector logical offset {} has no validity block",
+               logical_offset);
+    int64_t physical = prefix[static_cast<size_t>(block)];
+    const auto block_begin = block * kPendingValidityBlockRows;
+    for (int64_t i = block_begin; i < logical_offset; ++i) {
+        physical += is_valid(i) ? 1 : 0;
+    }
+    return physical;
+}
+
+template <typename EngineType, typename Consume>
+void
+WithProtoVectorValues(const DataArray& data,
+                      int64_t physical_begin,
+                      int64_t physical_count,
+                      const FieldMeta& field_meta,
+                      Consume&& consume) {
+    // Consume synchronously so decoded sparse rows remain alive through the
+    // append callback.
+    using StorageType = index::GrowingVectorStorageType<EngineType>;
+    if constexpr (std::is_same_v<EngineType, float>) {
+        const auto& values = data.vectors().float_vector().data();
+        const auto dim = field_meta.get_dim();
+        AssertInfo(
+            values.size() >=
+                static_cast<size_t>((physical_begin + physical_count) * dim),
+            "growing float vector payload is truncated");
+        consume(physical_count == 0 ? nullptr
+                                    : values.data() + physical_begin * dim,
+                dim);
+    } else if constexpr (std::is_same_v<EngineType, float16>) {
+        const auto& bytes = data.vectors().float16_vector();
+        const auto dim = field_meta.get_dim();
+        AssertInfo(bytes.size() >=
+                       static_cast<size_t>((physical_begin + physical_count) *
+                                           dim * sizeof(float16)),
+                   "growing float16 vector payload is truncated");
+        consume(physical_count == 0
+                    ? nullptr
+                    : reinterpret_cast<const float16*>(bytes.data()) +
+                          physical_begin * dim,
+                dim);
+    } else if constexpr (std::is_same_v<EngineType, bfloat16>) {
+        const auto& bytes = data.vectors().bfloat16_vector();
+        const auto dim = field_meta.get_dim();
+        AssertInfo(bytes.size() >=
+                       static_cast<size_t>((physical_begin + physical_count) *
+                                           dim * sizeof(bfloat16)),
+                   "growing bfloat16 vector payload is truncated");
+        consume(physical_count == 0
+                    ? nullptr
+                    : reinterpret_cast<const bfloat16*>(bytes.data()) +
+                          physical_begin * dim,
+                dim);
+    } else {
+        static_assert(std::is_same_v<EngineType, sparse_u32_f32>);
+        const auto& sparse = data.vectors().sparse_float_vector();
+        AssertInfo(sparse.contents_size() >= physical_begin + physical_count,
+                   "growing sparse vector payload is truncated");
+        std::vector<std::string_view> rows;
+        rows.reserve(static_cast<size_t>(physical_count));
+        for (int64_t i = 0; i < physical_count; ++i) {
+            rows.emplace_back(sparse.contents(physical_begin + i));
+        }
+        auto values = SparseBytesToRows(rows);
+        consume(static_cast<const StorageType*>(values.get()), sparse.dim());
+    }
+}
+
+template <typename EngineType, typename Consume>
+void
+WithLoadedVectorValues(const FieldDataPtr& data,
+                       int64_t physical_begin,
+                       int64_t physical_count,
+                       const FieldMeta& field_meta,
+                       Consume&& consume) {
+    using StorageType = index::GrowingVectorStorageType<EngineType>;
+    if constexpr (std::is_same_v<EngineType, sparse_u32_f32>) {
+        const auto* values = static_cast<const StorageType*>(data->Data());
+        const auto sparse_data =
+            std::dynamic_pointer_cast<const FieldData<SparseFloatVector>>(data);
+        AssertInfo(sparse_data != nullptr,
+                   "growing sparse FieldData has an incompatible "
+                   "representation");
+        consume(physical_count == 0 ? nullptr : values + physical_begin,
+                sparse_data->Dim());
+    } else {
+        const auto dim = field_meta.get_dim();
+        const auto* values = static_cast<const StorageType*>(data->Data());
+        consume(physical_count == 0 ? nullptr : values + physical_begin * dim,
+                dim);
+    }
 }
 
 int64_t
@@ -192,6 +319,9 @@ int32_t
 GetVectorArrayLength(const proto::schema::VectorField& vec_field,
                      DataType element_type,
                      int64_t dim) {
+    if (vec_field.valid_data_size() != 0) {
+        return vec_field.valid_data_size();
+    }
     switch (element_type) {
         case DataType::VECTOR_FLOAT:
             return vec_field.float_vector().data_size() / dim;
@@ -230,11 +360,10 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] =
-                    raw_data[source_index].physical_length();
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 auto* raw_data = static_cast<const ArrayValue*>(data->Data());
                 for (int64_t i = 0; i < num_rows; ++i) {
                     array_lengths[offset + i] =
@@ -322,14 +451,40 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
-        if (field_meta.is_nested_array()) {
+        if (field_meta.is_native_list_array()) {
             const auto has_valid_data = valid_data.size() == num_rows;
+            const auto nested =
+                field_meta.get_element_type() == DataType::ARRAY;
+            int64_t valid_count = 0;
+            if (has_valid_data) {
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    valid_count += valid_data[i];
+                }
+            }
+            const bool compact_nullable =
+                has_valid_data && array_data.data_size() == valid_count &&
+                array_data.data_size() != num_rows;
+            AssertInfo(array_data.data_size() == num_rows || compact_nullable,
+                       "native list field {} has {} payload rows for {} "
+                       "logical rows and {} valid rows",
+                       field_meta.get_id().get(),
+                       array_data.data_size(),
+                       num_rows,
+                       valid_count);
+            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
                 if (has_valid_data && !valid_data[i]) {
                     array_lengths[i] = 0;
                     continue;
                 }
-                array_lengths[i] = array_data.data(i).array_data().data_size();
+                const auto& row =
+                    array_data.data(compact_nullable ? physical_row++ : i);
+                array_lengths[i] =
+                    row.valid_data_size() > 0
+                        ? row.valid_data_size()
+                        : (nested ? row.array_data().data_size()
+                                  : GetLeafElementCount(
+                                        row, field_meta.get_element_type()));
             }
             return;
         }
@@ -431,37 +586,40 @@ LoadInfoHasTextField(const LoadFieldDataInfo& load_info, const Schema& schema) {
 }  // anonymous namespace
 
 void
-SegmentGrowingImpl::InitializeArrayOffsets() {
-    std::unique_lock lock(array_offsets_map_mutex_);
+SegmentGrowingImpl::InitializeStructElementOffsets() {
+    std::unique_lock lock(struct_element_offsets_map_mutex_);
     auto schema = get_schema_snapshot();
 
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
-    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+    for (auto field_id : schema->get_field_ids()) {
+        const auto& field_meta = (*schema)[field_id];
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
         }
     }
 
-    // Create one ArrayOffsetsGrowing per struct, shared by all its fields
+    // Create one StructElementOffsetsGrowing per struct, shared by all its fields
     for (const auto& [struct_name, field_ids] : struct_fields) {
-        auto array_offsets = std::make_shared<ArrayOffsetsGrowing>();
+        auto struct_element_offsets =
+            std::make_shared<StructElementOffsetsGrowing>();
 
-        // Pick the first field as representative (any field works since array lengths are identical)
+        // The first sub-field in schema order supplies lengths for inserts.
         FieldId representative_field = field_ids[0];
 
-        // Map all field_ids from this struct to the same ArrayOffsetsGrowing
+        // Map all field_ids from this struct to the same StructElementOffsetsGrowing
         for (auto field_id : field_ids) {
-            array_offsets_map_[field_id] = array_offsets;
+            struct_element_offsets_map_[field_id] = struct_element_offsets;
         }
 
         // Record representative field for Insert-time updates
         struct_representative_fields_.insert(representative_field);
 
         LOG_INFO(
-            "Created ArrayOffsetsGrowing for struct '{}' with {} fields, "
+            "Created StructElementOffsetsGrowing for struct '{}' with {} "
+            "fields, "
             "representative field_id={}",
             struct_name,
             field_ids.size(),
@@ -483,12 +641,14 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 }
 
 void
-SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
+SegmentGrowingImpl::try_remove_chunks(FieldId fieldId,
+                                      const Schema& schema,
+                                      int64_t covered_row_end) {
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema.operator[](fieldId);
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
-        if (indexing_record_.HasRawData(fieldId)) {
+        if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
             auto vec_data_base = insert_record_.get_data_base(fieldId);
             if (vec_data_base && vec_data_base->num_chunk() > 0) {
                 // No lock, and no try_lock: clear() swaps the container's
@@ -504,7 +664,643 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     }
 }
 
-cachinglayer::ResourceUsage
+void
+SegmentGrowingImpl::StageInsertVectorInput(
+    int64_t row_begin,
+    int64_t row_end,
+    const std::shared_ptr<InsertRecordProto>& insert_record,
+    const std::unordered_map<FieldId, int64_t>& field_offsets) {
+    bool needed = false;
+    auto schema = get_schema_snapshot();
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        if (IsVectorDataType(field_meta.get_data_type()) &&
+            growing_indexes_.Has(field_id)) {
+            needed = true;
+            break;
+        }
+    }
+    if (!needed) {
+        return;
+    }
+
+    PendingVectorInput pending;
+    pending.row_end = row_end;
+    pending.insert_record = insert_record;
+    pending.insert_field_offsets = field_offsets;
+
+    const auto row_count = row_end - row_begin;
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        if (!IsVectorDataType(field_meta.get_data_type()) ||
+            !growing_indexes_.Has(field_id)) {
+            continue;
+        }
+        auto offset_it = field_offsets.find(field_id);
+        if (offset_it == field_offsets.end()) {
+            continue;
+        }
+        const auto& data = insert_record->fields_data(offset_it->second);
+        PendingVectorInput::FieldLocation location;
+        if (field_meta.is_nullable()) {
+            const auto& validity = GetFieldDataRowValidData(data);
+            AssertInfo(validity.size() == static_cast<size_t>(row_count),
+                       "nullable growing vector field {} validity has {} "
+                       "rows, expected {}",
+                       field_id.get(),
+                       validity.size(),
+                       row_count);
+            location.valid_prefix = BuildValidityPrefix(
+                row_count,
+                [&](int64_t i) { return validity[static_cast<size_t>(i)]; });
+        }
+        pending.field_locations.emplace(field_id, std::move(location));
+    }
+
+    std::lock_guard lock(growing_index_feed_mutex_);
+    const auto result =
+        pending_vector_inputs_.try_emplace(row_begin, std::move(pending));
+    AssertInfo(result.second,
+               "duplicate pending growing vector insert range [{}, {})",
+               row_begin,
+               row_end);
+}
+
+void
+SegmentGrowingImpl::StageLoadedVectorInput(
+    FieldId field_id,
+    int64_t row_begin,
+    int64_t row_end,
+    const std::vector<FieldDataPtr>& field_data) {
+    if (!growing_indexes_.Has(field_id)) {
+        return;
+    }
+    const auto schema = get_schema_snapshot();
+    const auto& field_meta = schema->operator[](field_id);
+    auto retained = field_data;
+    PendingVectorInput::FieldLocation location;
+    location.loaded_row_ends.reserve(retained.size());
+    location.loaded_physical_ends.reserve(retained.size());
+    int64_t logical_rows = 0;
+    int64_t physical_rows = 0;
+    for (const auto& data : retained) {
+        AssertInfo(data != nullptr,
+                   "loaded growing vector field {} contains null FieldData",
+                   field_id.get());
+        logical_rows += data->get_num_rows();
+        physical_rows += field_meta.is_nullable() ? data->get_valid_rows()
+                                                  : data->get_num_rows();
+        location.loaded_row_ends.push_back(logical_rows);
+        location.loaded_physical_ends.push_back(physical_rows);
+    }
+    AssertInfo(logical_rows == row_end - row_begin,
+               "loaded growing vector field {} contains {} rows, expected {}",
+               field_id.get(),
+               logical_rows,
+               row_end - row_begin);
+    if (field_meta.is_nullable()) {
+        size_t part = 0;
+        int64_t part_begin = 0;
+        location.valid_prefix =
+            BuildValidityPrefix(logical_rows, [&](int64_t i) {
+                while (i >= location.loaded_row_ends[part]) {
+                    part_begin = location.loaded_row_ends[part++];
+                }
+                return retained[part]->is_valid(i - part_begin);
+            });
+    }
+    location.loaded_fields = std::move(retained);
+
+    std::lock_guard lock(growing_index_feed_mutex_);
+    auto [it, inserted] = pending_vector_inputs_.try_emplace(row_begin);
+    auto& pending = it->second;
+    if (inserted) {
+        pending.row_end = row_end;
+    }
+    AssertInfo(pending.row_end == row_end && !pending.insert_record,
+               "inconsistent pending growing vector load range [{}, {})",
+               row_begin,
+               row_end);
+    const auto location_result =
+        pending.field_locations.try_emplace(field_id, std::move(location));
+    AssertInfo(location_result.second,
+               "duplicate pending loaded vector location {} for range [{}, {})",
+               field_id.get(),
+               row_begin,
+               row_end);
+}
+
+void
+SegmentGrowingImpl::CompleteGrowingRawRange(int64_t row_begin,
+                                            int64_t row_end,
+                                            bool require_index_flush) {
+    AssertInfo(row_begin >= 0 && row_begin <= row_end,
+               "invalid completed growing raw range [{}, {})",
+               row_begin,
+               row_end);
+    std::lock_guard lock(growing_index_feed_mutex_);
+    growing_raw_ready_.AddSegment(row_begin, row_end);
+    if (require_index_flush) {
+        growing_index_required_flush_end_ = std::max(
+            growing_index_required_flush_end_.value_or(row_end), row_end);
+    }
+    PublishGrowingIndexesThroughRawReady();
+}
+
+void
+SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
+    const auto raw_ready_end = growing_raw_ready_.GetAck();
+    AssertInfo(growing_index_feed_cursor_ <= raw_ready_end,
+               "growing index feed cursor {} exceeds raw-ready row end {}",
+               growing_index_feed_cursor_,
+               raw_ready_end);
+
+    auto schema = get_schema_snapshot();
+    const auto configured_batch_rows = segcore_config_.get_chunk_rows();
+    AssertInfo(configured_batch_rows > 0,
+               "growing index feed batch size must be positive");
+    const auto batch_rows =
+        std::min<int64_t>(configured_batch_rows, kTextLobIndexBuildBatchSize);
+
+    auto flush_required_generation = [&]() {
+        if (growing_index_required_flush_end_.has_value() &&
+            growing_index_feed_cursor_ >= *growing_index_required_flush_end_) {
+            growing_indexes_.FlushAll();
+            growing_index_required_flush_end_.reset();
+        }
+    };
+
+    // A previous load may have fed its complete range and then failed while
+    // publishing an owner generation. Retry that boundary before accepting a
+    // later Insert range into the owners.
+    flush_required_generation();
+
+    while (growing_index_feed_cursor_ < raw_ready_end) {
+        if (!growing_index_pending_feed_end_.has_value()) {
+            auto next_end = std::min<int64_t>(
+                raw_ready_end, growing_index_feed_cursor_ + batch_rows);
+            auto pending_it =
+                pending_vector_inputs_.lower_bound(growing_index_feed_cursor_);
+            if (pending_it != pending_vector_inputs_.end() &&
+                pending_it->first == growing_index_feed_cursor_) {
+                next_end = std::min(next_end, pending_it->second.row_end);
+            } else {
+                if (pending_it != pending_vector_inputs_.begin()) {
+                    const auto previous = std::prev(pending_it);
+                    if (previous->second.row_end > growing_index_feed_cursor_) {
+                        next_end = std::min(next_end, previous->second.row_end);
+                    }
+                }
+                if (pending_it != pending_vector_inputs_.end()) {
+                    next_end = std::min(next_end, pending_it->first);
+                }
+            }
+            growing_index_pending_feed_end_ = next_end;
+        }
+        const auto batch_end = *growing_index_pending_feed_end_;
+        AssertInfo(batch_end > growing_index_feed_cursor_ &&
+                       batch_end <= raw_ready_end,
+                   "invalid pending growing index feed range [{}, {}) for "
+                   "raw-ready end {}",
+                   growing_index_feed_cursor_,
+                   batch_end,
+                   raw_ready_end);
+
+        for (const auto& [field_id, field_meta] : schema->get_fields()) {
+            if (growing_indexes_.Has(field_id)) {
+                FeedGrowingIndexRange(
+                    field_meta, growing_index_feed_cursor_, batch_end);
+            }
+        }
+
+        // Preserve this exact batch end across an exception. Every owner then
+        // retries the same immutable range; no owner is asked to accept a
+        // larger partially overlapping batch.
+        growing_index_feed_cursor_ = batch_end;
+        growing_index_pending_feed_end_.reset();
+        flush_required_generation();
+    }
+
+    // Reclamation allocates the replacement chunk directory. Complete it
+    // before advancing the main visibility ACK so an allocation failure can
+    // retry this exact accepted prefix without returning an error after rows
+    // became visible. A later staged input may still be writing into the raw
+    // generation outside this mutex; retain that generation until the staged
+    // range itself reaches this accepted boundary.
+    const bool has_unaccepted_staged_input = std::any_of(
+        pending_vector_inputs_.begin(),
+        pending_vector_inputs_.end(),
+        [&](const auto& input) {
+            return input.second.row_end > growing_index_feed_cursor_;
+        });
+    if (!has_unaccepted_staged_input) {
+        for (const auto& [field_id, field_meta] : schema->get_fields()) {
+            if (IsVectorDataType(field_meta.get_data_type())) {
+                try_remove_chunks(
+                    field_id, *schema, growing_index_feed_cursor_);
+            }
+        }
+    }
+
+    const auto visible_end = insert_record_.ack_responder_.GetAck();
+    AssertInfo(visible_end <= growing_index_feed_cursor_,
+               "query-visible growing row end {} exceeds indexed prefix {}",
+               visible_end,
+               growing_index_feed_cursor_);
+    if (visible_end < growing_index_feed_cursor_) {
+        // AckResponder inserts the new end before erasing the existing begin.
+        // Allocation failure therefore leaves the query-visible boundary
+        // unchanged, while the already-fed prefix remains retryable here.
+        insert_record_.ack_responder_.AddSegment(visible_end,
+                                                 growing_index_feed_cursor_);
+    }
+
+    const auto published_end = insert_record_.ack_responder_.GetAck();
+    for (auto it = pending_vector_inputs_.begin();
+         it != pending_vector_inputs_.end() &&
+         it->second.row_end <= published_end;) {
+        it = pending_vector_inputs_.erase(it);
+    }
+}
+
+void
+SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
+                                          int64_t row_begin,
+                                          int64_t row_end,
+                                          GrowingIndexSet::Appender* staged) {
+    AssertInfo(row_begin >= 0 && row_begin <= row_end,
+               "invalid growing index feed range [{}, {}) for field {}",
+               row_begin,
+               row_end,
+               field_meta.get_id().get());
+    if (row_begin == row_end) {
+        return;
+    }
+
+    const auto field_id = field_meta.get_id();
+    const auto data_type = field_meta.get_data_type();
+
+    auto append_vector = [&]<typename T>(int64_t offset,
+                                         const index::VectorBatch<T>& batch) {
+        if (staged != nullptr) {
+            GrowingIndexSet::AppendTo(*staged, field_id, offset, batch);
+        } else {
+            growing_indexes_.Append(field_id, offset, batch);
+        }
+    };
+
+    if (IsVectorDataType(data_type)) {
+        AssertInfo(data_type == DataType::VECTOR_FLOAT ||
+                       data_type == DataType::VECTOR_FLOAT16 ||
+                       data_type == DataType::VECTOR_BFLOAT16 ||
+                       data_type == DataType::VECTOR_SPARSE_U32_F32,
+                   "field {} type {} has no connected growing vector feed",
+                   field_id.get(),
+                   data_type);
+
+        auto pending_it = pending_vector_inputs_.upper_bound(row_begin);
+        if (pending_it != pending_vector_inputs_.begin()) {
+            --pending_it;
+        } else {
+            pending_it = pending_vector_inputs_.end();
+        }
+        const PendingVectorInput* pending = nullptr;
+        int64_t pending_begin = 0;
+        if (pending_it != pending_vector_inputs_.end() &&
+            pending_it->first <= row_begin &&
+            row_end <= pending_it->second.row_end) {
+            pending = &pending_it->second;
+            pending_begin = pending_it->first;
+        }
+
+        auto make_validity = [&](auto&& is_valid,
+                                 int64_t source_begin,
+                                 int64_t source_count,
+                                 FixedVector<bool>& valid,
+                                 int64_t& physical_count) -> const bool* {
+            physical_count = source_count;
+            if (!field_meta.is_nullable()) {
+                return static_cast<const bool*>(nullptr);
+            }
+            valid.resize(static_cast<size_t>(source_count));
+            physical_count = 0;
+            for (int64_t i = 0; i < source_count; ++i) {
+                const bool value = is_valid(source_begin + i);
+                valid[static_cast<size_t>(i)] = value;
+                physical_count += value ? 1 : 0;
+            }
+            return valid.data();
+        };
+
+        auto feed_typed = [&]<typename EngineType, typename RawTrait>() {
+            using StorageType = index::GrowingVectorStorageType<EngineType>;
+
+            if (pending != nullptr && pending->insert_record != nullptr) {
+                auto offset_it = pending->insert_field_offsets.find(field_id);
+                if (offset_it != pending->insert_field_offsets.end()) {
+                    const auto& data =
+                        pending->insert_record->fields_data(offset_it->second);
+                    const auto source_begin = row_begin - pending_begin;
+                    const auto source_count = row_end - row_begin;
+                    auto location_it = pending->field_locations.find(field_id);
+                    AssertInfo(
+                        location_it != pending->field_locations.end(),
+                        "pending growing vector field {} has no input location",
+                        field_id.get());
+                    const auto& location = location_it->second;
+                    const auto& validity = GetFieldDataRowValidData(data);
+                    AssertInfo(
+                        !field_meta.is_nullable() ||
+                            validity.size() ==
+                                static_cast<size_t>(pending->row_end -
+                                                    pending_begin),
+                        "nullable growing vector field {} validity has {} "
+                        "rows, expected {}",
+                        field_id.get(),
+                        validity.size(),
+                        pending->row_end - pending_begin);
+                    FixedVector<bool> valid;
+                    const auto physical_begin =
+                        field_meta.is_nullable()
+                            ? PhysicalRowsBefore(
+                                  location.valid_prefix,
+                                  source_begin,
+                                  [&](int64_t i) {
+                                      return validity[static_cast<size_t>(i)];
+                                  })
+                            : source_begin;
+                    int64_t physical_count = 0;
+                    const bool* valid_data = make_validity(
+                        [&](int64_t i) {
+                            return validity[static_cast<size_t>(i)];
+                        },
+                        source_begin,
+                        source_count,
+                        valid,
+                        physical_count);
+                    WithProtoVectorValues<EngineType>(
+                        data,
+                        physical_begin,
+                        physical_count,
+                        field_meta,
+                        [&](const StorageType* values, int64_t dim) {
+                            append_vector(row_begin,
+                                          index::VectorBatch<StorageType>{
+                                              static_cast<size_t>(source_count),
+                                              values,
+                                              dim,
+                                              valid_data});
+                        });
+                    return;
+                }
+            }
+
+            if (pending != nullptr) {
+                auto location_it = pending->field_locations.find(field_id);
+                if (location_it != pending->field_locations.end() &&
+                    !location_it->second.loaded_fields.empty()) {
+                    const auto& location = location_it->second;
+                    const auto& loaded = location.loaded_fields;
+                    const auto source_range_begin = row_begin - pending_begin;
+                    auto part_it =
+                        std::upper_bound(location.loaded_row_ends.begin(),
+                                         location.loaded_row_ends.end(),
+                                         source_range_begin);
+                    auto part = static_cast<size_t>(std::distance(
+                        location.loaded_row_ends.begin(), part_it));
+
+                    auto loaded_is_valid = [&](int64_t source_offset) {
+                        auto it =
+                            std::upper_bound(location.loaded_row_ends.begin(),
+                                             location.loaded_row_ends.end(),
+                                             source_offset);
+                        const auto index = static_cast<size_t>(std::distance(
+                            location.loaded_row_ends.begin(), it));
+                        AssertInfo(index < loaded.size(),
+                                   "loaded growing vector field {} offset {} "
+                                   "is out of range",
+                                   field_id.get(),
+                                   source_offset);
+                        const auto begin =
+                            index == 0 ? 0
+                                       : location.loaded_row_ends[index - 1];
+                        return loaded[index]->is_valid(source_offset - begin);
+                    };
+
+                    int64_t fed_end = row_begin;
+                    for (; part < loaded.size() && fed_end < row_end; ++part) {
+                        const auto& data = loaded[part];
+                        const auto field_begin =
+                            pending_begin +
+                            (part == 0 ? 0
+                                       : location.loaded_row_ends[part - 1]);
+                        const auto field_end =
+                            pending_begin + location.loaded_row_ends[part];
+                        const auto part_begin =
+                            std::max(row_begin, field_begin);
+                        const auto part_end = std::min(row_end, field_end);
+                        if (part_begin < part_end) {
+                            const auto source_begin = part_begin - field_begin;
+                            const auto source_count = part_end - part_begin;
+                            FixedVector<bool> valid;
+                            const auto physical_before_field =
+                                part == 0
+                                    ? 0
+                                    : location.loaded_physical_ends[part - 1];
+                            const auto physical_begin =
+                                field_meta.is_nullable()
+                                    ? PhysicalRowsBefore(
+                                          location.valid_prefix,
+                                          part_begin - pending_begin,
+                                          loaded_is_valid) -
+                                          physical_before_field
+                                    : source_begin;
+                            int64_t physical_count = 0;
+                            const bool* valid_data = make_validity(
+                                [&](int64_t i) { return data->is_valid(i); },
+                                source_begin,
+                                source_count,
+                                valid,
+                                physical_count);
+                            WithLoadedVectorValues<EngineType>(
+                                data,
+                                physical_begin,
+                                physical_count,
+                                field_meta,
+                                [&](const StorageType* values, int64_t dim) {
+                                    append_vector(
+                                        part_begin,
+                                        index::VectorBatch<StorageType>{
+                                            static_cast<size_t>(source_count),
+                                            values,
+                                            dim,
+                                            valid_data});
+                                });
+                            fed_end = part_end;
+                        }
+                    }
+                    AssertInfo(
+                        fed_end == row_end,
+                        "loaded growing vector field {} only covers row {} "
+                        "of requested end {}",
+                        field_id.get(),
+                        fed_end,
+                        row_end);
+                    return;
+                }
+            }
+
+            // Schema reopen and all-null synthesized fields have no external
+            // input handle. Their bounded backfill reads the immutable raw
+            // generation.
+            auto* raw = insert_record_.get_data_base(field_id);
+            const auto chunks = raw->acquire_chunks();
+            FixedVector<bool> valid;
+            const bool* valid_data = nullptr;
+            if (field_meta.is_nullable()) {
+                valid.resize(static_cast<size_t>(row_end - row_begin));
+                auto field_valid = insert_record_.get_valid_data(field_id);
+                AssertInfo(field_valid != nullptr,
+                           "nullable growing vector field {} has no validity",
+                           field_id.get());
+                field_valid->bulk_is_valid_range(
+                    row_begin, row_end - row_begin, valid.data());
+                valid_data = valid.data();
+            }
+            const auto& mapping = raw->get_offset_mapping();
+            const auto physical_begin = mapping.IsEnabled()
+                                            ? mapping.ValidCountBelow(row_begin)
+                                            : row_begin;
+            const auto physical_end = mapping.IsEnabled()
+                                          ? mapping.ValidCountBelow(row_end)
+                                          : row_end;
+            const auto physical_count = physical_end - physical_begin;
+
+            const auto* typed =
+                dynamic_cast<const ConcurrentVector<RawTrait>*>(raw);
+            AssertInfo(typed != nullptr,
+                       "growing vector raw column has an incompatible type");
+            const auto elements = typed->elements_per_row();
+            std::vector<StorageType> values(
+                static_cast<size_t>(physical_count * elements));
+            for (int64_t i = 0; i < physical_count; ++i) {
+                const auto* row =
+                    typed->get_physical_element(chunks, physical_begin + i);
+                AssertInfo(row != nullptr,
+                           "growing vector raw row {} is unavailable",
+                           physical_begin + i);
+                std::copy_n(row, elements, values.data() + i * elements);
+            }
+            int64_t dim =
+                field_meta.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
+                    ? 0
+                    : field_meta.get_dim();
+            if constexpr (std::is_same_v<EngineType, sparse_u32_f32>) {
+                for (const auto& row : values) {
+                    dim = std::max(dim, static_cast<int64_t>(row.dim()));
+                }
+            }
+            append_vector(row_begin,
+                          index::VectorBatch<StorageType>{
+                              static_cast<size_t>(row_end - row_begin),
+                              values.data(),
+                              dim,
+                              valid_data});
+        };
+
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT:
+                feed_typed.template operator()<float, FloatVector>();
+                break;
+            case DataType::VECTOR_FLOAT16:
+                feed_typed.template operator()<float16, Float16Vector>();
+                break;
+            case DataType::VECTOR_BFLOAT16:
+                feed_typed.template operator()<bfloat16, BFloat16Vector>();
+                break;
+            case DataType::VECTOR_SPARSE_U32_F32:
+                feed_typed
+                    .template operator()<sparse_u32_f32, SparseFloatVector>();
+                break;
+            default:
+                ThrowInfo(UnexpectedError,
+                          "unsupported connected growing vector type {}",
+                          data_type);
+        }
+        return;
+    }
+
+    AssertInfo(IsStringDataType(data_type) || data_type == DataType::GEOMETRY,
+               "field {} type {} has no connected growing feed",
+               field_id.get(),
+               data_type);
+    const auto* values = dynamic_cast<const ConcurrentVector<std::string>*>(
+        insert_record_.get_data_base(field_id));
+    AssertInfo(values != nullptr,
+               "growing field {} must use string storage",
+               field_id.get());
+
+    const auto configured_batch_rows = segcore_config_.get_chunk_rows();
+    AssertInfo(configured_batch_rows > 0,
+               "growing index feed batch size must be positive");
+    const auto batch_rows = data_type == DataType::TEXT
+                                ? std::min<int64_t>(configured_batch_rows,
+                                                    kTextLobIndexBuildBatchSize)
+                                : configured_batch_rows;
+
+    auto append = [&](int64_t offset, const index::TextBatch& batch) {
+        if (staged != nullptr) {
+            GrowingIndexSet::AppendTo(*staged, field_id, offset, batch);
+        } else {
+            growing_indexes_.Append(field_id, offset, batch);
+        }
+    };
+
+    for (auto offset = row_begin; offset < row_end; offset += batch_rows) {
+        const auto count = std::min<int64_t>(batch_rows, row_end - offset);
+        FixedVector<bool> valid(static_cast<size_t>(count), true);
+        const bool* valid_data = nullptr;
+        if (field_meta.is_nullable()) {
+            auto field_valid = insert_record_.get_valid_data(field_id);
+            AssertInfo(field_valid != nullptr,
+                       "nullable growing field {} has no validity storage",
+                       field_id.get());
+            field_valid->bulk_is_valid_range(offset, count, valid.data());
+            valid_data = valid.data();
+        }
+
+        std::vector<std::string> owned;
+        std::vector<std::string_view> views(static_cast<size_t>(count));
+        if (data_type == DataType::TEXT) {
+            std::vector<int64_t> offsets(static_cast<size_t>(count));
+            for (int64_t i = 0; i < count; ++i) {
+                offsets[static_cast<size_t>(i)] =
+                    valid_data == nullptr || valid_data[i] ? offset + i
+                                                           : INVALID_SEG_OFFSET;
+            }
+            owned.resize(static_cast<size_t>(count));
+            bulk_subscript_text_impl(field_id,
+                                     values,
+                                     offsets.data(),
+                                     count,
+                                     [&](size_t i, std::string value) {
+                                         owned[i] = std::move(value);
+                                     });
+            for (size_t i = 0; i < owned.size(); ++i) {
+                views[i] = owned[i];
+            }
+        } else {
+            for (int64_t i = 0; i < count; ++i) {
+                views[static_cast<size_t>(i)] =
+                    values->view_element(offset + i);
+            }
+        }
+
+        append(offset,
+               index::TextBatch{
+                   static_cast<size_t>(count), views.data(), valid_data});
+    }
+}
+
+ResourceUsage
 SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
     auto schema = get_schema_snapshot();
     return EstimateSegmentResourceUsage(*schema);
@@ -588,7 +1384,7 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
 
             // Check if this field has interim index
             bool has_interim_index =
-                interim_index_enabled && indexing_record_.is_in(field_id);
+                interim_index_enabled && growing_indexes_.Has(field_id);
 
             if (has_interim_index) {
                 if (data_type == DataType::VECTOR_SPARSE_U32_F32) {
@@ -675,21 +1471,15 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
         }
     }
 
-    // 4. Text index (Tantivy)
+    // 4. TEXT LOB spillover disk usage. Growing reader/writer generations are
+    // not yet included here; accounting them must also include retired pinned
+    // generations rather than reviving the old TextMatchIndex container.
     {
-        std::shared_lock lock(mutex_);
-        for (const auto& [field_id, index_variant] : text_indexes_) {
-            if (auto* ptr = std::get_if<std::unique_ptr<index::TextMatchIndex>>(
-                    &index_variant)) {
-                memory_bytes += (*ptr)->ByteSize();
+        std::shared_lock lock(text_lob_mutex_);
+        for (const auto& [field_id, spillover] : text_lob_spillovers_) {
+            if (spillover) {
+                disk_bytes += static_cast<int64_t>(spillover->GetDiskUsage());
             }
-        }
-    }
-
-    // 4b. TEXT LOB spillover disk usage
-    for (const auto& [field_id, spillover] : text_lob_spillovers_) {
-        if (spillover) {
-            disk_bytes += static_cast<int64_t>(spillover->GetDiskUsage());
         }
     }
 
@@ -751,11 +1541,12 @@ SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
 // shardDelegator::ProcessInsert), delivering a growing segment's inserts one at
 // a time in reserved logical order.
 void
-SegmentGrowingImpl::Insert(int64_t reserved_offset,
-                           int64_t num_rows,
-                           const int64_t* row_ids,
-                           const Timestamp* timestamps_raw,
-                           InsertRecordProto* insert_record_proto) {
+SegmentGrowingImpl::Insert(
+    int64_t reserved_offset,
+    int64_t num_rows,
+    const int64_t* row_ids,
+    const Timestamp* timestamps_raw,
+    std::shared_ptr<InsertRecordProto> insert_record_proto) {
     AssertInfo(insert_record_proto->num_rows() == num_rows,
                "Entities_raw count not equal to insert size");
     // protect schema being changed during insert
@@ -776,6 +1567,52 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                    "unexpected new field in growing segment {}, field id {}",
                    id_,
                    field.field_id());
+    }
+
+    // Only old proxy messages missing a child need sibling lengths. Normal
+    // inserts calculate their representative lengths in the write loop below.
+    std::unordered_set<std::string> structs_to_fill;
+    for (auto field_id : schema->get_field_ids()) {
+        if (field_id_to_offset.count(field_id) > 0 ||
+            schema->is_function_output(field_id)) {
+            continue;
+        }
+        if (auto name = GetStructNameForArrayField((*schema)[field_id])) {
+            structs_to_fill.insert(*name);
+        }
+    }
+
+    // Capture lengths from real input before synthetic children are attached.
+    // The representative may itself be missing from an old proxy message.
+    std::unordered_map<std::string, std::vector<int32_t>> struct_lengths;
+    std::unordered_map<std::string, std::vector<uint8_t>> struct_validity;
+    for (auto field_id : schema->get_field_ids()) {
+        auto source = field_id_to_offset.find(field_id);
+        if (source == field_id_to_offset.end()) {
+            continue;
+        }
+        const auto& meta = (*schema)[field_id];
+        auto name = GetStructNameForArrayField(meta);
+        if (!name || structs_to_fill.count(*name) == 0 ||
+            struct_lengths.count(*name) > 0) {
+            continue;
+        }
+        const auto& source_data =
+            insert_record_proto->fields_data(source->second);
+        auto& lengths = struct_lengths[*name];
+        lengths.resize(num_rows);
+        ExtractArrayLengths(source_data, meta, num_rows, lengths.data());
+        const auto& valid_data = GetFieldDataRowValidData(source_data);
+        AssertInfo(!meta.is_nullable() || valid_data.size() == num_rows,
+                   "struct provider {} has {} validity rows, expected {}",
+                   field_id.get(),
+                   valid_data.size(),
+                   num_rows);
+        auto& valid = struct_validity[*name];
+        valid.resize(num_rows, 1);
+        for (int64_t i = 0; i < num_rows && !valid_data.empty(); ++i) {
+            valid[i] = valid_data.Get(i);
+        }
     }
 
     // segment have latest schema while insert used old one
@@ -802,7 +1639,18 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             id_,
             field_id.get(),
             field_meta.get_data_type());
-        auto data = bulk_subscript_not_exist_field(field_meta, num_rows);
+        std::unique_ptr<DataArray> data;
+        auto name = GetStructNameForArrayField(field_meta);
+        if (name && struct_lengths.count(*name) > 0) {
+            const auto& lengths = struct_lengths.at(*name);
+            const auto& valid = struct_validity.at(*name);
+            data = CreateNullStructSubFieldDataArray(
+                field_meta, lengths.data(), num_rows, [&](int64_t i) {
+                    return valid[i] != 0;
+                });
+        } else {
+            data = bulk_subscript_not_exist_field(field_meta, num_rows);
+        }
         insert_record_proto->add_fields_data()->CopyFrom(*data);
         field_id_to_offset.emplace(field_id, field_offset++);
     }
@@ -830,6 +1678,14 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             field_meta,
             num_rows);
     }
+
+    // Retain the typed input before any growing owner can observe this range.
+    // Once an interim reader owns raw data, the column may stay reclaimed and
+    // retries must still replay the exact immutable payload.
+    StageInsertVectorInput(reserved_offset,
+                           reserved_offset + num_rows,
+                           insert_record_proto,
+                           field_id_to_offset);
 
     // step 2: sort timestamp
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
@@ -867,7 +1723,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         // ownership from ConcurrentVector.
         const bool index_owns_raw_data =
             IsVectorDataType(field_meta.get_data_type()) &&
-            indexing_record_.HasRawData(field_id);
+            growing_indexes_.CanReleaseVectorColumn(
+                field_id, insert_record_.ack_responder_.GetAck());
         if (!index_owns_raw_data) {
             if (field_meta.get_data_type() == DataType::TEXT) {
                 auto spillover = GetTextLobSpillover(field_id);
@@ -899,28 +1756,17 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             }
         }
 
-        //insert vector data into index
-        if (segcore_config_.get_enable_interim_segment_index()) {
-            indexing_record_.AppendingIndex(
-                reserved_offset,
-                num_rows,
-                field_id,
-                &insert_record_proto->fields_data(data_offset),
-                insert_record_,
-                field_meta);
-        }
-
-        std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+        std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
         {
-            std::shared_lock lock(array_offsets_map_mutex_);
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
             if (struct_representative_fields_.count(field_id) > 0) {
-                auto offsets_it = array_offsets_map_.find(field_id);
-                if (offsets_it != array_offsets_map_.end()) {
-                    array_offsets = offsets_it->second;
+                auto offsets_it = struct_element_offsets_map_.find(field_id);
+                if (offsets_it != struct_element_offsets_map_.end()) {
+                    struct_element_offsets = offsets_it->second;
                 }
             }
         }
-        if (array_offsets != nullptr) {
+        if (struct_element_offsets != nullptr) {
             const auto& field_data =
                 insert_record_proto->fields_data(data_offset);
 
@@ -928,33 +1774,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             ExtractArrayLengths(
                 field_data, field_meta, num_rows, array_lengths.data());
 
-            array_offsets->Insert(
+            struct_element_offsets->Insert(
                 reserved_offset, array_lengths.data(), num_rows);
-        }
-
-        // index text.
-        if (field_meta.enable_match()) {
-            // TODO: iterate texts and call `AddText` instead of `AddTexts`. This may cost much more memory.
-            std::vector<std::string> texts(
-                insert_record_proto->fields_data(data_offset)
-                    .scalars()
-                    .string_data()
-                    .data()
-                    .begin(),
-                insert_record_proto->fields_data(data_offset)
-                    .scalars()
-                    .string_data()
-                    .data()
-                    .end());
-            const auto& row_valid_data = GetFieldDataRowValidData(
-                insert_record_proto->fields_data(data_offset));
-            FixedVector<bool> texts_valid_data(row_valid_data.begin(),
-                                               row_valid_data.end());
-            AddTexts(field_id,
-                     texts.data(),
-                     texts_valid_data.data(),
-                     num_rows,
-                     reserved_offset);
         }
 
         // update average row data size
@@ -978,8 +1799,6 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
 
         stats_.mem_size += field_data_size;
-
-        try_remove_chunks(field_id, *schema);
     }
 
     // step 4: set pks to offset
@@ -996,9 +1815,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update the resource usage
     UpdateResourceTracking(*schema);
 
-    // step 6: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
+    // Raw rows become query-visible only after every connected growing owner
+    // has accepted the same contiguous prefix.
+    CompleteGrowingRawRange(reserved_offset,
+                            reserved_offset + num_rows,
+                            /*require_index_flush=*/false);
 }
 
 void
@@ -1047,10 +1868,11 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
-            if (field_meta.is_nested_array() &&
+            if (field_meta.is_native_list_array() &&
                 infos.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "nested ARRAY field {} is supported only by Storage "
+                          "native-list ARRAY field {} is supported only by "
+                          "Storage "
                           "V2/V3",
                           field_id.get());
             }
@@ -1076,7 +1898,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto lack_num = info.row_count - total;
             std::optional<proto::schema::TypeSchema> array_type;
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
             auto field_data = storage::CreateFieldDataFromDefaultValue(
@@ -1096,7 +1919,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
         }
@@ -1110,8 +1934,12 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get());
         auto field_data = storage::CollectFieldDataChannel(channel);
-        load_field_data_common(
-            field_id, reserved_offset, field_data, primary_field_id, num_rows);
+        load_field_data_common(field_id,
+                               reserved_offset,
+                               field_data,
+                               primary_field_id,
+                               num_rows,
+                               /*text_is_remote_lob_ref=*/false);
         // Build geometry cache for GEOMETRY fields, matching both storage-v2
         // load paths. Without this the rows loaded here are acked below
         // (readable) but have no cache entry, so once a later insert populates
@@ -1132,9 +1960,10 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         }
     }
 
-    // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
+    FillAbsentFieldsThrough(reserved_offset + num_rows);
+    CompleteGrowingRawRange(reserved_offset,
+                            reserved_offset + num_rows,
+                            /*require_index_flush=*/true);
 }
 
 void
@@ -1143,7 +1972,8 @@ SegmentGrowingImpl::load_field_data_common(
     size_t reserved_offset,
     const std::vector<FieldDataPtr>& field_data,
     FieldId primary_field_id,
-    size_t num_rows) {
+    size_t num_rows,
+    bool text_is_remote_lob_ref) {
     if (field_id == TimestampFieldID) {
         // step 2: sort timestamp
         // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
@@ -1170,6 +2000,13 @@ SegmentGrowingImpl::load_field_data_common(
 
     const auto& field_meta = (*schema)[field_id];
 
+    if (IsVectorDataType(field_meta.get_data_type())) {
+        StageLoadedVectorInput(field_id,
+                               static_cast<int64_t>(reserved_offset),
+                               static_cast<int64_t>(reserved_offset + num_rows),
+                               field_data);
+    }
+
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(reserved_offset,
                                                               field_data);
@@ -1179,22 +2016,67 @@ SegmentGrowingImpl::load_field_data_common(
     // chunks. Scalar indexes do not take over raw-data ownership.
     const bool index_owns_raw_data =
         IsVectorDataType(field_meta.get_data_type()) &&
-        indexing_record_.HasRawData(field_id);
-    if (!index_owns_raw_data) {
+        growing_indexes_.CanReleaseVectorColumn(
+            field_id, insert_record_.ack_responder_.GetAck());
+    if (!index_owns_raw_data && field_meta.get_data_type() == DataType::TEXT &&
+        !text_is_remote_lob_ref) {
+        auto* spillover = GetTextLobSpillover(field_id);
+        AssertInfo(spillover != nullptr,
+                   "TEXT field {} has no local spillover",
+                   field_id.get());
+        auto* text_column = dynamic_cast<ConcurrentVector<std::string>*>(
+            insert_record_.get_data_base(field_id));
+        AssertInfo(text_column != nullptr,
+                   "TEXT field {} must use string storage",
+                   field_id.get());
+
+        auto output_offset = static_cast<int64_t>(reserved_offset);
+        const auto batch_rows = std::min<int64_t>(
+            segcore_config_.get_chunk_rows(), kTextLobIndexBuildBatchSize);
+        AssertInfo(batch_rows > 0,
+                   "TEXT load encoding batch size must be positive");
+        for (const auto& data : field_data) {
+            const auto rows = data->get_num_rows();
+            const auto* strings = static_cast<const std::string*>(data->Data());
+            for (int64_t batch_start = 0; batch_start < rows;
+                 batch_start += batch_rows) {
+                const auto count =
+                    std::min<int64_t>(batch_rows, rows - batch_start);
+                std::vector<std::string> refs;
+                refs.reserve(static_cast<size_t>(count));
+                for (int64_t i = 0; i < count; ++i) {
+                    const auto row = batch_start + i;
+                    if (field_meta.is_nullable() && !data->is_valid(row)) {
+                        refs.push_back(spillover->WriteAndEncode("", 0));
+                    } else {
+                        const auto& value = strings[row];
+                        refs.push_back(spillover->WriteAndEncode(value.data(),
+                                                                 value.size()));
+                    }
+                }
+                text_column->set_data_raw(
+                    output_offset + batch_start, refs.data(), count);
+            }
+            output_offset += rows;
+        }
+        AssertInfo(
+            output_offset == static_cast<int64_t>(reserved_offset + num_rows),
+            "TEXT field {} load contains {} rows, expected {}",
+            field_id.get(),
+            output_offset - static_cast<int64_t>(reserved_offset),
+            num_rows);
+    } else if (!index_owns_raw_data) {
         insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
                                                              field_data);
     }
-    if (segcore_config_.get_enable_interim_segment_index()) {
-        auto offset = reserved_offset;
-        for (auto& data : field_data) {
-            auto row_count = data->get_num_rows();
-            indexing_record_.AppendingIndex(
-                offset, row_count, field_id, data, insert_record_, field_meta);
-            offset += row_count;
-        }
+    if (field_meta.get_data_type() == DataType::TEXT &&
+        text_is_remote_lob_ref) {
+        // Publish the physical representation boundary only after the V3 refs
+        // are in the column. Feed/query reads take one snapshot of this value
+        // per batch and never confuse legacy raw text with an encoded ref.
+        std::unique_lock lock(text_lob_mutex_);
+        text_loaded_row_counts_[field_id] = reserved_offset + num_rows;
     }
-    try_remove_chunks(field_id, *schema);
-
     if (field_id == primary_field_id) {
         insert_record_.insert_pks(reserved_offset, field_data);
     }
@@ -1205,43 +2087,28 @@ SegmentGrowingImpl::load_field_data_common(
             field_meta, num_rows, storage::GetByteSizeOfFieldDatas(field_data));
     }
 
-    // build text match index
-    if (field_meta.enable_match()) {
-        if (field_meta.get_data_type() == DataType::TEXT &&
-            HasTextLobPath(field_id)) {
-            BuildTextIndexFromTextLobRefs(
-                field_id, field_data, reserved_offset, field_meta);
-        } else {
-            auto pinned = GetTextIndex(nullptr, field_id);
-            auto index = pinned.get();
-            index->BuildIndexFromFieldData(
-                field_data, field_meta.is_nullable(), reserved_offset);
-            index->Commit();
-            // Reload reader so that the index can be read immediately
-            index->Reload();
-        }
-    }
-
-    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
+    std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
     {
-        std::shared_lock lock(array_offsets_map_mutex_);
+        std::shared_lock lock(struct_element_offsets_map_mutex_);
         if (struct_representative_fields_.count(field_id) > 0) {
-            auto offsets_it = array_offsets_map_.find(field_id);
-            if (offsets_it != array_offsets_map_.end()) {
-                array_offsets = offsets_it->second;
+            auto offsets_it = struct_element_offsets_map_.find(field_id);
+            if (offsets_it != struct_element_offsets_map_.end()) {
+                struct_element_offsets = offsets_it->second;
             }
         }
     }
-    if (array_offsets != nullptr) {
+    if (struct_element_offsets != nullptr) {
         std::vector<int32_t> array_lengths(num_rows);
         ExtractArrayLengthsFromFieldData(
             field_data, field_meta, array_lengths.data());
 
-        array_offsets->Insert(reserved_offset, array_lengths.data(), num_rows);
+        struct_element_offsets->Insert(
+            reserved_offset, array_lengths.data(), num_rows);
 
-        LOG_INFO("Updated ArrayOffsetsGrowing for field {} with {} rows",
-                 field_id.get(),
-                 num_rows);
+        LOG_INFO(
+            "Updated StructElementOffsetsGrowing for field {} with {} rows",
+            field_id.get(),
+            num_rows);
     }
 
     // update the mem size
@@ -1265,7 +2132,6 @@ SegmentGrowingImpl::load_column_group_data_internal(
 
     size_t num_rows = storage::GetNumRowsForLoadInfo(infos);
     auto reserved_offset = PreInsert(num_rows);
-    text_loaded_row_count_ = num_rows;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     ArrowSchemaPtr arrow_schema = schema->ConvertToArrowSchema();
@@ -1402,7 +2268,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows,
-                            field.second.is_nested_array()
+                            field.second.is_native_list_array() &&
+                                    data_type == DataType::ARRAY
                                 ? std::make_optional(
                                       field.second.get_array_type_schema())
                                 : std::nullopt);
@@ -1421,7 +2288,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                    reserved_offset,
                                    field_data,
                                    primary_field_id,
-                                   num_rows);
+                                   num_rows,
+                                   /*text_is_remote_lob_ref=*/false);
             // Build geometry cache for GEOMETRY fields
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
@@ -1432,9 +2300,10 @@ SegmentGrowingImpl::load_column_group_data_internal(
         }
     }
 
-    // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
+    FillAbsentFieldsThrough(reserved_offset + num_rows);
+    CompleteGrowingRawRange(reserved_offset,
+                            reserved_offset + num_rows,
+                            /*require_index_flush=*/true);
 }
 
 SegcoreError
@@ -1477,7 +2346,7 @@ SegmentGrowingImpl::Delete(int64_t size,
     }
 
     // step 2: fill delete record
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(std::move(sort_pks), sort_timestamps.data());
 
     // step 3: update resource tracking
     UpdateResourceTracking();
@@ -1503,7 +2372,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_.LoadPush(std::move(pks), timestamps);
 }
 
 cachinglayer::PinWrapper<SpanBase>
@@ -1512,9 +2381,15 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     int64_t chunk_id) const {
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    if (field_meta.is_nested_array()) {
+    if (field_meta.is_native_list_array()) {
+        if (field_meta.has_nullable_array_element()) {
+            ThrowInfo(ErrorCode::NotImplemented,
+                      "expressions on element-nullable array field {} are "
+                      "not supported yet",
+                      field_meta.get_name().get());
+        }
         ThrowInfo(ErrorCode::Unsupported,
-                  "Span API does not support nested ARRAY field {}",
+                  "Span API does not support native-list ARRAY field {}",
                   field_id.get());
     }
     return cachinglayer::PinWrapper<SpanBase>(
@@ -1550,6 +2425,33 @@ SegmentGrowingImpl::ApplyFieldValidData(milvus::OpContext* op_ctx,
 }
 
 void
+SegmentGrowingImpl::ApplyFieldValidDataByRange(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t logical_offset,
+    int64_t count,
+    TargetBitmapView valid_result) const {
+    (void)op_ctx;
+    if (count == 0) {
+        return;
+    }
+    auto schema = get_schema_snapshot();
+    auto& field_meta = schema->operator[](field_id);
+    if (!field_meta.is_nullable()) {
+        return;
+    }
+
+    auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
+    std::unique_ptr<bool[]> valid_data(new bool[count]);
+    valid_vec_ptr->bulk_is_valid_range(logical_offset, count, valid_data.get());
+    for (int64_t i = 0; i < count; ++i) {
+        if (!valid_data[i]) {
+            valid_result[i] = false;
+        }
+    }
+}
+
+void
 SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     milvus::OpContext* op_ctx,
     FieldId field_id,
@@ -1564,22 +2466,6 @@ SegmentGrowingImpl::ApplyFieldValidDataByOffsets(
     auto& field_meta = schema->operator[](field_id);
     if (!field_meta.is_nullable()) {
         return;
-    }
-
-    if (IsOrdinaryVectorDataType(field_meta.get_data_type()) &&
-        indexing_record_.SyncDataWithIndex(field_id)) {
-        const auto& field_indexing =
-            indexing_record_.get_vec_field_indexing(field_id);
-        auto indexing = field_indexing.get_segment_indexing();
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-        if (vec_index != nullptr && vec_index->HasValidData()) {
-            for (int64_t i = 0; i < count; ++i) {
-                if (!vec_index->IsRowValid(offsets[i])) {
-                    valid_result[i] = false;
-                }
-            }
-            return;
-        }
     }
 
     auto valid_vec_ptr = insert_record_.get_valid_data(field_id);
@@ -1622,9 +2508,15 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
                "fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -1772,17 +2664,9 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
     size_t next_physical = 0;
-    auto append_valid_view = [&](int64_t logical_offset) {
-        auto vector_array = vector_data->get_physical_element(
-            physical_offsets[next_physical++]);
-        AssertInfo(vector_array != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   logical_offset);
-        views.emplace_back(const_cast<char*>(vector_array->data()),
-                           vector_array->dim(),
-                           vector_array->physical_length(),
-                           vector_array->byte_size(),
-                           vector_array->get_element_type());
+    auto append_valid_view = [&] {
+        views.push_back(vector_data->view_physical_element(
+            physical_offsets[next_physical++]));
     };
 
     if (nullable) {
@@ -1794,7 +2678,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                 views.emplace_back();
                 continue;
             }
-            append_valid_view(logical_offsets[i]);
+            append_valid_view();
         }
         std::pair<std::vector<VectorArrayView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(valid_data->data())};
@@ -1808,7 +2692,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                logical_start,
                logical_start + len);
     for (int64_t i = 0; i < len; ++i) {
-        append_valid_view(logical_offsets[i]);
+        append_valid_view();
     }
     std::pair<std::vector<VectorArrayView>, ValidityView> content{
         std::move(views), ValidityView{}};
@@ -1850,9 +2734,15 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_views_by_offsets only supports recursive "
                "ARRAY fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -1914,6 +2804,7 @@ SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
+// Reports a row's matches in input order; DeletedRecord relies on it.
 void
 SegmentGrowingImpl::search_batch_pks(
     const std::vector<PkType>& pks,
@@ -1969,6 +2860,14 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
     std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
     std::vector<int64_t> spillover_indices;
     std::vector<std::string_view> spillover_refs;
+    int64_t loaded_end = 0;
+    {
+        std::shared_lock lock(text_lob_mutex_);
+        const auto loaded_end_it = text_loaded_row_counts_.find(field_id);
+        loaded_end = loaded_end_it == text_loaded_row_counts_.end()
+                         ? 0
+                         : loaded_end_it->second;
+    }
 
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
@@ -1976,7 +2875,7 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
             set_output(i, std::string());
             continue;
         }
-        if (offset < text_loaded_row_count_) {
+        if (offset < loaded_end) {
             auto ref_str = src.view_element(offset);
             auto ptr = reinterpret_cast<const uint8_t*>(ref_str.data());
             if (milvus_storage::lob_column::IsInlineData(ptr)) {
@@ -2002,6 +2901,15 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
     }
 
     if (!encoded_refs.empty()) {
+        std::string lob_base_path;
+        {
+            std::shared_lock lock(text_lob_mutex_);
+            auto path = text_lob_paths_.find(field_id);
+            AssertInfo(path != text_lob_paths_.end(),
+                       "TEXT field {} has no remote LOB path",
+                       field_id.get());
+            lob_base_path = path->second;
+        }
         auto properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
@@ -2012,11 +2920,8 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
             resolved.Add();
         }
         auto& cache = GetGlobalTextColumnCache();
-        cache.ReadBatchInto(text_lob_paths_.at(field_id),
-                            fs,
-                            *properties,
-                            encoded_refs,
-                            &resolved);
+        cache.ReadBatchInto(
+            lob_base_path, fs, *properties, encoded_refs, &resolved);
         for (size_t j = 0; j < loaded_indices.size(); ++j) {
             set_output(loaded_indices[j], std::move(*resolved.Mutable(j)));
         }
@@ -2325,22 +3230,11 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     const int64_t* seg_offsets,
     int64_t count,
     milvus::proto::schema::SparseFloatArray* output) const {
-    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
-
-    // If the index has finished building and keeps raw data, grab from index
-    // without any synchronization operations.
-    if (indexing_record_.HasRawData(field_id)) {
-        indexing_record_.GetDataFromIndex(
-            field_id, seg_offsets, count, 0, output);
-        return;
-    }
-    // Pin the chunk generation before deciding. Whatever we choose, the
-    // generation we read cannot be reclaimed under us; an empty snapshot means
-    // try_remove_chunks already ran, and that is gated on HasRawData, so the
-    // index can answer. This replaces an exclusive chunk lock that serialized
-    // concurrent retrieves against each other for a read-only operation.
+    // Pin raw before inspecting the reader. If reclamation wins first the
+    // empty snapshot directs this operation to one fixed reader generation;
+    // otherwise this operation retains and reads the raw generation it saw.
     auto chunks = vec_raw->acquire_chunks();
-    if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+    if (!chunks.empty()) {
         const auto physical_offsets =
             MapValidVectorOffsets(*vec_raw, seg_offsets, count);
         const auto* raw_offsets =
@@ -2356,7 +3250,27 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
             output);
         return;
     }
-    indexing_record_.GetDataFromIndex(field_id, seg_offsets, count, 0, output);
+
+    auto pin = PinGrowingIndex(field_id);
+    AssertInfo(pin,
+               "growing sparse vector field {} has neither raw data nor an "
+               "index reader",
+               field_id.get());
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
+    AssertInfo(reader != nullptr && reader->HasRawData(),
+               "growing sparse vector reader for field {} has no raw values",
+               field_id.get());
+    // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
+    // reader takes logical row ids directly.
+    auto ids = std::make_shared<knowhere::DataSet>();
+    ids->SetRows(count);
+    ids->SetDim(1);
+    ids->SetIds(seg_offsets);
+    ids->SetIsOwner(false);
+    auto retrieved = reader->GetSparseVector(ids);
+    SparseRowsToProto(
+        [&](size_t i) { return retrieved.get() + i; }, count, output);
 }
 
 template <typename S>
@@ -2408,20 +3322,8 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
 
-    // HasRawData interface guarantees that data can be fetched from growing segment
-    AssertInfo(HasRawData(field_id.get()), "Growing segment loss raw data");
-
-    // if index has finished building, grab from index without any
-    // synchronization operations.
-    if (indexing_record_.HasRawData(field_id)) {
-        indexing_record_.GetDataFromIndex(
-            field_id, seg_offsets, count, element_sizeof, output_raw);
-        return;
-    }
-    // Pin the chunk generation before deciding; see the sparse variant above
-    // for why the snapshot replaces the chunk lock here.
     auto chunks = vec.acquire_chunks();
-    if (!chunks.empty() && !indexing_record_.HasRawData(field_id)) {
+    if (!chunks.empty()) {
         const auto physical_offsets =
             MapValidVectorOffsets(vec, seg_offsets, count);
         const auto* raw_offsets =
@@ -2435,8 +3337,30 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
         }
         return;
     }
-    indexing_record_.GetDataFromIndex(
-        field_id, seg_offsets, count, element_sizeof, output_raw);
+
+    auto pin = PinGrowingIndex(field_id);
+    AssertInfo(pin,
+               "growing vector field {} has neither raw data nor an index "
+               "reader",
+               field_id.get());
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
+    AssertInfo(reader != nullptr && reader->HasRawData(),
+               "growing vector reader for field {} has no raw values",
+               field_id.get());
+    // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
+    // reader takes logical row ids directly.
+    auto ids = std::make_shared<knowhere::DataSet>();
+    ids->SetRows(count);
+    ids->SetDim(1);
+    ids->SetIds(seg_offsets);
+    ids->SetIsOwner(false);
+    auto retrieved = reader->GetVector(ids);
+    AssertInfo(retrieved.size() == static_cast<size_t>(count * element_sizeof),
+               "growing vector reader returned {} bytes, expected {}",
+               retrieved.size(),
+               count * element_sizeof);
+    milvus::fastmem::FastMemcpy(output_raw, retrieved.data(), retrieved.size());
 }
 
 template <typename S, typename T>
@@ -2516,11 +3440,7 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
         if (valid_data != nullptr && !valid_data[i]) {
             continue;
         }
-        auto value = vec.get_physical_element(physical_offset);
-        AssertInfo(value != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   seg_offsets[i]);
-        dst->at(i) = value->output_data();
+        dst->at(i) = vec.view_physical_element(physical_offset).output_data();
     }
 }
 
@@ -2663,9 +3583,10 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "raw Array* API does not support nested ARRAY field "
+                          "raw Array* API does not support native-list ARRAY "
+                          "field "
                           "{}; use protobuf retrieve output",
                           field_id.get());
             }
@@ -2744,94 +3665,6 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 void
-SegmentGrowingImpl::BuildTextIndexFromTextLobRefs(
-    FieldId field_id,
-    const std::vector<FieldDataPtr>& field_data,
-    size_t reserved_offset,
-    const FieldMeta& field_meta) {
-    AssertInfo(field_meta.get_data_type() == DataType::TEXT,
-               "field {} is not TEXT",
-               field_id.get());
-    AssertInfo(HasTextLobPath(field_id),
-               "TEXT field {} has no LOB path",
-               field_id.get());
-
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
-    AssertInfo(properties != nullptr,
-               "Loon FFI properties is not initialized for TEXT field {}",
-               field_id.get());
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto& cache = GetGlobalTextColumnCache();
-    const auto& lob_base_path = text_lob_paths_.at(field_id);
-
-    auto pinned = GetTextIndex(nullptr, field_id);
-    auto index = pinned.get();
-    int64_t offset = reserved_offset;
-
-    for (const auto& data : field_data) {
-        auto n = data->get_num_rows();
-        if (n == 0) {
-            continue;
-        }
-
-        auto raw_refs = static_cast<const std::string*>(data->Data());
-        for (int64_t batch_start = 0; batch_start < n;
-             batch_start += kTextLobIndexBuildBatchSize) {
-            auto batch_n = std::min<int64_t>(
-                static_cast<int64_t>(kTextLobIndexBuildBatchSize),
-                n - batch_start);
-            FixedVector<std::string> decoded_texts(batch_n);
-            FixedVector<bool> valid_data(batch_n, true);
-            std::vector<int64_t> pending_indices;
-            std::vector<milvus_storage::lob_column::EncodedRef> encoded_refs;
-            pending_indices.reserve(batch_n);
-            encoded_refs.reserve(batch_n);
-
-            for (int64_t i = 0; i < batch_n; ++i) {
-                auto row = batch_start + i;
-                auto valid = !field_meta.is_nullable() || data->is_valid(row);
-                valid_data[i] = valid;
-                if (!valid) {
-                    continue;
-                }
-
-                const auto& ref = raw_refs[row];
-                encoded_refs.push_back(
-                    MakeTextLobEncodedRef(ref.data(), ref.size()));
-                pending_indices.push_back(i);
-            }
-
-            if (!encoded_refs.empty()) {
-                auto texts = cache.ReadBatch(
-                    lob_base_path, fs, *properties, encoded_refs);
-                AssertInfo(
-                    texts.size() == pending_indices.size(),
-                    "TEXT LOB batch read returned inconsistent result size, "
-                    "field {}, expected {}, actual {}",
-                    field_id.get(),
-                    pending_indices.size(),
-                    texts.size());
-                for (size_t i = 0; i < pending_indices.size(); ++i) {
-                    decoded_texts[pending_indices[i]] = std::move(texts[i]);
-                }
-            }
-
-            index->AddTextsGrowing(
-                batch_n,
-                decoded_texts.data(),
-                field_meta.is_nullable() ? valid_data.data() : nullptr,
-                offset + batch_start);
-        }
-        offset += n;
-    }
-
-    index->Commit();
-    // Reload reader so that the index can be read immediately
-    index->Reload();
-}
-
-void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
                                     milvus::OpContext* op_ctx) {
     // Check for cancellation before starting
@@ -2839,62 +3672,58 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
         op_ctx, id_, field_id.get(), "SegmentGrowingImpl::CreateTextIndex()");
 
     auto schema = get_schema_snapshot();
-    auto index = BuildTextIndexForMeta(schema->operator[](field_id));
-    std::unique_lock lock(mutex_);
-    text_indexes_[field_id] = std::move(index);
-}
+    AssertInfo(schema->has_field(field_id),
+               "cannot create growing text index for unknown field {}",
+               field_id.get());
+    const auto& field_meta = schema->operator[](field_id);
 
-// Builds a standalone index without publishing it into text_indexes_; the
-// meta is passed in because Reopen runs before the field is in schema_.
-std::unique_ptr<index::TextMatchIndex>
-SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
-    AssertInfo(IsStringDataType(field_meta.get_data_type()),
-               "cannot create text index on non-string type");
-    std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
-    // todo: make this(200) configurable.
-    auto index = std::make_unique<index::TextMatchIndex>(
-        200,
-        unique_id.c_str(),
-        "milvus_tokenizer",
-        field_meta.get_analyzer_params().c_str(),
-        /*enable_background_merge=*/true);
-    index->Commit();
-    index->CreateReader(milvus::index::SetBitsetGrowing);
-    index->RegisterAnalyzer("milvus_tokenizer",
-                            field_meta.get_analyzer_params().c_str());
-    return index;
+    std::lock_guard feed_lock(growing_index_feed_mutex_);
+    if (growing_indexes_.Has(field_id)) {
+        return;
+    }
+
+    auto appender = growing_indexes_.StageAppender(
+        field_meta, index_meta_, segcore_config_, id_);
+    AssertInfo(appender.has_value() && appender->caps.text_match,
+               "field {} is not configured for growing text match",
+               field_id.get());
+    FeedGrowingIndexRange(
+        field_meta, 0, growing_index_feed_cursor_, &*appender);
+    GrowingIndexSet::Flush(*appender, field_id);
+
+    GrowingIndexSet::AppenderMap staged;
+    staged.emplace(field_id, std::move(*appender));
+    growing_indexes_.RegisterBatch(std::move(staged));
 }
 
 void
-SegmentGrowingImpl::CreateTextIndexes() {
-    auto schema = get_schema_snapshot();
-    for (const auto& [field_id, field_meta] : schema->get_fields()) {
-        if (IsStringDataType(field_meta.get_data_type()) &&
-            field_meta.enable_match()) {
-            CreateTextIndex(FieldId(field_id));
-        }
+SegmentGrowingImpl::EnsureTextLobSpillover(FieldId field_id) {
+    std::unique_lock lock(text_lob_mutex_);
+    if (text_lob_spillovers_.find(field_id) != text_lob_spillovers_.end()) {
+        text_loaded_row_counts_.try_emplace(field_id, 0);
+        return;
     }
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    auto base_path = mmap_config.GetMmapPath();
+    AssertInfo(!base_path.empty(), "Mmap path is empty");
+
+    auto spillover =
+        std::make_unique<TextLobSpillover>(id_, field_id, base_path);
+    const auto path = spillover->GetPath();
+    text_lob_spillovers_.emplace(field_id, std::move(spillover));
+    text_loaded_row_counts_.try_emplace(field_id, 0);
+    LOG_INFO("Created TEXT LOB spillover for segment {} field {} at {}",
+             id_,
+             field_id.get(),
+             path);
 }
 
 void
 SegmentGrowingImpl::InitializeTextLobSpillovers() {
-    // get base path from MmapManager config
-    std::string base_path;
-
-    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
-    base_path = mmap_config.GetMmapPath();
-    AssertInfo(!base_path.empty(), "Mmap path is empty");
-
-    // create spillover for each TEXT field
     auto schema = get_schema_snapshot();
     for (auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_meta.get_data_type() == DataType::TEXT) {
-            text_lob_spillovers_[field_id] =
-                std::make_unique<TextLobSpillover>(id_, field_id, base_path);
-            LOG_INFO("Created TEXT LOB spillover for segment {} field {} at {}",
-                     id_,
-                     field_id.get(),
-                     text_lob_spillovers_[field_id]->GetPath());
+            EnsureTextLobSpillover(field_id);
         }
     }
 }
@@ -2928,6 +3757,7 @@ SegmentGrowingImpl::InitTextLobPaths(const std::string& manifest_path) {
     std::filesystem::path segment_fs_path(segment_base_path);
     std::filesystem::path partition_path = segment_fs_path.parent_path();
 
+    std::unique_lock lock(text_lob_mutex_);
     for (auto field_id : text_field_ids) {
         std::filesystem::path lob_base_path =
             partition_path / "lobs" / std::to_string(field_id.get());
@@ -2937,31 +3767,6 @@ SegmentGrowingImpl::InitTextLobPaths(const std::string& manifest_path) {
             id_,
             field_id.get(),
             lob_base_path.string());
-    }
-}
-
-void
-SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
-                             const std::string* texts,
-                             const bool* texts_valid_data,
-                             size_t n,
-                             int64_t offset_begin) {
-    std::unique_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
-        ThrowInfo(ErrorCode::TextIndexNotFound,
-                  "text index not found for field {}",
-                  field_id.get());
-    }
-    // only unique_ptr is supported for growing segment
-    if (auto p = std::get_if<std::unique_ptr<milvus::index::TextMatchIndex>>(
-            &iter->second)) {
-        (*p)->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
-    } else {
-        ThrowInfo(ErrorCode::UnexpectedError,
-                  "text index of growing segment is not a unique_ptr for field "
-                  "{}",
-                  field_id.get());
     }
 }
 
@@ -3014,64 +3819,133 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
 
     // double check condition, avoid multiple assignment
     if (sch->get_schema_version() > current_schema->get_schema_version()) {
+        // Inserts take sch_mutex_ shared before the feed mutex. Holding the
+        // same order here freezes both the raw prefix and owner set until the
+        // new schema and its fully backfilled owners are published together.
+        std::lock_guard feed_lock(growing_index_feed_mutex_);
         auto absent_fields = sch->AbsentFields(*current_schema);
+        const auto accepted_row_count = growing_index_feed_cursor_;
+        const auto raw_ready_end = growing_raw_ready_.GetAck();
+        AssertInfo(accepted_row_count <= raw_ready_end,
+                   "growing index cursor {} exceeds raw-ready end {} during "
+                   "schema reopen",
+                   accepted_row_count,
+                   raw_ready_end);
 
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
             }
-            fill_empty_field(field_meta);
+            if (field_meta.get_data_type() == DataType::TEXT) {
+                EnsureTextLobSpillover(field_meta.get_id());
+            }
+            // A failed in-flight feed may leave a larger raw-ready prefix than
+            // the prefix accepted by every owner. Fill new columns through the
+            // former so the pending batch can later include the new owner, but
+            // backfill that owner only through accepted_row_count below.
+            fill_empty_field(field_meta, raw_ready_end);
         }
 
-        auto row_count = insert_record_.row_count();
-        // #50484: build text indexes for new enable_match fields BEFORE
-        // publishing schema_ -- readers skip Reopen once the new schema_ is
-        // visible. Backfill every pre-existing row (default value or nulls,
-        // same as fill_empty_field): doc offsets must stay dense and aligned
-        // with insert_record_ rows. Commit+Reload so the triggering query
-        // sees the backfill. Stage all fields locally and publish together
-        // only after every one succeeds: a present text_indexes_ entry is
-        // always complete, and a mid-build throw publishes nothing (schema_
-        // un-advanced, so the next query rebuilds from scratch).
-        std::vector<std::pair<FieldId, std::unique_ptr<index::TextMatchIndex>>>
-            staged_text_indexes;
+        GrowingIndexSet::AppenderMap staged_appenders;
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
             }
-            auto field_id = field_meta.get_id();
-            if (IsStringDataType(field_meta.get_data_type()) &&
-                field_meta.enable_match() &&
-                text_indexes_.find(field_id) == text_indexes_.end()) {
-                auto index = BuildTextIndexForMeta(field_meta);
-                if (row_count > 0) {
-                    const bool has_default =
-                        field_meta.default_value().has_value();
-                    std::vector<std::string> texts(
-                        row_count,
-                        has_default ? field_meta.default_value()->string_data()
-                                    : std::string());
-                    FixedVector<bool> texts_valid_data(row_count, has_default);
-                    index->AddTextsGrowing(
-                        row_count, texts.data(), texts_valid_data.data(), 0);
+            const auto field_id = field_meta.get_id();
+            auto appender = growing_indexes_.StageAppender(
+                field_meta,
+                index_meta_,
+                segcore_config_,
+                id_,
+                insert_record_.get_data_base(field_id));
+            if (!appender.has_value()) {
+                continue;
+            }
+
+            if (appender->caps.text_match) {
+                const bool has_default = field_meta.default_value().has_value();
+                AssertInfo(has_default || field_meta.is_nullable(),
+                           "new non-nullable text field {} has no default",
+                           field_id.get());
+                const std::string value =
+                    has_default ? field_meta.default_value()->string_data()
+                                : std::string();
+                const auto batch_rows =
+                    std::min<int64_t>(segcore_config_.get_chunk_rows(),
+                                      kTextLobIndexBuildBatchSize);
+                AssertInfo(batch_rows > 0,
+                           "growing text backfill batch size must be positive");
+                for (int64_t offset = 0; offset < accepted_row_count;
+                     offset += batch_rows) {
+                    const auto count = std::min<int64_t>(
+                        batch_rows, accepted_row_count - offset);
+                    std::vector<std::string_view> values(
+                        static_cast<size_t>(count), value);
+                    FixedVector<bool> valid(static_cast<size_t>(count),
+                                            has_default);
+                    index::TextBatch batch{
+                        .row_count = static_cast<size_t>(count),
+                        .values = values.data(),
+                        .valid =
+                            field_meta.is_nullable() ? valid.data() : nullptr,
+                    };
+                    GrowingIndexSet::AppendTo(
+                        *appender, field_id, offset, batch);
                 }
-                index->Commit();
-                index->Reload();
-                staged_text_indexes.emplace_back(field_id, std::move(index));
+            } else {
+                FeedGrowingIndexRange(
+                    field_meta, 0, accepted_row_count, &*appender);
             }
-        }
-        if (!staged_text_indexes.empty()) {
-            std::unique_lock lock(mutex_);
-            for (auto& [field_id, index] : staged_text_indexes) {
-                text_indexes_[field_id] = std::move(index);
-            }
+            GrowingIndexSet::Flush(*appender, field_id);
+            staged_appenders.emplace(field_id, std::move(*appender));
         }
 
-        for (const auto& field_meta : *absent_fields) {
-            if (sch->is_function_output(field_meta.get_id())) {
+        // Finish every other schema-side allocation before making any owner
+        // visible. RegisterBatch then publishes the complete staged set in one
+        // rollback-safe operation; the following shared_ptr store cannot fail.
+        // Visit new fields in schema order so the struct offsets provider is
+        // the first sub-field in proto order.
+        for (auto field_id : sch->get_field_ids()) {
+            if (current_schema->has_field(field_id) ||
+                sch->is_function_output(field_id)) {
                 continue;
             }
-            EnsureArrayOffsetsForStructField(field_meta, row_count, *sch);
+            EnsureStructElementOffsetsForField(
+                (*sch)[field_id], raw_ready_end, *sch);
+        }
+        // Struct offsets aliases of sub-fields dropped by this schema stay in
+        // the map and keep pointing to the struct's offsets. Erasing them
+        // here, before the schema is published, would open a mixed-state
+        // window: readers take the schema and the aliases separately and
+        // hold no lock across them, so a reader still on the old schema
+        // (for example MATCH_ANY resolving the struct through its first
+        // sub-field) must keep finding every alias of that schema, both
+        // while this Reopen runs (and after it fails partway) and after the
+        // new schema is published. All aliases of a struct point to the same
+        // offsets object, so a kept alias is always correct; field IDs are
+        // never reused, so it cannot be mistaken for a later field.
+        //
+        // The representative sub-field of each struct, which Insert uses to
+        // append element counts, is staged here and swapped in with the
+        // schema: Insert holds sch_mutex_ shared, so it runs either before
+        // this Reopen or after the schema store, never in between.
+        std::unordered_set<FieldId> staged_representatives;
+        {
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            std::unordered_set<std::string> represented_structs;
+            for (auto field_id : sch->get_field_ids()) {
+                auto struct_name = GetStructNameForArrayField((*sch)[field_id]);
+                if (struct_name &&
+                    struct_element_offsets_map_.count(field_id) > 0 &&
+                    represented_structs.insert(*struct_name).second) {
+                    staged_representatives.insert(field_id);
+                }
+            }
+        }
+        growing_indexes_.RegisterBatch(std::move(staged_appenders));
+        {
+            std::unique_lock lock(struct_element_offsets_map_mutex_);
+            struct_representative_fields_.swap(staged_representatives);
         }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
@@ -3163,10 +4037,77 @@ SegmentGrowingImpl::Load(milvus::tracer::TraceContext& trace_ctx,
 
 void
 SegmentGrowingImpl::FillAbsentFields() {
-    if (insert_record_.row_count() == 0) {
+    FillAbsentFieldsThrough(insert_record_.row_count());
+}
+
+void
+SegmentGrowingImpl::FillAbsentFieldsThrough(int64_t row_end) {
+    AssertInfo(row_end >= 0,
+               "cannot fill growing fields through negative row end {}",
+               row_end);
+    if (row_end == 0) {
         return;
     }
     auto schema = get_schema_snapshot();
+    std::unordered_set<std::string> visited_structs;
+    for (auto field_id : schema->get_field_ids()) {
+        auto name = GetStructNameForArrayField((*schema)[field_id]);
+        if (!name || !visited_structs.insert(*name).second) {
+            continue;
+        }
+        FieldId provider(-1);
+        std::shared_ptr<StructElementOffsetsGrowing> offsets;
+        for (auto sibling_id : schema->get_field_ids()) {
+            if (GetStructNameForArrayField((*schema)[sibling_id]) != name ||
+                !insert_record_.is_data_exist(sibling_id)) {
+                continue;
+            }
+            auto* column = insert_record_.get_data_base(sibling_id);
+            const bool loaded =
+                !column->empty() ||
+                (insert_record_.is_valid_data_exist(sibling_id) &&
+                 !insert_record_.get_valid_data(sibling_id)->empty());
+            if (!loaded) {
+                continue;
+            }
+            provider = sibling_id;
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            auto it = struct_element_offsets_map_.find(sibling_id);
+            if (it != struct_element_offsets_map_.end()) {
+                offsets = it->second;
+            }
+            break;
+        }
+        if (provider.get() < 0 || !offsets) {
+            continue;
+        }
+        auto filled_rows = offsets->GetRowCount();
+        if (filled_rows < row_end) {
+            const auto rows = row_end;
+            constexpr int64_t kLengthBatchRows = 4096;
+            std::vector<int64_t> row_ids(
+                std::min(kLengthBatchRows, rows - filled_rows));
+            std::vector<int32_t> lengths(row_ids.size());
+            milvus::OpContext op_ctx;
+            for (int64_t begin = filled_rows; begin < rows;
+                 begin += kLengthBatchRows) {
+                const auto count = std::min(kLengthBatchRows, rows - begin);
+                std::iota(row_ids.begin(), row_ids.begin() + count, begin);
+                auto data =
+                    bulk_subscript(&op_ctx, provider, row_ids.data(), count);
+                ExtractArrayLengths(
+                    *data, (*schema)[provider], count, lengths.data());
+                offsets->Insert(begin, lengths.data(), count);
+            }
+        }
+        std::unique_lock lock(struct_element_offsets_map_mutex_);
+        for (auto sibling_id : schema->get_field_ids()) {
+            if (GetStructNameForArrayField((*schema)[sibling_id]) == name) {
+                struct_representative_fields_.erase(sibling_id);
+            }
+        }
+        struct_representative_fields_.insert(provider);
+    }
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -3175,26 +4116,27 @@ SegmentGrowingImpl::FillAbsentFields() {
             continue;
         }
         if (IsVectorDataType(field_meta.get_data_type())) {
-            // A vector field may be legally absent from the loaded data only
-            // when it is nullable (added by AddField after the binlogs were
-            // written). Backfill its validity bitmap so that queries observe
-            // all-null values instead of an uninitialized column.
-            if (field_meta.is_nullable() &&
-                insert_record_.is_data_exist(field_id) &&
-                insert_record_.is_valid_data_exist(field_id) &&
-                insert_record_.get_valid_data(field_id)->empty()) {
-                fill_empty_field(field_meta);
-                EnsureArrayOffsetsForStructField(
-                    field_meta, insert_record_.row_count(), *schema);
+            // A vector field may be legally absent from the loaded data when
+            // it was added after the binlogs were written: a nullable vector,
+            // or an element-nullable vector array sub-field of a non-nullable
+            // struct. Backfill it so that queries observe null rows instead of
+            // an uninitialized column. An empty raw column alone does not mean
+            // absent: once a growing interim index owns the raw vectors, the
+            // column is reclaimed and later batches skip it, so ask
+            // HasFieldData, which also counts validity and index-held rows.
+            if (insert_record_.is_data_exist(field_id) &&
+                !HasFieldData(field_id)) {
+                fill_empty_field(field_meta, row_end);
+                EnsureStructElementOffsetsForField(
+                    field_meta, row_end, *schema);
             }
             continue;
         }
         // append_data is called according to schema before
         // so we must check data empty here
         if (insert_record_.get_data_base(field_id)->empty()) {
-            fill_empty_field(field_meta);
-            EnsureArrayOffsetsForStructField(
-                field_meta, insert_record_.row_count(), *schema);
+            fill_empty_field(field_meta, row_end);
+            EnsureStructElementOffsetsForField(field_meta, row_end, *schema);
         }
     }
 }
@@ -3292,8 +4234,6 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto row_id_rows = GetLoadedFieldRows(column_group_results, RowFieldID);
 
     auto reserved_offset = PreInsert(num_rows);
-    text_loaded_row_count_ = num_rows;
-
     if (timestamp_rows == -1 && num_rows > 0) {
         std::vector<Timestamp> timestamps(num_rows, 0);
         insert_record_.timestamps_.set_data_raw(
@@ -3314,7 +4254,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                                    reserved_offset,
                                    field_data,
                                    primary_field_id,
-                                   num_rows);
+                                   num_rows,
+                                   /*text_is_remote_lob_ref=*/true);
             // Build geometry cache for GEOMETRY fields
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
@@ -3325,8 +4266,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         }
     }
 
-    insert_record_.ack_responder_.AddSegment(reserved_offset,
-                                             reserved_offset + num_rows);
+    FillAbsentFieldsThrough(reserved_offset + num_rows);
+    CompleteGrowingRawRange(reserved_offset,
+                            reserved_offset + num_rows,
+                            /*require_index_flush=*/true);
 }
 
 std::unordered_map<FieldId, std::vector<FieldDataPtr>>
@@ -3447,7 +4390,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                         ? field.get_dim()
                         : 1,
                     rows_to_load,
-                    field.is_nested_array()
+                    field.is_native_list_array() && data_type == DataType::ARRAY
                         ? std::make_optional(field.get_array_type_schema())
                         : std::nullopt);
                 auto array = record_batch->column(i);
@@ -3466,7 +4409,8 @@ SegmentGrowingImpl::LoadColumnGroup(
 }
 
 void
-SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
+SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
+                                     int64_t total_row_num) {
     auto field_id = field_meta.get_id();
     LOG_INFO("start fill empty field {} (data type {}) for growing segment {}",
              field_meta.get_data_type(),
@@ -3479,9 +4423,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
             field_id, field_meta, size_per_chunk(), mmap_descriptor_);
     }
 
-    auto total_row_num = insert_record_.row_count();
-
-    // Reopen publishes schema_ LAST, so a text-index build failure after this
+    // Reopen publishes schema_ LAST, so an owner staging failure after this
     // fill leaves the column already backfilled while the segment still
     // reports the old schema -- the retry re-enters here for the same field.
     // A nullable vector's offset mapping is append-only and order-asserted,
@@ -3518,46 +4460,144 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
         return;
     }
 
-    auto data = bulk_subscript_not_exist_field(field_meta, missing);
-    if (insert_record_.is_valid_data_exist(field_id)) {
-        // Offset-addressed write: idempotent when `filled` is 0 for a
-        // non-mapping column being refilled, unlike the appending overload,
-        // which would double the validity length on a Reopen retry.
-        //
-        // This is one of the two rewrites ThreadSafeValidData's contract
-        // permits (see the borrow discussion on the class in
-        // ConcurrentVector.h). It is safe only because Reopen holds sch_mutex_
-        // unique and publishes schema_ last, so no reader can name this field
-        // yet, let alone hold a get_chunk_data() borrow into it. Anything that
-        // changes when Reopen publishes -- or that lets a reader reach a
-        // not-yet-published field -- invalidates that argument and this call
-        // with it.
-        insert_record_.get_valid_data(field_id)->set_data_raw(
-            filled, missing, data.get(), field_meta);
-    }
-    column->set_data_raw(filled, missing, data.get(), field_meta);
+    if (field_meta.get_data_type() == DataType::TEXT) {
+        auto* spillover = GetTextLobSpillover(field_id);
+        AssertInfo(spillover != nullptr,
+                   "TEXT field {} has no local spillover",
+                   field_id.get());
+        std::vector<std::string> refs;
+        auto* text_column =
+            dynamic_cast<ConcurrentVector<std::string>*>(column);
+        AssertInfo(text_column != nullptr,
+                   "TEXT field {} must use string storage",
+                   field_id.get());
 
-    // Backfilled GEOMETRY rows must reach the cache too. Once ANY cache entry
-    // exists for a field, the filter path takes the cache branch exclusively
-    // (GISFunctionFilterExpr's cache lookup), and a newly added field has no
-    // growing R-Tree because Reopen does not rebuild indexing_record_. So if
-    // these rows were left out, the first insert would create the cache and
-    // write only at its own absolute offsets, leaving [filled, total_row_num)
-    // as default-invalid gaps -- every backfilled row would then read as
-    // nullptr and be judged non-matching, silently dropping rows that the
-    // default geometry should match (or flipping to false positives under a
-    // negated predicate), while the same query is correct with the cache
-    // disabled.
-    //
-    // The write is addressed at `filled`, not 0, for the same reason the two
-    // column writes above are: `data` holds only the `missing` suffix, so the
-    // rows it carries belong at absolute offsets [filled, total_row_num).
-    // Passing (0, total_row_num) here would both re-address the suffix onto
-    // the already-filled prefix and read total_row_num rows out of a payload
-    // that only has `missing` of them.
-    if (field_meta.get_data_type() == DataType::GEOMETRY &&
-        segcore_config_.get_enable_geometry_cache() && missing > 0) {
-        BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
+        const bool has_default = field_meta.default_value().has_value();
+        AssertInfo(has_default || field_meta.is_nullable(),
+                   "new non-nullable TEXT field {} has no default",
+                   field_id.get());
+        const std::string value =
+            has_default ? field_meta.default_value()->string_data()
+                        : std::string();
+        const auto batch_rows = std::min<int64_t>(
+            segcore_config_.get_chunk_rows(), kTextLobIndexBuildBatchSize);
+        AssertInfo(batch_rows > 0, "TEXT backfill batch size must be positive");
+        for (int64_t offset = filled; offset < total_row_num;
+             offset += batch_rows) {
+            const auto count =
+                std::min<int64_t>(batch_rows, total_row_num - offset);
+            // Keep both protobuf/default materialization and encoded refs
+            // bounded. A long TEXT default must not be copied once per segment
+            // before spillover encoding starts.
+            auto batch_data = bulk_subscript_not_exist_field(field_meta, count);
+            if (insert_record_.is_valid_data_exist(field_id)) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    offset, count, batch_data.get(), field_meta);
+            }
+            refs.clear();
+            refs.reserve(static_cast<size_t>(count));
+            for (int64_t i = 0; i < count; ++i) {
+                refs.push_back(
+                    spillover->WriteAndEncode(value.data(), value.size()));
+            }
+            text_column->set_data_raw(offset, refs.data(), count);
+        }
+    } else {
+        std::shared_ptr<StructElementOffsetsGrowing> struct_offsets;
+        FieldId struct_provider(-1);
+        if (auto name = field_meta.is_element_nullable()
+                            ? GetStructNameForArrayField(field_meta)
+                            : std::nullopt) {
+            auto schema = get_schema_snapshot();
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            for (auto sibling_id : schema->get_field_ids()) {
+                if (sibling_id == field_id ||
+                    GetStructNameForArrayField((*schema)[sibling_id]) != name) {
+                    continue;
+                }
+                auto it = struct_element_offsets_map_.find(sibling_id);
+                if (it != struct_element_offsets_map_.end() &&
+                    it->second->GetRowCount() >= total_row_num) {
+                    struct_offsets = it->second;
+                    struct_provider = sibling_id;
+                    break;
+                }
+            }
+        }
+        std::unique_ptr<DataArray> data;
+        if (struct_offsets) {
+            std::vector<int32_t> starts(missing + 1);
+            struct_offsets->CopyRowElementStarts(
+                filled, missing, starts.data());
+            std::vector<int32_t> lengths(missing);
+            for (int64_t i = 0; i < missing; ++i) {
+                lengths[i] = starts[i + 1] - starts[i];
+            }
+            std::unique_ptr<bool[]> validity;
+            if (field_meta.is_nullable()) {
+                AssertInfo(insert_record_.is_valid_data_exist(struct_provider),
+                           "struct provider {} has no row validity",
+                           struct_provider.get());
+                validity = std::make_unique<bool[]>(missing);
+                insert_record_.get_valid_data(struct_provider)
+                    ->bulk_is_valid_range(filled, missing, validity.get());
+            }
+            data = CreateNullStructSubFieldDataArray(
+                field_meta, lengths.data(), missing, [&](int64_t i) {
+                    return !validity || validity[i];
+                });
+        } else {
+            // No sibling holds rows: the growing segment predates the struct.
+            // A growing segment created after the struct stores its original
+            // sub-fields, and the drop rule keeps one of them in the schema
+            // (schemautil.CheckStructKeepsOriginalSubField), so the rows here
+            // are null struct rows. Unlike a sealed segment there is no stored
+            // field set to check. The column and interim index of a dropped
+            // sub-field are not released right away: inserts after the drop
+            // no longer write or feed them, and both are freed with the
+            // growing segment.
+            data = bulk_subscript_not_exist_field(field_meta, missing);
+        }
+        if (insert_record_.is_valid_data_exist(field_id)) {
+            // Offset-addressed write: idempotent when `filled` is 0 for a
+            // non-mapping column being refilled, unlike the appending overload,
+            // which would double the validity length on a Reopen retry.
+            //
+            // This is one of the two rewrites ThreadSafeValidData's contract
+            // permits (see the borrow discussion on the class in
+            // ConcurrentVector.h). It is safe only because Reopen holds
+            // sch_mutex_ unique and publishes schema_ last, so no reader can
+            // name this field yet, let alone hold a get_chunk_data() borrow
+            // into it. Anything that changes when Reopen publishes -- or that
+            // lets a reader reach a not-yet-published field -- invalidates
+            // that argument and this call with it.
+            insert_record_.get_valid_data(field_id)->set_data_raw(
+                filled, missing, data.get(), field_meta);
+        }
+        column->set_data_raw(filled, missing, data.get(), field_meta);
+
+        // Backfilled GEOMETRY rows must reach the cache too. Once ANY cache entry
+        // exists for a field, the filter path takes the cache branch exclusively
+        // (GISFunctionFilterExpr's cache lookup), and a newly added field has no
+        // growing R-Tree because Reopen does not rebuild indexing_record_. So if
+        // these rows were left out, the first insert would create the cache and
+        // write only at its own absolute offsets, leaving [filled, total_row_num)
+        // as default-invalid gaps -- every backfilled row would then read as
+        // nullptr and be judged non-matching, silently dropping rows that the
+        // default geometry should match (or flipping to false positives under a
+        // negated predicate), while the same query is correct with the cache
+        // disabled.
+        //
+        // The write is addressed at `filled`, not 0, for the same reason the two
+        // column writes above are: `data` holds only the `missing` suffix, so the
+        // rows it carries belong at absolute offsets [filled, total_row_num).
+        // Passing (0, total_row_num) here would both re-address the suffix onto
+        // the already-filled prefix and read total_row_num rows out of a payload
+        // that only has `missing` of them.
+        if (field_meta.get_data_type() == DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache() && missing > 0) {
+            BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
+        }
     }
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
@@ -3567,45 +4607,51 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count) {
     auto schema = get_schema_snapshot();
-    EnsureArrayOffsetsForStructField(field_meta, row_count, *schema);
+    EnsureStructElementOffsetsForField(field_meta, row_count, *schema);
 }
 
 void
-SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
+SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
         return;
     }
 
-    std::unique_lock lock(array_offsets_map_mutex_);
+    std::unique_lock lock(struct_element_offsets_map_mutex_);
 
-    std::shared_ptr<ArrayOffsetsGrowing> array_offsets;
-    for (const auto& [field_id, offsets] : array_offsets_map_) {
-        auto field_it = schema.get_fields().find(field_id);
-        if (field_it == schema.get_fields().end()) {
+    std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
+    FieldId representative = field_meta.get_id();
+    bool first_child = true;
+    for (auto field_id : schema.get_field_ids()) {
+        auto existing_struct_name =
+            GetStructNameForArrayField(schema[field_id]);
+        if (existing_struct_name != struct_name) {
             continue;
         }
-
-        auto existing_struct_name =
-            GetStructNameForArrayField(field_it->second);
-        if (existing_struct_name == struct_name) {
-            array_offsets = offsets;
+        if (first_child) {
+            representative = field_id;
+            first_child = false;
+        }
+        auto it = struct_element_offsets_map_.find(field_id);
+        if (it != struct_element_offsets_map_.end()) {
+            struct_element_offsets = it->second;
             break;
         }
     }
 
-    if (!array_offsets) {
-        array_offsets = std::make_shared<ArrayOffsetsGrowing>();
-        struct_representative_fields_.insert(field_meta.get_id());
+    if (!struct_element_offsets) {
+        struct_element_offsets =
+            std::make_shared<StructElementOffsetsGrowing>();
+        struct_representative_fields_.insert(representative);
     }
 
-    auto current_row_count = array_offsets->GetRowCount();
+    auto current_row_count = struct_element_offsets->GetRowCount();
     AssertInfo(current_row_count <= row_count,
-               "struct array offsets row count {} exceeds segment row count "
+               "struct element offsets row count {} exceeds segment row count "
                "{} for field {}",
                current_row_count,
                row_count,
@@ -3613,11 +4659,11 @@ SegmentGrowingImpl::EnsureArrayOffsetsForStructField(
     if (current_row_count < row_count) {
         auto missing_row_count = row_count - current_row_count;
         std::vector<int32_t> empty_lengths(missing_row_count, 0);
-        array_offsets->Insert(
+        struct_element_offsets->Insert(
             current_row_count, empty_lengths.data(), missing_row_count);
     }
 
-    array_offsets_map_[field_meta.get_id()] = array_offsets;
+    struct_element_offsets_map_[field_meta.get_id()] = struct_element_offsets;
 }
 
 void

@@ -86,6 +86,30 @@ func TestSummarizeExternalRefreshOwnership(t *testing.T) {
 				UnchangedFilePaths:        1,
 			},
 		},
+		{
+			// milvus-table files are source segment manifest paths, matched by
+			// revision rather than by spelling.
+			name: "matches_source_manifests_by_revision",
+			files: []string{
+				packed.MarshalManifestPath("files/insert_log/1/2/3", 5),
+				packed.MarshalManifestPath("files/insert_log/1/2/4", 7),
+			},
+			fragments: packed.SegmentFragments{
+				10: externalRefreshPlannerFragments(`{"base_path":"files/insert_log/1/2/3","ver":5}`),
+				20: externalRefreshPlannerFragments(packed.MarshalManifestPath("files/insert_log/1/2/4", 6)),
+			},
+			filesPerTask: 2,
+			expected: externalRefreshOwnershipSummary{
+				BaseTaskCount:      1,
+				FinalTaskCount:     1,
+				MaxTaskFiles:       2,
+				MaxOwnedSegments:   2,
+				BaselineFilePaths:  2,
+				AddedFilePaths:     1,
+				RemovedFilePaths:   1,
+				UnchangedFilePaths: 1,
+			},
+		},
 	}
 
 	for _, test := range tests {

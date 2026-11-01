@@ -9,19 +9,21 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // newAckCallbackScheduler creates a new ack callback scheduler.
 func newAckCallbackScheduler(logger *mlog.Logger) *ackCallbackScheduler {
 	s := &ackCallbackScheduler{
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
-		pending:            make(chan *broadcastTask, 16),
+		pending:            typeutil.NewMultipartQueue[*broadcastTask](),
 		triggerChan:        make(chan struct{}, 1),
 		rkLockerMu:         sync.Mutex{},
 		rkLocker:           newResourceKeyLocker(),
@@ -35,10 +37,13 @@ type ackCallbackScheduler struct {
 	mlog.Binder
 
 	notifier           *syncutil.AsyncTaskNotifier[struct{}]
-	pending            chan *broadcastTask
 	triggerChan        chan struct{}
 	tombstoneScheduler *tombstoneScheduler
-	pendingAckedTasks  []*broadcastTask // should already sorted by the broadcastID
+	// Only enqueue and queue exchange hold pendingMu; task inspection and
+	// resource-key scheduling run after releasing it.
+	pendingMu         sync.Mutex
+	pending           *typeutil.MultipartQueue[*broadcastTask]
+	pendingAckedTasks []*broadcastTask // should already sorted by the broadcastID
 	// For the task that hold the conflicted resource-key (which is protected by the resource-key lock),
 	// broadcastID is always increasing,
 	// the task which broadcastID is smaller happens before the task which broadcastID is larger.
@@ -81,10 +86,22 @@ func (s *ackCallbackScheduler) Initialize(tasks []*broadcastTask, tombstoneIDs [
 
 // AddTask adds a new broadcast task into the ack scheduler.
 func (s *ackCallbackScheduler) AddTask(task *broadcastTask) {
-	select {
-	case <-s.notifier.Context().Done():
+	s.pendingMu.Lock()
+	if s.notifier.Context().Err() != nil {
+		s.pendingMu.Unlock()
 		panic("unreachable: ack scheduler is closing when adding new task")
-	case s.pending <- task:
+	}
+	s.pending.AddOne(task)
+	s.pendingMu.Unlock()
+	s.notify()
+}
+
+// notify coalesces wakeups: the loop drains pending tasks and retries blocked
+// callbacks before waiting again, so one outstanding notification is enough.
+func (s *ackCallbackScheduler) notify() {
+	select {
+	case s.triggerChan <- struct{}{}:
+	default:
 	}
 }
 
@@ -122,22 +139,23 @@ func (s *ackCallbackScheduler) background() {
 		select {
 		case <-s.notifier.Context().Done():
 			return
-		case task := <-s.pending:
-			s.addBroadcastTask(task)
 		case <-s.triggerChan:
 		case <-triggerTicker:
 		}
 	}
 }
 
-// addBroadcastTask adds a broadcast task into the pending acked tasks.
-func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
-	s.pendingAckedTasks = append(s.pendingAckedTasks, task)
-	return nil
-}
-
 // triggerAckCallback triggers the ack callback.
 func (s *ackCallbackScheduler) triggerAckCallback() {
+	s.pendingMu.Lock()
+	pending := s.pending
+	s.pending = typeutil.NewMultipartQueue[*broadcastTask]()
+	s.pendingMu.Unlock()
+	for pending.Len() > 0 {
+		s.pendingAckedTasks = append(s.pendingAckedTasks, pending.Next())
+		pending.UnsafeAdvance()
+	}
+
 	s.rkLockerMu.Lock()
 	defer s.rkLockerMu.Unlock()
 
@@ -153,7 +171,6 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.FieldBroadcastID(task.Header().BroadcastID), mlog.Err(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -162,6 +179,13 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
+	if len(pendingTasks) > 0 {
+		// Blocked tasks are retried on every wakeup: log a rate-limited summary,
+		// not one line per task.
+		s.Logger().RatedWarn(s.notifier.Context(), rate.Every(time.Second), "lock is occupied, delay the ack callbacks",
+			mlog.Int("blockedTaskCount", len(pendingTasks)),
+			mlog.Uint64("firstBlockedBroadcastID", pendingTasks[0].Header().BroadcastID))
+	}
 }
 
 // doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:
@@ -252,7 +276,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 		g.Unlock()
 		s.rkLockerMu.Unlock()
 
-		s.triggerChan <- struct{}{}
+		s.notify()
 		if err == nil {
 			logger.Info(context.TODO(), "execute ack callback done")
 		} else {

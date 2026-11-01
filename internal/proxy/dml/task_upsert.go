@@ -33,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -43,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -61,16 +58,13 @@ type UpsertTask struct {
 
 	ctx context.Context
 
-	timestamps        []uint64
-	rowIDs            []int64
-	result            *milvuspb.MutationResult
-	idAllocator       *allocator.IDAllocator
-	collectionName    string
-	collectionID      UniqueID
-	chMgr             channelmgr.ChannelsMgr
-	rlsEnabled        bool
-	rlsUsingPredicate *planpb.Expr
-	rlsCheckPredicate *planpb.Expr
+	timestamps     []uint64
+	rowIDs         []int64
+	result         *milvuspb.MutationResult
+	idAllocator    *allocator.IDAllocator
+	collectionName string
+	collectionID   UniqueID
+	chMgr          channelmgr.ChannelsMgr
 
 	vChannels        []vChan
 	pChannels        []pChan
@@ -191,23 +185,6 @@ func (it *UpsertTask) refreshMutationResultCounts() {
 	it.result.UpsertCnt = it.result.InsertCnt
 }
 
-func (it *UpsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-
-	channels := it.GetChannels()
-
-	beginTs := it.BeginTs()
-	endTs := it.EndTs()
-
-	for _, channel := range channels {
-		ret[channel] = pChanStatistics{
-			MinTs: beginTs,
-			MaxTs: endTs,
-		}
-	}
-	return ret, nil
-}
-
 func (it *UpsertTask) SetChannels() error {
 	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
@@ -300,8 +277,9 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
 	qt.SetActualChannelsMvcc(channelReadTs)
-	qt.SetSkipRuntimeRLS(true)
-	qt.SetPreserveRawFields(t.rlsEnabled && t.rlsUsingPredicate != nil)
+	// The user issued an upsert, not a query: this retrieval reads the rows
+	// the upsert replaces and must not move the query feature counters.
+	qt.MarkInternal()
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
@@ -323,14 +301,9 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 }
 
 // prepareUpsert prepares function outputs and shares read-based preparation
-// between Full AutoID, RLS-enabled Full, and Partial Upsert. Only Partial
+// between Full AutoID and Partial Upsert. Only Partial
 // restores retry state, merges old fields, and prepares CAS proofs.
 func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
-	if it.rlsEnabled {
-		if err := rlsutil.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
-			return err
-		}
-	}
 	partialUpdate := it.req.GetPartialUpdate()
 	fullAutoID := false
 	if partialUpdate {
@@ -358,15 +331,13 @@ func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
 			return err
 		}
 		fullAutoID = primaryField.GetAutoID()
-		if !fullAutoID && !it.rlsEnabled {
+		if !fullAutoID {
 			return genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, false)
 		}
-		if fullAutoID {
-			// Validate lookup PKs before querying; complete-payload validation stays
-			// in insertPreExecute, without inheriting omitted fields from old rows.
-			if _, err := checkUpsertPrimaryFieldData(it.schema, it.upsertMsg.InsertMsg.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
-				return err
-			}
+		// Validate lookup PKs before querying; complete-payload validation stays
+		// in insertPreExecute, without inheriting omitted fields from old rows.
+		if _, err := checkUpsertPrimaryFieldData(it.schema, it.upsertMsg.InsertMsg.GetFieldsData(), it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
+			return err
 		}
 	}
 	missingRows, err := it.queryPreExecute(ctx)
@@ -408,8 +379,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 
 	requestFields := it.req.GetFieldsData()
 	if !partialUpdate {
-		// Full uses the working insert payload. Function outputs are generated only
-		// after any existing-row USING authorization below.
+		// Full uses the working insert payload.
 		requestFields = it.upsertMsg.InsertMsg.GetFieldsData()
 	}
 	primaryFieldData, err := typeutil.GetPrimaryFieldData(requestFields, primaryFieldSchema)
@@ -439,24 +409,10 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		return nil, nil
 	}
 
-	usingExpr := it.rlsUsingPredicate
-	if it.rlsEnabled && !partialUpdate {
-		if usingExpr == nil && !primaryFieldSchema.GetAutoID() {
-			// An always-true USING predicate needs neither row classification nor
-			// old row data, so retain the normal full-upsert delete-and-insert path.
-			if err := generateFunctions(); err != nil {
-				return nil, err
-			}
-			it.deletePKs = upsertIDs
-			it.insertFieldData = it.upsertMsg.InsertMsg.GetFieldsData()
-			return nil, nil
-		}
-	}
-
 	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
-	outputFields, err := upsertRetrieveOutputFields(it.schema.SchemaHelper, primaryFieldSchema, usingExpr, partialUpdate)
-	if err != nil {
-		return nil, err
+	outputFields := []string{primaryFieldSchema.GetName()}
+	if partialUpdate {
+		outputFields = []string{"*"}
 	}
 	resp, storageCost, err := retrieveByPKs(ctx, it, upsertIDs, outputFields)
 	if err != nil {
@@ -509,25 +465,6 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		return nil, err
 	}
 	existRowNum := typeutil.GetSizeOfIDs(existIDs)
-	if existRowNum > 0 && it.rlsEnabled {
-		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
-			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
-			return nil, err
-		}
-		if it.partitionKeyMode && usingExpr != nil {
-			// Query reduction keeps one row per PK, while partition-key upsert
-			// deletes that PK from every physical partition. Until internal
-			// retrieval preserves every (partition, PK) copy, a non-trivial USING
-			// predicate cannot authorize all rows that the delete will affect.
-			return nil, merr.WrapErrOperationNotSupportedMsg(
-				"RLS upsert with a USING predicate is not supported for partition-key collections")
-		}
-		if partialUpdate && usingExpr != nil {
-			if err := dql.FormatTimestamptzFields(existFieldData, it.schema.SchemaHelper.GetTimezone()); err != nil {
-				return nil, err
-			}
-		}
-	}
 	if err := generateFunctions(); err != nil {
 		return nil, err
 	}
@@ -597,14 +534,33 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 					}
 					subFieldSchema := findStructChildSchema(structSchema, subField.GetFieldName())
 					if subFieldSchema == nil {
-						return nil, merr.WrapErrParameterInvalidMsg("child %q not found in struct field %q", subField.GetFieldName(), fieldName)
+						return nil, merr.WrapErrParameterInvalidMsg("sub-field %q does not exist in struct field %q", subField.GetFieldName(), fieldName)
 					}
 					subField.FieldId = subFieldSchema.GetFieldID()
 				}
 				continue
 			}
+			if fieldData.GetStructArrays() != nil {
+				if err := fillOmittedStructSubFields(structSchema, fieldData.GetStructArrays(), upsertIDSize); err != nil {
+					return nil, err
+				}
+			}
 			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return nil, err
+			}
+			if !structFieldHasPayload(fieldData.GetStructArrays()) {
+				if !structSchema.GetNullable() {
+					return nil, merr.WrapErrParameterInvalidMsg("struct field %q has no payload", fieldName)
+				}
+				// Every row is null. GenNullableStructArrayFieldData already
+				// builds the full format the fill below would produce.
+				nullStruct, err := GenNullableStructArrayFieldData(structSchema, upsertIDSize)
+				if err != nil {
+					log.Info(ctx, "generate nullable struct field data failed", mlog.Err(err))
+					return nil, err
+				}
+				fieldData.Field = nullStruct.Field
+				continue
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
@@ -647,6 +603,14 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				validData[i] = true
 			}
 			typeutil.SetFieldDataValidData(fieldData, validData)
+		}
+
+		// An omitted vector validity bitmap means every supplied row is valid.
+		// Materialize it before merge, which indexes logical rows and appends
+		// validity separately from the compact vector payload.
+		if fieldSchema.GetNullable() && typeutil.IsSupportedNullableVectorType(fieldSchema.GetDataType()) &&
+			len(typeutil.GetFieldDataValidData(fieldData)) == 0 {
+			typeutil.SetFieldDataValidData(fieldData, lo.RepeatBy(upsertIDSize, func(int) bool { return true }))
 		}
 
 		// compatible with different nullable/default_value data format from sdk
@@ -790,13 +754,19 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				return nil, merr.WrapErrServiceInternalMsg("PATH_REPLACE operand field %q disappeared after validation", existField.GetFieldName())
 			}
 
-			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
+			if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()); structSchema != nil {
 				if upsertField != nil {
 					if plan.isPathReplace() {
-						if err := validateExistingStructPathRows(existField, plan, existIndices); err != nil {
+						// The sub-fields and elements the path does not replace keep
+						// their old values, which must re-enter in insert layout.
+						keptField, err := compactRetrievedStructField(structSchema, existField)
+						if err != nil {
 							return nil, err
 						}
-						typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+						if err := validateExistingStructPathRows(keptField, plan, existIndices); err != nil {
+							return nil, err
+						}
+						typeutil.AppendFieldDataByColumn(dstField, keptField, existIndices)
 						dstIndices := make([]int64, len(updateIdxInUpsert))
 						for i := range dstIndices {
 							dstIndices[i] = int64(i)
@@ -810,7 +780,13 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 						typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 					}
 				} else {
-					typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+					// An omitted struct keeps its old value. Query returns it in
+					// read layout, and the merged rows are validated as insert input.
+					keptField, err := compactRetrievedStructField(structSchema, existField)
+					if err != nil {
+						return nil, err
+					}
+					typeutil.AppendFieldDataByColumn(dstField, keptField, existIndices)
 				}
 				continue
 			}
@@ -935,7 +911,12 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				continue
 			}
 			if structSchema.GetNullable() {
-				insertFieldsToAppend = append(insertFieldsToAppend, GenNullableStructArrayFieldData(structSchema, upsertIDSize))
+				fieldData, err := GenNullableStructArrayFieldData(structSchema, upsertIDSize)
+				if err != nil {
+					log.Info(ctx, "generate nullable struct field data failed", mlog.Err(err))
+					return nil, err
+				}
+				insertFieldsToAppend = append(insertFieldsToAppend, fieldData)
 			}
 		}
 
@@ -1048,29 +1029,6 @@ func (it *UpsertTask) allocateMissingAutoIDs(missingRows []int) (*schemapb.IDs, 
 		it.partialUpdateResultIDs = rewrittenIDs
 	}
 	return rewrittenIDs, nil
-}
-
-func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryField *schemapb.FieldSchema, usingExpr *planpb.Expr, partialUpdate bool) ([]string, error) {
-	if partialUpdate {
-		return []string{"*"}, nil
-	}
-	if schemaHelper == nil || primaryField == nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to resolve upsert retrieve fields without schema metadata")
-	}
-	outputFields := []string{primaryField.GetName()}
-	seen := map[int64]struct{}{primaryField.GetFieldID(): {}}
-	for _, fieldID := range rlsutil.ReferencedFieldIDs(usingExpr) {
-		if _, ok := seen[fieldID]; ok {
-			continue
-		}
-		field, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			return nil, merr.Wrapf(err, "failed to resolve RLS upsert field %d", fieldID)
-		}
-		seen[fieldID] = struct{}{}
-		outputFields = append(outputFields, field.GetName())
-	}
-	return outputFields, nil
 }
 
 // ToCompressedFormatNullable converts nullable field data from full format to compressed format.
@@ -1344,7 +1302,9 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 			},
 		}), nil
 
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_VarChar, schemapb.DataType_Timestamptz:
+		// Partial upsert merges query-result strings before insert validation
+		// converts Timestamptz values to their internal int64 representation.
 		return withValidData(&schemapb.FieldData{
 			FieldId:   field.FieldID,
 			FieldName: field.Name,
@@ -1390,23 +1350,6 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 						ArrayData: &schemapb.ArrayArray{
 							Data:        make([]*schemapb.ScalarField, upsertIDSize),
 							ElementType: field.GetElementType(),
-						},
-					},
-				},
-			},
-		}), nil
-
-	case schemapb.DataType_Timestamptz:
-		return withValidData(&schemapb.FieldData{
-			FieldId:   field.FieldID,
-			FieldName: field.Name,
-			Type:      field.DataType,
-			IsDynamic: field.IsDynamic,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_TimestamptzData{
-						TimestamptzData: &schemapb.TimestamptzArray{
-							Data: make([]int64, upsertIDSize),
 						},
 					},
 				},
@@ -1536,7 +1479,13 @@ func GenNullableFieldData(field *schemapb.FieldSchema, upsertIDSize int) (*schem
 	}
 }
 
-func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchema, rowCount int) *schemapb.FieldData {
+// GenNullableStructArrayFieldData builds a null struct for every upsert row in
+// the full format the partial-update merge uses: each sub-field has one
+// placeholder payload row per logical row, like the queried existing rows and
+// the request structs expanded by FillWithNullValue. Rows from these sources
+// are merged into one column, so they must share the layout;
+// ToCompressedFormatNullableStructField drops the placeholders afterwards.
+func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchema, rowCount int) (*schemapb.FieldData, error) {
 	fields := make([]*schemapb.FieldData, 0, len(structField.GetFields()))
 	for _, subField := range structField.GetFields() {
 		fieldName := subField.GetName()
@@ -1550,19 +1499,52 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 			FieldId:   subField.GetFieldID(),
 			Type:      subField.GetDataType(),
 		}
+		switch subField.GetDataType() {
+		case schemapb.DataType_Array:
+			fieldData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							Data:        make([]*schemapb.ScalarField, rowCount),
+							ElementType: subField.GetElementType(),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_ArrayOfVector:
+			dim, err := typeutil.GetDim(subField)
+			if err != nil {
+				return nil, merr.Wrapf(err, "struct sub-field %q", subField.GetName())
+			}
+			emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, subField.GetElementType())
+			if err != nil {
+				return nil, merr.Wrapf(err, "struct sub-field %q", subField.GetName())
+			}
+			// Every row is null and is dropped by the compaction after the
+			// merge, so the rows can share one placeholder.
+			rows := make([]*schemapb.VectorField, rowCount)
+			for i := range rows {
+				rows[i] = emptyRow
+			}
+			fieldData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_VectorArray{
+						VectorArray: &schemapb.VectorArray{
+							Dim:         dim,
+							ElementType: subField.GetElementType(),
+							Data:        rows,
+						},
+					},
+				},
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("struct sub-field %q has unexpected type %s",
+				subField.GetName(), subField.GetDataType().String())
+		}
 		// The source field is indexed by original upsert row IDs before
 		// appending the insert subset, so ValidData uses the same row domain.
-		validData := make([]bool, rowCount)
-		if typeutil.IsVectorType(subField.GetDataType()) {
-			fieldData.Field = &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{},
-			}
-		} else {
-			fieldData.Field = &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{},
-			}
-		}
-		typeutil.SetFieldDataValidData(fieldData, validData)
+		typeutil.SetFieldDataValidData(fieldData, make([]bool, rowCount))
 		fields = append(fields, fieldData)
 	}
 	return &schemapb.FieldData{
@@ -1572,7 +1554,7 @@ func GenNullableStructArrayFieldData(structField *schemapb.StructArrayFieldSchem
 		Field: &schemapb.FieldData_StructArrays{
 			StructArrays: &schemapb.StructArrayField{Fields: fields},
 		},
-	}
+	}, nil
 }
 
 // ToCompressedFormatNullableStructField converts nullable struct sub-fields from full format to compressed format.
@@ -1623,8 +1605,8 @@ func ToCompressedFormatNullableStructField(fieldData *schemapb.FieldData) error 
 // validateWholeStructFieldDataForPartialUpdate validates only the logical
 // top-level struct payload used by partial-update whole struct REPLACE.
 // It checks:
-// 1. ArrayOfStruct wrapper and sub-field count/name/type.
-// 2. All-or-none sub-field payload presence and nullable struct null-mask consistency.
+// 1. ArrayOfStruct wrapper and supplied sub-field name/type.
+// 2. Supplied sub-field payload presence and nullable struct null-mask consistency.
 // 3. Payload row counts needed for safe row append.
 // It does not flatten struct data or merge sub-fields; final insert
 // pre-execute still runs checkAndFlattenStructFieldData before storage writes.
@@ -1636,11 +1618,6 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 	if structArrays == nil {
 		return merr.WrapErrParameterInvalidMsg("field %q expects non-nil StructArrays payload", fieldData.GetFieldName())
 	}
-	if len(structArrays.GetFields()) != len(structSchema.GetFields()) {
-		return merr.WrapErrParameterInvalidMsg("length of fields of struct field mismatch length of the fields in schema, fieldName: %s, fieldData fields length:%d, schema fields length:%d",
-			fieldData.GetFieldName(), len(structArrays.GetFields()), len(structSchema.GetFields()))
-	}
-
 	seenSubFieldIDs := make(map[int64]struct{}, len(structArrays.GetFields()))
 	for _, subField := range structArrays.GetFields() {
 		if !typeutil.ValidateAndNormalizeFieldDataValidData(subField) {
@@ -1673,9 +1650,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			hasDataCount++
 		}
 	}
-	// All sub-fields must be either present together or absent together.
-	// A partial payload would mean partial struct replace, which is not
-	// supported by this path.
+	// An all-null struct has no element counts to copy from a sibling.
 	if hasDataCount == 0 {
 		for _, subField := range structArrays.GetFields() {
 			validData := typeutil.GetFieldDataValidData(subField)
@@ -1914,7 +1889,25 @@ func (it *UpsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
+	validateOpts := []fieldvalidator.ValidateOption{fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()}
+	if it.req.GetPartialUpdate() {
+		// The merge filled the fields the request omits from the stored rows.
+		// A request may name the dynamic field "" (REST does); it is $meta here.
+		requested := typeutil.NewSet(lo.Map(it.partialUpdateOriginalFields, func(f *schemapb.FieldData, _ int) string {
+			if f.GetIsDynamic() {
+				return common.MetaFieldName
+			}
+			return f.GetFieldName()
+		})...)
+		var stored []string
+		for _, f := range it.upsertMsg.InsertMsg.GetFieldsData() {
+			if !requested.Contain(f.GetFieldName()) {
+				stored = append(stored, f.GetFieldName())
+			}
+		}
+		validateOpts = append(validateOpts, fieldvalidator.WithStoredFields(stored...))
+	}
+	if err := fieldvalidator.NewValidateUtil(validateOpts...).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
@@ -1924,14 +1917,6 @@ func (it *UpsertTask) insertPreExecute(ctx context.Context) error {
 
 	if err := checkMaxInsertSize(ctx, "upsert", it.upsertMsg.InsertMsg.Size()); err != nil {
 		return err
-	}
-
-	if it.rlsEnabled {
-		if err := rlsutil.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
-			it.rlsCheckPredicate, "upsert", "check"); err != nil {
-			log.Warn(ctx, "RLS check expression validation failed for upsert", mlog.Err(err))
-			return err
-		}
 	}
 
 	log.Debug(ctx, "Proxy Upsert insertPreExecute done")
@@ -2019,20 +2004,9 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionName = colInfo.Schema.GetName()
-	it.rlsEnabled = colInfo.RlsEnabled
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
-	}
-	if it.rlsEnabled && it.req.GetSkipRls() {
-		it.rlsEnabled, err = it.node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), it.rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "upsert")
-		if err != nil {
-			return err
-		}
-	}
-	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
-		return err
 	}
 
 	if it.schemaTimestamp != 0 {
@@ -2065,6 +2039,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
 		it.req.PartialUpdate = true
 	}
+	recordUpsertFeatures(it.req)
 
 	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(schema.CollectionSchema, it.req.Namespace, it.req.GetPartitionName())
 	if err != nil {
@@ -2143,17 +2118,6 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	// check if num_rows is valid
 	if it.req.NumRows <= 0 {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
-	}
-
-	it.rlsUsingPredicate = nil
-	it.rlsCheckPredicate = nil
-	if it.rlsEnabled {
-		it.rlsUsingPredicate, it.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
-			ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.SchemaHelper,
-		)
-		if err != nil {
-			return err
-		}
 	}
 
 	if it.req.GetPartialUpdate() {

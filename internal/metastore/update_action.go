@@ -254,9 +254,10 @@ func AlterSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg, AlterEncoding: true}}
 }
 
-// MarkChannelDropped returns an UpdateAction that marks channel as removed.
-func MarkChannelDropped(channel string) UpdateAction {
-	return UpdateAction{Type: ActionUpdate, Entry: ChannelEntry{Channel: channel}}
+// DropChannelFlag returns an UpdateAction that deletes the removal flag of a
+// dropped channel.
+func DropChannelFlag(channel string) UpdateAction {
+	return UpdateAction{Type: ActionDelete, Entry: ChannelEntry{Channel: channel}}
 }
 
 // SaveDataView returns an UpdateAction that persists a DataView snapshot under

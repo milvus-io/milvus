@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -297,6 +298,103 @@ func (s *PackedBinlogRecordSuite) TestManifestReadFillsAbsentDefaultField() {
 	s.Equal(10, total)
 }
 
+func (s *PackedBinlogRecordSuite) TestManifestReadBackfillsStructChildFromParquetSibling() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	config := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	const (
+		pkID     = int64(100)
+		oldChild = int64(201)
+		newChild = int64(202)
+		structID = int64(200)
+	)
+	source := &schemapb.CollectionSchema{
+		Name: "struct_child_parquet_backfill",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: pkID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: structID, Name: "s", Nullable: true,
+			Fields: []*schemapb.FieldSchema{{
+				FieldID: oldChild, Name: "s[old]", DataType: schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64, Nullable: true,
+			}},
+		}},
+	}
+	values := make([]*Value, 0, 3)
+	for _, pk := range []int64{1, 2, 3} {
+		var child any
+		switch pk {
+		case 1:
+			child = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7, 8}}}}
+		case 3:
+			child = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}}
+		}
+		values = append(values, &Value{Value: map[FieldID]any{
+			common.RowIDField: pk + 10, common.TimeStampField: int64(1000), pkID: pk, oldChild: child,
+		}})
+	}
+	record, err := ValueSerializer(values, source)
+	s.Require().NoError(err)
+	defer record.Release()
+	original := &schemapb.ScalarField{}
+	s.Require().NoError(proto.Unmarshal(record.Column(oldChild).(*array.Binary).Value(0), original))
+	s.Require().Equal([]int64{7, 8}, original.GetLongData().GetData())
+	writer, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID,
+		source, allocator.NewLocalAllocator(1000, math.MaxInt64), s.chunkSize, int64(len(values)),
+		WithVersion(StorageV3), WithStorageConfig(config), WithWriterFormat("parquet"))
+	s.Require().NoError(err)
+	s.Require().NoError(writer.Write(record))
+	s.Require().NoError(writer.Close())
+	_, _, _, manifest, _ := writer.GetLogs()
+	s.Require().NotEmpty(manifest)
+	present, err := packed.GetManifestFieldIDs(manifest, config)
+	s.Require().NoError(err)
+	s.Contains(present, oldChild)
+	s.NotContains(present, newChild)
+	physicalReader, err := NewManifestRecordReader(s.ctx, manifest, source, WithVersion(StorageV3), WithStorageConfig(config))
+	s.Require().NoError(err)
+	physical, err := physicalReader.Next()
+	s.Require().NoError(err)
+	s.Require().True(physical.Column(oldChild).IsNull(1))
+	stored := &schemapb.ScalarField{}
+	s.Require().NoError(proto.Unmarshal(physical.Column(oldChild).(*array.Binary).Value(0), stored))
+	s.Require().Equal([]int64{7, 8}, stored.GetLongData().GetData())
+	s.Require().NoError(physicalReader.Close())
+
+	target := typeutil.Clone(source)
+	target.StructArrayFields[0].Fields = append(target.StructArrayFields[0].Fields, &schemapb.FieldSchema{
+		FieldID: newChild, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+	})
+	reader, err := NewManifestRecordReader(s.ctx, manifest, target, WithVersion(StorageV3), WithStorageConfig(config))
+	s.Require().NoError(err)
+	defer reader.Close()
+	read, err := reader.Next()
+	s.Require().NoError(err)
+	s.Require().Equal(3, read.Len())
+	backfilled := read.Column(newChild).(*array.List)
+	s.Require().Equal(1, backfilled.NullN())
+	for i, want := range []int64{2, 0, 0} {
+		start, end := backfilled.ValueOffsets(i)
+		s.Equal(want, end-start)
+	}
+	s.True(backfilled.IsNull(1))
+	s.False(backfilled.IsNull(2))
+	s.Require().Equal(2, backfilled.ListValues().Len())
+	s.True(backfilled.ListValues().IsNull(0))
+	s.True(backfilled.ListValues().IsNull(1))
+	_, err = reader.Next()
+	s.ErrorIs(err, io.EOF)
+}
+
 // writeV2Segment writes a 10-row StorageV2 packed segment and returns its
 // FieldBinlogs (which the V2 writer populates with ChildFields).
 func (s *PackedBinlogRecordSuite) writeV2Segment(storageConfig *indexpb.StorageConfig, columnGroups []storagecommon.ColumnGroup) []*datapb.FieldBinlog {
@@ -378,11 +476,11 @@ func (s *PackedBinlogRecordSuite) TestBinlogReadFillsAbsentDefaultFieldV2() {
 	s.Equal(10, total)
 }
 
-// TestBinlogReadNoChildFieldsFallsBackUnfiltered pins the import-restore safety net:
-// binlogs without ChildFields (FieldID keyed by column-group ID, the shape import
-// reconstructs) are not filterable, so the reader passes the full schema through
-// unchanged — no PK strip / no crash — instead of default-filling.
-func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsFallsBackUnfiltered() {
+// TestBinlogReadNoChildFieldsReadsFooterFieldIDs covers packed binlogs without
+// ChildFields (written by 2.6.0/2.6.1, or rebuilt by import, with FieldID keyed
+// by column group): the stored fields come from the file footers, so an added
+// field is filled with its default like with ChildFields.
+func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsReadsFooterFieldIDs() {
 	dir := s.T().TempDir()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
@@ -400,14 +498,22 @@ func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsFallsBackUnfiltered
 		{GroupID: 106, Columns: []int{17}, Fields: []int64{106}},
 	}
 	binlogs := s.writeV2Segment(storageConfig, columnGroups)
-	for _, fb := range binlogs { // simulate import-reconstructed binlogs: drop ChildFields
+	want := make(map[FieldID]struct{})
+	for _, fb := range binlogs { // simulate 2.6.0/2.6.1 binlogs: no ChildFields
+		for _, id := range fb.ChildFields {
+			want[id] = struct{}{}
+		}
 		fb.ChildFields = nil
 	}
 
 	const absentFieldID = int64(200)
 	readSchema := newAbsentDefaultReadSchema(s.schema, absentFieldID)
+	present, err := PackedBinlogPresentFields(s.ctx, binlogs, readSchema, WithStorageConfig(storageConfig))
+	s.Require().NoError(err)
+	s.Equal(want, present)
+
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, readSchema, WithVersion(StorageV2), WithStorageConfig(storageConfig))
-	s.NoError(err) // must not strip the PK / fail — regression guard for the import break
+	s.Require().NoError(err)
 	defer r.Close()
 	total := 0
 	for {
@@ -415,13 +521,198 @@ func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsFallsBackUnfiltered
 		if err == io.EOF {
 			break
 		}
-		s.NoError(err)
+		s.Require().NoError(err)
 		added := rec.Column(absentFieldID).(*array.Int64)
-		s.Equal(added.Len(), added.NullN(), "no-ChildFields fallback must not default-fill")
+		s.Equal(0, added.NullN(), "absent default field must not be null")
+		for j := 0; j < added.Len(); j++ {
+			s.Equal(int64(7), added.Value(j))
+		}
 		s.NotNil(rec.Column(int64(13))) // present column still reads back
 		total += rec.Len()
 	}
 	s.Equal(10, total)
+}
+
+const (
+	legacyStructPK       = int64(100)
+	legacyStructID       = int64(200)
+	legacyStructOldChild = int64(201)
+	legacyStructNewChild = int64(202)
+)
+
+func legacyStructSchemas() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+	source := &schemapb.CollectionSchema{
+		Name: "legacy_struct_child",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: legacyStructPK, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: legacyStructID, Name: "s", Nullable: true,
+			Fields: []*schemapb.FieldSchema{{
+				FieldID: legacyStructOldChild, Name: "s[old]", DataType: schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64, Nullable: true,
+			}},
+		}},
+	}
+	target := typeutil.Clone(source)
+	target.StructArrayFields[0].Fields = append(target.StructArrayFields[0].Fields, &schemapb.FieldSchema{
+		FieldID: legacyStructNewChild, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+	})
+	return source, target
+}
+
+// writeLegacyStructV2Segment writes a StorageV2 packed segment of the source
+// schema with every column in column group 0 and drops ChildFields, the shape
+// of a segment flushed by 2.6.0/2.6.1. pk 1 has two elements, pk 2 is a null
+// struct row, pk 3 has none; pks may repeat to produce several files.
+func (s *PackedBinlogRecordSuite) writeLegacyStructV2Segment(config *indexpb.StorageConfig, schema *schemapb.CollectionSchema, batches [][]int64) []*datapb.FieldBinlog {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	group := storagecommon.ColumnGroup{GroupID: 0}
+	for i, field := range allFields {
+		group.Columns = append(group.Columns, i)
+		group.Fields = append(group.Fields, field.GetFieldID())
+	}
+	var merged []*datapb.FieldBinlog
+	for batchIdx, pks := range batches {
+		values := make([]*Value, 0, len(pks))
+		for _, pk := range pks {
+			row := map[FieldID]any{common.RowIDField: pk + 10, common.TimeStampField: int64(1000), legacyStructPK: pk}
+			longs := func(data ...int64) *schemapb.ScalarField {
+				return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}}}
+			}
+			hasNew := typeutil.GetField(schema, legacyStructNewChild) != nil
+			// A null struct row is a nil value in every sub-field.
+			row[legacyStructOldChild] = nil
+			if hasNew {
+				row[legacyStructNewChild] = nil
+			}
+			switch pk {
+			case 1:
+				row[legacyStructOldChild] = longs(7, 8)
+				if hasNew {
+					row[legacyStructNewChild] = longs(1, 2)
+				}
+			case 3:
+				row[legacyStructOldChild] = longs()
+				if hasNew {
+					row[legacyStructNewChild] = longs()
+				}
+			}
+			values = append(values, &Value{Value: row})
+		}
+		record, err := ValueSerializer(values, schema)
+		s.Require().NoError(err)
+		w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID+int64(batchIdx), schema,
+			s.logIDAlloc, s.chunkSize, int64(len(values)),
+			WithVersion(StorageV2), WithColumnGroups([]storagecommon.ColumnGroup{group}), WithStorageConfig(config),
+			WithUploader(func(ctx context.Context, kvs map[string][]byte) error { return nil }))
+		s.Require().NoError(err)
+		s.Require().NoError(w.Write(record))
+		record.Release()
+		s.Require().NoError(w.Close())
+		fieldBinlogs, _, _, _, _ := w.GetLogs()
+		s.Require().Len(fieldBinlogs, 1)
+		for _, fb := range fieldBinlogs {
+			fb.ChildFields = nil
+			if merged == nil {
+				merged = []*datapb.FieldBinlog{fb}
+			} else {
+				merged[0].Binlogs = append(merged[0].Binlogs, fb.GetBinlogs()...)
+			}
+		}
+	}
+	return merged
+}
+
+// TestBinlogReadNoChildFieldsBackfillsAddedStructChild is the 2.6.0/2.6.1
+// upgrade case: a packed segment without ChildFields read with a schema that
+// added an element-nullable sub-field gives N null elements per row taken
+// from the stored sibling, and keeps a null struct row null.
+func (s *PackedBinlogRecordSuite) TestBinlogReadNoChildFieldsBackfillsAddedStructChild() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	config := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	source, target := legacyStructSchemas()
+	// Two files in the column group, as after two syncs of one segment.
+	binlogs := s.writeLegacyStructV2Segment(config, source, [][]int64{{1, 2}, {3}})
+	s.Require().Len(binlogs[0].GetBinlogs(), 2)
+
+	present, err := PackedBinlogPresentFields(s.ctx, binlogs, target, WithStorageConfig(config))
+	s.Require().NoError(err)
+	s.Equal(map[FieldID]struct{}{common.RowIDField: {}, common.TimeStampField: {}, legacyStructPK: {}, legacyStructOldChild: {}}, present)
+
+	reader, err := NewBinlogRecordReader(s.ctx, binlogs, target, WithVersion(StorageV2), WithStorageConfig(config))
+	s.Require().NoError(err)
+	defer reader.Close()
+	wantCounts := map[int64]int{1: 2, 2: 0, 3: 0}
+	seen := 0
+	for {
+		rec, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		s.Require().NoError(err)
+		pks := rec.Column(legacyStructPK).(*array.Int64)
+		backfilled := rec.Column(legacyStructNewChild).(*array.List)
+		for i := 0; i < rec.Len(); i++ {
+			pk := pks.Value(i)
+			start, end := backfilled.ValueOffsets(i)
+			s.Equal(wantCounts[pk], int(end-start), "pk %d", pk)
+			s.Equal(pk == 2, backfilled.IsNull(i), "pk %d", pk)
+			for j := start; j < end; j++ {
+				s.True(backfilled.ListValues().IsNull(int(j)), "pk %d", pk)
+			}
+			seen++
+		}
+	}
+	s.Equal(3, seen)
+}
+
+// An element-nullable sub-field stored in only some files of its column group
+// cannot be read: the packed engine would null-fill the other files with null
+// rows instead of null elements.
+func (s *PackedBinlogRecordSuite) TestBinlogPresentFieldsRejectsPartiallyStoredElementNullableChild() {
+	dir := s.T().TempDir()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+	config := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+	source, target := legacyStructSchemas()
+	without := s.writeLegacyStructV2Segment(config, source, [][]int64{{1}})
+	with := s.writeLegacyStructV2Segment(config, target, [][]int64{{3}})
+	without[0].Binlogs = append(without[0].Binlogs, with[0].GetBinlogs()...)
+
+	_, err := PackedBinlogPresentFields(s.ctx, without, target, WithStorageConfig(config))
+	s.Require().ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "stored in 1 of 2 files")
+	_, err = NewBinlogRecordReader(s.ctx, without, target, WithVersion(StorageV2), WithStorageConfig(config))
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+}
+
+// A footer that cannot be read is a storage (system) failure that keeps the
+// C++ storage code, never an input error.
+func TestBinlogReadNoChildFieldsFooterReadErrorIsSystem(t *testing.T) {
+	_, schema := legacyStructSchemas()
+	dir := t.TempDir()
+	binlogs := []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: dir + "/missing/0/1"}}}}
+	reader, err := NewBinlogRecordReader(context.Background(), binlogs, schema,
+		WithVersion(StorageV2), WithStorageConfig(&indexpb.StorageConfig{StorageType: "local", RootPath: dir}))
+	require.Nil(t, reader)
+	require.Error(t, err)
+	require.ErrorIs(t, err, merr.ErrSegcore)
+	require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	require.ErrorContains(t, err, "read field ids from packed binlog footers of column group 0")
 }
 
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
@@ -1133,10 +1424,9 @@ func TestRwOptionValidate(t *testing.T) {
 	}
 }
 
-func TestFilterSchemaToPresentFieldsStructAllOrNothing(t *testing.T) {
-	// One ordinary field plus a struct array whose two children are the physical
-	// (first-level) columns of the struct. A struct array is added/dropped whole,
-	// so its children are physically all-or-nothing.
+func TestFilterSchemaToPresentFieldsPartialStruct(t *testing.T) {
+	// Each child is a separate physical column. A partial struct keeps the
+	// stored child so the missing child can inherit its per-row element count.
 	newSchema := func() *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -1165,9 +1455,12 @@ func TestFilterSchemaToPresentFieldsStructAllOrNothing(t *testing.T) {
 		require.Len(t, out.GetFields(), 1)
 	})
 
-	t.Run("struct partially present is a data-integrity error", func(t *testing.T) {
-		_, err := filterSchemaToPresentFields(newSchema(), map[FieldID]struct{}{100: {}, 201: {}})
-		require.Error(t, err)
+	t.Run("struct partially present keeps stored child", func(t *testing.T) {
+		out, err := filterSchemaToPresentFields(newSchema(), map[FieldID]struct{}{100: {}, 201: {}})
+		require.NoError(t, err)
+		require.Len(t, out.GetStructArrayFields(), 1)
+		require.Len(t, out.GetStructArrayFields()[0].GetFields(), 1)
+		require.Equal(t, int64(201), out.GetStructArrayFields()[0].GetFields()[0].GetFieldID())
 	})
 }
 

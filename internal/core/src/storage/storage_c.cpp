@@ -23,6 +23,7 @@
 
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
+#include "common/init_c.h"
 #include "monitor/scope_metric.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
@@ -104,6 +105,18 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
         }
         storage_config.use_crc32c_checksum =
             c_storage_config.use_crc32c_checksum;
+        storage_config.talon_mode = c_storage_config.talon_mode;
+        storage_config.talon_small_read_threshold =
+            c_storage_config.talon_small_read_threshold;
+        storage_config.talon_coordinator =
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "";
+        storage_config.talon_block_size = c_storage_config.talon_block_size;
+        storage_config.talon_max_idle_per_addr =
+            c_storage_config.talon_max_idle_per_addr;
+        storage_config.talon_enable_for_external_table =
+            c_storage_config.talon_enable_for_external_table;
         milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
             storage_config);
 
@@ -186,6 +199,29 @@ InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config) {
 }
 
 CStatus
+InitStorageRuntime(const int cpu_threads, const int io_threads) {
+    try {
+        if (cpu_threads <= 0 || io_threads <= 0) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "storage runtime thread counts must be positive");
+        }
+        const auto status = milvus_storage::ConfigureStorageRuntime(
+            static_cast<uint32_t>(cpu_threads),
+            static_cast<uint32_t>(io_threads));
+        if (!status.ok()) {
+            // Storage reports late/duplicate Tokio initialization as Invalid.
+            // With validated counts this is a runtime setup failure, not bad input.
+            return milvus::FailureCStatus(milvus::UnexpectedError,
+                                          status.ToString());
+        }
+        UpdateArrowIOThreadPoolMetrics();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
     try {
         if (c_arrow_reader_config.hole_size_limit_bytes < 0) {
@@ -217,6 +253,16 @@ SetExternalVectorPartialNullAsRowNull(bool enabled) {
 bool
 GetExternalVectorPartialNullAsRowNull() {
     return milvus::storage::GetExternalVectorPartialNullAsRowNull();
+}
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    return milvus::storage::SetExternalSparseConversionMemoryLimit(bytes);
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return milvus::storage::GetExternalSparseConversionMemoryLimit();
 }
 
 CStatus

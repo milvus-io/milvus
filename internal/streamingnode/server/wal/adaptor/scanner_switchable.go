@@ -222,8 +222,8 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 					return nil, ctx.Err()
 				case <-ready:
 				}
-			} else if msg.MessageType() != message.MessageTypeTimeTick {
-				// Ordinary catchup switches only at a TimeTick shared with the WAB.
+			} else if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier {
+				// Ordinary catchup switches at a sync confirmation shared with WAB.
 				continue
 			}
 			if s.writeAheadBuffer == nil {

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -448,9 +450,8 @@ struct ArithOpIndexFunc {
                                int64_t,
                                T>
         HighPrecisonType;
-    using Index = index::ScalarIndex<T>;
     TargetBitmap
-    operator()(Index* index,
+    operator()(const index::IScalarValueReader<T>* index,
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
@@ -471,7 +472,7 @@ struct ArithOpIndexFunc {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            auto raw = index->Reverse_Lookup(offset);
+            auto raw = index->Lookup(offset);
             if (!raw.has_value()) {
                 res[i] = false;
                 continue;
@@ -738,11 +739,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override {
-        SegmentExpr::DetermineExecPath();
-        if (exec_path_ != ExprExecPath::ScalarIndex) {
-            return;
-        }
-
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -755,36 +751,9 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
             return;
         }
 
-        // for basic types, need index raw data for arith evaluation
-        bool has_raw = false;
-        switch (data_type) {
-            case DataType::BOOL:
-                has_raw = IndexHasRawData<bool>();
-                break;
-            case DataType::INT8:
-                has_raw = IndexHasRawData<int8_t>();
-                break;
-            case DataType::INT16:
-                has_raw = IndexHasRawData<int16_t>();
-                break;
-            case DataType::INT32:
-                has_raw = IndexHasRawData<int32_t>();
-                break;
-            case DataType::INT64:
-                has_raw = IndexHasRawData<int64_t>();
-                break;
-            case DataType::FLOAT:
-                has_raw = IndexHasRawData<float>();
-                break;
-            case DataType::DOUBLE:
-                has_raw = IndexHasRawData<double>();
-                break;
-            default:
-                has_raw = false;
-        }
-        if (!has_raw) {
-            exec_path_ = ExprExecPath::RawData;
-        }
+        auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
+        req.value_type = data_type;
+        SelectAndPinIndex(req);
     }
 
     bool
@@ -853,11 +822,33 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecArrayLength(OffsetVector* input = nullptr);
 
+    // Row-level ARRAY length on a sealed ArrayChunk column: each chunk
+    // stores (offset, length) per row, so the predicate reads that table
+    // directly instead of building an ArrayView per row.
+    bool
+    UseArrayChunkLengths() const;
+
+    template <typename ValueType>
+    VectorPtr
+    ExecArrayLengthFromChunks(OffsetVector* input, int64_t real_batch_size);
+
+ public:
+    // The chunk-length path reads no element data and keeps no per-batch
+    // state beyond the data cursor, so it can run in one pass like an
+    // indexed expression; otherwise this one raw-data leaf would force the
+    // whole plan back to per-batch execution.
+    bool
+    CanExecuteAllAtOnce() const override {
+        return UseArrayChunkLengths() || SegmentExpr::CanExecuteAllAtOnce();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;
     SingleElement value_arg_;
     bool arg_inited_{false};
+    mutable std::optional<bool> use_array_chunk_lengths_;
+    std::shared_ptr<ChunkedColumnInterface> array_length_column_;
 };
 
 }  //namespace exec

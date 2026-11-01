@@ -1,6 +1,9 @@
 package snview
 
 import (
+	"context"
+
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -11,7 +14,8 @@ type AcquireResource struct {
 	Key qviews.QueryViewKey
 
 	// Meta carries the complete view metadata required by resource preparation.
-	Meta *viewpb.QueryViewMeta
+	Meta           *viewpb.QueryViewMeta
+	PartitionStats []*viewpb.ClusteredPartitionStats
 
 	// OnReady is called when resource preparation completes successfully.
 	// Must NOT be called synchronously during Acquire.
@@ -31,8 +35,8 @@ type ReleaseResource struct {
 	Key qviews.QueryViewKey
 
 	// OnDropped is called when the view-level release operation completes.
-	// Physical SN resources are reclaimed by DataVersion watermark updates,
-	// not by per-view reference counting.
+	// Growing-segment reclamation follows DataVersion watermarks; immutable
+	// partition-statistics resources use per-View reference counts.
 	// Must NOT be called synchronously during Release.
 	OnDropped func()
 }
@@ -41,11 +45,9 @@ type ReleaseResource struct {
 // Resources include growing segments, BM25 IDF statistics, and other
 // shard-level query state required to serve a query view.
 //
-// The resource lifecycle is reference based. AlterLoadConfig creates an
-// initialization reference. Acquire registers a QueryView reference and the
-// first successful QueryView reference removes the initialization reference.
-// Release removes the QueryView reference. Physical resources are closed only
-// after both the initialization reference and all QueryView references are gone.
+// Acquire registers a QueryView reference and starts resource preparation on
+// demand. Release removes the reference; resources close after the last view
+// releases them. Segment handles independently retain resources during queries.
 //
 // # Liveness Contracts
 //
@@ -64,10 +66,27 @@ type ReleaseResource struct {
 // All callbacks MUST be invoked asynchronously (not during the Acquire /
 // Release call itself) to avoid deadlocking the caller's mutex.
 type StreamingNodeResourceManager interface {
-	// Acquire registers a QueryView reference and waits for existing
-	// WAL-triggered resource preparation.
+	// Acquire registers a QueryView reference and prepares its resources.
 	Acquire(req AcquireResource)
 
 	// Release removes the QueryView reference held by a local state machine.
 	Release(req ReleaseResource)
+}
+
+type QueryRuntimeProvider interface {
+	QueryRuntime(key qviews.QueryViewKey) (QueryRuntime, bool)
+}
+
+type QueryRuntime interface {
+	ResolvePartitions(loadInfoVersion uint64, requested []int64) ([]int64, error)
+	WaitMVCCVisible(ctx context.Context, growingTimetick uint64, transformingTimetick uint64) error
+	AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]GrowingSegmentHandle, error)
+}
+
+type GrowingSegmentHandle interface {
+	ID() int64
+	PartitionID() int64
+	Collection() *segcore.CCollection
+	Segment() segcore.CSegment
+	Release()
 }

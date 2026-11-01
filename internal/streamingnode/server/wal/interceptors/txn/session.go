@@ -43,10 +43,12 @@ type TxnSession struct {
 	expired          bool                         // The flag indicates the transaction has trigger expired once.
 	txnContext       message.TxnContext           // transaction id of the session
 	inFlightCount    int                          // The message is in flight count of the session.
+	bodyCount        uint64                       // Successfully appended logical bodies, excluding backend retries.
 	state            message.TxnState             // The state of the session.
 	doneWait         chan struct{}                // The channel for waiting the transaction committed.
 	rollback         bool                         // The flag indicates the transaction is rollbacked.
 	cleanupCallbacks []func()                     // The cleanup callbacks function for the session.
+	hasNonInsert     bool                         // A successful body requires Transform consumption.
 	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
 }
 
@@ -79,18 +81,30 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 
 // AddNewMessageDoneAndKeepalive decreases the in flight count of the session and keepalive the session.
 // notify the committedWait channel if the in flight count is 0 and committed waited.
-func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64) {
+func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64, typ message.MessageType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if typ != message.MessageTypeInsert {
+		s.hasNonInsert = true
+	}
 
 	// make a refresh lease here.
 	if s.lastTimetick < timetick {
 		s.lastTimetick = timetick
 	}
 	s.inFlightCount--
+	s.bodyCount++
 	if s.doneWait != nil && s.inFlightCount == 0 {
 		close(s.doneWait)
 	}
+}
+
+// IsInsertOnly is stable after RequestCommitAndWait succeeds. Record successful
+// body types before releasing their in-flight slots, including recovered bodies.
+func (s *TxnSession) IsInsertOnly() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bodyCount > 0 && !s.hasNonInsert
 }
 
 // AddNewMessageFail decreases the in flight count of the session but not refresh the lease.
@@ -137,7 +151,7 @@ func (s *TxnSession) expiredTimeTick() uint64 {
 }
 
 // RequestCommitAndWait request commits the transaction and waits for the all messages sent.
-func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) error {
+func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64, bodyCnt uint64) error {
 	waitCh, err := s.getDoneChan(timetick, message.TxnStateOnCommit)
 	if err != nil {
 		return err
@@ -147,6 +161,15 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64) 
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-waitCh:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if bodyCnt != 0 && bodyCnt != s.bodyCount {
+			// No Commit has reached WAL. End this attempt and release references;
+			// the producer retries the entire transaction with a fresh TxnID.
+			s.state = message.TxnStateRollbacked
+			s.cleanup()
+			return status.NewTransactionExpired("txn %d body count mismatch: expected %d, appended %d", s.txnContext.TxnID, bodyCnt, s.bodyCount)
+		}
 		return nil
 	}
 }
@@ -224,6 +247,18 @@ func (s *TxnSession) Cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.cleanup()
+}
+
+// abort terminates a session under the exclusive WAL lock. Marking the outcome
+// lets LastConfirmedMessageID advance without waiting for the session's lease.
+func (s *TxnSession) abort() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.state != message.TxnStateCommitted {
+		s.state = message.TxnStateRollbacked
+	}
 	s.cleanup()
 }
 

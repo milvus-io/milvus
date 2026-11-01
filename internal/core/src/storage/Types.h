@@ -106,6 +106,8 @@ struct IndexMeta {
     milvus::proto::index::IndexStorePathVersion index_store_path_version{
         milvus::proto::index::IndexStorePathVersion::
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
+    // Complete segment-rooted artifact prefix from the coordinator or loader.
+    std::string index_file_prefix;
 };
 
 struct StorageConfig {
@@ -129,6 +131,12 @@ struct StorageConfig {
     uint32_t max_connections = 100;
     std::string tls_min_version = "";
     bool use_crc32c_checksum = false;
+    uint32_t talon_mode = 0;
+    uint32_t talon_small_read_threshold = 0;
+    std::string talon_coordinator = "";
+    uint32_t talon_block_size = 0;
+    uint32_t talon_max_idle_per_addr = 0;
+    bool talon_enable_for_external_table = false;
 
     std::string
     ToString() const {

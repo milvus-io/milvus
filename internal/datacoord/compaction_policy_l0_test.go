@@ -27,10 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestL0CompactionPolicySuite(t *testing.T) {
@@ -58,10 +58,8 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	setupStore := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(setupStore), metaStore: setupStore}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
@@ -69,7 +67,7 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, s.collection)
+	setupStore.PutCollection(s.collection)
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.l0Policy = newL0CompactionPolicy(meta, s.mockAlloc)
 }
@@ -130,6 +128,47 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	mlog.Info(context.TODO(), "cView", mlog.String("string", cView.String()))
 }
 
+func (s *L0CompactionPolicySuite) TestActiveCollectionWithoutL0() {
+	store := metacache.NewMetaStore(nil)
+	m := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	store.PutCollection(s.collection)
+	m.segments.SetSegment(1, genTestSegmentInfo(s.testLabel, 1, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed))
+	s.l0Policy.meta = m
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+	s.l0Policy.OnCollectionUpdate(s.collection.ID)
+	active := s.l0Policy.activeCollections.collections[s.collection.ID]
+
+	events, err := s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(events)
+	s.ElementsMatch([]int64{s.collection.ID}, s.l0Policy.activeCollections.GetActiveCollections())
+	s.EqualValues(1, active.readCount.Load())
+
+	// A newly eligible L0 keeps the active classification from the preceding pass.
+	segment := genTestSegmentInfo(s.testLabel, 2, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed)
+	segment.DmlPosition = &msgpb.MsgPosition{Timestamp: 1}
+	m.segments.SetSegment(2, segment)
+	events, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Len(events[TriggerTypeLevelZeroViewChange], 1)
+	s.Empty(events[TriggerTypeLevelZeroViewIDLE])
+
+	// An in-flight L0 leaves the L1-only collection participating in idle aging.
+	m.segments.SetIsCompacting(2, true)
+	active.lastRefresh = time.Now().Add(-4 * paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
+	events, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(events)
+	s.Empty(s.l0Policy.activeCollections.GetActiveCollections())
+
+	// When no eligible segment remains, the stale active entry is removed immediately.
+	s.l0Policy.OnCollectionUpdate(s.collection.ID)
+	m.segments.SetIsCompacting(1, true)
+	_, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(s.l0Policy.activeCollections.GetActiveCollections())
+}
+
 func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	segArgs := []struct {
 		ID   UniqueID
@@ -151,11 +190,9 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		info.DmlPosition = &msgpb.MsgPosition{Timestamp: arg.PosT}
 		segments[arg.ID] = info
 	}
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	meta.metaStore.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -241,14 +278,12 @@ func (s *L0CompactionPolicySuite) TestPositionFiltering() {
 		segments[arg.ID] = info
 	}
 
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	store.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -326,14 +361,12 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringWithNoGrowingSegments() {
 		segments[arg.ID] = info
 	}
 
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	store.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -390,14 +423,12 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringEdgeCase() {
 		segments[arg.ID] = info
 	}
 
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	store.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -553,14 +584,12 @@ func (s *L0CompactionPolicySuite) TestMultiChannelPositionFiltering() {
 		segments[arg.ID] = info
 	}
 
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(label1.CollectionID, &collectionInfo{
+	store.PutCollection(&collectionInfo{
 		ID:     label1.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -626,17 +655,15 @@ func (s *L0CompactionPolicySuite) TestGroupL0ViewsByPartChan() {
 		},
 	}
 
-	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for _, segView := range segments {
 		info := genTestSegmentInfo(segView.label, segView.ID, segView.Level, commonpb.SegmentState_Flushed)
 		info.DmlPosition = segView.dmlPos
 		info.Deltalogs = genTestBinlogs(1, 4*MB)
 		meta.segments.SetSegment(segView.ID, info)
 	}
-	meta.collections.Insert(label1.CollectionID, &collectionInfo{
+	store.PutCollection(&collectionInfo{
 		ID:     label1.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})

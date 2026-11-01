@@ -232,28 +232,38 @@ func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
 	}
 }
 
+// requestTimeout preserves the existing Request-Timeout header semantics for
+// both buffered and batched DQL responses.
+func requestTimeout(gCtx *gin.Context) (time.Duration, bool) {
+	timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+	requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+	if requestTimeout != "" {
+		timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
+		if err != nil {
+			HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
+				mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
+					"%s parse failed, err: %s",
+					mhttp.HTTPHeaderRequestTimeout,
+					err.Error(),
+				).Error(),
+			})
+			return 0, false
+		}
+		timeout = time.Duration(timeoutSecond) * time.Second
+	}
+	return timeout, true
+}
+
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	timeoutHandler := &Timeout{
 		handler: handler,
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
-		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
-		if requestTimeout != "" {
-			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
-			if err != nil {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
-					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
-					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
-						"%s parse failed, err: %s",
-						mhttp.HTTPHeaderRequestTimeout,
-						err.Error(),
-					).Error(),
-				})
-				return
-			}
-			timeout = time.Duration(timeoutSecond) * time.Second
+		timeout, ok := requestTimeout(gCtx)
+		if !ok {
+			return
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
 		defer cancel()

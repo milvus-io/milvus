@@ -20,15 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSingleCompactionPolicySuite(t *testing.T) {
@@ -55,11 +56,12 @@ func (s *SingleCompactionPolicySuite) SetupTest() {
 	}
 
 	segments := genSegmentsForMeta(s.testLabel)
-	meta := &meta{segments: NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	singleStore := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(singleStore), metaStore: singleStore}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	singleStore.PutCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -142,20 +144,9 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, true, false)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L2, 100, 10000, 1, true, false)
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
@@ -169,7 +160,7 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		State:        datapb.CompactionTaskState_executing,
 	})
 
-	views, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	views, _, _, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
 	s.Equal(2, len(views))
 }
@@ -188,20 +179,9 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 
 	segments := make(map[UniqueID]*SegmentInfo, 0)
 	segments[101] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 0, 10000, 201, false, true)
-	segments[102] = buildTestSegment(101, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
-	segments[103] = buildTestSegment(101, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L2, 500, 10000, 10, false, true)
+	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 100, 10000, 1, false, false)
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
@@ -216,9 +196,39 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 		Type:         datapb.CompactionType_SortCompaction,
 	})
 
-	_, sortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
+	_, invisibleSortViews, visibleSortViews, _, err := s.singlePolicy.triggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(3, len(sortViews))
+	s.Equal(3, len(invisibleSortViews)+len(visibleSortViews))
+}
+
+// TestTriggerSortsInvisibleSegmentsFirst checks that the sort sweep returns the
+// sorts of invisible segments, which a flush or a clustering compaction just
+// wrote, before the sorts of visible segments of any collection.
+func (s *SingleCompactionPolicySuite) TestTriggerSortsInvisibleSegmentsFirst() {
+	newSegment := func(id, collectionID int64, invisible bool) *SegmentInfo {
+		label := &CompactionGroupLabel{CollectionID: collectionID, PartitionID: 10, Channel: "ch-1"}
+		segment := genTestSegmentInfo(label, id, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+		segment.IsInvisible = invisible
+		return segment
+	}
+	store := metacache.NewMetaStore(nil)
+	meta := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	// Each collection has a visible and an invisible unsorted segment.
+	for _, segment := range []*SegmentInfo{newSegment(1, 100, false), newSegment(2, 100, true), newSegment(3, 200, false), newSegment(4, 200, true)} {
+		meta.segments.SetSegment(segment.GetID(), segment)
+	}
+	for _, collectionID := range []int64{100, 200} {
+		store.PutCollection(&collectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{}})
+	}
+	s.singlePolicy.meta = meta
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	sortedSegments := lo.Map(events[TriggerTypeSort], func(view CompactionView, _ int) int64 {
+		return view.GetSegmentsView()[0].ID
+	})
+	s.Require().Len(sortedSegments, 4)
+	s.ElementsMatch([]int64{2, 4}, sortedSegments[:2])
 }
 
 func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
@@ -238,18 +248,7 @@ func (s *SingleCompactionPolicySuite) TestSegmentSortCompaction() {
 	segments[102] = buildTestSegment(102, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103] = buildTestSegment(103, collID, datapb.SegmentLevel_L1, 0, 10000, 201, true, true)
 	segments[103].State = commonpb.SegmentState_Dropped
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: {
-					101: segments[101],
-					102: segments[102],
-					103: segments[103],
-				},
-			},
-		},
-	}
+	segmentsInfo := newSegmentsInfoWithSegments(segments)
 
 	compactionTaskMeta := newTestCompactionTaskMeta(s.T())
 	s.singlePolicy.meta = &meta{
@@ -294,9 +293,10 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 	mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
 	policy := newSingleCompactionPolicy(s.singlePolicy.meta, s.mockAlloc, mockHandler)
 
-	views, sortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
+	views, invisibleSortViews, visibleSortViews, triggerID, err := policy.triggerOneCollection(context.Background(), collID, false)
 	s.NoError(err)
 	s.Nil(views)
-	s.Nil(sortViews)
+	s.Nil(invisibleSortViews)
+	s.Nil(visibleSortViews)
 	s.EqualValues(0, triggerID)
 }

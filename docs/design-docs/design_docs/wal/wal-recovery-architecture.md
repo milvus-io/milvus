@@ -155,11 +155,34 @@ when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
 The barrier is delivered once, and no second logical scanner is opened.
 
-If the handoff position has been evicted, the scanner continues durable catchup.
-If a tailing reader is evicted later, it resumes durable reads from the last
-consumed message's safe physical LastConfirmedMessageID and filters out already
-consumed TimeTicks. Both paths preserve the upper scanner's transaction and
-ordering state. Cancellation releases the scanner while reading durable WAL,
+The sync operator publishes QueryMVCC from the complete ACK prefix before
+appending its confirmation to WAL and WAB. The acknowledged data is already
+durable; queries still wait for runtime consumption to reach their granted
+Growing/Transform targets. Consequently WAL and WAB consumers cannot dispatch a
+Flush and expose its new DataView/QueryView before the corresponding query
+frontiers are published. RecoveryStorage adds no per-message publication wait.
+MVCCManager remains owned by WAL initialization. After bounded recovery, the
+opener registers recovered live channels at the opening fence before append
+admission and live replay resume.
+
+WAB protects the live suffix from construction onward. RecoveryStorage marks
+only the complete prefix it has observed and dispatched as evictable, after each
+confirmation. Actual eviction retains the original capacity/TTL policy.
+This includes volatile scoped MVCCBarriers, which remain pending until consumed
+and cannot be replaced by ordinary TimeTicks. Capacity/keepalive do not evict
+unconsumed records, so startup handoff and live recovery tailing cannot lose
+this suffix. Current WAB occupancy drives producer backpressure directly.
+
+The latest durable confirmation is retained independently of queue eviction.
+Consumed volatile barriers after it follow the ordinary cache policy rather than
+waiting for another durable confirmation. Readers at or beyond that confirmation
+can rejoin the remaining queue or receive latest volatile progress after their
+cached prefix expires, without waiting for a new durable write. This applies to
+both initial catchup handoff and existing tailing offsets. Readers behind evicted
+durable data still require WAL replay. The scanner still
+supports durable catchup from the last consumed message's safe physical
+LastConfirmedMessageID, filtering already consumed TimeTicks and preserving its
+transaction and ordering state. Cancellation releases the scanner while reading durable WAL,
 paused at the startup boundary, or waiting on an empty WAB. Open failure,
 AlterWAL early return, and normal close all release the retained stream.
 

@@ -65,12 +65,7 @@ func TestBumpSchemaVersionCompactionTaskSuite(t *testing.T) {
 
 type fakeTextIndex struct{}
 
-func (fakeTextIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
-func (fakeTextIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
-func (fakeTextIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
-func (fakeTextIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
-func (fakeTextIndex) Delete() error                                               { return nil }
-func (fakeTextIndex) CleanLocalData() error                                       { return nil }
+func (fakeTextIndex) Delete() error { return nil }
 func (fakeTextIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 42}}}, nil
 }
@@ -545,9 +540,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) materializeAdditiveManifest(segme
 	delta := segment.GetManifestDelta()
 	s.Require().NotNil(delta, "additive result must ship a manifest delta")
 	s.Require().NotEmpty(delta.GetColumnGroups())
-	basePath, baseVersion, err := packed.UnmarshalManifestPath(segment.GetBaseManifest())
-	s.Require().NoError(err)
-	manifest, err := packed.CommitManifestUpdates(basePath, baseVersion, s.task.compactionParams.StorageConfig, &packed.ManifestUpdates{
+	manifest, err := packed.CommitManifestUpdates(segment.GetBaseManifest(), s.task.compactionParams.StorageConfig, &packed.ManifestUpdates{
 		ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
 		Stats:        packed.StatEntriesFromProto(delta.GetStats()),
 	})
@@ -2065,6 +2058,62 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaAnchorPlusR
 	s.ElementsMatch([]int64{common.RowIDField, 101}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
 		return field.GetFieldID()
 	}))
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRetainsStructSibling() {
+	s.setupTest()
+	st := &schemapb.StructArrayFieldSchema{FieldID: 200, Name: "s", Fields: []*schemapb.FieldSchema{
+		{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		{FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true},
+	}}
+	s.task.plan.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{st}
+	readSchema, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{
+		existingFields:       map[int64]struct{}{common.RowIDField: {}, 201: {}},
+		absentOrdinaryFields: []*schemapb.FieldSchema{st.Fields[1]},
+	})
+	s.Require().NoError(err)
+	s.Require().Len(readSchema.GetStructArrayFields(), 1)
+	s.Equal(int64(200), readSchema.GetStructArrayFields()[0].GetFieldID())
+	s.ElementsMatch([]int64{201, 202}, lo.Map(readSchema.GetStructArrayFields()[0].GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
+	s.ElementsMatch([]int64{common.RowIDField}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
+}
+
+// The additive pass reads the sub-fields it appends plus one stored sibling
+// for their element counts, a scalar Array before an ArrayOfVector, and no
+// other sibling: a VectorArray sibling would load its whole vector payload.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaReadsOneStructShapeProvider() {
+	s.setupTest()
+	vector := &schemapb.FieldSchema{FieldID: 201, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}
+	scalar := &schemapb.FieldSchema{FieldID: 202, Name: "s[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	otherScalar := &schemapb.FieldSchema{FieldID: 203, Name: "s[more]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	added := &schemapb.FieldSchema{FieldID: 204, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+	st := &schemapb.StructArrayFieldSchema{FieldID: 200, Name: "s", Fields: []*schemapb.FieldSchema{vector, scalar, otherScalar, added}}
+	s.task.plan.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{st}
+	readStructFieldIDs := func(existing ...int64) []int64 {
+		existingFields := map[int64]struct{}{common.RowIDField: {}}
+		for _, id := range existing {
+			existingFields[id] = struct{}{}
+		}
+		readSchema, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{
+			existingFields:       existingFields,
+			absentOrdinaryFields: []*schemapb.FieldSchema{added},
+		})
+		s.Require().NoError(err)
+		s.Require().Len(readSchema.GetStructArrayFields(), 1)
+		return lo.Map(readSchema.GetStructArrayFields()[0].GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+			return field.GetFieldID()
+		})
+	}
+	s.ElementsMatch([]int64{202, 204}, readStructFieldIDs(201, 202, 203))
+	s.ElementsMatch([]int64{201, 204}, readStructFieldIDs(201))
+	// The segment predates the struct: no sibling to read.
+	s.ElementsMatch([]int64{204}, readStructFieldIDs())
+	// The plan schema keeps the whole struct.
+	s.Len(st.GetFields(), 4)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRejectsMissingSystemAnchor() {

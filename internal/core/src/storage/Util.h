@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include "common/FastMem.h"
+#include "common/Consts.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -71,6 +72,14 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+// Startup-only budget for the buffers owned by one sparse normalization call.
+// Returns false for a non-positive limit and leaves the existing value intact.
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 
@@ -89,6 +98,9 @@ AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type,
@@ -111,6 +123,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
@@ -325,6 +340,55 @@ DrainFuture(std::future<T>& future) noexcept {
     }
 }
 
+// Normal control flow for bounded field-data visitors. Stop is not
+// cancellation and is never represented by an exception.
+enum class VisitControl {
+    Continue,
+    Stop,
+};
+
+enum class VisitOutcome {
+    Exhausted,
+    Stopped,
+    // The requested field is absent from the source inventory. This differs
+    // from a present field that legitimately contains zero rows.
+    FieldMissing,
+};
+
+using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
+
+// Visits on the caller thread in numeric binlog and row-group order. Parallel
+// reads use serial windows charged by all columns' stored Arrow byte estimate;
+// oversized or unknown-size groups run alone. Stop drains and joins the current
+// window before returning. Decoder and visitor memory add to the estimate.
+VisitOutcome
+VisitFieldDataFromStorageV2(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor);
+
+namespace detail {
+
+// Internal window budget override for tests; public readers use the default.
+VisitOutcome
+VisitFieldDataFromStorageV2Paged(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor,
+    size_t max_rows,
+    size_t offset,
+    size_t window_bytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+
+}  // namespace detail
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
@@ -361,6 +425,37 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // source arrow batches held alive by in-flight decode futures; a few batches
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
+
+// Visits manifest data on the calling thread in source order. Stop prevents
+// further ReadNext calls, decode submissions, and callbacks. Decode work
+// already submitted within the bounded input-byte window is still joined via
+// future::get(); a real failure there takes precedence over a normal Stopped
+// outcome. The window does not bound decoded/external-normalization expansion.
+VisitOutcome
+VisitFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const FieldDataVisitor& visitor,
+    int64_t max_inflight_bytes = kStreamingInflightBytes);
+
+// Visits a Milvus-written TEXT column of a manifest as logical UTF-8 values.
+// Such a column stores LOB-encoded cells: a value below the inline threshold
+// (64 KiB by default) is kept inline behind a marker byte, and a larger value
+// is a reference into the partition's LOB files. Reading the column with the
+// plain manifest reader yields those encoded cells; this reader resolves both
+// forms. External TEXT columns are plain UTF-8 and use the plain reader. Stop
+// prevents further ReadNext calls and callbacks.
+VisitOutcome
+VisitTextFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    const FieldDataVisitor& visitor);
 
 void
 IterateFieldDataFromManifest(
@@ -487,6 +582,11 @@ using DataTypeToOffsetMap =
 std::vector<FieldDataPtr>
 FetchFieldData(ChunkManager* cm, const std::vector<std::string>& batch_files);
 
+// Sort insert binlogs by their complete numeric basename. Malformed names,
+// including a one-file list, fail with DataFormatBroken.
+void
+SortBinlogPaths(std::vector<std::string>& paths);
+
 inline void
 SortByPath(std::vector<std::string>& paths) {
     std::sort(paths.begin(),
@@ -554,12 +654,22 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Returns the PARQUET:field_id of every column stored in a packed file, in
+// column order, reading only the file footer. Throws a SegcoreError carrying
+// the storage error code on a failed read, and DataFormatBroken when a column
+// has no valid field id.
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath);
+
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
+// Element-nullable arrays retain one validity entry per logical child value.
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
-                            int64_t row_index);
+                            int64_t row_index,
+                            bool element_nullable);
 
 // Convert a timestamp value to microseconds based on its Arrow TimeUnit.
 inline int64_t
@@ -616,9 +726,17 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //   Vectors: various -> FixedSizeBinary
 //   VectorArray: List<List<scalar>> -> List<FixedSizeBinary>
 //
+// preserve_array_element_validity is for consumers whose ARRAY result model
+// carries element validity; legacy Chunk materialization leaves it disabled.
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       bool preserve_array_element_validity = false);
+
+bool
+IsCompatibleArrayElementArrowType(
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType expected_type);
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector

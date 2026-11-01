@@ -14,12 +14,12 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION 15ab3d7)
+set( milvus-storage_VERSION 4795f8b)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
 
-message(STATUS "Building milvus-storage-${milvus-storage_SOURCE_VER} from source")
+message(STATUS "Building milvus-storage-${milvus-storage_VERSION} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
 if ( ENABLE_AZURE_FS STREQUAL "ON" )
@@ -30,6 +30,17 @@ endif ()
 
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
+
+# milvus-storage's Rust bridge now depends on crates that require Rust 1.94.1.
+# The top-level CMake cache may have been initialized by other Rust components
+# that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
+# before adding milvus-storage. Use rustup's toolchain name so Corrosion can
+# append the current host triple on Linux and macOS.
+set(Rust_TOOLCHAIN "1.94.1" CACHE STRING "" FORCE)
+unset(Rust_COMPILER_CACHED CACHE)
+unset(Rust_CARGO_CACHED CACHE)
+unset(_CORROSION_RUSTC CACHE)
+unset(_CORROSION_CARGO CACHE)
 
 # Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake.
 # find_package(Protobuf) sets Protobuf_PROTOC_EXECUTABLE automatically.
@@ -63,20 +74,34 @@ if ( NOT milvus-storage_POPULATED )
     # Enable S3 filesystem support on all platforms
     target_compile_definitions(milvus-storage PRIVATE MILVUS_S3_FS)
 
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        # GNU ld 2.38 groups AArch64 input sections before adding veneers.
+        # Large Rust archives plus ASAN can exhaust its default 1 MiB margin,
+        # especially with 4 KiB stub padding for the Cortex-A53 843419 workaround.
+        # Use 64 MiB groups to keep veneers in range while retaining ASAN and
+        # the erratum workaround. Probe support for other linkers.
+        include(CheckLinkerFlag)
+        check_linker_flag(CXX "LINKER:--stub-group-size=67108864"
+                         MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
+        if(MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
+            target_link_options(milvus-storage PRIVATE "LINKER:--stub-group-size=67108864")
+        endif()
+    endif()
+
     # milvus-storage uses Aws::S3::S3Client and Aws::S3::Model::* directly but only
     # links AWS::aws-sdk-cpp-identity-management in its own CMakeLists.txt. The S3
     # symbols happen to resolve through Arrow's transitive dependency on aws-sdk-cpp-s3,
     # but this is fragile (depends on Arrow package config). Explicitly link the S3
     # component so the symbols are always resolved in libmilvus-storage.so.
-    # Conan's cmake_find_package generator creates FindAWSSDK.cmake but it must be
-    # explicitly loaded to create the AWS::* targets.
-    find_package(AWSSDK REQUIRED)
+    # Use the same Conan CMakeDeps config as the root project.
+    find_package(AWSSDK REQUIRED CONFIG)
     if(TARGET AWS::aws-sdk-cpp-s3)
         target_link_libraries(milvus-storage PUBLIC AWS::aws-sdk-cpp-s3)
     elseif(TARGET AWS::s3)
         target_link_libraries(milvus-storage PUBLIC AWS::s3)
     else()
-        message(WARNING "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
+        message(FATAL_ERROR "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
     endif()
 
     # On macOS, aws-c-io uses Apple's Network.framework for socket operations
@@ -84,6 +109,8 @@ if ( NOT milvus-storage_POPULATED )
         target_link_libraries(milvus-storage PUBLIC "-framework Network")
     endif()
 endif()
+
+milvus_check_aws_runtime(milvus-storage)
 
 set( MILVUS_STORAGE_INCLUDE_DIR ${milvus-storage_SOURCE_DIR}/cpp/include CACHE INTERNAL "Path to milvus-storage include directory" )
 
