@@ -240,6 +240,39 @@ func TestMembershipFilterConfig(t *testing.T) {
 	})
 }
 
+func TestProxyExprCacheConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil))
+	params := proxyConfig{}
+	params.init(base)
+	for _, tc := range []struct {
+		item *ParamItem
+		want int64
+	}{
+		{&params.ExprCacheMaxBytes, 64 << 20},
+		{&params.ExprCacheMaxEntryBytes, 8 << 20},
+	} {
+		assert.Equal(t, tc.want, tc.item.GetAsInt64())
+		require.NoError(t, base.Save(tc.item.Key, "12345"))
+		assert.Equal(t, int64(12345), tc.item.GetAsInt64())
+		for _, invalid := range []string{"0", "-1", "invalid", "1.5", "9223372036854775808"} {
+			require.NoError(t, base.Save(tc.item.Key, invalid))
+			assert.Equal(t, tc.want, tc.item.GetAsInt64(), invalid)
+		}
+	}
+}
+
+func TestProxyExprCacheConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	file := filepath.Join(dir, "expr-cache.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("proxy:\n  exprCache:\n    maxBytes: 1048576\n    maxEntryBytes: 65536\n"), 0o600))
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(file)}))
+	params := proxyConfig{}
+	params.init(base)
+	assert.Equal(t, int64(1<<20), params.ExprCacheMaxBytes.GetAsInt64())
+	assert.Equal(t, int64(64<<10), params.ExprCacheMaxEntryBytes.GetAsInt64())
+}
+
 // TestMembershipFilterSizeFallbackKeys pins the upgrade path for deployments
 // tuned under the pre-unification per-kind keys: with the new
 // proxy.maxMembershipFilterSize unset, the first fallback key that is
