@@ -57,3 +57,36 @@ func TestValidateFunctionChecksMinHashParamsWithRuntimeCheckDisabled(t *testing.
 func TestValidateFunctionAcceptsValidMinHashWithRuntimeCheckDisabled(t *testing.T) {
 	require.NoError(t, ValidateFunction(minHashCollectionSchema("2"), "minhash", true))
 }
+
+func TestValidateFunctionAcceptsTextMinHashWithRuntimeCheckDisabled(t *testing.T) {
+	schema := minHashCollectionSchema("2")
+	schema.Fields[0].DataType = schemapb.DataType_Text
+	require.NoError(t, ValidateFunction(schema, "minhash", true))
+	schema = minHashCollectionSchema("3")
+	schema.Fields[0].DataType = schemapb.DataType_Text
+	require.ErrorContains(t, ValidateFunction(schema, "minhash", true), "does not match expected dim")
+	schema = minHashCollectionSchema("2")
+	schema.Fields[0].DataType = schemapb.DataType_Int64
+	require.ErrorIs(t, ValidateFunction(schema, "minhash", true), merr.ErrParameterInvalid)
+}
+
+func TestValidateFunctionAcceptsTextBM25WithRuntimeCheckDisabled(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}}},
+			{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Name: "bm25", Type: schemapb.FunctionType_BM25,
+			InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"},
+		}},
+	}
+	require.NoError(t, ValidateFunction(schema, "bm25", true))
+}
+
+func TestCheckFunctionInputFieldRejectsMissingFieldsWithoutPanic(t *testing.T) {
+	for _, functionType := range []schemapb.FunctionType{schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash} {
+		require.ErrorIs(t, CheckFunctionInputField(&schemapb.FunctionSchema{Type: functionType}, nil), merr.ErrParameterInvalid)
+	}
+}

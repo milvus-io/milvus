@@ -48,3 +48,46 @@ func TestValidateMinHashFunctionRejectsNumHashesOverflowingDimCheck(t *testing.T
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	require.ErrorContains(t, err, "does not match expected dim")
 }
+
+func TestValidateMinHashFunctionAcceptsTextInput(t *testing.T) {
+	collSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "text", DataType: schemapb.DataType_Text},
+		{Name: "hash", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "32"},
+		}},
+	}}
+	funSchema := &schemapb.FunctionSchema{
+		Name: "minhash", Type: schemapb.FunctionType_MinHash,
+		InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+		Params: []*commonpb.KeyValuePair{{Key: NumHashesKey, Value: "1"}},
+	}
+	require.NoError(t, ValidateMinHashFunction(collSchema, funSchema))
+}
+
+func TestMinHashFunctionRunnerAcceptsTextInput(t *testing.T) {
+	const textID, hashID = int64(100), int64(101)
+	collSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: textID, Name: "text", DataType: schemapb.DataType_Text},
+		{FieldID: hashID, Name: "hash", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "512"},
+		}},
+	}}
+	funSchema := &schemapb.FunctionSchema{
+		Name: "minhash", Type: schemapb.FunctionType_MinHash,
+		InputFieldIds: []int64{textID}, OutputFieldIds: []int64{hashID},
+		Params: []*commonpb.KeyValuePair{{Key: NumHashesKey, Value: "16"}},
+	}
+	runner, err := NewMinHashFunctionRunner(collSchema, funSchema)
+	require.NoError(t, err)
+	defer runner.Close()
+
+	outputs, err := runner.BatchRun([]string{"alpha beta gamma", "alpha beta gamma"})
+	require.NoError(t, err)
+	require.Len(t, outputs, 1)
+	fieldData, ok := outputs[0].(*schemapb.FieldData)
+	require.True(t, ok)
+	vectors := fieldData.GetVectors()
+	require.EqualValues(t, 512, vectors.GetDim())
+	require.Len(t, vectors.GetBinaryVector(), 128)
+	require.Equal(t, vectors.GetBinaryVector()[:64], vectors.GetBinaryVector()[64:])
+}

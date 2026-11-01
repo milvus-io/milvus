@@ -118,7 +118,7 @@ func (t *bumpSchemaVersionCompactionTask) Compact() (*datapb.CompactionPlanResul
 	// segments still route to additive reconciliation, which rejects them as a
 	// data-integrity error rather than writing an empty materialized record.
 	if len(diff.droppedFieldIDs) > 0 {
-		result, err = t.runFullSchemaRewrite(diff.existingFields)
+		result, err = t.runFullSchemaRewrite(diff)
 	} else if len(diff.absentOrdinaryFields) == 0 && len(diff.missingOutputFields) == 0 {
 		result = t.runSchemaVersionBumpOnly()
 	} else {
@@ -269,29 +269,6 @@ func validateSupportedMissingFunctionMaterialization(functionSchema *schemapb.Fu
 	}
 }
 
-// validateMaterializationInputField enforces the schema-bump runtime contract on
-// persisted function inputs. It is narrower than the collection-creation
-// validator: a sealed StorageV3 Text column is read back as encoded LOB
-// references, which stringInputsFromRecord cannot consume without LOB decoding,
-// so only VarChar is an acceptable persisted input here.
-func validateMaterializationInputField(functionSchema *schemapb.FunctionSchema, field *schemapb.FieldSchema) error {
-	switch functionSchema.GetType() {
-	case schemapb.FunctionType_BM25:
-		if field.GetDataType() != schemapb.DataType_VarChar {
-			return merr.WrapErrDataIntegrityMsg(
-				"persisted bm25 input field %d must be VarChar for schema-bump materialization (Text would require LOB decoding), got %s",
-				field.GetFieldID(), field.GetDataType())
-		}
-	case schemapb.FunctionType_MinHash:
-		if field.GetDataType() != schemapb.DataType_VarChar {
-			return merr.WrapErrDataIntegrityMsg(
-				"persisted minhash input field %d must be VarChar for schema-bump materialization (Text would require LOB decoding), got %s",
-				field.GetFieldID(), field.GetDataType())
-		}
-	}
-	return nil
-}
-
 func validateMaterializationOutputField(functionSchema *schemapb.FunctionSchema, field *schemapb.FieldSchema) error {
 	switch functionSchema.GetType() {
 	case schemapb.FunctionType_BM25:
@@ -408,8 +385,9 @@ func missingFunctionMaterializations(schema *schemapb.CollectionSchema, existing
 }
 
 // validateFunctionInputFields checks that every declared input of a
-// to-be-materialized function exists in the persisted schema and satisfies the
-// schema-bump materialization input contract.
+// to-be-materialized function exists in the persisted schema. The shared
+// schema validator owns input-type policy; the materializer checks actual
+// Arrow values after the compactor prepares any TEXT LOB strings.
 func validateFunctionInputFields(schema *schemapb.CollectionSchema, functionSchema *schemapb.FunctionSchema) error {
 	for _, inputFieldID := range functionSchema.GetInputFieldIds() {
 		inputField := typeutil.GetField(schema, inputFieldID)
@@ -417,9 +395,6 @@ func validateFunctionInputFields(schema *schemapb.CollectionSchema, functionSche
 			return merr.WrapErrDataIntegrityMsg(
 				"function %s input field %d not found in persisted schema",
 				functionSchema.GetName(), inputFieldID)
-		}
-		if err := validateMaterializationInputField(functionSchema, inputField); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -608,8 +583,9 @@ func (t *bumpSchemaVersionCompactionTask) runSchemaVersionBumpOnly() *datapb.Com
 	}
 }
 
-func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields map[int64]struct{}) (*datapb.CompactionPlanResult, error) {
+func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(diff *schemaBumpPhysicalDiff) (*datapb.CompactionPlanResult, error) {
 	segment := t.plan.GetSegmentBinlogs()[0]
+	existingFields := diff.existingFields
 	collectionID := segment.GetCollectionID()
 	newSegmentID, err := t.fullRewriteSegmentID()
 	if err != nil {
@@ -666,11 +642,17 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 	}
 	defer reader.Close()
 
-	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), t.plan.GetSchema().GetFunctions(), existingFields)
+	materializer, err := NewRecordMaterializer(t.plan.GetSchema(), diff.missingFunctions, existingFields)
 	if err != nil {
 		return nil, err
 	}
 	defer materializer.Close()
+	preparer, err := newFunctionInputPreparer(t.plan.GetSchema(), diff.missingFunctions,
+		existingFields, segment.GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer preparer.Close()
 
 	alloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	writerOpts := []storage.RwOption{
@@ -739,13 +721,16 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 				return nil, err
 			}
 			if selection != nil && selection.Len() == 0 {
+				if err := preparer.Skip(t.ctx, record); err != nil {
+					return nil, err
+				}
 				continue
 			}
 		}
 
 		// record stays owned by the reader (released on its next Next/Close);
 		// only the derived arrays of the wrapped record are cleaned up here.
-		wrapped, err := materializer.WrapWithSelection(record, selection)
+		wrapped, err := materializePreparedRecord(t.ctx, record, selection, materializer, preparer)
 		if err != nil {
 			return nil, err
 		}
@@ -763,6 +748,9 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 
 		writtenRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+	if err := preparer.Finish(); err != nil {
+		return nil, err
 	}
 
 	if readRows != t.plan.GetTotalRows() {
@@ -1206,7 +1194,26 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 
 	var readDuration, computeDuration, writeDuration, updateStatsDuration time.Duration
 
-	reader, _, err := t.openRecordReader(segment, inputSchema)
+	preparer, err := newFunctionInputPreparer(t.plan.GetSchema(), diff.missingFunctions,
+		diff.existingFields, segment.GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		return nil, err
+	}
+	defer preparer.Close()
+	var reader storage.RecordReader
+	if textIDs := preparer.presentTextIDs(); len(textIDs) > 0 {
+		configs, configErr := preparer.sourceTextConfigs(textIDs)
+		if configErr != nil {
+			return nil, configErr
+		}
+		reader, err = storage.NewTextDecodedManifestRecordReader(ctx, segment.GetManifest(), inputSchema, configs,
+			storage.WithPresentFields(diff.existingFields),
+			storage.WithCollectionID(collectionID),
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
+	} else {
+		reader, _, err = t.openRecordReader(segment, inputSchema)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1239,7 +1246,6 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		return nil, err
 	}
 	defer materializer.Close()
-
 	var totalRows int64
 	for {
 		readStart := time.Now()
@@ -1257,7 +1263,7 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		computeStart := time.Now()
 		// record stays owned by the reader (released on its next Next/Close);
 		// only the derived arrays of the wrapped record are cleaned up here.
-		wrapped, err := materializer.Wrap(record)
+		wrapped, err := materializePreparedRecord(ctx, record, nil, materializer, preparer)
 		computeDuration += time.Since(computeStart)
 		if err != nil {
 			span.End()
@@ -1299,6 +1305,10 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 
 		totalRows += int64(wrapped.Len())
 		cleanupMaterializedRecord(wrapped)
+	}
+	if err := preparer.Finish(); err != nil {
+		span.End()
+		return nil, err
 	}
 	span.End()
 	if totalRows != t.plan.GetTotalRows() {
