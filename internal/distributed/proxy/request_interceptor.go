@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -42,18 +43,44 @@ func init() {
 	fullMethodName2Tag = typeutil.NewConcurrentMap[string, string]()
 }
 
-// UnaryRequestStatsInterceptor implements `grpc.UnaryServerInterceptor`
-// it records incoming grpc request metrics in unified interceptor
+// UnaryRequestStatsInterceptor returns a `grpc.UnaryServerInterceptor` that
+// records incoming grpc request metrics in unified interceptor
 //
 // when some retirable error occurs, it will record it as `RetryLabel` instead of failure one
 // when other interceptor rejects the request, it will record it as `RejectedLabel`
-func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+//
+// The db_name and collection_name labels are the request's, kept only while
+// they denote a database or collection that exists (proxy.CollectionMetricLabels),
+// so the request is counted once it has finished, total included.
+func UnaryRequestStatsInterceptor(getMetaCache func() proxy.Cache) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		return unaryRequestStats(ctx, req, rpcInfo, handler, getMetaCache)
+	}
+}
+
+func unaryRequestStats(ctx context.Context, req any, rpcInfo *grpc.UnaryServerInfo, handler grpc.UnaryHandler, getMetaCache func() proxy.Cache) (interface{}, error) {
 	methodTag := FullMethodName2Tag(rpcInfo.FullMethod)
 	db, _ := requestutil.GetDbNameFromRequest(req)
 	collection, _ := requestutil.GetCollectionNameFromRequest(req)
 
 	dbName := db.(string)
 	collectionName := collection.(string)
+
+	start := time.Now()
+	resp, err := handler(ctx, req)
+	label, cause := requestutil.ParseMetricLabel(resp, err)
+
+	var cache proxy.Cache
+	if getMetaCache != nil {
+		cache = getMetaCache()
+	}
+	dbName, collectionName = proxy.CollectionMetricLabels(cache, methodTag, dbName, collectionName, resp, err)
+	// The received bytes are recorded by the stats handler once the response
+	// is written, under the names the handler put into the RPC stats.
+	if stats := metrics.GetStats(ctx); stats != nil && (stats.DatabaseName() != "" || stats.CollectionName() != "") {
+		statsDB, statsCollection := proxy.CollectionMetricLabels(cache, methodTag, stats.DatabaseName(), stats.CollectionName(), resp, err)
+		stats.SetDatabaseName(statsDB).SetCollectionName(statsCollection)
+	}
 
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -63,11 +90,6 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 		dbName,
 		collectionName,
 	).Inc()
-
-	start := time.Now()
-	resp, err := handler(ctx, req)
-	label, cause := requestutil.ParseMetricLabel(resp, err)
-
 	// set metrics for state code
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
