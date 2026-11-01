@@ -175,6 +175,15 @@ class ColumnVector final : public SimpleVector {
         return *(reinterpret_cast<T*>(GetRawData()) + index);
     }
 
+    // Like ValueAt, but returns a reference instead of a copy. The reference
+    // is valid only while this vector is alive and unchanged.
+    template <typename T>
+    const T&
+    ValueAtRef(size_t index) const {
+        AssertInfo(index < length_, "ValueAtRef index out of range");
+        return *(reinterpret_cast<const T*>(GetRawData()) + index);
+    }
+
     template <typename T>
     void
     SetValueAt(size_t index, const T& value) {
