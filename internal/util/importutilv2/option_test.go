@@ -434,3 +434,56 @@ func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
 	assert.Less(t, elapsed, 10*time.Second,
 		"validating %d options took %s -- a pairwise scan is back", n, elapsed)
 }
+
+// A secondary restore cuts a snapshot bundle at each source PChannel's flush
+// boundary. The public option accepts only PChannel keys; source segments may
+// still name a VChannel when the reader resolves their PChannel bound.
+func TestSnapshotPChannelEndTsOptions(t *testing.T) {
+	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
+	now := tsoutil.ComposeTSByTime(time.Now())
+	later := tsoutil.ComposeTSByTime(time.Now().Add(time.Second))
+
+	bounds, err := GetSnapshotPChannelEndTs(base)
+	assert.NoError(t, err)
+	assert.Nil(t, bounds)
+
+	option := &commonpb.KeyValuePair{
+		Key:   SnapshotPChannelEndTs,
+		Value: fmt.Sprintf(`{"dml_0":"%d","dml_1":"%d"}`, now, later),
+	}
+	bounds, err = GetSnapshotPChannelEndTs(append(base, option))
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]uint64{"dml_0": now, "dml_1": later}, bounds)
+
+	end, ok := SnapshotPChannelEnd(bounds, "dml_1_4600v0")
+	assert.True(t, ok)
+	assert.Equal(t, later, end)
+	_, ok = SnapshotPChannelEnd(bounds, "dml_9_4600v0")
+	assert.False(t, ok)
+	_, ok = SnapshotPChannelEnd(nil, "dml_0_4600v0")
+	assert.False(t, ok)
+
+	for _, value := range []string{
+		"", "null", "[]", "{}",
+		fmt.Sprintf(`{"":"%d"}`, now),
+		fmt.Sprintf(`{"dml_0_4600v0":"%d"}`, now),
+		fmt.Sprintf(`{"dml_0":"%d","dml_0_4600v0":"%d"}`, now, later),
+		fmt.Sprintf(`{"dml_0":%d}`, now),
+		fmt.Sprintf(`{"dml_0":"%d"} {}`, now),
+		`{"dml_0":"not-a-timestamp"}`,
+		`{"dml_0":"1"}`,
+		fmt.Sprintf(`{"dml_0":"%d","dml_0":"%d"}`, now, now),
+		strings.Repeat("x", 65537),
+	} {
+		t.Run(value[:min(len(value), 40)], func(t *testing.T) {
+			_, err := GetSnapshotPChannelEndTs(append(base, &commonpb.KeyValuePair{Key: SnapshotPChannelEndTs, Value: value}))
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Error(t, ValidateSnapshotSourceRequest(append(base, &commonpb.KeyValuePair{Key: SnapshotPChannelEndTs, Value: value})))
+		})
+	}
+
+	// The bounds belong to a snapshot source and to exactly one option.
+	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, option)))
+	assert.Error(t, ValidateSnapshotSourceRequest(Options{option}))
+	assert.Error(t, ValidateSnapshotSourceRequest(append(base, option, option)))
+}

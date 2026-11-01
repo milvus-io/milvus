@@ -18,6 +18,7 @@ package importutilv2
 
 import (
 	"context"
+	"io"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -50,6 +51,14 @@ type Reader interface {
 	Close()
 }
 
+// snapshotCommitBoundReader hides a segment committed after the restore's
+// replication anchor. Its raw row timestamps can still precede that anchor.
+type snapshotCommitBoundReader struct{ Reader }
+
+func (r *snapshotCommitBoundReader) Read() (*storage.InsertData, error) {
+	return nil, io.EOF
+}
+
 // ReaderFactory belongs to one task execution. Only resolved source dependencies
 // are shared; each NewReader call owns its stream, decoder and request context.
 // Options and storage configuration must remain immutable during execution.
@@ -58,6 +67,9 @@ type ReaderFactory struct {
 	cfg     *indexpb.StorageConfig
 	options Options
 	storage func() (readerStorage, error)
+	// pchannelEndTS is the job's per-PChannel end bounds, parsed once and shared
+	// by every file the task reads. Empty when the job cuts at one timestamp.
+	pchannelEndTS func() (map[string]uint64, error)
 }
 
 type readerStorage struct {
@@ -69,6 +81,9 @@ type readerStorage struct {
 func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
 	return &ReaderFactory{
 		cm: cm, cfg: cfg, options: options,
+		pchannelEndTS: sync.OnceValues(func() (map[string]uint64, error) {
+			return GetSnapshotPChannelEndTs(options)
+		}),
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
 			// resolution error for this attempt too; a retry creates a new factory.
@@ -125,7 +140,19 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 			return nil, err
 		}
 	}
-	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption)
+	bounds, err := f.pchannelEnd()
+	if err != nil {
+		return nil, err
+	}
+	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption, bounds)
+}
+
+// pchannelEnd is the job's per-PChannel end bounds, parsed on first use.
+func (f *ReaderFactory) pchannelEnd() (map[string]uint64, error) {
+	if f.pchannelEndTS == nil {
+		return nil, nil
+	}
+	return f.pchannelEndTS()
 }
 
 // PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
@@ -138,6 +165,14 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 		return nil, err
 	}
 	start, end, err := ParseTimeRange(f.options)
+	if err != nil {
+		return nil, err
+	}
+	bounds, err := f.pchannelEnd()
+	if err != nil {
+		return nil, err
+	}
+	end, err = snapshotPChannelEnd(end, bounds, source)
 	if err != nil {
 		return nil, err
 	}
@@ -171,21 +206,62 @@ func NewReader(ctx context.Context,
 	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
+// readerSource adapts a validated descriptor to the 1-4 contract the data
+// reader implements. Only this view is narrowed: never mutate the persisted
+// descriptor, and never expand L0 paths back into a segment, because a shared
+// task borrows its prepared bitmap instead of opening L0 again.
+func readerSource(source *internalpb.SnapshotImportSource, shared bool) *internalpb.SnapshotImportSource {
+	if source == nil {
+		return nil
+	}
+	switch {
+	case shared:
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source) - 4
+		source.SourceChannel = ""
+		source.SourcePartitionId = 0
+	case SnapshotSourceScoped(source):
+		// A per-PChannel bound rides on tsEnd, not on the descriptor, so the
+		// scope bit only has to leave the version. The clone keeps the channel
+		// for anything that reports which file was cut.
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source)
+	}
+	return source
+}
+
+type snapshotChannelSource interface {
+	GetSourceChannel() string
+}
+
+// snapshotPChannelEnd applies the job's per-PChannel end bounds to one source
+// file or delete scope. Data and deletes use the same inclusive bound so the
+// imported state ends exactly where replication resumes: post-bound rows are
+// not imported, and post-bound deletes are not applied early. Both the job and
+// channel bounds are upper bounds, so the lower one wins.
+func snapshotPChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshotChannelSource) (uint64, error) {
+	if len(bounds) == 0 {
+		return jobEnd, nil
+	}
+
+	channel := source.GetSourceChannel()
+	if channel == "" {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-PChannel end bounds but the file names no source channel")
+	}
+	end, ok := SnapshotPChannelEnd(bounds, channel)
+	if !ok {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries no end bound for source channel %s", channel)
+	}
+
+	return min(jobEnd, end), nil
+}
+
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
-	encryption binlog.SourceEncryption,
+	encryption binlog.SourceEncryption, pchannelEndTS map[string]uint64,
 ) (Reader, error) {
-	source := importFile.GetSnapshotSource()
-	if shared != nil {
-		// Adapt only the validated reader view. Never expand L0 paths back
-		// into a segment or mutate the persisted descriptor: the reader must
-		// borrow the task's prepared bitmap instead of opening L0 again.
-		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		source.Version -= 4
-		source.SourceChannel = ""
-		source.SourcePartitionId = 0
-	}
+	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -198,13 +274,29 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
-				if shared != nil {
-					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
-						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
+				tsEnd, err = snapshotPChannelEnd(tsEnd, pchannelEndTS, importFile.GetSnapshotSource())
+				if err != nil {
+					return nil, err
 				}
-				return binlog.NewStorageV3ManifestReader(
-					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
-				)
+				var r Reader
+				if shared != nil {
+					r, err = binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
+						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
+				} else {
+					r, err = binlog.NewStorageV3ManifestReader(
+						ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
+					)
+				}
+				if err != nil {
+					return nil, err
+				}
+				// Only the replication bound uses commit time; the job's ordinary
+				// start/end range keeps its raw row timestamp semantics.
+				channelEnd, bounded := SnapshotPChannelEnd(pchannelEndTS, importFile.GetSnapshotSource().GetSourceChannel())
+				if bounded && source.GetSourceCommitTimestamp() > channelEnd {
+					return &snapshotCommitBoundReader{Reader: r}, nil
+				}
+				return r, nil
 			}
 			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.
