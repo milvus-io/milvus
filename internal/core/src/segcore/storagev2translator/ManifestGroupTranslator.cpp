@@ -504,19 +504,23 @@ ManifestGroupTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-ManifestGroupTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    assert(cid < meta_.chunk_memory_size_.size());
-    auto cell_sz = meta_.chunk_memory_size_[cid];
-    auto overhead_sz = loading_overhead_bytes(cell_sz);
-
-    if (use_mmap_) {
-        return {{0, cell_sz}, {overhead_sz, cell_sz}};
-    } else {
-        return {{cell_sz, 0}, {overhead_sz, 0}};
+milvus::cachinglayer::LoadingResourceUsage
+ManifestGroupTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    int64_t cell_bytes = 0;
+    int64_t overhead_bytes = 0;
+    for (const auto cid : cids) {
+        assert(cid < meta_.chunk_memory_size_.size());
+        const auto size = meta_.chunk_memory_size_[cid];
+        cell_bytes += size;
+        overhead_bytes += loading_overhead_bytes(size);
     }
+    const cachinglayer::ResourceUsage overhead{overhead_bytes,
+                                               use_mmap_ ? cell_bytes : 0};
+    return {use_mmap_ ? cachinglayer::ResourceUsage{0, cell_bytes}
+                      : cachinglayer::ResourceUsage{cell_bytes, 0},
+            {},
+            overhead};
 }
 
 const std::string&
