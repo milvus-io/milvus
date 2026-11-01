@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -93,7 +94,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
-			)
+			).withCollectionInfo(collectionInfo)
 			segmentTotal += len(segmentManagers)
 		}
 	}
@@ -221,6 +222,19 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
+	// rowWidth is the estimated bytes of one row of the current schema, system
+	// columns included, or 0 when unknown. The segment alloc worker reads it
+	// without the shard manager lock, hence atomic.
+	rowWidth atomic.Int64
+}
+
+// RowWidth returns the estimated bytes of one row of the current schema, or 0
+// when the schema is unknown or cannot be estimated.
+func (c *CollectionInfo) RowWidth() int64 {
+	if c == nil {
+		return 0
+	}
+	return c.rowWidth.Load()
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write
@@ -233,6 +247,7 @@ type PrimaryKeyDescriptor struct {
 func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
 	c.Schema = schema
 	c.primaryKey = nil
+	c.rowWidth.Store(typeutil.EstimateRowWidth(schema.GetSchema()))
 	if schema == nil || schema.GetSchema() == nil {
 		return
 	}

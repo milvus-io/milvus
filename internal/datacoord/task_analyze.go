@@ -205,7 +205,14 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 
 				// Calculate the number of clusters based on total data size.
 				totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(task.FieldType)
-				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
+				// The per-collection segment size target: maxSize capped at
+				// dataCoord.segment.maxRows rows of the schema's row width, the
+				// same cap the compaction planners apply.
+				expectedSegmentSize := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
+				if rowWidth, maxRows := typeutil.EstimateRowWidth(at.schema), Params.DataCoordCfg.SegmentMaxRows.GetAsInt64(); rowWidth > 0 && maxRows > 0 {
+					expectedSegmentSize = math.Min(expectedSegmentSize, float64(rowWidth*maxRows))
+				}
+				numClusters := int64(math.Ceil(totalSegmentsRawDataSize / (expectedSegmentSize * Params.DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.GetAsFloat())))
 				if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
 					log.Info(context.TODO(), "data size is too small, skip analyze task",
 						mlog.Float64("raw data size", totalSegmentsRawDataSize),

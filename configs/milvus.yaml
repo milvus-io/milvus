@@ -859,6 +859,14 @@ dataCoord:
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
+    # Caps the per-collection segment size target at maxRows x estimated row size of the schema:
+    # the target becomes min(maxSize, maxRows x estimated row size), for sealing, compaction and import alike.
+    # It is a byte target derived from a row count, not a row limit: each path measures bytes in its own unit
+    # (binlog bytes for import and compaction, insert message bytes for sealing), so the rows per segment are
+    # maxRows x estimated row size / bytes per row in that path. It only takes effect for collections whose
+    # estimated row is narrower than maxSize / maxRows, such as collections without a vector field or with
+    # low-dimensional vectors. 0 disables it.
+    maxRows: 4000000
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
@@ -1412,6 +1420,10 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
+  # Whether CreateCollection accepts a schema with no vector field. Such a collection supports
+  # every operation except search, and a vector field cannot be added to it later.
+  # Keep it false during a rolling upgrade until every proxy and coordinator runs a version with this feature.
+  enableCollectionWithoutVector: true
   traceLogMode: 0 # trace request info
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size

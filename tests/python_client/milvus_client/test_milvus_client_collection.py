@@ -588,15 +588,18 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         """
         target: test create collection without vectors
         method: create collection only with int field
-        expected: raise exception
+        expected: the collection is created; it supports everything except search
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with only non-vector fields
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("int_field", DataType.INT64, is_primary=True, auto_id=False)
-        error = {ct.err_code: 1100, ct.err_msg: "schema does not contain vector field: invalid parameter"}
-        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+        self.create_collection(client, collection_name, schema=schema)
+        assert collection_name in self.list_collections(client)[0]
+        described = self.describe_collection(client, collection_name)[0]
+        assert [f["name"] for f in described["fields"]] == ["int_field"]
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR])
@@ -5451,16 +5454,20 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         """
         target: test create collection with only string field (no vector field)
         method: create collection with only string field
-        expected: Raise exception
+        expected: the collection is created and can be queried
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with only string field
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("string_pk", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=False)
-        # Try to create collection
-        error = {ct.err_code: 1100, ct.err_msg: "schema does not contain vector field: invalid parameter"}
-        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+        self.create_collection(client, collection_name, schema=schema)
+        self.insert(client, collection_name, [{"string_pk": f"k{i}"} for i in range(10)])
+        self.load_collection(client, collection_name)
+        res = self.query(client, collection_name, filter="", output_fields=["count(*)"])[0]
+        assert res[0]["count(*)"] == 10
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_string_field_over_max_length(self):

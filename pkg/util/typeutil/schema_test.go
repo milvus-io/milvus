@@ -7811,3 +7811,60 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
 }
+
+func TestHasVectorField(t *testing.T) {
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	scalar := &schemapb.FieldSchema{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32}
+	vector := &schemapb.FieldSchema{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector}
+	sparse := &schemapb.FieldSchema{FieldID: 103, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}
+
+	assert.False(t, HasVectorField(nil))
+	assert.False(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, scalar}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, vector}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, sparse}}))
+	assert.True(t, HasVectorField(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{pk},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 104, Name: "s",
+			Fields: []*schemapb.FieldSchema{{FieldID: 105, Name: "s[vec]", DataType: schemapb.DataType_FloatVector}},
+		}},
+	}))
+	assert.False(t, HasVectorField(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{pk},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 104, Name: "s",
+			Fields: []*schemapb.FieldSchema{{FieldID: 105, Name: "s[i]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}},
+		}},
+	}))
+}
+
+func TestRowCappedSegmentSize(t *testing.T) {
+	const maxSize = int64(1024 * 1024 * 1024)
+	narrow := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+	}}
+	wide := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+	}}
+	assert.Equal(t, int64(12+SegmentRowOverhead), EstimateRowWidth(narrow))
+	assert.Equal(t, int64(8+512+SegmentRowOverhead), EstimateRowWidth(wide))
+	assert.Equal(t, int64(0), EstimateRowWidth(nil))
+	// the stored schema carries RowID and Timestamp as int64 fields; they must not be counted twice
+	stored := &schemapb.CollectionSchema{Fields: append([]*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+	}, narrow.Fields...)}
+	assert.Equal(t, EstimateRowWidth(narrow), EstimateRowWidth(stored))
+
+	// 28 B x 4 M rows = 112 MB caps the 1 GB target; 536 B x 4 M rows exceeds it
+	assert.Equal(t, int64(28*4000000), RowCappedSegmentSize(maxSize, EstimateRowWidth(narrow), 4000000))
+	assert.Equal(t, maxSize, RowCappedSegmentSize(maxSize, EstimateRowWidth(wide), 4000000))
+	// the boundary is maxSize / maxRows = 268.4 B: 269 B rows keep the target, 268 B rows are capped just below it
+	assert.Equal(t, maxSize, RowCappedSegmentSize(maxSize, 269, 4000000))
+	assert.Equal(t, int64(268*4000000), RowCappedSegmentSize(maxSize, 268, 4000000))
+	// disabled or unknown
+	assert.Equal(t, maxSize, RowCappedSegmentSize(maxSize, EstimateRowWidth(narrow), 0))
+	assert.Equal(t, maxSize, RowCappedSegmentSize(maxSize, 0, 4000000))
+}
