@@ -74,9 +74,10 @@ func groupUsesPublishCommitTS(source model.SegmentChangeSource) bool {
 // publishes a new DataView snapshot (compact_version +1) with the members in
 // and the parents out.
 //
-// Lock order: segmentManifestLocks -> DataView collection lock -> segMu. The
-// segMu.RLock validation in phase 2 is brief and released before the DataView
-// lock is acquired, so no path holds segMu while waiting on the DataView lock.
+// Lock order: segmentManifestLocks -> DataView collection lock -> segment
+// writer locks -> groupMu. The groupMu.RLock validation in phase 2 is brief and
+// released before the DataView lock is acquired, so no path holds groupMu
+// while waiting on the DataView lock.
 // Once the manifest locks are held, the DataView-lock holders (flush /
 // Recompute) hold the collection lock only briefly and never request a manifest
 // lock, so the publish wait is bounded (design §5.4.2).
@@ -128,55 +129,55 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 	coll := m.GetCollection(g.CollectionID)
 	readiness := m.prepareReadiness(coll)
 
-	// Phase 2: read and validate the members under segMu.RLock and build the
+	// Phase 2: read and validate the members under groupMu.RLock and build the
 	// loadable projection. The read lock is released before the DataView lock is
 	// acquired, keeping the acquisition order acyclic. Ownership is enforced via
 	// the stagedSegmentToGroup reverse index (F4: the change_group_id field is
 	// not yet on SegmentInfo).
-	m.segMu.RLock()
+	m.groupMu.RLock()
 	loadable := make([]dataview.LoadableSegment, 0, len(g.NewSegmentIDs))
 	for _, id := range g.NewSegmentIDs {
 		seg := m.segments.GetSegment(id)
 		if seg == nil {
-			m.segMu.RUnlock()
+			m.groupMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d is missing from meta (externally dropped?)", g.GroupID, id)
 		}
 		if seg.GetState() == commonpb.SegmentState_Dropped {
-			m.segMu.RUnlock()
+			m.groupMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d was externally dropped", g.GroupID, id)
 		}
 		if owner, ok := m.stagedSegmentToGroup[id]; !ok || owner != g.GroupID {
-			m.segMu.RUnlock()
+			m.groupMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d is not staged by this group", g.GroupID, id)
 		}
 		if len(seg.GetBinlogs()) == 0 && seg.GetManifestPath() == "" {
-			m.segMu.RUnlock()
+			m.groupMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d has no data footprint", g.GroupID, id)
 		}
 		if readiness != nil {
 			if !readiness.schemaReady(seg) {
-				m.segMu.RUnlock()
+				m.groupMu.RUnlock()
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d schema version behind collection at publish (C23)", g.GroupID, id)
 			}
 			if !readiness.indexReady(seg) {
-				m.segMu.RUnlock()
+				m.groupMu.RUnlock()
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d index state regressed after READY (R5)", g.GroupID, id)
 			}
 		}
 		l, err := loadableSegmentOf(seg)
 		if err != nil {
-			m.segMu.RUnlock()
+			m.groupMu.RUnlock()
 			return err
 		}
 		loadable = append(loadable, l)
 	}
-	m.segMu.RUnlock()
+	m.groupMu.RUnlock()
 
 	// Phase 3a: build the post-publish DataView snapshot (acquires the DataView
 	// collection lock; a nil view with no-op callbacks means the collection's
@@ -247,7 +248,7 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 
 // loadableSegmentOf converts a segment into the DataView loadable projection,
 // parsing the latest Manifest version from its ManifestPath (0 for non-V3
-// segments). Manifest path parsing is pure string I/O and runs outside segMu;
+// segments). Manifest path parsing is pure string I/O and runs outside groupMu;
 // the caller guarantees the manifest lock is held for the member so the version
 // cannot be advanced concurrently.
 func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -244,11 +245,15 @@ func getFieldBinlogs(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBi
 	return nil
 }
 
+// mergeFieldBinlogs merges newBinlogs into currentBinlogs, which the caller
+// owns, and leaves newBinlogs unchanged: a field's later entries are appended
+// to a copy of its first one, so an update operator that runs again merges the
+// same input.
 func mergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	for _, newBinlog := range newBinlogs {
 		fieldBinlogs := getFieldBinlogs(newBinlog.GetFieldID(), currentBinlogs)
 		if fieldBinlogs == nil {
-			currentBinlogs = append(currentBinlogs, newBinlog)
+			currentBinlogs = append(currentBinlogs, proto.Clone(newBinlog).(*datapb.FieldBinlog))
 		} else {
 			if len(fieldBinlogs.ChildFields) == 0 {
 				fieldBinlogs.ChildFields = newBinlog.GetChildFields()

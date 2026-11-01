@@ -570,9 +570,9 @@ func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
 
 	// Simulate GC of the L0 parent after the groups were persisted: identical
 	// bytes must reload without a conflict.
-	m.segMu.Lock()
+	unlock := m.lockSegments(4001)
 	m.segments.DropSegment(4001)
-	m.segMu.Unlock()
+	unlock()
 
 	byID, staged, superseded, err := m.loadSegmentChangeGroups(ctx)
 	require.NoError(t, err, "GC'd L0 parent must not flip persisted groups into a recovery conflict")
@@ -921,9 +921,9 @@ func TestMeta_PublishSupersededParentGcResidue(t *testing.T) {
 
 	// Simulate the drop/truncate + GC cycle removing the superseded parent
 	// from meta while the group sits READY.
-	m.segMu.Lock()
+	unlock := m.lockSegments(2001)
 	m.segments.DropSegment(2001)
-	m.segMu.Unlock()
+	unlock()
 
 	committed := ready.Clone()
 	committed.State = model.SegmentChangeStateCommitted

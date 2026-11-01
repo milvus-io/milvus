@@ -313,7 +313,7 @@ func getStatsFields(collection *collectionInfo) statsFields {
 }
 
 // segmentNeedsStats reports whether the segment itself lacks the stats of
-// subJobType. It reads only the segment, so it may run under meta.segMu.
+// subJobType. It reads only the segment, not the stats task meta.
 func segmentNeedsStats(segment *SegmentInfo, fields statsFields, subJobType indexpb.StatsSubJob) bool {
 	switch subJobType {
 	case indexpb.StatsSubJob_TextIndexJob:
@@ -344,7 +344,7 @@ func (si *statsInspector) getStatsCandidateSegments(ctx context.Context, collect
 		if len(fields.text) == 0 && len(fields.json) == 0 {
 			continue
 		}
-		// Only segment-local checks run under segMu; the task lookups follow.
+		// Select by the segment-local checks; the task lookups follow.
 		segments := si.mt.SelectSegments(ctx, WithCollection(collection.ID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 			return lo.SomeBy(statsSubJobs, func(subJobType indexpb.StatsSubJob) bool {
 				return segmentNeedsStats(segment, fields, subJobType)

@@ -168,7 +168,7 @@ func TestTalonPrewarmInspectorStopBlockedSupplier(t *testing.T) {
 	c := &recordingTalonPrewarm{stats: map[string]int{}, closeStarted: make(chan struct{})}
 	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) {
 		close(supplierEntered)
-		// Model the uncancellable segMu.RLock wait behind a catalog writer.
+		// Model a supplier that does not return until released.
 		<-releaseSupplier
 		return []string{"one", "two"}, nil
 	}, c, func(s string) (string, error) { return s, nil }, time.Hour, 1)

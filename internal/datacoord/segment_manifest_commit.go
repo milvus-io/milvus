@@ -88,7 +88,7 @@ type SegmentCatalogMutation struct {
 	// below is the sole publisher of the first manifest pointer.
 	NewSegment *datapb.SegmentInfo
 	// Operators are existing DataCoord segment mutations applied to a clone
-	// under segMu.  They are a migration adapter: callers retain their current
+	// under the segment's writer lock.  They are a migration adapter: callers retain their current
 	// metadata contract while the manifest mutation is Noop.  They must not
 	// perform manifest I/O or include UpdateManifest.
 	Operators []UpdateOperator
@@ -165,19 +165,19 @@ type SegmentManifestCommit struct {
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
 // StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
 // order is segmentManifestLocks[segmentID] -> indexMeta.keyLock ->
-// indexMeta.fieldIndexLock (read) -> segMu: a backfill replace holds the
-// fieldIndexLock read side from its index-removal re-resolution through the
-// publication section, so the retraction check and the pointer advance are
-// atomic with index creation. No caller may enter this protocol while holding
-// segMu, and code holding segMu must NEVER take fieldIndexLock: a commit that
-// already holds its read side while waiting for segMu would deadlock against
-// the segMu holder (and RWMutex writer-preference can pin that read behind a
-// pending CreateIndex/DropIndex). Manifest I/O runs outside segMu; the final
+// indexMeta.fieldIndexLock (read) -> segment writer lock: a backfill replace
+// holds the fieldIndexLock read side from its index-removal re-resolution
+// through the publication section, so the retraction check and the pointer
+// advance are atomic with index creation. No caller may enter this protocol
+// while holding a segment writer lock, and code holding a segment writer lock
+// must NEVER take fieldIndexLock: a commit that already holds its read side
+// while waiting for the writer lock would deadlock against the lock holder (and
+// RWMutex writer-preference can pin that read behind a pending
+// CreateIndex/DropIndex). Manifest I/O runs outside the writer lock; the final
 // catalog mutation is rebased onto the latest SegmentInfo and catalog + memory
-// publication stays in one segMu critical section. No lock is ever acquired
-// inside that section: the fieldIndexLock-guarded index gauge update a staged
-// SegmentIndex mutation defers runs only after segMu is released (still under
-// keyLock).
+// publication stays under it. No lock is ever acquired inside that section:
+// the fieldIndexLock-guarded index gauge update a staged SegmentIndex mutation
+// defers runs only after the writer lock is released (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
@@ -189,7 +189,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// KeyLock.Lock is synchronous: a caller blocks here only when another
 	// transaction for this segment is in flight. There is no asynchronous
 	// queue or goroutine. Different segment IDs can perform manifest I/O
-	// concurrently; their final full-record publication is serialized by segMu.
+	// concurrently; their final full-record publication takes the writer lock.
 	locks := m.getSegmentManifestLocks()
 	lockStart := time.Now()
 	locks.Lock(commit.SegmentID)
@@ -197,13 +197,11 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	lockWait := time.Since(lockStart)
 	holdStart := time.Now()
 
-	// Snapshot the manifest input, then release segMu before object-storage I/O.
-	m.segMu.RLock()
+	// Snapshot the manifest input before object-storage I/O.
 	segment := m.segments.GetSegment(commit.SegmentID)
 	if segment != nil {
 		segment = segment.Clone()
 	}
-	m.segMu.RUnlock()
 
 	// Backfill replace: resolve the index IDs whose field the commit drops from
 	// the CURRENT index definitions under the manifest lock, then expand them
@@ -357,10 +355,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	releaseIO()
 
 	// Re-resolve the backfill index-removal set from the CURRENT index
-	// definitions AFTER manifest I/O but BEFORE taking segMu: an index created
-	// during the commit window (including while the manifest transaction was in
-	// flight) is enumerated here. The result feeds verifyNoUnexpectedIndexRecords
-	// inside segMu.
+	// definitions AFTER manifest I/O but BEFORE taking the writer lock: an index
+	// created during the commit window (including while the manifest transaction
+	// was in flight) is enumerated here. The result feeds
+	// verifyNoUnexpectedIndexRecords under the writer lock.
 	//
 	// fieldIndexLock's read side is held from this re-resolution THROUGH the
 	// publication section, so the final check and the pointer advance are atomic
@@ -370,9 +368,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// after the replace publishes (its build then reads the new manifest, so no
 	// index built from the pre-replace column values can be accepted). Index DDL
 	// holds the write side across an etcd round trip and sync.RWMutex is
-	// writer-preferring, so the read side is acquired HERE — before segMu — and
-	// released after the publication section, before the deferred gauge closures
-	// that re-enter it; it is never acquired inside segMu.
+	// writer-preferring, so the read side is acquired HERE — before the writer
+	// lock — and released after the publication section, before the deferred
+	// gauge closures that re-enter it; it is never acquired under the writer
+	// lock.
 	var (
 		verifyIndexIDs   map[int64]struct{}
 		releaseIndexLock func()
@@ -383,21 +382,21 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		verifyIndexIDs = m.indexIDsByDroppedColumnsLocked(segment.GetCollectionID(), commit)
 	}
 
-	// Re-enter segMu only for the final full-record publication. Ordinary
-	// segment writers may have changed unrelated fields during manifest I/O, so
-	// apply the catalog mutation to the latest clone rather than the I/O input.
+	// Take the segment's writer lock only for the final full-record
+	// publication. Ordinary segment writers may have changed unrelated fields
+	// during manifest I/O, so apply the catalog mutation to the latest clone
+	// rather than the I/O input.
 	//
-	// The section is an inner function so segMu is released before
+	// The section is an inner function so the writer lock is released before
 	// deferredIndexMetric runs. That closure takes indexMeta.fieldIndexLock for
 	// the stored-index-size gauge, and every index DDL (CreateIndex, AlterIndex,
 	// MarkIndexAsDeleted, RemoveIndex) holds that lock's write side across an
 	// etcd round trip; sync.RWMutex is writer-preferring, so acquiring it inside
-	// segMu would park this commit — segMu held — behind that round trip and
-	// stall every segment reader. No lock is acquired inside segMu.
+	// the writer lock would park this commit behind that round trip and stall
+	// every writer of the segment. No lock is acquired inside it.
 	var deferredIndexMetrics []func()
 	if err := func() error {
-		m.segMu.Lock()
-		defer m.segMu.Unlock()
+		defer m.lockSegments(commit.SegmentID)()
 		latest := m.segments.GetSegment(commit.SegmentID)
 		if isNewSegment {
 			if latest != nil {
@@ -476,9 +475,10 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		// the manifest lock, so a build can be created while this commit holds
 		// the lock but after the removal set was enumerated above. Such a record
 		// would survive publication with an index built from the pre-replace
-		// column data. Re-check under segMu (still holding the manifest lock)
-		// that no live record on a replaced index escaped the staged removals,
-		// and abort as stale so the caller retries and re-enumerates it.
+		// column data. Re-check under the writer lock (still holding the
+		// manifest lock) that no live record on a replaced index escaped the
+		// staged removals, and abort as stale so the caller retries and
+		// re-enumerates it.
 		if err := m.verifyNoUnexpectedIndexRecords(verifyIndexIDs, commit, removedBuildIDs); err != nil {
 			return err
 		}
@@ -487,7 +487,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			return merr.Wrap(err, "publish segment manifest")
 		}
 		// Memory is installed only after the catalog write has succeeded while the
-		// same segMu critical section still excludes competing full-record writers.
+		// same writer lock still excludes competing full-record writers.
 		m.segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
 			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.install())
@@ -499,13 +499,13 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 		return err
 	}
-	// segMu is released. The fieldIndexLock read side held since the verify-set
-	// re-resolution is released before the deferred gauge closures, which
-	// re-enter that lock after segMu is released; the segment manifest lock and
-	// keyLock(buildID) are still held, so the deferred gauge update stays
-	// serialized against MarkIndexAsDeleted (via fieldIndexLock) and ordered
-	// before the next writer of the same build, without ever awaiting
-	// fieldIndexLock inside segMu.
+	// The writer lock is released. The fieldIndexLock read side held since the
+	// verify-set re-resolution is released before the deferred gauge closures,
+	// which re-enter that lock; the segment manifest lock and keyLock(buildID)
+	// are still held, so the deferred gauge update stays serialized against
+	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next writer
+	// of the same build, without ever awaiting fieldIndexLock under the writer
+	// lock.
 	if releaseIndexLock != nil {
 		releaseIndexLock()
 	}
@@ -701,7 +701,8 @@ func commitDropsColumns(commit SegmentManifestCommit) bool {
 // read side for its own lookup; a caller that must hold that read side across a
 // larger critical section (the commit's re-resolution before publication) uses
 // indexIDsByDroppedColumnsLocked instead, which assumes it is already held.
-// Called outside segMu. Returns nil when the commit drops no columns.
+// Called outside the segment writer lock. Returns nil when the commit drops no
+// columns.
 func (m *meta) indexIDsByDroppedColumns(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
 	if !commitDropsColumns(commit) {
 		return nil
@@ -781,11 +782,11 @@ func (m *meta) retractReplacedColumnIndexRecords(commit SegmentManifestCommit, r
 
 // verifyNoUnexpectedIndexRecords fails the commit if any live SegmentIndex
 // record on an index that the commit's DropColumns retracts is not covered by
-// the staged removals. Called under the manifest lock + segMu at publication.
-// indexIDs is the removal set resolved from the CURRENT index definitions just
-// before segMu is taken, so an index created during the commit window is still
-// enumerated without taking fieldIndexLock inside segMu; the scan here only
-// reads the segment's records, converting the
+// the staged removals. Called under the manifest lock + the segment writer lock
+// at publication. indexIDs is the removal set resolved from the CURRENT index
+// definitions just before the writer lock is taken, so an index created during
+// the commit window is still enumerated without taking fieldIndexLock under the
+// writer lock; the scan here only reads the segment's records, converting the
 // AddSegmentIndex-does-not-participate-in-the-manifest-lock race into a
 // fail-and-retry: a record created while the commit held the lock aborts the
 // commit instead of surviving with an index built from the pre-replace data.
@@ -853,11 +854,11 @@ func validateManifestIndexTaskProjection(m *meta, segment *SegmentInfo, entry pa
 // getSegmentManifestLocks also supports focused unit tests that construct a
 // lightweight meta directly instead of calling newMeta.
 func (m *meta) getSegmentManifestLocks() *lock.KeyLock[int64] {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-	if m.segmentManifestLocks == nil {
-		m.segmentManifestLocks = lock.NewKeyLock[int64]()
-	}
+	m.segmentManifestLocksOnce.Do(func() {
+		if m.segmentManifestLocks == nil {
+			m.segmentManifestLocks = lock.NewKeyLock[int64]()
+		}
+	})
 	return m.segmentManifestLocks
 }
 
@@ -952,7 +953,7 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	}
 	// Always seed the pack from the segment-lock snapshot. Operators then never
 	// re-read the shared SegmentsInfo map while catalog I/O is intentionally
-	// outside segMu. This also lets creation commits use the same machinery
+	// outside the writer lock. This also lets creation commits use the same machinery
 	// before their segment is visible in meta.
 	pack.segments[current.GetID()] = current.Clone()
 	for _, operator := range mutation.Operators {
@@ -1055,7 +1056,7 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 }
 
 // preparedSegmentManifest pairs a commit with the immutable manifest revision that
-// stage 2 produced for it, ready to be published under segMu in stage 3.
+// stage 2 produced for it, ready to be published under the segment writer locks in stage 3.
 type preparedSegmentManifest struct {
 	commit       SegmentManifestCommit
 	manifestPath string
@@ -1110,16 +1111,18 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 //     so no hold-and-wait convoy), escalating after a bounded window to ordered
 //     blocking acquisition so extreme single-segment contention cannot starve the
 //     batch (see acquireSegmentManifestLocks for the deadlock-safety argument).
-//  2. Generate each segment's new manifest revision in parallel, OUTSIDE segMu — the
+//  2. Generate each segment's new manifest revision in parallel, OUTSIDE the
+//     segment writer locks — the
 //     loon transaction is object-storage I/O — each generated from the segment's
 //     current in-lock manifest pointer (a Noop member may pin an ExpectedManifest CAS).
 //  3. Publish every prepared pointer plus the caller's extraOperators in one
-//     m.UpdateSegmentsInfo call: a single segMu critical section, one catalog write.
+//     m.UpdateSegmentsInfo call: under the writer locks of the segments, one catalog write.
 //
-// Lock order is segmentManifestLocks -> segMu (the manifest locks are all held
-// before UpdateSegmentsInfo takes segMu). indexMeta.keyLock never enters this path
-// at all, because SegmentIndex mutations are rejected below; the single-segment
-// commit, which does take it, orders it BEFORE segMu. No caller may hold segMu.
+// Lock order is segmentManifestLocks -> segment writer locks (the manifest locks
+// are all held before UpdateSegmentsInfo takes the writer locks).
+// indexMeta.keyLock never enters this path at all, because SegmentIndex
+// mutations are rejected below; the single-segment commit, which does take it,
+// orders it BEFORE the writer locks. No caller may hold a segment writer lock.
 //
 // commits must target existing StorageV3 segments; NewSegment is rejected because the
 // single AlterSegments batch cannot create a segment, SegmentIndex is rejected
@@ -1201,7 +1204,7 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 			mlog.Duration("lockHold", time.Since(holdStart)))
 	}()
 
-	// Stage 2: generate every segment's manifest revision in parallel, off segMu.
+	// Stage 2: generate every segment's manifest revision in parallel, off the writer locks.
 	prepared, err := m.prepareSegmentManifests(ctx, commits)
 	if err != nil {
 		return err
@@ -1232,7 +1235,7 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 // in-flight commits ahead of it. segmentIDs must be sorted and de-duplicated —
 // that order, plus the manifest-lock discipline (single-segment commits never take
 // a second manifest lock while holding one; no caller enters this protocol holding
-// segMu), is what makes phase 2 deadlock-free (see lock.LockManyOrdered).
+// a segment writer lock), is what makes phase 2 deadlock-free (see lock.LockManyOrdered).
 func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64], segmentIDs []int64) error {
 	backoff := segmentManifestLockRetryInitial
 	start := time.Now()
@@ -1282,12 +1285,11 @@ func acquireSegmentManifestLocks(ctx context.Context, locks *lock.KeyLock[int64]
 }
 
 // prepareSegmentManifests snapshots the target segments once, then generates each
-// segment's new manifest revision in parallel outside segMu. A segment that is gone
+// segment's new manifest revision in parallel outside the writer locks. A segment that is gone
 // or unhealthy at snapshot time is skipped (nil result); any real generation failure
 // aborts the batch. The returned slice holds only the segments that produced a
 // revision, in unspecified order.
 func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentManifestCommit) ([]preparedSegmentManifest, error) {
-	m.segMu.RLock()
 	snapshots := make(map[int64]*SegmentInfo, len(commits))
 	for i := range commits {
 		id := commits[i].SegmentID
@@ -1295,7 +1297,6 @@ func (m *meta) prepareSegmentManifests(ctx context.Context, commits []SegmentMan
 			snapshots[id] = segment.Clone()
 		}
 	}
-	m.segMu.RUnlock()
 
 	io, releaseIO, err := m.manifestCommitExecutor.acquire(ctx)
 	if err != nil {
@@ -1387,7 +1388,7 @@ func (m *meta) submitSegmentManifest(ctx context.Context, io *packed.ManifestIOC
 }
 
 // publishSegmentManifestOperator produces the stage-3 operator that publishes one
-// prepared revision inside UpdateSegmentsInfo's segMu section: it rebases onto the
+// prepared revision inside UpdateSegmentsInfo, under the segment's writer lock: it rebases onto the
 // latest record, re-checks the CAS and monotonic-version guards, applies the commit's
 // caller operators and typed fields, then advances the manifest pointer. A segment
 // dropped during manifest I/O is skipped without failing the batch.
@@ -1395,8 +1396,8 @@ func (m *meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) 
 	return func(modPack *updateSegmentPack) bool {
 		commit := prepared.commit
 		// Peek the latest record without seeding the pack, so a skip leaves nothing
-		// to persist. We hold segMu (via UpdateSegmentsInfo) and every manifest lock.
-		latest := modPack.meta.segments.GetSegment(commit.SegmentID)
+		// to persist. Peek takes the writer lock; we hold every manifest lock.
+		latest := modPack.Peek(commit.SegmentID)
 		if latest == nil || !isSegmentHealthy(latest) {
 			mlog.Warn(modPack.meta.ctx, "segment dropped or unhealthy during batch manifest commit; skipping publication",
 				mlog.Int64("segmentID", commit.SegmentID))

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -35,9 +36,9 @@ import (
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
 // publication unit of batch segment changes. The in-memory table lives on
-// `meta` and is guarded by segMu: the group record composes into the same
-// catalog txn as segment writes (see UpdateSegmentsInfoAndChangeGroups), so it
-// shares the segment lock. This is the layer that later batch pipelines
+// `meta` and is guarded by meta.groupMu: the group record composes into the
+// same catalog txn as segment writes (see UpdateSegmentsInfoAndChangeGroups),
+// which take it after the writer locks of their segments. This is the layer that later batch pipelines
 // (import, compaction, copy, ...) call to stage and publish their outputs, and
 // that the DataView integration (PR #52537) extends by composing a DataView
 // snapshot action into the same txn.
@@ -129,8 +130,8 @@ func (m *meta) AddSegmentChangeGroup(ctx context.Context, group *model.SegmentCh
 	if err := group.Validate(); err != nil {
 		return err
 	}
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
 	return m.addSegmentChangeGroupLocked(ctx, group)
 }
 
@@ -182,7 +183,7 @@ func containsInt64(list []int64, id int64) bool {
 // parent would, on double publish, expose two visible outputs covering the
 // same logical rows. L0 is the explicit exception (monotonic delta
 // application, absorbed by the DataView delta watermark), and groups never
-// stage L0. The caller holds segMu; it must be invoked for every group
+// stage L0. The caller holds groupMu; it must be invoked for every group
 // creation entry point — both the standalone AddSegmentChangeGroup and the
 // composite UpdateSegmentsInfoAndChangeGroups — so there is no defensive gap.
 func (m *meta) validateSegmentChangeGroupOwnershipLocked(group *model.SegmentChangeGroup) error {
@@ -195,7 +196,7 @@ func (m *meta) validateSegmentChangeGroupOwnershipLocked(group *model.SegmentCha
 // see claims staged by sibling group actions within the SAME txn (review N1) —
 // the in-memory indexes are only updated after the catalog write, so without
 // this a single txn carrying two conflicting new groups would both pass and
-// break the invariant at the persistence layer. The caller holds segMu.
+// break the invariant at the persistence layer. The caller holds groupMu.
 func (m *meta) validateSegmentChangeGroupOwnershipAgainstLocked(group *model.SegmentChangeGroup, staged, superseded map[int64]int64) error {
 	for _, id := range group.NewSegmentIDs {
 		if owner, ok := staged[id]; ok {
@@ -231,7 +232,7 @@ func (m *meta) validateSegmentChangeGroupOwnershipAgainstLocked(group *model.Seg
 // ALREADY-REGISTERED group: the transition must be legal AND the member set
 // (NewSegmentIDs / SupersededSegmentIDs) must be unchanged — members are fixed
 // at registration, so a transition that smuggles in new references would
-// bypass the anti-duplication check. The caller holds segMu.
+// bypass the anti-duplication check. The caller holds groupMu.
 func (m *meta) validateSegmentChangeGroupTransitionLocked(group *model.SegmentChangeGroup) error {
 	current := m.segmentChangeGroups[group.GroupID]
 	if current == nil {
@@ -297,8 +298,8 @@ func (m *meta) UpdateSegmentChangeGroup(ctx context.Context, group *model.Segmen
 	if err := group.Validate(); err != nil {
 		return err
 	}
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
 	current := m.segmentChangeGroups[group.GroupID]
 	// chyezh#2a: COMMITTED is reachable ONLY through the composite publish path
@@ -346,8 +347,8 @@ func mergeTransitionOntoRecord(current, group *model.SegmentChangeGroup) *model.
 
 // GetSegmentChangeGroup returns a clone of the group, or nil when unknown.
 func (m *meta) GetSegmentChangeGroup(ctx context.Context, collectionID, groupID int64) *model.SegmentChangeGroup {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	group := m.segmentChangeGroups[groupID]
 	if group == nil || (collectionID > 0 && group.CollectionID != collectionID) {
 		return nil
@@ -358,8 +359,8 @@ func (m *meta) GetSegmentChangeGroup(ctx context.Context, collectionID, groupID 
 // GetSegmentChangeGroupsByCollection returns clones of all groups of a
 // collection, in unspecified order. collectionID <= 0 returns every group.
 func (m *meta) GetSegmentChangeGroupsByCollection(ctx context.Context, collectionID int64) []*model.SegmentChangeGroup {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	groups := make([]*model.SegmentChangeGroup, 0, len(m.segmentChangeGroups))
 	for _, group := range m.segmentChangeGroups {
 		if collectionID > 0 && group.CollectionID != collectionID {
@@ -373,8 +374,8 @@ func (m *meta) GetSegmentChangeGroupsByCollection(ctx context.Context, collectio
 // GetSegmentChangeGroupBySegmentID returns the group that currently stages
 // segmentID (STAGED/READY), or nil when the segment is not staged.
 func (m *meta) GetSegmentChangeGroupBySegmentID(ctx context.Context, segmentID int64) *model.SegmentChangeGroup {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	groupID, ok := m.stagedSegmentToGroup[segmentID]
 	if !ok {
 		return nil
@@ -389,8 +390,8 @@ func (m *meta) GetSegmentChangeGroupBySegmentID(ctx context.Context, segmentID i
 // HasStagedSegment reports whether segmentID is currently a STAGED/READY member
 // of a group in collectionID.
 func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int64) bool {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	groupID, ok := m.stagedSegmentToGroup[segmentID]
 	if !ok {
 		return false
@@ -408,8 +409,8 @@ func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int
 // IsImporting would otherwise leak their DML position / partition into the
 // read set.
 func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	members := typeutil.NewUniqueSet()
 	for _, g := range m.segmentChangeGroups {
 		if collectionID > 0 && g.CollectionID != collectionID {
@@ -433,8 +434,8 @@ func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeu
 // convergence) use; unlike GetSegmentChangeGroupBySegmentID it also covers
 // superseded-parent claims.
 func (m *meta) GetSegmentChangeGroupByReferencedSegment(ctx context.Context, segmentID int64) *model.SegmentChangeGroup {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	groupID, ok := m.stagedSegmentToGroup[segmentID]
 	if !ok {
 		groupID, ok = m.supersededSegmentToGroup[segmentID]
@@ -452,8 +453,8 @@ func (m *meta) GetSegmentChangeGroupByReferencedSegment(ctx context.Context, seg
 // HasReferencedSegment reports whether segmentID is claimed by an ALIVE group
 // in collectionID, as a staged member or a superseded parent.
 func (m *meta) HasReferencedSegment(ctx context.Context, collectionID, segmentID int64) bool {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
 	groupID, ok := m.stagedSegmentToGroup[segmentID]
 	if !ok {
 		groupID, ok = m.supersededSegmentToGroup[segmentID]
@@ -472,8 +473,8 @@ func (m *meta) HasReferencedSegment(ctx context.Context, collectionID, segmentID
 // Callers must ensure the group's superseded segments are fully retired before
 // deleting it.
 func (m *meta) DeleteSegmentChangeGroup(ctx context.Context, collectionID, groupID int64) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
 	current := m.segmentChangeGroups[groupID]
 	if current == nil {
@@ -506,8 +507,8 @@ func (m *meta) DeleteSegmentChangeGroup(ctx context.Context, collectionID, group
 // GC calls it once RootCoord has dropped the collection and all its segments
 // are recycled.
 func (m *meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collectionID int64) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
 	if err := m.catalog.DropSegmentChangeGroups(ctx, collectionID); err != nil {
 		return err
 	}
@@ -572,11 +573,17 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 				"UpdateSegmentsInfoAndChangeGroups only accepts segment change group actions, got %T", action.Entry)
 		}
 	}
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	// The writer locks of the segments come before groupMu.
+	locks, updatePack, err := m.runOperators(operators)
+	defer locks.release()
+	if err != nil {
+		return err
+	}
+	m.groupMu.Lock()
+	defer m.groupMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
 
-	// Semantic validation of every group action, under segMu, before any write.
+	// Semantic validation of every group action, under groupMu, before any write.
 	// A Save of an UNREGISTERED group is a creation and must pass the same
 	// anti-duplication checks as AddSegmentChangeGroup (F1: no defensive gap on
 	// the composite creation path). A Save of a REGISTERED group is a state
@@ -663,17 +670,6 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	}
 	groupActions = normalized
 
-	updatePack := &updateSegmentPack{
-		meta:       m,
-		segments:   make(map[int64]*SegmentInfo),
-		increments: make(map[int64]metastore.BinlogsIncrement),
-	}
-	for _, operator := range operators {
-		operator(updatePack)
-		if updatePack.err != nil {
-			return updatePack.err
-		}
-	}
 	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return err
 	}
@@ -886,9 +882,7 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	}
 	// Apply memory status after a successful meta update; the MetaStore
 	// emits segment metrics as segments are installed.
-	for id, s := range updatePack.segments {
-		m.segments.SetSegment(id, s)
-	}
+	m.segments.PublishSegments(lo.Values(updatePack.segments))
 	for _, action := range groupActions {
 		m.applySegmentChangeGroupActionMemoryLocked(action)
 	}
@@ -896,7 +890,7 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 }
 
 // applySegmentChangeGroupActionMemoryLocked folds one group action into the
-// in-memory table and the staged-member reverse index. The caller holds segMu.
+// in-memory table and the staged-member reverse index. The caller holds groupMu.
 func (m *meta) applySegmentChangeGroupActionMemoryLocked(action metastore.UpdateAction) {
 	entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
 	if !ok {
@@ -932,7 +926,7 @@ func (m *meta) applySegmentChangeGroupActionMemoryLocked(action metastore.Update
 
 // dropGroupReferencesLocked removes every referenced segment (staged members
 // and superseded parents) of a group from the reverse indexes. The caller
-// holds segMu.
+// holds groupMu.
 func (m *meta) dropGroupReferencesLocked(groupID int64) {
 	group := m.segmentChangeGroups[groupID]
 	if group == nil {
@@ -951,8 +945,7 @@ func (m *meta) dropGroupReferencesLocked(groupID int64) {
 }
 
 // isL0SegmentLocked reports whether segmentID exists in meta and is an L0 delta
-// segment. The caller holds segMu (reads the shared SegmentsInfo map, no further
-// locking needed).
+// segment. The caller holds groupMu; the segment is read without a lock.
 func (m *meta) isL0SegmentLocked(segmentID int64) bool {
 	segment := m.segments.GetSegment(segmentID)
 	return segment != nil && segment.GetLevel() == datapb.SegmentLevel_L0
@@ -962,7 +955,7 @@ func (m *meta) isL0SegmentLocked(segmentID int64) bool {
 // the anti-duplication invariant: it is either an L0 delta segment in live meta
 // NOW, or another ALIVE group already persisted it as L0-exempt (so the
 // decision is monotonic once any owner recorded it, independent of later GC of
-// the segment). The caller holds segMu.
+// the segment). The caller holds groupMu.
 func (m *meta) isSupersededExemptLocked(segmentID int64) bool {
 	if m.isL0SegmentLocked(segmentID) {
 		return true
@@ -984,7 +977,7 @@ func (m *meta) isSupersededExemptLocked(segmentID int64) bool {
 // parents are exempt from the anti-duplication invariant, persisting the
 // decision on the group (C11): recovery must not re-derive the exemption from
 // live SegmentMeta, or a GC'd L0 parent would flip identical persisted bytes
-// into a startup conflict. The caller holds segMu; group is mutated in place.
+// into a startup conflict. The caller holds groupMu; group is mutated in place.
 func (m *meta) stampSupersededL0ExemptionsLocked(group *model.SegmentChangeGroup) {
 	group.SupersededL0SegmentIDs = group.SupersededL0SegmentIDs[:0]
 	for _, id := range group.SupersededSegmentIDs {
@@ -996,7 +989,7 @@ func (m *meta) stampSupersededL0ExemptionsLocked(group *model.SegmentChangeGroup
 
 // ensureSegmentChangeGroupStoreLocked lazily initializes the group table for a
 // `meta` constructed directly (unit tests) rather than via newMeta. The caller
-// holds segMu.
+// holds groupMu.
 func (m *meta) ensureSegmentChangeGroupStoreLocked() {
 	if m.segmentChangeGroups == nil {
 		m.segmentChangeGroups = make(map[int64]*model.SegmentChangeGroup)
