@@ -683,8 +683,9 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			meta: &meta{
-				catalog:  catalog,
-				segments: NewSegmentsInfo(),
+				catalog:     catalog,
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
