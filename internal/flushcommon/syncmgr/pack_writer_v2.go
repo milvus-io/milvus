@@ -310,6 +310,7 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 		return nil, "", err
 	}
 	// workaround to store row num
+	validElementCounts, _ := storage.CollectVectorArrayValidElements(bw.schema, rec, nil, nil)
 	for _, columnGroup := range columnGroups {
 		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
@@ -324,6 +325,8 @@ func (bw *BulkPackWriterV2) writeInsertsIntoStorage(_ context.Context,
 					TimestampFrom:   tsFrom,
 					TimestampTo:     tsTo,
 					FieldNullCounts: getFieldNullCounts(columnGroup),
+					FieldValidElementCounts: storage.ColumnGroupValidElementCounts(
+						columnGroup, validElementCounts),
 				},
 			},
 		}

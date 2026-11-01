@@ -63,6 +63,9 @@ class CachedSearchIterator {
     // moment once the interim index owns the raw data, and reading the live
     // container instead would either trip its bounds assertion (after a
     // reclaim) or read a generation this iterator never pinned.
+    //
+    // `element_nullable`: element-level search on an element-nullable
+    // VECTOR_ARRAY, whose rows store only valid vectors.
     CachedSearchIterator(const dataset::SearchDataset& dataset,
                          const segcore::VectorBase* vec_data,
                          const ChunkSnapshot& chunks,
@@ -70,7 +73,8 @@ class CachedSearchIterator {
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
-                         const milvus::DataType& data_type);
+                         const milvus::DataType& data_type,
+                         bool element_nullable = false);
 
     // For sealed segment with chunked data, BF
     CachedSearchIterator(ChunkedColumnInterface* column,
@@ -110,6 +114,9 @@ class CachedSearchIterator {
     // a separate VectorArray with its own backing allocation, so we flatten
     // per-chunk here and keep the buffers alive alongside the iterators.
     std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_;
+    // Growing element-nullable VECTOR_ARRAY: physical-to-logical element ids
+    // per range, referenced by the chunk iterators' bitsets.
+    std::vector<std::vector<int32_t>> element_id_buffers_;
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
     int8_t sign_ = 1;

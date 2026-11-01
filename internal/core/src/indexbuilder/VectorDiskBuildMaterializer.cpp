@@ -218,6 +218,8 @@ VectorDiskBuildMaterializer::InitializeStaging(std::string staging_parent,
                                                DataType value_type,
                                                int64_t dim,
                                                bool nullable,
+                                               bool element_nullable,
+                                               bool embedding_list,
                                                int64_t expected_rows,
                                                bool side_input_declared) {
     owner_ = storage::LocalDirectory::CreateOwned(
@@ -240,8 +242,19 @@ VectorDiskBuildMaterializer::InitializeStaging(std::string staging_parent,
                    static_cast<uint64_t>(std::numeric_limits<size_t>::max()),
                "disk vector expected row count exceeds size_t: {}",
                expected_rows_);
-    embedding_list_ = field_type_ == DataType::VECTOR_ARRAY;
-    if (embedding_list_) {
+    vector_array_ = field_type_ == DataType::VECTOR_ARRAY;
+    embedding_list_ = embedding_list;
+    element_nullable_ = element_nullable;
+    AssertInfo(!element_nullable_ || vector_array_,
+               "element-nullable disk vector build requires VECTOR_ARRAY, got "
+               "{}",
+               field_type_);
+    if (element_nullable_ && embedding_list_) {
+        ThrowInfo(Unsupported,
+                  "element-nullable VECTOR_ARRAY does not support "
+                  "embedding-list metrics");
+    }
+    if (vector_array_) {
         AssertInfo(value_type_ != DataType::VECTOR_ARRAY &&
                        value_type_ != DataType::VECTOR_SPARSE_U32_F32 &&
                        IsVectorDataType(value_type_),
@@ -259,7 +272,7 @@ VectorDiskBuildMaterializer::InitializeStaging(std::string staging_parent,
                dim_,
                value_type_);
     if (side_input_declared_) {
-        AssertInfo(!embedding_list_,
+        AssertInfo(!vector_array_,
                    "VECTOR_ARRAY optional scalar input is unsupported");
         primary_layout_.emplace();
     }
@@ -334,7 +347,7 @@ VectorDiskBuildMaterializer::Add(const FieldDataPtr& batch) {
         }
 
         size_t batch_vectors = physical_rows;
-        if (embedding_list_) {
+        if (vector_array_) {
             batch_vectors = ValidateEmbeddingList(*batch, physical_rows);
         } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
             ValidateSparse(*batch, physical_rows);
@@ -353,12 +366,14 @@ VectorDiskBuildMaterializer::Add(const FieldDataPtr& batch) {
                       next_physical);
         }
 
-        AppendValidity(logical_rows, valid);
+        if (!ElementLevel()) {
+            AppendValidity(logical_rows, valid);
+        }
         if (primary_layout_.has_value()) {
             primary_layout_->Append(logical_rows,
                                     ValidityView::FromExpanded(valid));
         }
-        if (embedding_list_) {
+        if (vector_array_) {
             WriteEmbeddingList(*batch, physical_rows);
         } else if (value_type_ == DataType::VECTOR_SPARSE_U32_F32) {
             WriteSparse(*batch, physical_rows);
@@ -387,6 +402,12 @@ VectorDiskBuildMaterializer::FinishPrimary() {
         if (logical_rows_ == 0) {
             ThrowInfo(DataIsEmpty, "cannot build an empty disk vector index");
         }
+        const bool element_level = ElementLevel();
+        if (element_level && logical_elements_ == 0) {
+            ThrowInfo(DataIsEmpty,
+                      "cannot build an element-level disk vector index "
+                      "without elements");
+        }
         AssertInfo(raw_dim_ <= std::numeric_limits<uint32_t>::max(),
                    "disk vector dimension {} exceeds uint32 wire format",
                    raw_dim_);
@@ -396,11 +417,12 @@ VectorDiskBuildMaterializer::FinishPrimary() {
         raw_file_->Close();
         raw_file_.reset();
 
-        if (nullable_) {
+        if (element_level ? element_nullable_ : nullable_) {
             valid_path_ =
                 (std::filesystem::path(owner_->Path()) / "valid_data_input")
                     .string();
-            const auto logical = static_cast<uint64_t>(logical_rows_);
+            const auto logical = static_cast<uint64_t>(
+                element_level ? logical_elements_ : logical_rows_);
             WriteWholeFile(valid_path_,
                            &logical,
                            sizeof(logical),
@@ -408,7 +430,8 @@ VectorDiskBuildMaterializer::FinishPrimary() {
                            validity_.size());
         }
 
-        all_null_ = nullable_ && physical_valid_parents_ == 0;
+        all_null_ = element_level ? element_nullable_ && physical_rows_ == 0
+                                  : nullable_ && physical_valid_parents_ == 0;
         empty_embedding_list_ =
             embedding_list_ && !all_null_ && physical_rows_ == 0;
         if (embedding_list_ && !all_null_) {
@@ -734,11 +757,69 @@ VectorDiskBuildMaterializer::WriteEmbeddingList(FieldDataBase& batch,
     const auto* values = static_cast<const VectorArray*>(batch.Data());
     for (size_t row = 0; row < physical_parents; ++row) {
         raw_file_->Write(values[row].data(), values[row].byte_size());
-        offsets_.push_back(
-            CheckedAdd(offsets_.back(),
-                       static_cast<size_t>(values[row].physical_length()),
-                       "VECTOR_ARRAY offset"));
+        if (embedding_list_) {
+            offsets_.push_back(
+                CheckedAdd(offsets_.back(),
+                           static_cast<size_t>(values[row].physical_length()),
+                           "VECTOR_ARRAY offset"));
+        } else {
+            AppendElementValidity(values[row], row);
+        }
     }
+}
+
+void
+VectorDiskBuildMaterializer::AppendElementValidity(const VectorArray& value,
+                                                   size_t row) {
+    if (value.length() < value.physical_length()) {
+        ThrowInfo(DataFormatBroken,
+                  "disk VECTOR_ARRAY value {} has {} logical and {} physical "
+                  "elements",
+                  row,
+                  value.length(),
+                  value.physical_length());
+    }
+    const auto logical = static_cast<size_t>(value.length());
+    const auto next = CheckedAdd(
+        logical_elements_, logical, "disk VECTOR_ARRAY logical element");
+    if (!element_nullable_) {
+        if (value.is_element_nullable() ||
+            value.length() != value.physical_length()) {
+            ThrowInfo(DataFormatBroken,
+                      "disk VECTOR_ARRAY value {} carries null elements in a "
+                      "non-element-nullable field",
+                      row);
+        }
+        logical_elements_ = next;
+        return;
+    }
+    if (next > std::numeric_limits<size_t>::max() - 7) {
+        ThrowInfo(DataFormatBroken,
+                  "disk VECTOR_ARRAY element validity byte count overflows "
+                  "size_t");
+    }
+    // Bits of this row's elements follow the previous rows' bits; a null row
+    // contributes no element.
+    validity_.resize((next + 7) / 8, 0);
+    const auto validity = value.element_validity_view();
+    size_t valid = 0;
+    for (size_t i = 0; i < logical; ++i) {
+        if (!value.is_element_nullable() || validity[i]) {
+            const auto bit = logical_elements_ + i;
+            validity_[bit >> 3] |=
+                static_cast<uint8_t>(1U << static_cast<unsigned>(bit & 7));
+            ++valid;
+        }
+    }
+    if (valid != static_cast<size_t>(value.physical_length())) {
+        ThrowInfo(DataFormatBroken,
+                  "disk VECTOR_ARRAY value {} has {} valid elements but {} "
+                  "physical vectors",
+                  row,
+                  valid,
+                  value.physical_length());
+    }
+    logical_elements_ = next;
 }
 
 VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
@@ -747,6 +828,7 @@ VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
     DataType value_type,
     int64_t dim,
     bool nullable,
+    bool element_nullable,
     int64_t expected_rows,
     const index::IndexFamily& family,
     const index::BuildParams& params) {
@@ -771,6 +853,8 @@ VectorDiskBuildMaterializer::VectorDiskBuildMaterializer(
                       value_type,
                       dim,
                       nullable,
+                      element_nullable,
+                      IsEmbeddingListBuild(field_type, params),
                       expected_rows,
                       !input_spec_.side_inputs.empty());
 }
@@ -803,13 +887,16 @@ VectorDiskBuildMaterializer::Swap(VectorDiskBuildMaterializer& other) noexcept {
     swap(nullable_, other.nullable_);
     swap(expected_rows_, other.expected_rows_);
     swap(side_input_declared_, other.side_input_declared_);
+    swap(vector_array_, other.vector_array_);
     swap(embedding_list_, other.embedding_list_);
+    swap(element_nullable_, other.element_nullable_);
     swap(all_null_, other.all_null_);
     swap(empty_embedding_list_, other.empty_embedding_list_);
     swap(state_, other.state_);
     swap(logical_rows_, other.logical_rows_);
     swap(physical_valid_parents_, other.physical_valid_parents_);
     swap(physical_rows_, other.physical_rows_);
+    swap(logical_elements_, other.logical_elements_);
     swap(primary_layout_, other.primary_layout_);
     swap(validity_scratch_, other.validity_scratch_);
     swap(validity_scratch_capacity_, other.validity_scratch_capacity_);

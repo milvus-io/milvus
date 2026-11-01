@@ -22,15 +22,20 @@
 #include <string>
 #include <vector>
 
+#include "common/BitsetView.h"
 #include "common/QueryInfo.h"
+#include "common/Types.h"
 #include "common/VectorArray.h"
 #include "exec/operator/Utils.h"
 #include "index/Meta.h"
 #include "index/contracts/query/IVectorReader.h"
+#include "indexbuilder/VectorBuildMaterializer.h"
+#include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "indexbuilder/test_utils/SourceBuildTestUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "query/CachedSearchIterator.h"
+#include "storage/artifact/FileSink.h"
 
 namespace milvus::indexbuilder::test {
 namespace {
@@ -193,6 +198,9 @@ class VectorArrayBuildSessionTest : public SourceBuildTest {
             const auto* reader =
                 dynamic_cast<const index::IVectorReader*>(owner.get());
             ASSERT_NE(reader, nullptr);
+            // Null rows contribute no element, so the element domain carries
+            // no validity.
+            EXPECT_FALSE(reader->HasValidData());
             index::VectorSearchParams search;
             search.topk_ = topk;
             search.metric_type_ = knowhere::metric::COSINE;
@@ -210,6 +218,136 @@ class VectorArrayBuildSessionTest : public SourceBuildTest {
                                                offset < physical_rows;
                                     }));
         }
+    }
+
+    struct ElementNullableData {
+        FieldDataPtr data;
+        // One entry per logical element; null elements hold no vector.
+        std::vector<bool> element_valid;
+        std::vector<std::vector<float>> element_vectors;
+        int64_t physical_elements{0};
+    };
+
+    // Rows whose index % 7 == 3 are null; the others hold row % 4 elements,
+    // where element j is null when (row + j) % 3 == 0 (or always when
+    // all_null_elements is set).
+    static ElementNullableData
+    GenElementNullable(int64_t rows, bool all_null_elements) {
+        std::mt19937 rng(7);
+        std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+        ElementNullableData result;
+        std::vector<VectorArray> arrays;
+        std::vector<uint8_t> validity((rows + 7) / 8, 0);
+        for (int64_t row = 0; row < rows; ++row) {
+            if (row % 7 == 3) {
+                continue;
+            }
+            validity[row / 8] |= static_cast<uint8_t>(1u << (row % 8));
+            const auto count = static_cast<int>(row % 4);
+            TargetBitmap bits(count, false);
+            std::vector<float> values;
+            for (int j = 0; j < count; ++j) {
+                const bool valid = !all_null_elements && (row + j) % 3 != 0;
+                result.element_valid.push_back(valid);
+                result.element_vectors.emplace_back();
+                if (!valid) {
+                    continue;
+                }
+                bits.set(j);
+                auto& vector = result.element_vectors.back();
+                for (int64_t d = 0; d < kDim; ++d) {
+                    vector.push_back(distribution(rng));
+                }
+                values.insert(values.end(), vector.begin(), vector.end());
+                ++result.physical_elements;
+            }
+            arrays.emplace_back(values.data(),
+                                count,
+                                kDim,
+                                DataType::VECTOR_FLOAT,
+                                TargetBitmapView(bits.data(), count),
+                                true);
+        }
+        result.data = storage::CreateFieldData(
+            DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, kDim);
+        result.data->FillFieldData(arrays.data(), validity.data(), rows, 0);
+        return result;
+    }
+
+    PreparedBuild
+    PrepareElementNullable(int64_t rows, bool disk = false) {
+        Config params{{knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
+                      {knowhere::indexparam::HNSW_M, 16},
+                      {knowhere::indexparam::EFCONSTRUCTION, 200}};
+        if (disk) {
+            params = DiskParams();
+            params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+        }
+        auto prepared = Prepare(DataType::VECTOR_ARRAY,
+                                DataType::VECTOR_FLOAT,
+                                true,
+                                disk ? knowhere::IndexEnum::INDEX_DISKANN
+                                     : knowhere::IndexEnum::INDEX_HNSW,
+                                rows,
+                                kDim,
+                                params);
+        prepared.file_manager_context.fieldDataMeta.field_schema
+            .set_element_nullable(true);
+        return prepared;
+    }
+
+    // The V1 insert-binlog fixture cannot carry element validity, so the
+    // batch goes straight into the production resident materializer, builder
+    // and sink; the artifact is then opened by the production loader.
+    storage::ArtifactStats
+    PublishElementNullable(const PreparedBuild& prepared,
+                           const FieldDataPtr& data,
+                           int64_t rows) {
+        auto params = prepared.request.params;
+        params["local_dir"] = prepared.request.staging_parent;
+        VectorBuildMaterializer materializer(DataType::VECTOR_ARRAY,
+                                             prepared.request.value_type,
+                                             kDim,
+                                             true,
+                                             rows,
+                                             prepared.request.family,
+                                             params);
+        materializer.Add(data);
+        auto artifact = std::move(materializer).Build();
+        storage::V1DiskSink sink(prepared.file_manager_context,
+                                 prepared.request.output.storage_namespace);
+        artifact->Serialize(sink);
+        auto stats = sink.Finish();
+        sink.ReleaseLocalStaging();
+        return stats;
+    }
+
+    // Disk counterpart of PublishElementNullable.
+    storage::ArtifactStats
+    PublishElementNullableDisk(const PreparedBuild& prepared,
+                               const FieldDataPtr& data,
+                               int64_t rows) {
+        auto params = prepared.request.params;
+        params["local_dir"] = prepared.request.staging_parent;
+        VectorDiskBuildMaterializer materializer(
+            prepared.request.staging_parent,
+            DataType::VECTOR_ARRAY,
+            prepared.request.value_type,
+            kDim,
+            true,
+            true,
+            rows,
+            prepared.request.family,
+            params);
+        materializer.Add(data);
+        materializer.FinishPrimary();
+        auto artifact = std::move(materializer).Build();
+        storage::V1DiskSink sink(prepared.file_manager_context,
+                                 prepared.request.output.storage_namespace);
+        artifact->Serialize(sink);
+        auto stats = sink.Finish();
+        sink.ReleaseLocalStaging();
+        return stats;
     }
 };
 
@@ -313,10 +451,139 @@ TEST_F(VectorArrayBuildSessionTest, HnswElementLevelListsFromBinlog) {
     ExpectElementLevelHnswRoundTrip(false);
 }
 
-// knowhere keeps an element-domain identity map for a nullable element-level
-// index, so the loaded validity is sized by the vector count, not the rows.
+// Null rows contribute no element, so a row-nullable element-level index has
+// no validity and counts only the vectors of the non-null rows.
 TEST_F(VectorArrayBuildSessionTest, HnswNullableElementLevelListsFromBinlog) {
     ExpectElementLevelHnswRoundTrip(true);
+}
+
+// An element-nullable field indexes its non-null elements in the logical
+// element domain: null elements keep their ids but are never returned.
+TEST_F(VectorArrayBuildSessionTest, HnswElementNullableElementLevel) {
+    constexpr int64_t rows = 60;
+    constexpr int64_t topk = 4;
+    auto prepared = PrepareElementNullable(rows);
+    const auto generated = GenElementNullable(rows, false);
+    const auto logical = static_cast<int64_t>(generated.element_valid.size());
+    ASSERT_GT(generated.physical_elements, topk);
+    ASSERT_LT(generated.physical_elements, logical);
+    const auto stats = PublishElementNullable(prepared, generated.data, rows);
+    ASSERT_FALSE(stats.Files().empty());
+
+    std::vector<int64_t> targets;
+    for (int64_t id = 0; id < logical && targets.size() < 2; ++id) {
+        if (generated.element_valid[id]) {
+            targets.push_back(id);
+        }
+    }
+    ASSERT_EQ(targets.size(), 2);
+    std::vector<float> query_values;
+    for (const auto id : targets) {
+        const auto& vector = generated.element_vectors[id];
+        query_values.insert(query_values.end(), vector.begin(), vector.end());
+    }
+    const auto queries = knowhere::GenDataSet(2, kDim, query_values.data());
+    index::VectorSearchParams search;
+    search.topk_ = topk;
+    search.metric_type_ = knowhere::metric::COSINE;
+    search.search_params_ =
+        Config{{knowhere::meta::METRIC_TYPE, search.metric_type_},
+               {knowhere::indexparam::EF, 64}};
+    const auto expect_valid_elements = [&](const SearchResult& result) {
+        for (const auto offset : result.seg_offsets_) {
+            if (offset == INVALID_SEG_OFFSET) {
+                continue;
+            }
+            ASSERT_GE(offset, 0);
+            ASSERT_LT(offset, logical);
+            EXPECT_TRUE(generated.element_valid[offset]) << offset;
+        }
+    };
+
+    for (const bool mmap : {false, true}) {
+        SCOPED_TRACE(mmap ? "mmap" : "heap");
+        auto owner = Open(prepared, stats, mmap);
+        EXPECT_EQ(owner->Count(), generated.physical_elements);
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(owner.get());
+        ASSERT_NE(reader, nullptr);
+        EXPECT_TRUE(reader->HasValidData());
+        EXPECT_EQ(reader->ValidCount(), generated.physical_elements);
+        for (int64_t id = 0; id < logical; ++id) {
+            EXPECT_EQ(reader->IsRowValid(id), generated.element_valid[id])
+                << id;
+        }
+
+        SearchResult result;
+        reader->Search(queries, search, nullptr, nullptr, result);
+        EXPECT_EQ(result.total_nq_, 2);
+        ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
+        expect_valid_elements(result);
+        // An exact copy of an element finds that element's logical id.
+        EXPECT_EQ(result.seg_offsets_[0], targets[0]);
+        EXPECT_EQ(result.seg_offsets_[topk], targets[1]);
+
+        // The filter bitset is addressed by logical element id.
+        TargetBitmap filter(logical, false);
+        filter.set(targets[0]);
+        SearchResult filtered;
+        reader->Search(queries, search, BitsetView(filter), nullptr, filtered);
+        ASSERT_EQ(filtered.seg_offsets_.size(), 2 * topk);
+        expect_valid_elements(filtered);
+        EXPECT_TRUE(
+            std::none_of(filtered.seg_offsets_.begin(),
+                         filtered.seg_offsets_.end(),
+                         [&](int64_t offset) { return offset == targets[0]; }));
+        EXPECT_EQ(filtered.seg_offsets_[topk], targets[1]);
+    }
+}
+
+// Every element null: the artifact publishes only the element-domain id map.
+TEST_F(VectorArrayBuildSessionTest, HnswElementNullableAllNullElements) {
+    constexpr int64_t rows = 20;
+    auto prepared = PrepareElementNullable(rows);
+    const auto generated = GenElementNullable(rows, true);
+    const auto logical = static_cast<int64_t>(generated.element_valid.size());
+    ASSERT_GT(logical, 0);
+    ASSERT_EQ(generated.physical_elements, 0);
+    const auto stats = PublishElementNullable(prepared, generated.data, rows);
+    ASSERT_FALSE(stats.Files().empty());
+
+    auto owner = Open(prepared, stats);
+    EXPECT_EQ(owner->Count(), 0);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(owner.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_TRUE(reader->HasValidData());
+    EXPECT_EQ(reader->ValidCount(), 0);
+    for (int64_t id = 0; id < logical; ++id) {
+        EXPECT_FALSE(reader->IsRowValid(id)) << id;
+    }
+    const std::vector<float> values(2 * kDim, 0.1F);
+    ExpectEmptySearch(*reader,
+                      knowhere::GenDataSet(2, kDim, values.data()),
+                      knowhere::metric::COSINE,
+                      2);
+}
+
+// Rows without any element leave nothing to index; the build is skipped.
+TEST_F(VectorArrayBuildSessionTest, HnswElementNullableWithoutElements) {
+    constexpr int64_t rows = 4;
+    auto prepared = PrepareElementNullable(rows);
+    std::vector<VectorArray> arrays;
+    for (int64_t row = 0; row < rows; ++row) {
+        arrays.emplace_back(
+            nullptr, 0, kDim, DataType::VECTOR_FLOAT, TargetBitmapView(), true);
+    }
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, kDim);
+    const std::vector<uint8_t> validity{0x0F};
+    data->FillFieldData(arrays.data(), validity.data(), rows, 0);
+    try {
+        PublishElementNullable(prepared, data, rows);
+        FAIL() << "an index without elements must not be built";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), DataIsEmpty);
+    }
 }
 
 #ifdef BUILD_DISK_ANN
@@ -371,6 +638,155 @@ TEST_F(VectorArrayBuildSessionTest, DiskAnnNonemptyListsFromBinlog) {
     reader->Search(queries, params, nullptr, nullptr, result);
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.distances_.size(), 2 * topk);
+}
+
+// A plain metric on a row-nullable VECTOR_ARRAY builds an element-level
+// DiskANN index: null rows contribute no element, so no validity is written
+// and the index holds exactly the vectors of the non-null rows.
+TEST_F(VectorArrayBuildSessionTest,
+       DiskAnnNullableElementLevelListsFromBinlog) {
+    constexpr int64_t rows = 60;
+    constexpr int64_t topk = 4;
+    auto params = DiskParams();
+    params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    auto prepared = Prepare(DataType::VECTOR_ARRAY,
+                            DataType::VECTOR_FLOAT,
+                            true,
+                            knowhere::IndexEnum::INDEX_DISKANN,
+                            rows,
+                            kDim,
+                            params);
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    std::vector<VectorArray> arrays;
+    std::vector<std::vector<float>> elements;
+    std::vector<uint8_t> validity((rows + 7) / 8, 0);
+    for (int64_t row = 0; row < rows; ++row) {
+        if (row % 5 == 0) {
+            continue;
+        }
+        validity[row / 8] |= static_cast<uint8_t>(1u << (row % 8));
+        const auto count = row % 3 + 1;
+        std::vector<float> values(count * kDim);
+        for (auto& value : values) {
+            value = distribution(rng);
+        }
+        for (int64_t j = 0; j < count; ++j) {
+            elements.emplace_back(values.begin() + j * kDim,
+                                  values.begin() + (j + 1) * kDim);
+        }
+        arrays.emplace_back(values.data(), count, kDim, DataType::VECTOR_FLOAT);
+    }
+    const auto physical = static_cast<int64_t>(elements.size());
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, kDim);
+    data->FillFieldData(arrays.data(), validity.data(), rows, 0);
+    WriteInsert(prepared, data);
+    const auto stats = Publish(prepared);
+    ASSERT_FALSE(stats.Files().empty());
+
+    auto owner = Open(prepared, stats);
+    ASSERT_EQ(owner->Count(), physical);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(owner.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_FALSE(reader->HasValidData());
+
+    // An exact copy of an element finds that element's id.
+    const std::vector<int64_t> targets{0, physical - 1};
+    std::vector<float> query_values;
+    for (const auto id : targets) {
+        query_values.insert(
+            query_values.end(), elements[id].begin(), elements[id].end());
+    }
+    const auto queries = knowhere::GenDataSet(2, kDim, query_values.data());
+    index::VectorSearchParams search;
+    search.topk_ = topk;
+    search.metric_type_ = knowhere::metric::L2;
+    search.search_params_ =
+        Config{{knowhere::meta::METRIC_TYPE, search.metric_type_},
+               {index::DISK_ANN_QUERY_LIST, topk * 4}};
+    SearchResult result;
+    reader->Search(queries, search, nullptr, nullptr, result);
+    EXPECT_EQ(result.total_nq_, 2);
+    ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
+    EXPECT_TRUE(std::all_of(
+        result.seg_offsets_.begin(),
+        result.seg_offsets_.end(),
+        [&](int64_t offset) { return offset >= 0 && offset < physical; }));
+    EXPECT_EQ(result.seg_offsets_[0], targets[0]);
+    EXPECT_EQ(result.seg_offsets_[topk], targets[1]);
+}
+
+// Element-nullable DiskANN: the validity is written in the logical element
+// domain, so ids and the filter bitset are logical element ids.
+TEST_F(VectorArrayBuildSessionTest, DiskAnnElementNullableElementLevel) {
+    constexpr int64_t rows = 60;
+    constexpr int64_t topk = 4;
+    auto prepared = PrepareElementNullable(rows, true);
+    const auto generated = GenElementNullable(rows, false);
+    const auto logical = static_cast<int64_t>(generated.element_valid.size());
+    ASSERT_LT(generated.physical_elements, logical);
+    const auto stats =
+        PublishElementNullableDisk(prepared, generated.data, rows);
+    ASSERT_FALSE(stats.Files().empty());
+
+    std::vector<int64_t> targets;
+    for (int64_t id = logical - 1; id >= 0 && targets.size() < 2; --id) {
+        if (generated.element_valid[id]) {
+            targets.push_back(id);
+        }
+    }
+    ASSERT_EQ(targets.size(), 2);
+    std::vector<float> query_values;
+    for (const auto id : targets) {
+        const auto& vector = generated.element_vectors[id];
+        query_values.insert(query_values.end(), vector.begin(), vector.end());
+    }
+    const auto queries = knowhere::GenDataSet(2, kDim, query_values.data());
+    index::VectorSearchParams search;
+    search.topk_ = topk;
+    search.metric_type_ = knowhere::metric::L2;
+    search.search_params_ =
+        Config{{knowhere::meta::METRIC_TYPE, search.metric_type_},
+               {index::DISK_ANN_QUERY_LIST, topk * 4}};
+
+    auto owner = Open(prepared, stats);
+    EXPECT_EQ(owner->Count(), generated.physical_elements);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(owner.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_TRUE(reader->HasValidData());
+    EXPECT_EQ(reader->ValidCount(), generated.physical_elements);
+    for (int64_t id = 0; id < logical; ++id) {
+        EXPECT_EQ(reader->IsRowValid(id), generated.element_valid[id]) << id;
+    }
+    const auto expect_valid_elements = [&](const SearchResult& result) {
+        for (const auto offset : result.seg_offsets_) {
+            if (offset == INVALID_SEG_OFFSET) {
+                continue;
+            }
+            ASSERT_GE(offset, 0);
+            ASSERT_LT(offset, logical);
+            EXPECT_TRUE(generated.element_valid[offset]) << offset;
+        }
+    };
+    SearchResult result;
+    reader->Search(queries, search, nullptr, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
+    expect_valid_elements(result);
+    EXPECT_EQ(result.seg_offsets_[0], targets[0]);
+    EXPECT_EQ(result.seg_offsets_[topk], targets[1]);
+
+    TargetBitmap filter(logical, false);
+    filter.set(targets[0]);
+    SearchResult filtered;
+    reader->Search(queries, search, BitsetView(filter), nullptr, filtered);
+    ASSERT_EQ(filtered.seg_offsets_.size(), 2 * topk);
+    expect_valid_elements(filtered);
+    EXPECT_TRUE(
+        std::none_of(filtered.seg_offsets_.begin(),
+                     filtered.seg_offsets_.end(),
+                     [&](int64_t offset) { return offset == targets[0]; }));
+    EXPECT_EQ(filtered.seg_offsets_[topk], targets[1]);
 }
 
 TEST_F(VectorArrayBuildSessionTest, DiskAnnAllNullParentsFromBinlog) {

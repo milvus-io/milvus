@@ -28,6 +28,7 @@
 #include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "knowhere/array_store.h"
 
 namespace milvus::query {
@@ -38,12 +39,11 @@ struct FlattenedVectorArrayRows {
     std::vector<size_t> row_offsets;
 };
 
-// Both growing storage modes expose one row object per chunk slot. Flatten
-// their compact payloads for Knowhere, optionally retaining row boundaries
+// Growing VECTOR_ARRAY chunks hold one VectorArrayView per row. Flatten the
+// rows' compact payloads for Knowhere, optionally retaining row boundaries
 // for embedding-list search.
-template <typename Row>
-FlattenedVectorArrayRows
-FlattenVectorArrayRows(const Row* rows,
+inline FlattenedVectorArrayRows
+FlattenVectorArrayRows(const VectorArrayView* rows,
                        int64_t row_count,
                        bool include_row_offsets) {
     AssertInfo(row_count >= 0 && (row_count == 0 || rows != nullptr),
@@ -72,6 +72,39 @@ FlattenVectorArrayRows(const Row* rows,
         }
     }
     return result;
+}
+
+// Element-nullable rows store only valid vectors. Append the logical element
+// id of each stored vector in rows [0, row_count) to `ids`, numbering logical
+// elements from `logical_begin`. Returns the rows' logical element count.
+inline int64_t
+AppendVectorArrayElementIds(const VectorArrayView* rows,
+                            int64_t row_count,
+                            int64_t logical_begin,
+                            std::vector<int32_t>& ids) {
+    AssertInfo(row_count >= 0 && (row_count == 0 || rows != nullptr),
+               "invalid VECTOR_ARRAY row range");
+    int64_t logical = logical_begin;
+    for (int64_t i = 0; i < row_count; ++i) {
+        const auto length = rows[i].length();
+        AssertInfo(logical + length <= std::numeric_limits<int32_t>::max(),
+                   "logical element count {} exceeds int32 range",
+                   logical + length);
+        if (!rows[i].is_element_nullable()) {
+            for (int j = 0; j < length; ++j) {
+                ids.push_back(static_cast<int32_t>(logical + j));
+            }
+        } else {
+            const auto& validity = rows[i].element_validity_view();
+            for (int j = 0; j < length; ++j) {
+                if (validity[j]) {
+                    ids.push_back(static_cast<int32_t>(logical + j));
+                }
+            }
+        }
+        logical += length;
+    }
+    return logical - logical_begin;
 }
 
 inline bool

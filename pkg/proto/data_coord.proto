@@ -549,6 +549,14 @@ message Statistics {
   // segment's insert binlogs (e.g. ["parquet"], ["lance"], or
   // ["parquet","lance"] for mixed).
   repeated string formats = 15;
+  // Per-field count of valid elements of ArrayOfVector (VectorArray) fields,
+  // summed across all binlogs of that field: the elements of non-null rows,
+  // without null elements of element-nullable fields. A field has an entry
+  // only when every binlog of it recorded field_valid_element_counts; a
+  // missing entry means the count is unknown (older data), not zero. Used by
+  // task_index for the minimum-vector-count check of element-nullable
+  // VectorArray indexes.
+  map<int64, int64> valid_element_counts = 16;
 }
 
 message SegmentStartPosition {
@@ -672,6 +680,9 @@ message Binlog {
   int64 memory_size = 7;
   // null counts per field in this column group.
   map<int64, int64> field_null_counts = 8;
+  // valid element counts of the ArrayOfVector (VectorArray) fields in this
+  // column group (zero included); see Statistics.valid_element_counts.
+  map<int64, int64> field_valid_element_counts = 9;
 }
 
 message GetRecoveryInfoResponse {

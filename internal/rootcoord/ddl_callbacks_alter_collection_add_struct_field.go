@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -59,6 +60,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	// Sub-fields of a whole struct added here are original sub-fields of that
 	// struct: they get no origin marker, and users cannot supply one.
 	if err := rejectStructSubFieldOriginMarkers([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
+		return err
+	}
+	if err := schemautil.RejectStructSubFieldsTextMatch([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
 		return err
 	}
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
