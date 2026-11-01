@@ -34,11 +34,30 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestListIndexesVersionTakenBeforeList(t *testing.T) {
+	broker := meta.NewMockBroker(t)
+	allocated := false
+	broker.EXPECT().AllocTimestamp(mock.Anything).RunAndReturn(func(context.Context) (uint64, error) {
+		allocated = true
+		return 100, nil
+	}).Once()
+	broker.EXPECT().ListIndexes(mock.Anything, int64(1)).RunAndReturn(func(context.Context, int64) ([]*indexpb.IndexInfo, error) {
+		assert.True(t, allocated)
+		return []*indexpb.IndexInfo{{IndexID: 10}}, nil
+	}).Once()
+
+	infos, version, err := ListIndexesWithVersion(context.Background(), broker, 1)
+	require.NoError(t, err)
+	assert.Len(t, infos, 1)
+	assert.EqualValues(t, 100, version)
+}
 
 func TestSpawnReplicasWithRG(t *testing.T) {
 	paramtable.Init()
