@@ -1,9 +1,31 @@
 # Mutable Columns: In-Place Partial Update via Merge-on-Read Patches
 
-- Status: Draft
+- Status: Draft (revision 2)
 - Author: Xiaofan Luan
-- Date: 2026-07-09
-- Related: [discussion #51115](https://github.com/milvus-io/milvus/discussions/51115)
+- Date: 2026-07-09; revision 2: 2026-11-01
+- Related: [discussion #51115](https://github.com/milvus-io/milvus/discussions/51115),
+  issue #52063 (mutable columns), issue #54943 (ARRAY_TRIM and array op
+  semantics under retry / idempotency)
+
+## Revision 2 Summary
+
+Revision 1 (2026-07-09) established the mechanism: patches are deletes with a
+payload, an in-memory overlay with version chains serves reads, and patch
+compaction plus column folding bound the overlay. Revision 2 keeps all of
+that and changes the following:
+
+| # | Revision 1 | Revision 2 | Why |
+|---|---|---|---|
+| R1 | Overlay served through a `PatchedColumnView` at the Raw chunk accessor / `bulk_subscript` | Mutable columns live in their **own column group**, written as **Vortex**, loaded with `local_format=vortex`; the overlay is applied at the two Vortex decode outlets (Scan batches and Take results) | Every sealed read of a Vortex column already funnels through `VortexColumn` Scan/Take (see "Read Path"); the Raw chunk accessors are scattered across ~6 families of call sites |
+| R2 | Numeric, BOOL, TIMESTAMPTZ, ARRAY only; VARCHAR / JSON / GEOMETRY / struct immutable | **All non-vector types in Phase 1** (adds VARCHAR, TEXT, JSON, `$meta`, GEOMETRY, native-list ARRAY, ArrayOfStruct with scalar sub-fields); vectors, sparse vectors and EmbList in Phase 2 | At a Vortex outlet a variable-length value is patched by swapping one view pointer; text match moves to a tantivy delta that is isomorphic to the growing text index |
+| R3 | Ops SET / INCR / APPEND / POP_FRONT / REMOVE | Ops **SET / APPEND / REMOVE / TRIM / PATH_REPLACE**; INCR deferred; POP_FRONT replaced by TRIM (Redis `LTRIM`) | One Redis-aligned op set; TRIM covers pop-front, pop-back and keep-last-N |
+| R4 | `(R, S)` base-free folding for any APPEND/REMOVE interleaving | Base-free folding only for **SET absorbing earlier ops** and **concatenating consecutive APPENDs** | `max_capacity` clamps after every op, which makes REMOVE/TRIM results depend on the current length |
+| R5 | Retries out of scope | **Request-level idempotency key**; no CAS for patch ops | Today the SDKs auto-retry Upsert and there is no Upsert idempotency key, so non-idempotent array ops can apply twice (#54943) |
+| R6 | Three phases | **Two phases**: Phase 1 brute force only; Phase 2 index-backed search (scalar index result correction, text match delta, vector search correction) | |
+| R7 | — | Two delete-path invariants made explicit: patch entries dedupe by `(offset, column, ts, seq)` exactly like `DeletedRecord`'s `(ts, offset)` set, and `fold_ts` never exceeds the channel's L0-distributed watermark | Unlike deletes, APPEND is not idempotent and a late older SET must not override a folded newer one |
+
+Sections below are revision 1 text unless they carry a "(rev 2)" marker or
+were rewritten for the changes above.
 
 ## Motivation
 
@@ -67,99 +89,136 @@ folding)". No mechanism in this design is invented from scratch.
 
 | Term | Meaning |
 |---|---|
-| patch | One logged mutation, `(pk, ts, op, operand)`; op ∈ {SET, INCR, APPEND, POP_FRONT, REMOVE} |
+| patch | One logged mutation, `(pk, ts, seq, op, operand)`; op ∈ {SET, APPEND, REMOVE, TRIM, PATH_REPLACE} (INCR reserved) |
 | patch deltalog | Persisted file of patches for one (segment, mutable column); one emitted per flush cycle; internally ts-ordered |
 | overlay | Per-(segment, mutable column) in-memory structure serving current values; chunk-partitioned `hashmap<offset, version chain>` |
-| version chain | Per-row list of `(ts, op, operand)` nodes providing MVCC |
-| floor node | The single chain node holding everything folded below safe_ts; still a relative op, never materialized |
+| version chain | Per-row list of `(ts, seq, op, operand)` nodes providing MVCC |
+| floor node | The single chain node holding everything folded below safe_ts |
 | safe timestamp (safe_ts) | Lower bound of any timestamp a current or future reader may use; history below it is dead and purgeable |
-| materialization | Computing an absolute value from base + ops; happens only at read time and at column folding |
+| materialization | Computing an absolute value from base + ops; happens only at read, pruning and column folding |
 | patch compaction | Background merge of deltalogs with per-PK op folding; output is still deltalog format |
-| column folding | Background rewrite of one column file with patches applied, swapped in atomically via the segment manifest |
-| fold_ts | Per-(segment, column) watermark recorded in the manifest; load replays only entries with `ts > fold_ts` |
-| patched_bitset | Monotone per-(segment, column) bitmap of ever-patched rows; used for index result correction (Phase 3) |
+| column folding | Background rewrite of the mutable column group with patches applied, swapped in atomically via the segment manifest |
+| fold_ts | Per-(segment, column group) watermark recorded in the manifest; load replays only entries with `ts > fold_ts` |
+| L0-distributed watermark | Per-channel ts below which every L0 patch has already been routed to its target segments (rev 2) |
+| request_id | Client-supplied idempotency key of one `update()` call, reused across retries (rev 2) |
+| patched_bitset | Monotone per-(segment, column) bitmap of ever-patched rows; used for index result correction (Phase 2) |
 
 ## Goals
 
-- Partial update of designated columns by primary key.
-- Supported types: **numeric scalars (INT8/16/32/64, FLOAT, DOUBLE), BOOL,
-  TIMESTAMPTZ, and ARRAY** (SET / APPEND / POP_FRONT / REMOVE).
-- Counter support via **INCR delta ops**: an increment is just `+1` written
-  to the log — no read-modify-write anywhere in the system.
-- Mutable columns can appear in filter expressions, evaluated by brute-force
-  scan in v1 (indexes return post-v1 via result correction).
+- Partial update of designated (`mutable=true`) columns by primary key, with
+  **no read on the write path and no CAS**.
+- **Phase 1 types**: BOOL, INT8/16/32/64, FLOAT, DOUBLE, TIMESTAMPTZ,
+  VARCHAR/STRING, TEXT, JSON, the dynamic field `$meta`, GEOMETRY, ARRAY
+  (legacy and native list: element-nullable and nested), and ArrayOfStruct
+  whose sub-fields are scalar. Future fixed-width types (DECIMAL, DATE, TIME)
+  follow the fixed-width rules when they land.
+- **Phase 1 reads**: mutable columns may appear in filters and outputs; dirty
+  rows are evaluated by brute-force fix-up. **Phase 2** adds index-backed
+  search on mutable columns and mutable vector / sparse / EmbList fields.
+- **Redis-aligned array semantics** (`RPUSH`, `LREM 0`, `LTRIM`, `LSET`)
+  that are deterministic, replicable and replayable.
+- **Exactly-once under client retry** through a request-level idempotency key.
 - Reuse existing subsystems: DML channel/WAL, PK bloom-filter routing,
-  L0→L1 compaction, manifest-based atomic file replacement. No new storage
-  subsystem.
+  L0→L1 compaction, manifest-based atomic column-group replacement. No new
+  storage subsystem.
 - MVCC semantics identical to deletes: timestamp-based visibility, same
   consistency guarantees.
 
 ## Non-Goals
 
-- **VARCHAR and JSON scalars are immutable.** This deliberately removes the
-  heaviest machinery an earlier draft required: no overlay text index, no
-  tokenization on the patch path, no JSON parsing/merge-patch, and the
-  BM25 / embedding-function questions become moot (function inputs are text,
-  which is immutable). String-tag use cases are expressed as ARRAY of
-  numeric ids instead.
-- **No index support on mutable columns in v1.** This is a scheduling
-  choice, not an architectural one — see "Path to Indexed Mutable Columns".
-- No mutation of vector fields, primary key, partition key, or clustering key.
-- No index-addressed array ops (`arr[3] = x`, insert-at) and no
-  value-returning ops (LPOP-style pop that returns the element) — see
-  "Array mutation ops" for the admission rule that permanently excludes
-  them. Supported array ops are SET / APPEND / POP_FRONT / REMOVE(value).
-- No read-your-write feedback on whether an update hit an existing PK (see
-  Write Path).
+- **INCR** is deferred. Its analysis is kept under "SET and INCR" for when it
+  returns.
+- Set-semantics and positional array ops beyond PATH_REPLACE: AddUnique /
+  `$addToSet`, PREPEND (`LPUSH`), INSERT (`LINSERT`), REMOVE with a count,
+  REMOVE-at-index, and value-returning pops (`LPOP`/`RPOP` return values are
+  reads). The op enum is append-only, so any of these can be added later.
+- Conditional / CAS-style updates. Business-version conditional upsert
+  (#54532 / #54697) stays on the read-merge-write path.
+- Atomicity of one batch across vchannels. Each vchannel commits
+  independently, exactly as insert and delete do today.
+- Mutation of the primary key, partition key or clustering key. Function
+  output fields are not written directly; Phase 2 recomputes them in the proxy
+  from new inputs.
+- Raw local format for mutable columns. This becomes possible once local
+  format phase 2 moves all sealed reads behind `ColumnInterface`.
+- Synchronous feedback on whether an update matched a row (see API).
 
 ## Schema and API Semantics
 
 A field may be declared with `mutable=true`. Constraints:
 
-- Allowed types: INT8/16/32/64, FLOAT, DOUBLE, BOOL, TIMESTAMPTZ, ARRAY.
-  v1 restricts array element types to numeric/bool/timestamptz; VARCHAR
-  elements are a possible follow-up (the arena mechanism below already
-  covers them; text match does not apply to arrays, so nothing heavy
-  returns).
-- A mutable field cannot be: primary key, partition key, clustering key,
-  vector field, function-field input, or the target of `create_index`.
-- Mutable fields may appear in filter expressions and as output fields.
+- **Not allowed** for: the primary key, partition key, clustering key, or a
+  function output field. Vector, sparse vector and EmbList fields are allowed
+  only from Phase 2.
+- **Storage**: the split policy places mutable fields in their own column
+  group(s). That group is written in the Vortex physical format and loaded
+  with `local_format=vortex`. The PK never shares a group with a mutable
+  field.
+- **Phase 1 only**: a mutable field may not carry a scalar index, text match,
+  NGRAM, FM, TRIE or RTREE. JSON stats are allowed; dirty rows bypass them.
+  Output values must come from column data, never reverse-looked-up from an
+  index.
+- **`$meta`**: allowed. It is treated like JSON (see "JSON and the dynamic
+  field").
 
-New DML API:
+New DML API (rev 2):
 
 ```
-update(collection, pk, {col: value, ...})            # SET
-update(collection, pk, {col: Incr(delta), ...})      # INCR, numeric only
-update(collection, pk, {arr: Append([v, ...]), ...}) # array: Append / PopFront / Remove(v)
+update(collection,
+       pks=[...],
+       ops={
+         "status":  Set(v),                    # any mutable type, including NULL
+         "tags":    Append([v, ...]),          # array tail (RPUSH)
+         "blocked": Remove([v, ...]),          # remove all occurrences (LREM 0)
+         "events":  Remove(where=("id", 7)),   # ArrayOfStruct: by scalar sub-field value
+         "recent":  Trim(start, stop),         # keep [start, stop] (LTRIM)
+         "meta":    PathReplace('["a"][0]', v) # positional / JSON path (LSET-like)
+       },
+       request_id=None,      # SDK generates one per logical call, reuses it on retry
+       check_exists=False)   # optional best-effort PK existence check
 ```
 
-- Only mutable columns may appear in the value map; touching a non-mutable
-  column is a client-side error (full-row upsert remains the path for those).
-- Array values are validated against max_capacity and element type at the
-  proxy, like inserts.
-- **Missing-PK semantics: silent ignore.** Like a delete whose PK matches no
-  segment, the update message is broadcast and dropped wherever the PK bloom
-  filter misses. The write path never reads, so throughput and latency match
-  the delete path. Clients are not told whether the update took effect.
-- **Updates are PK-addressed only.** Batching by PK list is supported (like
-  delete). There is no `update ... where <expr>` — predicate-addressed
-  updates require a read to resolve targets, which the write path forbids;
-  clients can query PKs first and update by PK.
+Rules:
 
-### Supported types × operations
+- **One op per field per request.** Ordering inside a request is never
+  ambiguous; a multi-step change is several requests, ordered by ts.
+- **Operands** are either broadcast to every PK or given per PK.
+- **Missing PK: silent ignore**, like a delete whose PK matches no segment.
+  The call returns "accepted", not "applied". With `check_exists=True` the
+  proxy rejects PKs that the PK bloom filter / PK index cannot find. This is
+  best effort: a row deleted after the check makes the patch a no-op.
+- **Errors that need the current value cannot be reported** on the write
+  path. Out-of-range PATH_REPLACE, a missing JSON parent and similar cases are
+  deterministic no-ops on every replica.
+- **`upsert(partial_update=True)` is unchanged.** It remains a read-merge-write
+  path with CAS, synchronous errors and insert-on-missing-PK. Users who need
+  those semantics keep using it.
+- **Idempotency**: see "Write Path → Request-level idempotency".
 
-| Type | SET | INCR | Notes |
-|---|---|---|---|
-| INT8/16/32/64 | ✓ | ✓ | overflow semantics: see Open Questions |
-| FLOAT / DOUBLE | ✓ | ✓ | accumulation error accepted |
-| BOOL | ✓ | — | |
-| TIMESTAMPTZ | ✓ | — | INCR semantically unclear; excluded in v1 |
-| ARRAY (numeric/bool/timestamptz elements) | ✓ whole-value | — | plus APPEND / POP_FRONT / REMOVE(value, all occurrences); list semantics, order and duplicates preserved |
-| VARCHAR / JSON / GEOMETRY / vector / struct | — | — | immutable |
+### Supported types × operations (rev 2)
+
+| Type | SET | APPEND | REMOVE | TRIM | PATH_REPLACE | Phase 1 | Phase 2 |
+|---|---|---|---|---|---|---|---|
+| BOOL, INT8–64, FLOAT, DOUBLE | ✓ | — | — | — | — | brute force | STL_SORT / BITMAP / INVERTED / HYBRID (and bit-sliced, #54373) via result correction |
+| TIMESTAMPTZ | ✓ | — | — | — | — | brute force | STL_SORT via result correction |
+| VARCHAR / STRING | ✓ | — | — | — | — | brute force | INVERTED / BITMAP / TRIE / STL_SORT / NGRAM / FM via result correction; text / phrase match via tantivy delta |
+| TEXT (LOB) | ✓ | — | — | — | — | brute force | text / phrase match via tantivy delta |
+| JSON | ✓ | — | — | — | ✓ JSON path | brute force; JSON stats bypassed for dirty rows | JSON path index / INVERTED / NGRAM via result correction |
+| `$meta` | ✓ (top-level key merge) | — | — | — | ✓ JSON path | as JSON | as JSON |
+| GEOMETRY | ✓ (WKB) | — | — | — | — | brute force | RTREE via result correction |
+| ARRAY, legacy | ✓ | ✓ | ✓ by value | ✓ | ✓ `[i]` | brute force | INVERTED / BITMAP / HYBRID / STL_SORT via result correction |
+| ARRAY, native list (element-nullable / nested) | ✓ | ✓ outer list | ✓ by value (NULL matches NULL; nested: deep equality) | ✓ outer list | ✓ `[i]` | brute force | element-level indexes when #51393 lands |
+| ArrayOfStruct (scalar sub-fields) | ✓ | ✓ elements | ✓ `where child == v` | ✓ | ✓ `[i]`, `[i].child` | brute force | sub-field indexes via result correction |
+| ArrayOfStruct with vector sub-fields, EmbList | — | — | — | — | — | — | SET / APPEND / TRIM via vector search correction |
+| FLOAT / BINARY / FP16 / BF16 / INT8 vector, SPARSE_FLOAT_VECTOR | — | — | — | — | — | — | SET via vector search correction |
+| PK, partition key, clustering key | — | — | — | — | — | — | — |
 
 ## Update Semantics
 
 ### SET and INCR
+
+> (rev 2) INCR is deferred; the INCR analysis below is kept for when it
+> returns. SET semantics are unchanged.
 
 Patch entries are `(pk, ts, op, operand)` with op ∈ {SET, INCR}.
 
@@ -186,81 +245,125 @@ reads into possibly-evicted (mmap) base chunks on the apply path. Instead:
 Edge semantics to fix during implementation (listed in Open Questions):
 INCR on a NULL value, integer overflow behavior, float accumulation error.
 
-### Array mutation ops
+### Array operations (rev 2: Redis-aligned)
 
-The admission rule for any op: **it must be loggable without reading the
-old value, and its application must be a deterministic state transition.**
-Determinism is what guarantees replication — every replica consumes the
-same WAL in the same timestamp order, so deterministic ops converge on all
-replicas and across recovery replays. (Note this is weaker than requiring
-CRDT commutativity: commutativity is needed only without a total order,
-and the WAL provides one.) Foldability without base is desired on top, for
-patch-compaction quality.
+**Admission rule** (unchanged from revision 1): an op must be loggable
+without reading the old value, and applying it must be a deterministic state
+transition. Determinism, together with the WAL's per-channel total order and
+PK→vchannel affinity, is what makes replication, CDC and recovery replay
+converge. Commutativity is not required.
 
-Arrays keep plain **list semantics** (duplicates and order preserved) with
-three ops besides SET:
+| Op | Redis analogue | Semantics | Idempotent (same request applied twice) |
+|---|---|---|---|
+| `SET(arr)` | `SET` | Replace the whole value; `SET(NULL)` is legal | yes |
+| `APPEND(elems)` | `RPUSH` | Append at the tail, then clamp to `max_capacity` | **no** |
+| `REMOVE(values)` | `LREM key 0 v` | Remove **all** elements equal to any of `values`. This keeps the semantics of today's `ARRAY_REMOVE` (`typeutil.removeArrayRow`) | yes |
+| `TRIM(start, stop)` | `LTRIM` | Keep elements `[start, stop]`, both inclusive and 0-based. Negative indexes count from the end; out-of-range indexes are clamped; `start > stop` or `start >= len` gives `[]` | window form (`TRIM(-N,-1)`, `TRIM(0,N-1)`): yes; pop form (`TRIM(1,-1)`, `TRIM(0,-2)`): **no** |
+| `PATH_REPLACE([i], v)` | `LSET` | Replace element `i` (negative counts from the end); out of range ⇒ no-op | yes |
 
-- **`APPEND(elems)`** — append at the tail (Redis RPUSH).
-- **`POP_FRONT`** — remove the first element; **returns nothing** (unlike
-  Redis LPOP — a returned value would be a read). Pop of an empty list is
-  a no-op. `APPEND` + `POP_FRONT` is a zero-read FIFO queue — the natural
-  implementation of "keep the most recent N events".
-- **`REMOVE(value)`** — remove **all** occurrences of `value`. The
-  all-occurrences semantics is deliberate: removing only the *first*
-  occurrence is the one variant that breaks foldability, because whether
-  the first match lives in the base or in the appended suffix is unknowable
-  without reading the base.
+On `[a, b, c, d, e]`: `TRIM(-3,-1)` → `[c, d, e]` (keep the most recent N),
+`TRIM(1,-1)` → `[b, c, d, e]` (pop front), `TRIM(0,-2)` → `[a, b, c, d]` (pop
+back).
 
-**Folding — which forms are base-free.** Two op families
-fold to an exact, base-free floor (no base read below `safe_ts`): a run of
-scalar INCRs sums, and any interleaving of APPEND/REMOVE folds to
-`(remove_set R, surviving suffix S)` — remove-all-occurrences has no
-underflow, so `R` applies to base only at read.
+**Positional ops under concurrency.** PATH_REPLACE `[i]` and TRIM resolve
+against whatever the list is at their ts. A concurrent APPEND or TRIM can
+shift which element `[i]` designates. The result is still deterministic and
+identical on every replica, which is the same contract Redis gives. This is
+documented rather than prevented.
 
-**POP_FRONT has no base-free closed form.** Whether a POP is a real removal
-or a no-op on an already-empty list depends on `len(base)`, which is not
-available during base-free folding, so the tempting `(pop_count k, suffix S)`
-closed form is **wrong** — it miscounts pops-on-empty and lets a later
-APPEND's element be dropped. For example, with `base=[]` and operations
-`POP, APPEND(7)`, direct evaluation produces `[7]` while `(k,S)` produces
-`[]`. POP_FRONT is therefore kept as a
-**coalesced symbolic op-chain** (consecutive APPENDs merge) and resolved
-against base where base is in hand: at read, at column folding, and — to
-keep memory bounded — at overlay **pruning**, which for a POP-containing row
-materializes the chain against the locally-available base into a floor list.
-Pruning runs on the writer thread *off* the per-patch apply path, so reading
-base there is allowed (the no-base-read rule governs the apply hot path, not
-background pruning). POP×REMOVE mixes are symbolic-until-materialize the same
-way. The exact base-free floors are only the two above: scalar SET/INCR with
-an INCR watermark, and APPEND/REMOVE `(R,S)`.
+**`max_capacity` clamps after every op (rev 2).** APPEND that overflows keeps
+the most recent `max_capacity` elements and drops the oldest, giving
+sliding-window behaviour. This differs from today's
+`upsert(partial_update=True)`, which rejects an overflowing APPEND; that path
+is unchanged. The clamp must run after each op, in op order, because clamping
+only once at the end gives a different answer:
 
-**What an array patch actually stores:** an op's operand is only its
-arguments — APPEND stores just the appended elements, REMOVE stores one
-value, POP_FRONT stores nothing; **SET is the only op that carries a full
-array**. Deltalogs never hold a materialized full array. The overlay holds
-ops / `(R,S)` / appended suffixes, with one exception: a POP-containing row,
-once pruned, holds its materialized floor list (the current window
-contents — inherent data the user is storing, not overhead). A row appended
-to 10,000 times without pops costs the overlay one folded suffix, not
-10,000 array copies.
+```
+max_capacity = 3, base [a, b, c]
+APPEND(d), then TRIM(0, 1)
+clamp after each op:  [b, c, d] → [b, c]
+clamp at the end:     [a, b, c, d] → [a, b]        (wrong)
+```
 
-Rejected by the admission rule, permanently: index-addressed ops
-(LSET/LINSERT — ambiguous under concurrent APPEND, weak use case),
-value-returning ops (LPOP/RPOP return the popped value — a read), and any
-conditional/CAS-style update.
+**Folding: which forms are base-free (rev 2 replaces the `(R, S)` rule).**
+Every Milvus ARRAY has a `max_capacity`, so the clamp can always fire. Once
+it can fire, the result of REMOVE and TRIM depends on the current length,
+which is not known during base-free folding. Only two foldings stay exact:
 
-Consequences:
+1. **SET absorbs everything before it.**
+2. **Consecutive APPENDs concatenate.** Keeping the last `cap` elements after
+   each append is the same as keeping the last `cap` after appending the
+   concatenation.
 
-- **max_capacity cannot be enforced on the write path** (checking fullness
-  requires the current length). It is enforced at materialization: reads
-  and folds clamp to max_capacity in materialization order, and the
-  overflow tail is dropped. This must be documented prominently — it is a
-  more surprising flavor of silent-ignore than the missing-PK case. Note
-  that with POP_FRONT available, clients that care can maintain window size
-  themselves.
-- Long op chains cost O(chain) at read until the safe-timestamp pruner
-  folds them into a floor node (still relative ops, never needing base).
-  Hot-row read cost within the pruning window needs benchmarking.
+Every other sequence (REMOVE, TRIM, PATH_REPLACE, and their interleavings
+with APPEND) is kept as an ordered op list. It is materialized against the
+base at read, at column folding and at overlay pruning. Pruning reads the
+base off the per-patch apply path, as revision 1 already allowed for
+POP_FRONT.
+
+**Equality and NULL rules.** These are defined once and executed by a single
+implementation shared by proxy (Go), segcore (C++) and folding, or verified
+against shared golden vectors:
+
+- NaN is never equal to anything. This matches today's `ARRAY_REMOVE`.
+- `+0.0 == -0.0`.
+- Strings compare bytewise.
+- A NULL element equals a NULL element, so `REMOVE([NULL])` removes all null
+  elements.
+- Nested arrays use deep equality.
+- On a NULL array, APPEND treats the base as `[]`; REMOVE, TRIM and
+  PATH_REPLACE are no-ops.
+
+**Native-list arrays** (element-nullable / nested, #54513). Ops apply to the
+outer list, and an appended element may be NULL. Overlay values are stored as
+Arrow lists with element validity, never as protobuf blobs. Today's proxy
+rejects APPEND/REMOVE on these fields (`task_upsert_partial_op.go`); the
+mutable path lifts that.
+
+**ArrayOfStruct: lockstep rule.** A struct array row is a list of struct
+elements stored as one array column per sub-field, aligned by element index.
+
+- The version chain is kept **per struct field**, not per sub-field. Every op
+  applies to all sub-fields at the same ts.
+- A read of one sub-field materializes the struct chain and projects that
+  sub-field.
+- Column folding replaces all sub-field columns with the same `fold_ts` in
+  one manifest transaction.
+- `max_capacity` clamps at the same position for every sub-field.
+- Ops:
+  - APPEND struct elements;
+  - TRIM;
+  - `REMOVE(where child == v)`: remove all elements whose scalar sub-field
+    `child` equals `v`, using the equality rules above (vector sub-fields
+    cannot be the key);
+  - PATH_REPLACE `[i]` (whole element) and `[i].child` (one component).
+- Sub-field evolution (#54514): an older APPEND operand that lacks a newly
+  added sub-field materializes NULL or the default value; dropping a
+  sub-field discards its component from chains.
+- Invariant tested in Phase 1: all sub-field lengths of a row are always
+  equal.
+
+### JSON and the dynamic field (rev 2)
+
+- `SET(doc)` replaces the whole document.
+- `PATH_REPLACE(path, v)` uses today's grammar (`["key"][i]…`, depth ≤ 64).
+  It becomes a blind op: a missing intermediate key, a wrong parent type or
+  an out-of-range index ⇒ no-op. A missing final key is created, as today.
+- `$meta` follows the same rules. Its `SET` keeps today's partial-update
+  meaning, a merge of top-level keys.
+- Dirty rows bypass JSON stats / shredding and are evaluated on the raw JSON.
+  This also applies when JSON shredding serves group-by keys (#53412).
+
+### VARCHAR, TEXT, GEOMETRY (rev 2)
+
+- SET only.
+- **TEXT**:
+  - A patch value larger than the LOB inline threshold (64 KiB) is written as
+    a LOB file by the flusher, and the deltalog stores the LOB reference.
+  - The Vortex outlet patches the encoded reference column consistently with
+    `bulk_subscript_text_impl`'s LOB resolution.
+  - Column folding uses the existing LOB REUSE/REWRITE compaction logic.
+- **GEOMETRY**: patch values are always stored as WKB.
 
 ## Write Path
 
@@ -289,6 +392,44 @@ from checkpoint in TimeTick order like deletes).
    insert binlog contains rows exactly as inserted (which CDC, backup, and
    replay all rely on); the base/patch separation is uniform across growing
    and sealed segments.
+
+### No CAS, and request-level idempotency (rev 2)
+
+**Patch ops need no CAS.** Every op is blind and deterministic, so the only
+ordering requirement is the one the WAL already provides. The StreamingNode
+`partialupdate` interceptor's PK row locks (#54216) guarantee that a later
+write on a PK gets a later TimeTick. Patch messages still pass through that
+interceptor and publish their PKs into the version index. This lets a
+concurrent read-merge-write `upsert(partial_update=True)` detect them through
+its existing CAS.
+
+**Retries are the remaining hazard.** Current state on master:
+
+- pymilvus retries `upsert` on gRPC errors up to 75 times and ignores
+  `retriable`. The Go client retries `Unavailable` / `ResourceExhausted` up
+  to 6 times.
+- There is no idempotency key for Upsert.
+- An ambiguous commit can surface as a conflict (`TRANSACTION_EXPIRED` is
+  mapped to the CAS retry signal) or as a generic error.
+
+A retried APPEND or pop-form TRIM therefore applies twice (#54943).
+Revision 2 adds:
+
+1. **`request_id`.** The SDK generates one per logical `update()` call and
+   reuses it on every retry. Users may also supply their own.
+2. **Dedup at the WAL owner.** The StreamingNode keeps a TTL-bounded table
+   keyed by `(collection, request_id, vchannel)`. The dedup check and the
+   append run atomically under the same row-lock / vchannel serialization, so
+   two in-flight copies of one request cannot both commit. The `request_id`
+   is persisted in the WAL message, so the table is rebuilt from the WAL
+   after failover, and the TTL is bounded by WAL retention.
+3. **Multi-vchannel batches.** Each vchannel dedups independently. Retrying a
+   partially committed batch re-applies only the vchannels that did not
+   commit. An ambiguous outcome answers "already applied" on retry.
+4. **SDK retry policy.** `update()` is auto-retried only with a
+   `request_id`, and an SDK without `request_id` support cannot call
+   `update()`. CDC carries `request_id` to the target cluster, which dedups
+   the same way.
 
 ### Growing segments use the same overlay
 
@@ -357,11 +498,12 @@ makes the "no patches here" fast path a single branch.
   consistency staleness window; a query below it is impossible by
   construction, so history below it is dead and purgeable (the same
   contract that lets MVCC databases vacuum). The pruner is also what
-  recycles arena blocks. For base-free op families (SET/INCR,
-  APPEND/REMOVE) the floor node is relative and needs no base; for a
-  POP_FRONT-containing array row the pruner reads the (locally available)
-  base to collapse the chain into a floor list (allowed here because
-  pruning is off the per-patch apply path — see "Array mutation ops"). In
+  recycles arena blocks. For base-free folds (SET absorbing earlier ops,
+  concatenated APPENDs) the floor node is relative and needs no base; for
+  an array row holding REMOVE / TRIM / PATH_REPLACE ops the pruner reads the
+  (locally available) base to collapse the chain into a floor value (allowed
+  here because pruning is off the per-patch apply path — see "Array
+  operations"). In
   steady state each updated row holds one live node — overlay memory is
   bounded by the number of *distinct* updated rows, not by update
   frequency. A hot counter updated 1000×/s occupies one slot.
@@ -378,6 +520,24 @@ makes the "no patches here" fast path a single branch.
   mitigation — snapshotting cold overlay partitions into immutable local
   files with a small mutable tail, i.e. a node-local memtable/L0 — is
   deliberately out of scope for v1.)
+
+### Duplicate delivery (rev 2)
+
+The same patch can reach a segment's overlay more than once:
+
+- the streaming forward and the delta buffer (`ListAfter`) overlap with L0
+  load;
+- during growing→sealed handoff;
+- during recovery replay from a checkpoint.
+
+Deletes tolerate this because `DeletedRecord` stores `(ts, offset)` in a
+sorted set (`segcore/DeletedRecord.h`, `accessor.insert(entry).second`), so a
+duplicate is never inserted. Patches use the same rule. A chain node is
+identified by `(offset, column, ts, seq)`, where `seq` is the entry's
+position within its WAL message, and inserting an existing identity is a
+no-op. Every delivery path goes through this check. This matters more for
+patches than for deletes, because APPEND and pop-form TRIM are not
+idempotent.
 
 ### Building the overlay from deltalogs
 
@@ -502,14 +662,49 @@ path's file lifecycle unchanged.
 
 ## Read Path
 
-- **Expression evaluation** on a mutable column reads the base column chunk
-  and consults the overlay at the query timestamp. Evaluation is
-  brute-force only in v1; since no index can exist on these columns yet, no
-  planner change is needed beyond rejecting `create_index`.
-- **Output fields** are materialized the same way after search/query.
-- The vector search path is entirely unaware of mutable columns.
-- Consistency: visibility is governed by the same timestamp mechanism as
-  deletes; guaranteed-timestamp / bounded / eventually all behave identically.
+- **Where the overlay is applied (rev 2).** Mutable columns are Vortex
+  local-format columns. On master every sealed read of a Vortex column goes
+  through `VortexColumn` (`internal/core/src/mmap/VortexColumn.cpp`), which
+  implements `ChunkedColumnInterface`:
+  - expression evaluation uses Scan cursors (`SegmentExpr::EnsureDataScanCursor`
+    in `exec/expression/Expr.h`, and `SegmentChunkReader` routes Vortex
+    columns to Scan);
+  - offset reads use Take;
+  - `bulk_subscript` and group-by use Take.
+
+  The overlay is therefore applied at exactly two decode outlets:
+  - **Iterator / Scan.** Each `ScanBatch` covers `[row_id_start, +size)`.
+    Binary-search the query snapshot for dirty offsets in that range. If
+    there are none, the batch is returned untouched.
+    - For view targets (`StringView`, `Json`, `ArrayView`, `ArrayValueView`),
+      copy the view array and repoint the dirty slots to overlay arena
+      values. No payload bytes are copied.
+    - For primitive targets, copy the value array and overwrite the dirty
+      slots.
+    - Validity is rewritten only when a patch flips nullness.
+    - The batch `owner` holds the original owner, the new arrays and the
+      snapshot.
+
+    Types without a direct scan (ARRAY, WKT geometry) go through
+    `MaterializeChunk`, which uses the same helper.
+  - **Take.** The Vortex Take result is already owned, so dirty positions
+    are replaced in place. If every requested offset is dirty, decoding can
+    be skipped.
+- **Legacy chunk-view APIs** (`DataOfChunk`, `Span`, `StringViews`,
+  `*ViewsByOffsets`) throw for a column that has an overlay, so a read can
+  never silently return stale data. Local format phase 2 removes them.
+- **One snapshot per query.** Scan, Take, outputs and fix-up all use the same
+  overlay snapshot chosen at the query timestamp. It is passed through the
+  query context.
+- **Growing segments** apply the same overlay at the growing data-access
+  layer. Growing segments do not use Vortex.
+- **Output fields** are materialized through the same outlets after
+  search/query.
+- The vector search path is unaware of mutable scalar columns. Phase 2 covers
+  mutable vector fields.
+- **Consistency.** Visibility is governed by the same timestamp mechanism as
+  deletes. Strong and Session consistency read the caller's own writes;
+  Bounded and Eventually do not, exactly as for insert and delete.
 
 ### Expression evaluation over patched columns
 
@@ -599,11 +794,12 @@ re-litigate them):
 - The row-wise fix-up leg reuses the existing offset-based evaluation path
   (`has_offset_input_` / `OffsetVector` in `exec/expression/Expr.h`, built
   for iterative filters) rather than adding per-expr fix-up logic.
-- Overlay values are served through a **PatchedColumnView at the data
-  access layer** (chunk accessor / bulk_subscript), not inside individual
-  expression classes — one integration point covers every expression type
-  and output-field materialization. Unpatched columns must pay effectively
-  zero overhead on this hot path (a null-check branch).
+- (rev 2) Overlay values are served at the two Vortex decode outlets (Scan
+  batches and Take results, see "Read Path") and at the growing data-access
+  layer, not inside individual expression classes — one integration point
+  per backend covers every expression type and output-field
+  materialization. Unpatched columns must pay effectively zero overhead on
+  this hot path (a null-check branch).
 - Nullable interaction: SET carries validity (SET NULL is legal; a SET on a
   previously-NULL row flips its validity bit), so the validity bitmap needs
   overlay treatment too. INCR on NULL is a no-op (see Open Questions).
@@ -626,17 +822,23 @@ patch-aware in **v1** — numeric columns are exactly what they serve:
   invalidated by any patch to that column. The cache key must incorporate a
   per-(segment, column) overlay version, or caching is disabled for such
   expressions in v1 (recommended: disable, revisit with versioned keys).
+- (rev 2) **Vortex zone maps and scan pushdown** (loaded but not wired into
+  production queries on master): when enabled, a cell containing dirty rows
+  must not be pruned or answered by pushdown; assert this. **JSON stats /
+  shredding** are bypassed for dirty rows.
 
 ## Folding and Compaction
 
 Two levels keep patch volume bounded:
 
 1. **Patch compaction.** Multiple deltalogs for a segment are merged and
-   folded per PK using the op folding rules (SET absorbs, INCR sums,
-   APPEND/REMOVE → `(R, S)`, POP_FRONT stays a coalesced symbolic chain —
-   see "Array mutation ops"), below the safe timestamp. This is what
-   absorbs high-frequency counter workloads. Output is still deltalog
-   format.
+   folded per PK below the safe timestamp. Output is still deltalog format.
+   Under revision 2's rules (see "Array operations"):
+   - SET absorbs every op before it;
+   - consecutive APPENDs concatenate;
+   - everything else is kept as an ordered op list. That includes REMOVE,
+     TRIM, PATH_REPLACE and their interleavings with APPEND, which depend on
+     the current length because of the `max_capacity` clamp.
 2. **Column folding.** When the patch ratio for (segment, column) exceeds a
    threshold, rewrite that single column file with patches applied
    (materializing INCRs against the base — the one place deltas become
@@ -655,6 +857,42 @@ patches (harmless for SET, **wrong for INCR/APPEND**). Old deltalogs are
 GC-eligible only after the manifest swap commits and no reader pins the old
 version; the swap itself rides the existing segment-reopen atomic
 read-update COW mechanism (see `20260627-segment-reopen-atomic-read-update-cow`).
+
+**`fold_ts` is bounded by the L0-distributed watermark (rev 2).** Deletes are
+order-insensitive: a late delete compares against the row's insert ts and is
+still correct. A patch is not order-insensitive. Consider this sequence:
+
+```
+ts=70  SET(price=10)   still in an undistributed L0 segment
+ts=80  SET(price=20)   already routed to the segment
+fold at S=100          base := 20
+L0 routes ts=70 later  applied on top of the folded base → 10   (wrong; should stay 20)
+```
+
+Dropping late entries with `ts ≤ fold_ts` is not enough on its own. If the
+segment had no ts=80 patch, the fold would leave base=5 and the late ts=70
+SET would then be dropped: a lost update. The rule is therefore:
+
+> `fold_ts = min(S, L0-distributed watermark of the channel)`. This is the
+> earliest start ts among the channel's L0 segments that L0 compaction has
+> not yet processed.
+
+Every patch with `ts ≤ fold_ts` is then guaranteed to be in the segment's own
+deltalogs and included in the fold. Every later L0 delivery has
+`ts > fold_ts` and applies normally. The existing channel-level mutual
+exclusion between L0 compaction and mix / sort / clustering / schema-bump
+compaction (`datacoord/compaction_inspector.go`) keeps the watermark stable
+while a fold is planned.
+
+**Column-group replace (rev 2).** A fold rewrites only the mutable column
+group. It commits as a `SegmentManifestDelta` replace operation, the same
+primitive backfill uses (#53491), and records `fold_ts` per (segment, column
+group) in manifest metadata. The manifest's delta logs model deletes only, so
+patch deltalogs need their own manifest entry type. For ArrayOfStruct, all
+sub-field columns are replaced in one transaction with the same `fold_ts`.
+The Vortex writer always re-encodes its Arrow input, which is another reason
+mutable fields get their own group: a fold never re-encodes unrelated
+columns.
 
 **Local-cache consequence of a fold.** Folding runs on a DataNode and
 writes the new column binlog to object storage; it does not touch any
@@ -711,13 +949,13 @@ scheduler must still stagger folds to avoid manifest-update and IO
 bursts. The fold ratio is also the read-cost knob: because a dense chunk
 costs ~9–14× a clean scan (see "Dense-overlay chunks"), folding at ~20%
 keeps steady-state read overhead on the hot column near 5×. The same
-reasoning carries into Phase 3: **very-high-churn columns should stay
+reasoning carries into Phase 2: **very-high-churn columns should stay
 unindexed even once indexes are available** — their patched fraction sits
 high between folds, so result correction degrades toward brute force
 anyway while forcing continuous index-rebuild churn; plain brute-force
 fix-up plus an aggressive fold cadence is the right plan for them.
 
-## Path to Indexed Mutable Columns (Post-v1)
+## Path to Indexed Mutable Columns (Phase 2)
 
 The patch mechanism composes with indexes without modifying any index
 structure, using **result correction**. The overlay already yields, per
@@ -751,22 +989,59 @@ easy to get wrong:
   scanned, so the base point-read must be explicit. The materializer
   already point-reads base for INCR chains, so the capability exists — the
   semantics just must be stated. The overlay itself needs no redesign for
-  Phase 3; the additions are the materialized bitset (snapshot-readable,
+  Phase 2; the additions are the materialized bitset (snapshot-readable,
   maintained at apply time, surviving folds until index rebuild) and this
   fallback rule.
 
-With the v1 type set, the relevant indexes are **STL_SORT, BITMAP, HYBRID,
-and INVERTED** (including inverted on arrays for `array_contains`); the
-correction leg is a plain comparison against the overlay value. The
-text-oriented indexes (TRIE, NGRAM, FM, text match) and RTREE apply only to
-immutable types and need nothing. Vector indexes and the PK index are
-untouched by construction.
+**Phase 2 coverage (rev 2).** Result correction needs only a row-wise
+evaluation of the leaf predicate on the dirty rows. That evaluation reuses
+`ProcessDataByOffsets` and reads through the already-patched Take outlet.
+Because of this it applies to **every scalar index type**:
 
-An earlier draft covering mutable VARCHAR analyzed text match support via a
-per-segment overlay tantivy index, and established that BM25 can never be
-supported (exact IDF maintenance requires reading the old document's tokens
-— a read-before-write the append-only write path forbids). Recorded here so
-the analysis isn't redone if mutable strings are ever revisited.
+- STL_SORT, BITMAP, HYBRID, INVERTED (including array inverted), TRIE, NGRAM,
+  FMINDEX and RTREE;
+- JSON path index and JSON stats;
+- the bit-sliced index (#54373).
+
+No index structure is modified. Integration points are `ProcessIndexChunks`
+(`exec/expression/Expr.h`) plus any leaf that pins an index directly
+(roughly 18 `PinIndex` sites, 14 JSON-stats sites and NGRAM). That list must
+be verified before Phase 2 is sized.
+
+**Text match / phrase match.** These have no row-wise raw-data evaluator, and
+a hand-written token or slop matcher would drift from tantivy semantics.
+Mutable text fields therefore use **base + tombstone + a tantivy delta**:
+
+- the delta is built by the same writer as the growing text index
+  (`TantivyGrowingTextIndex`);
+- it uses the same analyzer configuration, and for multi-analyzer fields the
+  row's *current* selector value;
+- it is queried by the same text / phrase match code;
+- each delta document carries `(offset, ts)`, and a delta hit is kept only if
+  it is the version the query snapshot selects;
+- not-yet-committed delta entries are covered by a synchronous commit before
+  the query, or by a transient in-memory index queried with the same code.
+
+Matching is boolean (no scoring), so `(base AND NOT dirty) ∪ delta` equals
+indexing the new documents in one index. This is the same equivalence that
+growing and sealed text indexes already rely on.
+
+**Vectors, sparse vectors, EmbList.** Search masks dirty rows out of the base
+index through the search bitset and brute-forces the dirty rows' new values.
+For EmbList it computes MaxSim. The results are merged into the top-K. This
+covers range search, search iterators, group-by search and every leg of
+hybrid search. Output fields are patched at the vector raw-data outlet.
+Vector fields are not Vortex local-format, so this is a separate integration
+point. Folding a vector column rewrites it and rebuilds its index, so its
+fold threshold is tuned separately.
+
+**Function fields.** For BM25 and embedding functions, the proxy recomputes
+the output from the new inputs carried in the request and emits it as a SET.
+If the inputs are incomplete, the request falls back to the read-merge-write
+path. BM25 corpus statistics (df, avgdl) are approximate until folding.
+Exact IDF maintenance would need the old document's tokens, which is the
+revision 1 conclusion. Phase 2 must match today's delete behaviour for these
+statistics; whether deletes decrement them is still to be verified.
 
 ### Fold / rebuild atomicity
 
@@ -878,6 +1153,14 @@ part of the segment's file set and are reloaded with the segment (see
   or patch deltalogs. Mutable columns are gated behind a collection-level
   feature flag that can only be enabled once the whole cluster runs a
   supporting version.
+- (rev 2) **`update()` vs `upsert(partial_update=True)`.** The two APIs
+  coexist: `update()` is blind (patch path, no CAS, no synchronous errors,
+  missing PK ignored); partial upsert stays read-merge-write with CAS,
+  synchronous errors and insert-on-missing-PK. Both publish PK versions, so
+  a partial upsert's CAS detects concurrent patches.
+- (rev 2) **Struct sub-field evolution** (#54514): adding a sub-field
+  starts it with no patch components (older APPEND operands materialize
+  NULL/default); dropping a sub-field discards its components.
 
 ## Known Risks
 
@@ -910,6 +1193,15 @@ part of the segment's file set and are reloaded with the segment (see
 - **Observability.** Patch ratio, overlay bytes, fold rate/lag, and
   backpressure events need first-class metrics, or query-performance
   regressions and write throttling become undiagnosable.
+- (rev 2) **Capacity-dependent folding.** Folding REMOVE/TRIM sequences
+  without the base silently diverges from read-time materialization; only
+  SET-absorb and APPEND-concat may fold base-free.
+- (rev 2) **Divergent implementations.** Equality, NULL and clamp rules
+  evaluated by Go (proxy) and C++ (segcore, folding) must be identical, or
+  replicas diverge. One shared implementation or shared golden vectors.
+- (rev 2) **Per-group writer format.** Phase 1 depends on writing the
+  mutable column group as Vortex while the rest of the segment keeps the
+  global writer format.
 
 ## Validation Status
 
@@ -917,8 +1209,8 @@ Stated explicitly so a reviewer can see the confidence level of each claim.
 
 **Asserted from code/doc reading, not build-verified:**
 
-- Reuse of the offset-input evaluation path and a data-access-layer
-  `PatchedColumnView` in segcore.
+- Reuse of the offset-input evaluation path, and the Vortex decode outlets
+  (Scan / Take) as the single sealed integration point (rev 2).
 - Streaming integration: the new codegen message type, PK→channel affinity,
   L0 routing, and CDC/recovery reuse (checked against the streaming-system
   docs, not a build).
@@ -930,99 +1222,132 @@ Stated explicitly so a reviewer can see the confidence level of each claim.
    writer + pruner + an in-flight fold. Highest-risk unproven piece; the
    model is designed but not stress-tested.
 2. **Folding algebra and MVCC correctness** with implementation-level
-   property tests covering scalar SET/INCR, the `fold_ts` watermark, array
-   APPEND/REMOVE, and POP_FRONT prune-materialization end to end.
+   property tests covering SET, APPEND-concat folding, REMOVE/TRIM ordered
+   materialization with the clamp-after-each-op rule, the `fold_ts`
+   watermark bounded by L0 distribution, and `(offset, column, ts, seq)`
+   dedup across every delivery path, end to end.
 3. **Read-path performance** in the production segcore path: clean-chunk
    overhead, patched-row fix-up cost across densities, and fold thresholds.
 4. **Overlay memory and PK-apply throughput** at the target write rate,
    benchmarked against the delete-path baseline; ARRAY arena memory density
    separately.
 
-## Implementation Phases
+## Implementation Phases (rev 2)
 
-Three phases, each independently shippable behind the collection-level
-feature gate. The expensive foundations (write path, overlay, data-access
-integration) all land in Phase 1 on the simplest value types; later phases
-are additive. Phase 2 and Phase 3 are independent of each other and can
-proceed in parallel.
+Two phases, each independently shippable behind the collection-level feature
+gate.
 
-### Phase 1 — MOR foundation + fixed-width scalars (SET / INCR)
+### Phase 1 — Brute force only
 
-Scope: the entire vertical slice for INT/FLOAT/DOUBLE/BOOL/TIMESTAMPTZ.
+**Scope**: every type in the Phase 1 column of "Supported types ×
+operations", with ops SET / APPEND / REMOVE / TRIM / PATH_REPLACE. Dirty rows
+are evaluated row-wise. No index is read or modified for a mutable column.
 
-- Schema `mutable=true` + constraint validation; `update()` API; proto and
-  the new WAL message type via codegen (**the op field and operand encoding
-  cover array ops from day one** — file/wire formats don't change in
-  Phase 2, only new op values activate).
-- Write path: proxy → WAL (PK→channel affinity) → L0 → PK-routed
-  per-segment patch deltalogs; growing-segment flush of patch deltalogs;
-  recovery replay; CDC message type.
-- QueryNode: overlay (chunk-partitioned, inline fixed-width version chains,
-  safe-ts pruning, memory quota); **PatchedColumnView** at the data access
-  layer; expression fix-up via the offset-input path (row-wise at all
-  densities — see "Dense-overlay chunks" for why no fallback is needed);
-  SkipIndex unconditional-fix-up rule; expression-cache disable;
-  output-field materialization; nullable/validity overlay.
-- Background: patch compaction (SET/INCR folding), column folding with
-  `fold_ts` watermark + manifest swap, folding scheduling policy v0.
-- Ops: feature gate, metrics (patch ratio / overlay bytes / fold lag).
+- **Schema and API**
+  - `mutable=true` and constraint validation;
+  - the split policy gives mutable fields their own Vortex column group;
+  - the `update()` API with `request_id` and `check_exists`;
+  - the new WAL message type via codegen, with an op enum that already
+    reserves INCR;
+  - `ARRAY_TRIM` in `FieldPartialUpdateOp` (#54943).
+- **Write path**
+  - proxy → WAL (PK→vchannel affinity, row locks, PK version publication) →
+    L0 materializer → PK-routed per-segment patch deltalogs;
+  - a manifest entry type for patch deltalogs and per-column-group
+    `fold_ts`;
+  - growing-segment flush emits patch deltalogs;
+  - TEXT LOB spill for large values;
+  - recovery replay;
+  - CDC with `request_id`;
+  - backup and snapshot include patch deltalogs.
+- **StreamingNode**: the `request_id` dedup table (atomic with append,
+  rebuilt from the WAL).
+- **QueryNode**
+  - overlay with the I1–I5 concurrency model, `(offset, column, ts, seq)`
+    dedup, safe-ts pruning and a memory quota;
+  - the two Vortex outlets (Scan, Take) plus `MaterializeChunk`, and the
+    growing data-access layer;
+  - legacy chunk-view APIs throw for overlaid columns;
+  - fix-up through the offset-input path;
+  - skip-index unconditional fix-up; ExprCache disabled; Vortex zone-map and
+    pushdown disabled for cells with dirty rows (asserted); JSON stats
+    bypassed for dirty rows.
+- **Shared materializer**: one implementation of the SET / APPEND / REMOVE /
+  TRIM / PATH_REPLACE semantics, equality and NULL rules, and the
+  clamp-after-each-op rule. It is used by the read path, pruning and folding,
+  or all implementations are checked against shared golden vectors.
+- **Background**: patch compaction (SET-absorb and APPEND-concat only);
+  column folding with `fold_ts = min(S, L0-distributed watermark)` through a
+  column-group replace; folding scheduling v0, driven by memory.
+- **Ops**: the feature gate; metrics for patch ratio, overlay bytes, fold lag,
+  dedup hits and backpressure.
 
-Exit criteria: end-to-end SET/INCR on scalar columns with correct
-brute-force filtering and outputs under MVCC; folding keeps overlay and
-load-replay bounded under sustained load; **stress results for the two
-known risks** — overlay memory under wide updates, PK-routing cost vs the
-delete-path baseline.
+**Exit criteria**
 
-### Phase 2 — ARRAY ops (APPEND / POP_FRONT / REMOVE)
+1. **Differential test.** The same random op sequence goes through the old
+   path (delete + full insert) and through `update()`. Results must be
+   identical for every query shape: filter, search+filter, iterative filter,
+   outputs, order by, aggregation, group-by (including JSON-shredded keys),
+   and query/search iterators.
+2. **Interleaving tests.** Patches sit in L0, segment deltalogs and the delta
+   buffer, interleaved with every compaction type, growing→sealed handoff and
+   QueryNode restart.
+3. **Exactly-once.** Retries, duplicate deliveries and failover never apply a
+   non-idempotent op twice.
+4. **Struct invariant.** Sub-field lengths of a row are always equal.
+5. **Overlay TSan stress** covering I1–I5.
+6. **Read-amplification curves** that set the fold thresholds.
 
-Scope: additive on Phase 1; no write-path or format changes.
+### Phase 2 — Index-backed search
 
-- Overlay arena for variable-length values; op-chain version nodes with
-  `(R, S)` exact folding for APPEND/REMOVE and the base-materialized
-  coalesced symbolic chain for POP_FRONT (which has no base-free closed form).
-- Prune-materializes-against-base path for POP-containing rows (keeps
-  overlay memory ∝ distinct rows); proxy validation for array ops;
-  max_capacity clamping at materialization; NULL-base semantics; array
-  predicate fix-up (`array_contains`, `array_length`) through
-  PatchedColumnView.
+**Scope**: lifts the no-index restriction and adds mutable vector fields.
 
-Exit criteria: property tests cover scalar SET/INCR, the watermark, `(R,S)`,
-and the POP prune-materialization path under all op interleavings; hot-row read
-cost within the pruning window is benchmarked.
+- `patched_bitset` per (segment, column), rebuilt at load.
+- The correction wrapper on every index evaluation path, with base fallback.
+- The planner falls back to full brute force above a patch-ratio threshold.
+- The fold / rebuild atomic-swap state machine (revision 1 "Fold / rebuild
+  atomicity").
+- The text / phrase match tantivy delta.
+- Vector / sparse / EmbList search correction and the vector raw-data outlet.
+- Proxy recomputation of function outputs.
+- Optional accelerations, added only when measurements demand them:
+  - BITMAP and RTREE in-place updates below the safe timestamp;
+  - an STL_SORT B-tree delta;
+  - a tantivy delta for INVERTED.
 
-### Phase 3 — Index support via result correction
+**Exit criteria**
 
-Scope: lifts the "no index" restriction for STL_SORT / BITMAP / HYBRID /
-INVERTED (including array inverted).
+- Indexed queries are correct across the fold / rebuild / swap lifecycle,
+  including crash points.
+- Vector recall matches the delete + insert path.
+- Performance-vs-patch-ratio curves are published and the thresholds are set
+  from them.
 
-- `patched_bitset` formalized per (segment, column), rebuilt at load.
-- Correction wrapper on the index evaluation path (reuses Phase 1's
-  materializer + row-wise evaluation as the brute-force leg) + the base
-  fallback rule.
-- Planner threshold fallback to full brute force; per-index-type threshold
-  benchmarks.
-- Fold/rebuild atomic-swap state machine (bitset survives folding until new
-  index commits) + datacoord rebuild scheduling.
+### Dependencies
 
-Exit criteria: indexed queries on mutable columns correct across the fold /
-rebuild / swap lifecycle (including crash points); performance-vs-patch-ratio
-curves published and thresholds set from them.
+| Dependency | State on master (2026-11-01) | Impact |
+|---|---|---|
+| Per-column-group writer format, so that mutable groups are written as Vortex | `dataNode.storage.format` is global and defaults to parquet | **Blocks Phase 1** |
+| Manifest entries for patch deltalogs and per-group `fold_ts` | Delta logs model deletes only; column-group replace exists (#53491) | Phase 1, milvus-storage change |
+| Vortex local format | Phase 1 merged; mmap #54284 draft; zone map and pushdown not wired in production | Outlets build on the current state; any future pruning must honour the dirty-cell rule |
+| Native-list arrays and struct partial update | #54795 open (lifts #54739); proxy rejects struct sub-field names and struct APPEND/REMOVE today | Gates the native-list and struct parts of Phase 1 |
+| Local format phase 2 (`ColumnInterface`) | No PR | Not blocking; when it lands, the outlets cover Raw too |
+| LSM PK index stack (#53596 and others) | Open | Not blocking; lowers PK→offset apply cost |
 
 ## Open Questions
 
-- INCR edge semantics: INCR on NULL (recommend no-op, consistent with the
-  silent-ignore philosophy), integer overflow (recommend wraparound, i.e.
-  native two's-complement, documented), float accumulation error (accept).
-- Array ops on a NULL base: recommend APPEND treats NULL as empty list
-  (Redis RPUSH-creates-the-list semantics), POP_FRONT/REMOVE on NULL are
-  no-ops.
-- Whether ARRAY-of-VARCHAR elements ship in v1 or as a follow-up.
-- Per-collection metrics for overlay size / patch ratio to guide folding and
-  index-fallback thresholds (likely yes).
-- The patch-ratio threshold at which index result correction becomes slower
-  than pure brute force (needs benchmarking per index type).
-- The column-folding trigger ratio that best balances read-cost bound
-  (dense-chunk overhead) against fold IO. A microbenchmark puts a 50%-dirty
-  chunk at ~9–14× the clean scan; folding at ~20% caps the hot column near
-  5×. Confirm on the real segcore kernel with bit-packed TargetBitmap
-  (which makes the clean scan cheaper and thus the dense multiplier larger).
+- Fold triggers: the default patch-ratio and memory watermarks per column
+  type. Variable-length and struct columns need their own stress tests.
+- Dedup table: the TTL and how it relates to WAL retention and checkpoints.
+- `check_exists`: whether it is worth shipping in Phase 1.
+- Whether deletes decrement BM25 statistics today. This is the baseline for
+  Phase 2 function fields.
+- The verified list of index-pinning call sites outside `ProcessIndexChunks`,
+  which sizes Phase 2.
+- Whether Vortex decode outputs are writable, which would avoid one copy for
+  primitive Scan batches.
+- Whether any delegator / coordinator logic prunes whole segments using
+  scalar statistics. If so, it must ignore mutable columns or use widened
+  statistics.
+- INCR return: overflow and NULL semantics (revision 1 recommendations
+  stand). INCR also interacts with the capacity-free fixed-width folding.
