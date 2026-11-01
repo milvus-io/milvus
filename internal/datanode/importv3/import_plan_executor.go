@@ -86,11 +86,11 @@ func executeImportPlan(
 	logAllocator := allocator.NewLocalAllocator(req.GetLogRange().GetBegin(), req.GetLogRange().GetEnd())
 	writerSpec := plan.GetWriter()
 	segmentID := req.GetSegmentId()
-	// The final segment writer must encrypt with the target collection's zone,
-	// never the read/source context (which for a backup import is the source
-	// cluster's zone). Passing no plugin context lets the writer derive the
-	// target zone from the schema properties, matching the V2 import path. The
-	// read paths below keep pluginContext so backup fragments decrypt correctly.
+	// Reshard uses the source context only to read original backup data and
+	// writes fragments with the target collection's context. pluginContext is
+	// the target context used below to read those fragments. The final segment
+	// writer derives its target context from the schema properties, matching
+	// the V2 import path.
 	writerOptions, err := buildImportV3WriterOptions(
 		req.GetStorageConfig(),
 		plan.GetCollectionId(),

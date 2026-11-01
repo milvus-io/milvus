@@ -712,7 +712,9 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
-	WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+	if err := WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req); err != nil {
+		return nil, err
+	}
 	if metautil.IsSegmentRooted(segIndex.IndexStorePathVersion) {
 		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
 		if err != nil {

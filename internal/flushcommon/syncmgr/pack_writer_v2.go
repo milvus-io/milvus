@@ -18,7 +18,6 @@ package syncmgr
 
 import (
 	"context"
-	"encoding/base64"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -172,24 +171,8 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) *indexcgopb.StoragePluginContext {
-	if !hookutil.IsClusterEncryptionEnabled() {
-		return nil
-	}
-	ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), collectionID)
-	if ez == nil {
-		return nil
-	}
-	unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-	if len(unsafe) == 0 {
-		return nil
-	}
-
-	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ez.EzID,
-		CollectionId:     ez.CollectionID,
-		EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-	}
+func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -221,7 +204,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	if err != nil {
+		return nil, "", err
+	}
 
 	// Allocate logIDs once, before the retry loop. writeInsertsIntoStorage builds the
 	// actual writer and performs the IO; retries must only repeat the IO, never draw
