@@ -367,7 +367,7 @@ func (gc *garbageCollector) Resume(ctx context.Context, collectionID int64, tick
 func (gc *garbageCollector) work(ctx context.Context) {
 	// TODO: fast cancel for gc when closing.
 	// Run gc tasks in parallel.
-	gc.wg.Add(4)
+	gc.wg.Add(5)
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
@@ -399,6 +399,10 @@ func (gc *garbageCollector) work(ctx context.Context) {
 		gc.runRecycleTaskWithPauser(ctx, "lob", lobCheckInterval, func(ctx context.Context, signal <-chan gcCmd) {
 			gc.recycleUnusedLOBFiles(ctx)
 		})
+	}()
+	go func() {
+		defer gc.wg.Done()
+		gc.recycleDroppedChannelFlags(ctx)
 	}()
 	go func() {
 		defer gc.wg.Done()
@@ -1310,8 +1314,10 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 		return
 	}
 
-	collectionID2GcStatus := make(map[int64]bool)
 	skippedCnt := 0
+	// The checkpoints of each collection, so that a dropped collection's
+	// checkpoints go together, after the rest of its meta.
+	candidates := make(map[int64][]string)
 
 	mlog.Info(ctx, "start to GC channel cp", mlog.Int("vchannelCPCnt", len(channelCPs)))
 	for vChannel := range channelCPs {
@@ -1328,43 +1334,93 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			mlog.Warn(ctx, "parse collection id fail, skip to gc channel cp", mlog.String("vchannel", vChannel))
 			continue
 		}
+		candidates[collectionID] = append(candidates[collectionID], vChannel)
+	}
 
-		_, ok := collectionID2GcStatus[collectionID]
-		if !ok {
-			if ctx.Err() != nil {
-				// process canceled, stop.
-				return
-			}
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
-			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
-			if err == nil && !has {
-				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
-			} else {
-				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
-				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Bool("dropped", has), mlog.Err(err))
-				collectionID2GcStatus[collectionID] = false
-			}
+	for collectionID, vChannels := range candidates {
+		gc.ackSignal(signal)
+		if ctx.Err() != nil {
+			// process canceled, stop.
+			return
 		}
-
-		// Skip to GC if all segments meta of the corresponding collection are not removed
-		if gcConfirmed := collectionID2GcStatus[collectionID]; !gcConfirmed {
-			skippedCnt++
+		if gc.collectionGCPaused(collectionID) {
 			continue
 		}
-
-		err := gc.meta.DropChannelCheckpoint(vChannel)
-		if err != nil {
-			// Try to GC in the next gc cycle if drop channel cp meta fail.
-			mlog.Warn(ctx, "failed to drop channelcp check point during gc", mlog.String("vchannel", vChannel), mlog.Err(err))
-		} else {
-			mlog.Info(ctx, "GC channel cp", mlog.String("vchannel", vChannel))
+		if !gc.collectionRecyclable(ctx, collectionID) {
+			skippedCnt += len(vChannels)
+			continue
+		}
+		if err := gc.recycleDroppedCollection(ctx, collectionID, vChannels); err != nil {
+			mlog.Warn(ctx, "failed to recycle dropped collection meta, retry in next GC round",
+				mlog.Int64("collectionID", collectionID), mlog.Err(err))
 		}
 	}
 
 	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
+}
+
+// collectionRecyclable reports whether RootCoord has dropped the collection and
+// all its segments are recycled, the condition RootCoord uses to remove the
+// collection meta.
+func (gc *garbageCollector) collectionRecyclable(ctx context.Context, collectionID int64) bool {
+	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+	cancel()
+	if err != nil || has {
+		// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
+		mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
+			mlog.Int64("collectionID", collectionID),
+			mlog.Bool("exists", has), mlog.Err(err))
+		return false
+	}
+	// Skip to GC if all segments meta of the corresponding collection are not removed
+	return gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+}
+
+// recycleDroppedCollection drops what DataCoord still keeps for a collection
+// that RootCoord has dropped and whose segments are all recycled: its segment
+// change groups, its cached collection info and metrics, and the checkpoints
+// of its vChannels. The checkpoints go last: they are what brings GC back to
+// the collection if an earlier step fails.
+func (gc *garbageCollector) recycleDroppedCollection(ctx context.Context, collectionID int64, vChannels []string) error {
+	if err := gc.meta.DropSegmentChangeGroupsOfCollection(ctx, collectionID); err != nil {
+		return err
+	}
+	gc.meta.DropCollection(collectionID)
+	var errs []error
+	for _, vChannel := range vChannels {
+		if err := gc.meta.DropChannelCheckpoint(vChannel); err != nil {
+			errs = append(errs, merr.Wrapf(err, "failed to drop checkpoint of vchannel %s", vChannel))
+		}
+	}
+	return merr.Combine(errs...)
+}
+
+// recycleDroppedChannelFlags deletes the "removed" channel flags that older
+// versions left behind for every dropped channel. Dropping a channel now
+// deletes its flag, so no new ones appear: the sweep retries every
+// checkInterval until it succeeds once. It runs apart from the meta task, so a
+// long first sweep blocks neither the other recycle tasks nor a pause.
+func (gc *garbageCollector) recycleDroppedChannelFlags(ctx context.Context) {
+	ticker := time.NewTicker(gc.option.checkInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if time.Now().Before(gc.pauseUntil.PauseUntil()) {
+			continue
+		}
+		removed, err := gc.meta.catalog.RemoveDroppedChannelFlags(ctx)
+		if err != nil {
+			mlog.Warn(ctx, "failed to remove dropped channel flags, retry later", mlog.Err(err))
+			continue
+		}
+		mlog.Info(ctx, "removed dropped channel flags", mlog.Int("count", removed))
+		return
+	}
 }
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
