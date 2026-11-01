@@ -66,6 +66,10 @@ var (
 	RegisterAlterResourceGroupV2AckCallback = registerMessageAckCallback[*message.AlterResourceGroupMessageHeader, *message.AlterResourceGroupMessageBody]
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
+	// File resources
+	RegisterAddFileResourceV2AckCallback    = registerMessageAckCallback[*message.AddFileResourceMessageHeader, *message.AddFileResourceMessageBody]
+	RegisterRemoveFileResourceV2AckCallback = registerMessageAckCallback[*message.RemoveFileResourceMessageHeader, *message.RemoveFileResourceMessageBody]
+
 	// Snapshot
 	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
 	RegisterDropSnapshotV2AckCallback              = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
@@ -138,6 +142,10 @@ func resetMessageAckCallbacks() {
 		// Resource Group
 		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
+
+		// File resources
+		message.MessageTypeAddFileResourceV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRemoveFileResourceV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
 		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
