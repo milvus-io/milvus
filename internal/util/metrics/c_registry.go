@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
@@ -174,8 +175,9 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 }
 
 func parseTextMetrics(metricsStr string) (map[string]*dto.MetricFamily, error) {
-	// prometheus/common v0.55.0 uses the zero-value parser with legacy name validation.
-	var parser expfmt.TextParser
+	// The zero-value TextParser has no validation scheme and panics on parse;
+	// knowhere/segcore emit legacy-format metric names.
+	parser := expfmt.NewTextParser(model.LegacyValidation)
 	return parser.TextToMetricFamilies(strings.NewReader(metricsStr))
 }
 
