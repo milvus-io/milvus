@@ -452,7 +452,7 @@ func TestStructArrayPathReplaceVariants(t *testing.T) {
 
 	err = upsertStructArrayPathReplace(t, ctx, mc, collName, labelAndScoreSchema,
 		map[string]any{"label": []string{"subset"}, "score": []float32{8.8}}, "[2]")
-	require.ErrorContains(t, err, "requires all struct children")
+	require.ErrorContains(t, err, `sub-field "clips[embedding]" of struct field "clips" is required`)
 	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
 
 	fullVector := entity.FloatVector{7.1, 7.2, 7.3, 7.4}
@@ -491,7 +491,7 @@ func TestStructArrayPathReplaceRejectsInvalidRequestsWithoutMutation(t *testing.
 			operandSchema: labelSchema,
 			operand:       map[string]any{"label": []string{"unchanged"}},
 			path:          "[0]",
-			contains:      "requires all struct children",
+			contains:      `sub-field "clips[embedding]" of struct field "clips" is required`,
 		},
 		{
 			name:          "unknown child",

@@ -233,6 +233,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
          schema_proto.struct_array_fields()) {
+        schema->struct_field_ids_[child.name()] = FieldId(child.fieldid());
         for (const auto& sub_field : child.fields()) {
             auto field = sub_field;
             field.set_nullable(field.nullable() || child.nullable());

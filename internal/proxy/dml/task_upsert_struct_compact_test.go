@@ -71,6 +71,17 @@ type ccChild struct {
 	elementNullable bool
 	// Leaf nullability of a nested Array.
 	leafNullable bool
+	// An added sub-field holds only null elements on rows written before it
+	// was added.
+	added bool
+}
+
+// elementsOf returns the element validity of the sub-field on row.
+func (c ccChild) elementsOf(row ccRow) []bool {
+	if c.added {
+		return make([]bool, len(row.elements))
+	}
+	return row.elements
 }
 
 // ccRow is one entity row of the struct field. Every sub-field has
@@ -256,11 +267,12 @@ func ccLeaf(elementType schemapb.DataType, seed int, validData []bool, nullable,
 }
 
 func ccScalarRow(child ccChild, rowIndex int, row ccRow, dense bool) *schemapb.ScalarField {
+	elements := child.elementsOf(row)
 	if child.kind == ccScalar {
-		return ccLeaf(child.elementType, rowIndex+1, row.elements, child.elementNullable, dense)
+		return ccLeaf(child.elementType, rowIndex+1, elements, child.elementNullable, dense)
 	}
-	inner := make([]*schemapb.ScalarField, 0, len(row.elements))
-	for element, valid := range row.elements {
+	inner := make([]*schemapb.ScalarField, 0, len(elements))
+	for element, valid := range elements {
 		if child.elementNullable && !valid {
 			if dense {
 				// Query output for a null inner Array: an empty value of the leaf type.
@@ -278,15 +290,16 @@ func ccScalarRow(child ccChild, rowIndex int, row ccRow, dense bool) *schemapb.S
 		ArrayData: &schemapb.ArrayArray{ElementType: child.elementType, Data: inner},
 	}}
 	if child.elementNullable {
-		typeutil.SetArrayElementValidData(value, append([]bool{}, row.elements...))
+		typeutil.SetArrayElementValidData(value, append([]bool{}, elements...))
 	}
 	return value
 }
 
 // ccVectorRow is the same in both layouts: vector elements are compact.
 func ccVectorRow(child ccChild, rowIndex int, row ccRow) *schemapb.VectorField {
-	values := make([]float32, 0, len(row.elements)*ccVectorDim)
-	for element, valid := range row.elements {
+	elements := child.elementsOf(row)
+	values := make([]float32, 0, len(elements)*ccVectorDim)
+	for element, valid := range elements {
 		if child.elementNullable && !valid {
 			continue
 		}
@@ -294,7 +307,7 @@ func ccVectorRow(child ccChild, rowIndex int, row ccRow) *schemapb.VectorField {
 	}
 	value := &schemapb.VectorField{Dim: ccVectorDim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: values}}}
 	if child.elementNullable {
-		typeutil.SetVectorArrayElementValidData(value, append([]bool{}, row.elements...))
+		typeutil.SetVectorArrayElementValidData(value, append([]bool{}, elements...))
 	}
 	return value
 }
@@ -495,6 +508,9 @@ type ccPartialUpdate struct {
 	responses []*milvuspb.QueryResults
 	snapshots []*milvuspb.QueryResults
 	original  []*schemapb.FieldData
+	// expect, when set, returns the written value of a sub-field on an
+	// existing row; nil keeps the old value.
+	expect func(child ccChild, rowIndex int, row ccRow) proto.Message
 }
 
 // The rows of the collection are rows[i] at primary key i+1. Query returns
@@ -647,14 +663,22 @@ func (p *ccPartialUpdate) checkWritten(pks []int64, missing map[int64]bool) {
 			if row.null {
 				continue
 			}
+			var want proto.Message
+			if p.expect != nil {
+				want = p.expect(child, rowIndex, row)
+			}
 			if child.kind == ccVector {
 				got := field.GetVectors().GetVectorArray().GetData()[i]
-				want := ccVectorRow(child, rowIndex, row)
+				if want == nil {
+					want = ccVectorRow(child, rowIndex, row)
+				}
 				require.True(t, proto.Equal(want, got), "%s row %d: got %v, want %v", child.name, i, got, want)
 				continue
 			}
 			got := field.GetScalars().GetArrayData().GetData()[i]
-			want := ccScalarRow(child, rowIndex, row, true)
+			if want == nil {
+				want = ccScalarRow(child, rowIndex, row, true)
+			}
 			require.True(t, proto.Equal(want, got), "%s row %d: got %v, want %v", child.name, i, got, want)
 		}
 	}
@@ -769,5 +793,173 @@ func TestPartialUpsertReplacesElementNullableStruct(t *testing.T) {
 				require.True(t, errors.Is(err, merr.ErrParameterInvalid), err.Error())
 			})
 		}
+	}
+}
+
+func TestPartialUpsertKeepsOmittedStructWithAddedSubFields(t *testing.T) {
+	// Rows written before the sub-fields were added read back N null elements
+	// for them, in read layout like any other element-nullable sub-field.
+	added := []ccChild{
+		{name: "added_s", id: 231, kind: ccScalar, elementType: schemapb.DataType_VarChar, elementNullable: true, added: true},
+		{name: "added_n", id: 232, kind: ccNested, elementType: schemapb.DataType_Int64, elementNullable: true, leafNullable: true, added: true},
+		{name: "added_v", id: 233, kind: ccVector, elementType: schemapb.DataType_FloatVector, elementNullable: true, added: true},
+	}
+	pks := []int64{2, 5, 1, 4, 3}
+	for _, rowNullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rowNullable=%t", rowNullable), func(t *testing.T) {
+			children := append([]ccChild{ccScalarChildren()[4], ccScalarChildren()[8], ccNestedChildren()[0], ccVectorChildren()[1]}, added...)
+			p := newCCPartialUpdate(t, children, rowNullable, pks)
+			require.NoError(t, p.run())
+			p.checkWritten(pks, nil)
+			p.checkInputsUnchanged()
+			require.NoError(t, p.retry())
+			p.checkWritten(pks, nil)
+			p.checkInputsUnchanged()
+		})
+	}
+}
+
+// newCCPathReplace prepares a PATH_REPLACE of the struct field at path.
+func newCCPathReplace(t *testing.T, children []ccChild, rowNullable bool, pks []int64, path string, operand *schemapb.FieldData) *ccPartialUpdate {
+	t.Helper()
+	p := newCCPartialUpdate(t, children, rowNullable, pks, operand)
+	p.task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{{
+		FieldName: ccStructName, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: path,
+	}}
+	plans, _, err := resolveFieldPartialUpdateOps(p.task.req, p.task.schema.CollectionSchema)
+	require.NoError(t, err)
+	p.task.fieldPartialUpdatePlans = plans
+	p.task.partialUpdateOriginalFields = cloneFieldDataList(p.task.req.GetFieldsData())
+	p.original = cloneFieldDataList(p.task.req.GetFieldsData())
+	return p
+}
+
+// ccOperand builds a PATH_REPLACE operand with one struct element per row.
+func ccOperand(rows int, children ...*schemapb.FieldData) *schemapb.FieldData {
+	for _, child := range children {
+		if child.GetType() == schemapb.DataType_ArrayOfVector {
+			data := child.GetVectors().GetVectorArray()
+			for len(data.Data) < rows {
+				data.Data = append(data.Data, proto.Clone(data.Data[0]).(*schemapb.VectorField))
+			}
+			continue
+		}
+		data := child.GetScalars().GetArrayData()
+		for len(data.Data) < rows {
+			data.Data = append(data.Data, proto.Clone(data.Data[0]).(*schemapb.ScalarField))
+		}
+	}
+	return &schemapb.FieldData{
+		FieldName: ccStructName, FieldId: ccStructID, Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}},
+	}
+}
+
+func ccOperandScalar(name string, elementType schemapb.DataType, row *schemapb.ScalarField) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name, Type: schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: elementType, Data: []*schemapb.ScalarField{row}}},
+		}},
+	}
+}
+
+func ccOperandVector(name string, row *schemapb.VectorField) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name, Type: schemapb.DataType_ArrayOfVector,
+		Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Dim: ccVectorDim,
+			Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+				Dim: ccVectorDim, ElementType: schemapb.DataType_FloatVector, Data: []*schemapb.VectorField{row},
+			}},
+		}},
+	}
+}
+
+func TestPathReplaceKeepsElementNullableStructSiblings(t *testing.T) {
+	// Element 1 is null on pk 1 and valid on pk 5; both rows are replaced.
+	pks := []int64{5, 1}
+	const index = 1
+	score := func() *schemapb.ScalarField {
+		row := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{77}}}}
+		typeutil.SetArrayElementValidData(row, []bool{true})
+		return row
+	}
+	replacedScore := func(child ccChild, rowIndex int, row ccRow) *schemapb.ScalarField {
+		want := ccScalarRow(child, rowIndex, row, true)
+		want.GetLongData().Data[index] = 77
+		typeutil.GetArrayElementValidData(want)[index] = true
+		return want
+	}
+
+	for _, rowNullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("one sub-field/rowNullable=%t", rowNullable), func(t *testing.T) {
+			// Every other sub-field keeps its old value.
+			children := ccAllChildren()
+			operand := ccOperand(len(pks), ccOperandScalar("score", schemapb.DataType_Int64, score()))
+			p := newCCPathReplace(t, children, rowNullable, pks, "[1][score]", operand)
+			p.expect = func(child ccChild, rowIndex int, row ccRow) proto.Message {
+				if child.name == "score" {
+					return replacedScore(child, rowIndex, row)
+				}
+				return nil
+			}
+			require.NoError(t, p.run())
+			p.checkWritten(pks, nil)
+			p.checkInputsUnchanged()
+			require.NoError(t, p.retry())
+			p.checkWritten(pks, nil)
+			p.checkInputsUnchanged()
+		})
+
+		t.Run(fmt.Sprintf("whole element/rowNullable=%t", rowNullable), func(t *testing.T) {
+			// The replaced element of the nested sub-field keeps its own null
+			// leaf; the other elements and their leaves keep their old values.
+			children := []ccChild{ccScalarChildren()[4], ccNestedChildren()[0], ccVectorChildren()[0]}
+			leaf := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x"}}}}
+			typeutil.SetArrayElementValidData(leaf, []bool{true, false})
+			tags := &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{leaf},
+			}}}
+			typeutil.SetArrayElementValidData(tags, []bool{true})
+			vec := &schemapb.VectorField{Dim: ccVectorDim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{9, 9}}}}
+			typeutil.SetVectorArrayElementValidData(vec, []bool{true})
+			operand := ccOperand(len(pks),
+				ccOperandScalar("score", schemapb.DataType_Int64, score()),
+				ccOperandScalar("tags", schemapb.DataType_Array, tags),
+				ccOperandVector("vec", vec))
+			p := newCCPathReplace(t, children, rowNullable, pks, "[1]", operand)
+			p.expect = func(child ccChild, rowIndex int, row ccRow) proto.Message {
+				switch child.name {
+				case "score":
+					return replacedScore(child, rowIndex, row)
+				case "tags":
+					want := ccScalarRow(child, rowIndex, row, true)
+					replaced := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", ""}}}}
+					typeutil.SetArrayElementValidData(replaced, []bool{true, false})
+					want.GetArrayData().Data[index] = replaced
+					typeutil.GetArrayElementValidData(want)[index] = true
+					return want
+				default:
+					elements := append([]bool{}, row.elements...)
+					elements[index] = true
+					values := make([]float32, 0, len(elements)*ccVectorDim)
+					for element, valid := range elements {
+						switch {
+						case element == index:
+							values = append(values, 9, 9)
+						case valid:
+							values = append(values, float32(rowIndex+1), float32(element))
+						}
+					}
+					want := &schemapb.VectorField{Dim: ccVectorDim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: values}}}
+					typeutil.SetVectorArrayElementValidData(want, elements)
+					return want
+				}
+			}
+			require.NoError(t, p.run())
+			p.checkWritten(pks, nil)
+			p.checkInputsUnchanged()
+		})
 	}
 }
