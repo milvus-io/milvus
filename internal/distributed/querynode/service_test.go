@@ -229,6 +229,22 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("Materialize", func(t *testing.T) {
+		want := &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{Status: merr.Success(), BodyRawSize: 3}}
+		mockQN.EXPECT().Materialize(mock.Anything, mock.Anything).Return(want, nil).Once()
+		got, err := server.Materialize(ctx, &querypb.QueryRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(3), got.GetHeader().GetBodyRawSize())
+	})
+
+	t.Run("MaterializeSegments", func(t *testing.T) {
+		want := &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{Status: merr.Success(), BodyRawSize: 2}}
+		mockQN.EXPECT().MaterializeSegments(mock.Anything, mock.Anything).Return(want, nil).Once()
+		got, err := server.MaterializeSegments(ctx, &querypb.QueryRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, int64(2), got.GetHeader().GetBodyRawSize())
+	})
+
 	t.Run("QueryStream", func(t *testing.T) {
 		mockQN.EXPECT().QueryStream(mock.Anything, mock.Anything).Return(nil)
 		ret := server.QueryStream(nil, nil)

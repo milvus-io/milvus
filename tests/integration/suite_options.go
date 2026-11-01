@@ -1,8 +1,11 @@
 package integration
 
+import "github.com/milvus-io/milvus/tests/integration/cluster"
+
 type clusterSuiteOption struct {
 	dropAllCollectionsWhenTestTearDown bool
 	notResetDeploymentWhenTestTearDown bool
+	clusterOptions                     []cluster.MiniClusterV3Option
 }
 
 type ClusterSuiteOption func(o *clusterSuiteOption)
@@ -19,5 +22,12 @@ func WithDropAllCollectionsWhenTestTearDown() ClusterSuiteOption {
 func WithoutResetDeploymentWhenTestTearDown() ClusterSuiteOption {
 	return func(o *clusterSuiteOption) {
 		o.notResetDeploymentWhenTestTearDown = true
+	}
+}
+
+// WithClusterOptions passes extra options to the cluster SetupSuite starts.
+func WithClusterOptions(opts ...cluster.MiniClusterV3Option) ClusterSuiteOption {
+	return func(o *clusterSuiteOption) {
+		o.clusterOptions = append(o.clusterOptions, opts...)
 	}
 }

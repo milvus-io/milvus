@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -440,6 +441,13 @@ func (node *QueryNode) Start() error {
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
+
+		// Materialize does not follow grpc.client.*: without its own codec it
+		// sends raw what Query would compress.
+		if paramtable.Get().QueryNodeGrpcClientCfg.CompressionEnabled.GetAsBool() &&
+			materialize.ResolveCodec() == materialize.CodecNone {
+			mlog.Warn(node.ctx, "grpc compression is on but queryNode.materialize.codec is none, Materialize replies will be sent uncompressed")
+		}
 
 		// execution-path feature counters (see internal/featureusage)
 		featureusage.SetEnabled(paramtable.Get().CommonCfg.FeatureUsageCountersEnabled.GetAsBool())

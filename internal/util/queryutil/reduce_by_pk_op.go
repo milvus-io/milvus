@@ -276,7 +276,66 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 // mergeByPKWithTimestamp merges with timestamp-based deduplication.
 // When duplicate PK found with higher timestamp, replaces the previous entry.
 func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*timestampedResult, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
-	cursors := make([]int64, len(results))
+	selectedRows, err := op.selectRowsByPKWithTimestamp(results)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(selectedRows) == 0 {
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
+	}
+
+	// Build merged result from original results
+	origResults := make([]*internalpb.RetrieveResults, len(results))
+	for i, tr := range results {
+		origResults[i] = tr.result
+	}
+
+	// buildMergedRetrieveResults merges whatever FieldsData the inputs carry. On
+	// the Arrow path that is the SYSTEM columns only -- the export leaves them in
+	// the protobuf header and puts user columns in the record -- so the two
+	// halves are merged by the same selectedRows and reassembled by the reader
+	// from milvus.field_order.
+	merged, err := buildMergedRetrieveResults(origResults, selectedRows, op.schema)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hand the selection out unmaterialized. Nothing between here and the
+	// response assembly reads the user columns -- the Arrow-routed pipeline is
+	// this operator and nothing else -- so gathering them into a merged record
+	// here would only copy the whole payload into an intermediate that the
+	// FieldData build then copies out of again.
+	if op.arrowOut != nil {
+		records := make([]arrow.Record, len(results))
+		any := false
+		for i, r := range results {
+			records[i] = r.record
+			any = any || r.record != nil
+		}
+		if any {
+			op.arrowOut.Records = records
+			op.arrowOut.Rows = selectedRows
+		}
+	}
+
+	merged.HasMoreResult = hasMoreResult
+	return merged, nil
+}
+
+// selectRowsByPKWithTimestamp picks the rows the merge keeps, in output order.
+//
+// Every input is normally sorted ascending by PK (segcore and the worker-side
+// reduce both emit PK order), and then the k-way merge emits all copies of a
+// PK back to back, so dedup is a comparison with the last emitted row rather
+// than a map lookup. The fast path reads the PK and timestamp slices directly
+// instead of boxing every candidate into `any`, and it checks sortedness as it
+// consumes each row; the first out-of-order row abandons it for the map path,
+// which is correct for any order. Until that row is consumed the emitted
+// sequence is non-decreasing, so whatever the fast path decided before
+// noticing is exactly what the map path decides -- but the restart is cheaper
+// to reason about than a hand-over, and unsorted input is not a hot case.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestamp(results []*timestampedResult) ([]rowRef, error) {
 	rowSizeCalculators := make([]*rowSizeCalculator, len(results))
 	for i, result := range results {
 		// withArrowRecord is what keeps the maxOutputSize guard honest on the
@@ -285,6 +344,187 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		rowSizeCalculators[i] = newRowSizeCalculator(result.result).
 			withArrowRecord(result.record)
 	}
+
+	var (
+		rows []rowRef
+		ok   bool
+		err  error
+	)
+	if intPKs, strPKs := typedPKs(results); intPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, intPKs, rowSizeCalculators)
+	} else if strPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, strPKs, rowSizeCalculators)
+	}
+	if ok {
+		return rows, err
+	}
+	return op.selectRowsByPKWithTimestampMap(results, rowSizeCalculators)
+}
+
+// typedPKs returns every result's PK column as a typed slice when all of them
+// share one PK type, and nil, nil otherwise (mixed or unknown ID kinds go to
+// the map path).
+func typedPKs(results []*timestampedResult) ([][]int64, [][]string) {
+	if len(results) == 0 {
+		return nil, nil
+	}
+	switch results[0].result.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		pks := make([][]int64, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_IntId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.IntId.GetData()
+		}
+		return pks, nil
+	case *schemapb.IDs_StrId:
+		pks := make([][]string, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_StrId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.StrId.GetData()
+		}
+		return nil, pks
+	default:
+		return nil, nil
+	}
+}
+
+// selectSortedByPK is the fast path of selectRowsByPKWithTimestamp. It returns
+// ok=false, with no rows and no error, as soon as it consumes a row whose PK is
+// below its predecessor in the same input; the caller then reruns the map path
+// from scratch. Everything else -- tie-breaking, replacement, the size guard,
+// the limit, the drain stop and element-level counting -- is the map path's
+// behavior, row for row; TestSelectRowsByPKWithTimestamp_Differential holds the
+// two together.
+func selectSortedByPK[K int64 | string](
+	op *ReduceByPKWithTimestampOperator,
+	results []*timestampedResult,
+	pks [][]K,
+	rowSizeCalculators []*rowSizeCalculator,
+) ([]rowRef, bool, error) {
+	n := len(results)
+	cursors := make([]int, n)
+	hasMore := make([]bool, n)
+	elemIndices := make([][]*internalpb.ElementIndices, n)
+	isElementLevel := results[0].result.GetElementLevel()
+	stopWhenDrained := reduce.ShouldStopWhenDrained(op.reduceType)
+	var drained bool
+	for i, r := range results {
+		hasMore[i] = r.result.GetHasMoreResult()
+		drained = drained || (len(pks[i]) == 0 && hasMore[i])
+		if isElementLevel {
+			elemIndices[i] = r.result.GetElementIndices()
+		}
+	}
+	// getTimestamp's contract: a missing or short timestamp column reads as 0.
+	tsAt := func(i, row int) int64 {
+		if ts := results[i].timestamps; row < len(ts) {
+			return ts[row]
+		}
+		return 0
+	}
+	elemCountAt := func(i, row int) int64 {
+		if !isElementLevel {
+			return 1
+		}
+		if row < len(elemIndices[i]) {
+			return int64(len(elemIndices[i][row].GetIndices()))
+		}
+		return 1
+	}
+
+	var (
+		selectedRows   []rowRef
+		retSize        int64
+		availableCount int64
+		lastPK         K
+		lastTs         int64
+	)
+	for {
+		// Same choice as selectMinPKWithTimestamp: the smallest PK, a strictly
+		// newer timestamp on an equal PK, and otherwise the lowest input index.
+		sel := -1
+		var minPK K
+		var maxTs int64
+		for i := 0; i < n; i++ {
+			c := cursors[i]
+			if c >= len(pks[i]) {
+				continue
+			}
+			pk := pks[i][c]
+			if sel == -1 || pk < minPK {
+				sel, minPK, maxTs = i, pk, tsAt(i, c)
+			} else if pk == minPK {
+				if ts := tsAt(i, c); ts > maxTs {
+					sel, maxTs = i, ts
+				}
+			}
+		}
+		if sel == -1 {
+			break
+		}
+		// drained mirrors selectMinPKWithTimestamp's drainResult: some input
+		// with more results behind it has run out. Cursors only grow, so it is
+		// tracked where a cursor reaches the end rather than recomputed.
+		if stopWhenDrained && drained {
+			break
+		}
+
+		c := cursors[sel]
+		if c > 0 && minPK < pks[sel][c-1] {
+			return nil, false, nil
+		}
+		ts := maxTs
+		rowSize := rowSizeCalculators[sel].rowSize(int64(c))
+		elemCount := elemCountAt(sel, c)
+
+		if len(selectedRows) == 0 || minPK != lastPK {
+			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: int64(c)})
+			lastPK, lastTs = minPK, ts
+			retSize += rowSize
+			availableCount += elemCount
+		} else if ts != 0 && ts > lastTs {
+			// Duplicate PK: all copies are adjacent, so the entry to compare
+			// with is the last one emitted.
+			last := len(selectedRows) - 1
+			oldRef := selectedRows[last]
+			retSize = retSize - rowSizeCalculators[oldRef.resultIdx].rowSize(oldRef.rowIdx) + rowSize
+			if isElementLevel {
+				if old := int(oldRef.rowIdx); old < len(elemIndices[oldRef.resultIdx]) {
+					availableCount -= int64(len(elemIndices[oldRef.resultIdx][old].GetIndices()))
+				}
+				availableCount += elemCount
+			}
+			selectedRows[last] = rowRef{resultIdx: sel, rowIdx: int64(c)}
+			lastTs = ts
+		}
+
+		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
+			return nil, true, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+		}
+		if op.limit > 0 && availableCount >= op.limit {
+			break
+		}
+
+		cursors[sel]++
+		if cursors[sel] >= len(pks[sel]) && hasMore[sel] {
+			drained = true
+		}
+	}
+	return selectedRows, true, nil
+}
+
+// selectRowsByPKWithTimestampMap is the general selection: it dedups through a
+// map keyed by the boxed PK, so it is correct for inputs in any order. It is
+// the fallback of selectRowsByPKWithTimestamp and the reference the fast path
+// is differentially tested against.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestampMap(results []*timestampedResult, rowSizeCalculators []*rowSizeCalculator) ([]rowRef, error) {
+	cursors := make([]int64, len(results))
 
 	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
 	type pkEntry struct {
@@ -361,46 +601,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		cursors[sel]++
 	}
 
-	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
-	}
-
-	// Build merged result from original results
-	origResults := make([]*internalpb.RetrieveResults, len(results))
-	for i, tr := range results {
-		origResults[i] = tr.result
-	}
-
-	// buildMergedRetrieveResults merges whatever FieldsData the inputs carry. On
-	// the Arrow path that is the SYSTEM columns only -- the export leaves them in
-	// the protobuf header and puts user columns in the record -- so the two
-	// halves are merged by the same selectedRows and reassembled by the reader
-	// from milvus.field_order.
-	merged, err := buildMergedRetrieveResults(origResults, selectedRows, op.schema)
-	if err != nil {
-		return nil, err
-	}
-
-	// Hand the selection out unmaterialized. Nothing between here and the
-	// response assembly reads the user columns -- the Arrow-routed pipeline is
-	// this operator and nothing else -- so gathering them into a merged record
-	// here would only copy the whole payload into an intermediate that the
-	// FieldData build then copies out of again.
-	if op.arrowOut != nil {
-		records := make([]arrow.Record, len(results))
-		any := false
-		for i, r := range results {
-			records[i] = r.record
-			any = any || r.record != nil
-		}
-		if any {
-			op.arrowOut.Records = records
-			op.arrowOut.Rows = selectedRows
-		}
-	}
-
-	merged.HasMoreResult = hasMoreResult
-	return merged, nil
+	return selectedRows, nil
 }
 
 // timestampedResult wraps a RetrieveResult with extracted timestamps

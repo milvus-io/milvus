@@ -16,16 +16,19 @@
 package querynodev2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/ipc"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -48,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -56,7 +60,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -66,6 +72,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1745,6 +1752,259 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	resp, err = suite.node.Query(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestMaterialize_Failed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	creq.Limit = typeutil.Unlimited
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		DmlChannels:              []string{suite.vchannel},
+		MaterializeFormatVersion: materialize.FormatVersion,
+	}
+
+	// collection not loaded
+	resp, err := suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
+
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, nil)
+	defer suite.node.manager.Collection.Unref(suite.collectionID, 1)
+
+	// delegator not found
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
+
+	// node not healthy
+	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_RejectsOutOfScope() {
+	unlimited := func() *internalpb.RetrieveRequest {
+		return &internalpb.RetrieveRequest{CollectionID: suite.collectionID, Limit: typeutil.Unlimited}
+	}
+	cases := []struct {
+		name    string
+		version int32
+		mutate  func(*internalpb.RetrieveRequest)
+	}{
+		{"limited", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Limit = 10 }},
+		{"aggregate", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Aggregates = []*planpb.Aggregate{{}} }},
+		{"group by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.GroupByFieldIds = []int64{101} }},
+		{"order by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.OrderByFields = []*planpb.OrderByField{{}} }},
+		{"no format version", 0, func(*internalpb.RetrieveRequest) {}},
+		{"newer format version", materialize.FormatVersion + 1, func(*internalpb.RetrieveRequest) {}},
+	}
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			r := unlimited()
+			c.mutate(r)
+			res, err := suite.node.MaterializeSegments(context.Background(), &querypb.QueryRequest{
+				Req:                      r,
+				DmlChannels:              []string{suite.vchannel},
+				MaterializeFormatVersion: c.version,
+			})
+			suite.NoError(err)
+			// Out of scope, not broken: the proxy falls back to Query.
+			suite.ErrorIs(merr.Error(res.GetStatus()), merr.ErrServiceUnimplemented)
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestMaterialize_Normal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+
+	res, err := suite.node.Materialize(ctx, &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(res.GetStatus()))
+	suite.Greater(res.GetHeader().GetBodyRawSize(), int64(0))
+	// The delegator relays the body through the side table, not res.Body.
+	body := resource.TakeMaterializeBody(res)
+	defer body.Release()
+	suite.Greater(body.Len(), 0)
+	// The request named no schema, so the reply carries the bytes.
+	suite.NotEmpty(res.GetHeader().GetBodySchema())
+	suite.Equal(materialize.SchemaFingerprint(res.GetHeader().GetBodySchema()), res.GetHeader().GetSchemaFingerprint())
+	suite.Equal(typeutil.MaxTimestamp, res.GetHeader().GetMvccTimestamp())
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_MatchesQuerySegments() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	// Like the real proxy, request the timestamp in both the request and the
+	// serialized plan; otherwise segcore force-retains the pk in the header.
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	// Match every row, so the comparison covers many rows across segments.
+	planNode.Node = &planpb.PlanNode_Predicates{Predicates: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 109, DataType: schemapb.DataType_Int64},
+		Op:         planpb.OpType_GreaterEqual,
+		Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+	}}}}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+		SegmentIDs:               suite.validSegmentIDs,
+		Scope:                    querypb.DataScope_Historical,
+	}
+
+	qres, err := suite.node.QuerySegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(qres.GetStatus()))
+	wantRows := int64(typeutil.GetSizeOfIDs(qres.GetIds()))
+	suite.Require().Greater(wantRows, int64(0))
+
+	mreq := proto.Clone(req).(*querypb.QueryRequest)
+	mres, err := suite.node.MaterializeSegments(ctx, mreq)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(mres.GetStatus()))
+
+	suite.Greater(mres.GetHeader().GetBodyRawSize(), int64(0))
+	// Without a fingerprint in the request the reply carries the schema bytes;
+	// with the matching one it omits them; with another it carries them.
+	schemaMsg := mres.GetHeader().GetBodySchema()
+	fp := mres.GetHeader().GetSchemaFingerprint()
+	suite.Require().NotEmpty(schemaMsg)
+	suite.Equal(materialize.SchemaFingerprint(schemaMsg), fp)
+	for _, c := range []struct {
+		name      string
+		requestFP uint64
+		wantBytes bool
+	}{
+		{"matching fingerprint", fp, false},
+		{"other fingerprint", fp + 1, true},
+	} {
+		freq := proto.Clone(mreq).(*querypb.QueryRequest)
+		freq.MaterializeSchemaFingerprint = c.requestFP
+		fres, err := suite.node.MaterializeSegments(ctx, freq)
+		suite.Require().NoError(err, c.name)
+		suite.Require().NoError(merr.Error(fres.GetStatus()), c.name)
+		suite.NotEmpty(fres.GetBody(), c.name)
+		suite.Equal(fp, fres.GetHeader().GetSchemaFingerprint(), c.name)
+		if c.wantBytes {
+			suite.Equal(schemaMsg, fres.GetHeader().GetBodySchema(), c.name)
+		} else {
+			suite.Empty(fres.GetHeader().GetBodySchema(), c.name)
+		}
+		// arrow-go's stock reader is the oracle.
+		rd, err := ipc.NewReader(io.MultiReader(bytes.NewReader(schemaMsg), bytes.NewReader(bytes.Join(fres.GetBody(), nil))))
+		suite.Require().NoError(err, c.name)
+		n := int64(0)
+		for rd.Next() {
+			n += rd.Record().NumRows()
+		}
+		suite.Require().NoError(rd.Err(), c.name)
+		rd.Release()
+		suite.Equal(wantRows, n, c.name)
+	}
+	// Turn the batches back into FieldData the way the proxy does
+	// (materialize.Schema.ReadEntry, then Gather), then compare pk values and
+	// every column with Query's, both ordered by pk.
+	ms, err := materialize.ParseSchema(mres.GetHeader().GetBodySchema())
+	suite.Require().NoError(err)
+	var (
+		batches []*materialize.Batch
+		rows    []materialize.RowRef
+	)
+	for i, e := range mres.GetBody() {
+		b, err := ms.ReadEntry([][]byte{e}, i, 0)
+		suite.Require().NoError(err)
+		// The timestamp is the batch's system column.
+		suite.Require().Len(b.Sys, 1)
+		suite.Require().Len(b.Timestamps(ms), b.Rows)
+		batches = append(batches, b)
+		for j := 0; j < b.Rows; j++ {
+			rows = append(rows, materialize.RowRef{Batch: int32(i), Row: int32(j)})
+		}
+	}
+	suite.Equal(wantRows, int64(len(rows)))
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	suite.Require().NoError(err)
+	ids, fields, err := ms.Gather(batches, rows, helper)
+	suite.Require().NoError(err)
+	mseg := &segcorepb.RetrieveResults{Ids: ids, FieldsData: fields}
+
+	sortByPK := func(ids []int64, fields []*schemapb.FieldData) ([]int64, map[int64]*schemapb.FieldData) {
+		order := make([]int, len(ids))
+		for i := range order {
+			order[i] = i
+		}
+		sort.Slice(order, func(a, b int) bool { return ids[order[a]] < ids[order[b]] })
+		sortedIDs := make([]int64, len(ids))
+		dst := typeutil.PrepareResultFieldData(fields, int64(len(ids)))
+		for i, o := range order {
+			sortedIDs[i] = ids[o]
+			typeutil.AppendFieldData(dst, fields, int64(o))
+		}
+		byID := make(map[int64]*schemapb.FieldData, len(dst))
+		for _, fd := range dst {
+			byID[fd.GetFieldId()] = fd
+		}
+		return sortedIDs, byID
+	}
+	wantPKs, wantCols := sortByPK(qres.GetIds().GetIntId().GetData(), qres.GetFieldsData())
+	gotPKs, gotCols := sortByPK(mseg.GetIds().GetIntId().GetData(), mseg.GetFieldsData())
+	suite.Equal(wantPKs, gotPKs)
+	suite.Require().NotEmpty(wantCols)
+	suite.Equal(len(wantCols), len(gotCols))
+	for id, want := range wantCols {
+		got, ok := gotCols[id]
+		suite.Require().True(ok, "field %d missing from Materialize", id)
+		suite.Equal(want.GetType(), got.GetType(), "field %d", id)
+		suite.True(proto.Equal(want.GetScalars(), got.GetScalars()), "field %d scalars differ", id)
+		suite.True(proto.Equal(want.GetVectors(), got.GetVectors()), "field %d vectors differ", id)
+		suite.Equal(want.GetValidData(), got.GetValidData(), "field %d valid data", id)
+	}
+
+	// A collection that is not loaded surfaces as a header status, not an error.
+	mreq.Req.CollectionID = -1
+	mres, err = suite.node.MaterializeSegments(ctx, mreq)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(mres.GetStatus()), merr.ErrCollectionNotLoaded)
 }
 
 func (suite *ServiceSuite) TestQuerySegments_Failed() {
