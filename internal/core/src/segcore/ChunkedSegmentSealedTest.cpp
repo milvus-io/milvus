@@ -1740,10 +1740,18 @@ TEST(test_chunk_segment, ReadStateLoadScopeReleasesStructOffsets) {
     std::weak_ptr<typename decltype(offsets)::element_type> retired = offsets;
     offsets.reset();
 
-    auto target = std::make_shared<Schema>(*schema);
-    target->UpdateLoadFields({pk.get()});
+    // QueryViews bind required fields explicitly; legacy Schema load fields
+    // only control preloading and do not remove fields from the layout.
+    auto target = std::make_shared<const segcore::SealedFieldLayout>(
+        schema, segcore::LoadScope({pk.get()}));
     auto narrowed = primary->PinReadState();
     narrowed->Reopen(target);
+    EXPECT_EQ(narrowed->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(narrowed->GetStructElementOffsets(score), nullptr);
+    EXPECT_EQ(old->GetStructElementOffsets(label), retired.lock());
+    EXPECT_EQ(old->GetStructElementOffsets(score), retired.lock());
+    EXPECT_TRUE(schema->IsFieldInLoadScope(label));
+    EXPECT_TRUE(schema->IsFieldInLoadScope(score));
     primary->AdoptReadState(*narrowed);
     EXPECT_EQ(primary->GetStructElementOffsets(label), nullptr);
     EXPECT_EQ(primary->GetStructElementOffsets(score), nullptr);
