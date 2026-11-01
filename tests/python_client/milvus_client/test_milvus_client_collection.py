@@ -3281,18 +3281,24 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
             client.create_partition(collection_name, p2)
             client.release_collection(collection_name)
             client.load_partitions(collection_name, [p1])
-            client.insert(collection_name,
-                          [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(5)],
-                          partition_name=p1)
-            client.insert(collection_name,
-                          [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(10, 15)],
-                          partition_name=p2)
+            client.insert(
+                collection_name, [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(5)], partition_name=p1
+            )
+            client.insert(
+                collection_name, [{"id": i, "vector": [1.0, 0.0, 0.0, 0.0]} for i in range(10, 15)], partition_name=p2
+            )
             client.delete(collection_name, ids=[10])
 
             def read_ids(partitions=None):
                 kwargs = {"partition_names": partitions} if partitions is not None else {}
-                rows = client.query(collection_name, filter="id >= 0", output_fields=["id"],
-                                    consistency_level="Strong", timeout=120, **kwargs)
+                rows = client.query(
+                    collection_name,
+                    filter="id >= 0",
+                    output_fields=["id"],
+                    consistency_level="Strong",
+                    timeout=120,
+                    **kwargs,
+                )
                 return {row["id"] for row in rows}
 
             assert read_ids() == set(range(5))
@@ -3301,8 +3307,14 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
             assert read_ids() == set(range(5)) | {11, 12, 13, 14}
             client.release_partitions(collection_name, [p1])
             assert read_ids() == {11, 12, 13, 14}
-            self.query(client, collection_name, filter="id >= 0", partition_names=[p1],
-                       check_task=CheckTasks.err_res, check_items={ct.err_code: 201, ct.err_msg: "partition not loaded"})
+            self.query(
+                client,
+                collection_name,
+                filter="id >= 0",
+                partition_names=[p1],
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 201, ct.err_msg: "partition not loaded"},
+            )
             client.insert(collection_name, [{"id": 5, "vector": [1.0, 0.0, 0.0, 0.0]}], partition_name=p1)
             client.delete(collection_name, ids=[0])
             client.load_partitions(collection_name, [p1])
