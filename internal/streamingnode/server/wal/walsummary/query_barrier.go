@@ -18,4 +18,5 @@ func (m *Manager) ObserveQueryBarrier(vchannel string, timetick uint64) {
 	// subscriptions use scoped tokens, so unrelated VChannels stay asleep.
 	m.notifyReadersLocked()
 	m.notifyTransformLocked(vchannel)
+	m.dispatchTransformLocked(vchannel, nil, timetick)
 }

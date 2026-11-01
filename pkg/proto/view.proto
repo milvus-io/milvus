@@ -14,6 +14,50 @@ service ViewSyncService {
     }
 }
 
+// Immutable collection loading intent, stored at coord/load_info/<collection>/<version>.
+// QueryViews reference a version; physical segment files remain owned by DataView/Manifest.
+message CollectionLoadConfig {
+    // Globally unique collection identity; all referenced fields, indexes and replicas belong to it.
+    int64 collectionID = 1;
+    // Owning database, used for DDL admission and management reporting.
+    // This does not select query resources or identify a Schema version.
+    int64 dbID = 2;
+    // Durable allocator-issued identity, strictly increasing for successive publications.
+    // Zero is not persisted; release/reload allocates a fresh identity.
+    uint64 version = 3;
+    // Exact loaded partition membership for this version; empty means no partitions.
+    repeated int64 partition_ids = 4;
+    // Explicit query-visible field scope, including all selected IndexIDs per field.
+    // Materialized before publication; it is never inferred from preload_fields on reads.
+    repeated LoadFieldConfig required_fields = 5;
+    // Eager-loading hints within required_fields. Empty uses schema-defined preload policy;
+    // omitting a field here does not make that required field inaccessible to queries.
+    repeated LoadFieldConfig preload_fields = 6;
+    // Desired replicas and their resource-group constraints; node placement belongs to QueryView.
+    repeated LoadReplicaConfig replicas = 7;
+    // True for an explicitly chosen replica configuration; false follows cluster defaults.
+    bool user_specified_replica_mode = 8;
+}
+
+// Field selection owned by immutable QueryView requirements. WAL messages use their own definition.
+message LoadFieldConfig {
+    // Field identity within the collection's Schema; never a field ordinal or name.
+    int64 field_id = 1;
+    // Exact selected IndexIDs, sorted and unique on publication. Empty means no selected index.
+    // Multiple IDs support distinct JSON-path indexes. Definitions are resolved by ID;
+    // index files/build versions remain segment-specific and are not encoded here.
+    repeated int64 index_ids = 2;
+}
+
+message LoadReplicaConfig {
+    // Persistent logical replica identity, independent of its current worker nodes.
+    int64 replica_id = 1;
+    // Resource group constraining placement; this is not a snapshot of node membership.
+    string resource_group_name = 2;
+    // Desired loading priority used by replica scheduling.
+    common.LoadPriority priority = 3;
+}
+
 // DataVersion is the composite version embedded in a QueryView version.
 // Values are ordered lexicographically by
 // (streaming_version, compact_version).

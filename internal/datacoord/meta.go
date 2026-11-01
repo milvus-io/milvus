@@ -2054,15 +2054,27 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
+	committedUpdates, err := m.updateSegmentsInfo(ctx, operators...)
+	if err != nil {
+		return err
+	}
+	m.notifyQueryViewSegmentUpdates(ctx, committedUpdates)
+	return nil
+}
+
+// updateSegmentsInfo returns committed segment changes for the caller to notify
+// after releasing any manifest locks it owns.
+func (m *meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
+	var committedUpdates []*SegmentInfo
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 
 	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if updatePack == nil {
-		return nil
+		return nil, nil
 	}
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })
@@ -2071,14 +2083,15 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	if err := m.catalog.AlterSegments(ctx, segments, increments...); err != nil {
 		mlog.Error(ctx, "meta update: update flush segments info - failed to store flush segment info into Etcd",
 			mlog.Err(err))
-		return err
+		return nil, err
 	}
 	// update memory status
 	for id, s := range updatePack.segments {
+		committedUpdates = append(committedUpdates, s)
 		m.segments.SetSegment(id, s)
 	}
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
-	return nil
+	return committedUpdates, nil
 }
 
 // UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
@@ -2088,6 +2101,8 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // even without SegmentMeta mutations; (false, nil) means both are absent.
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
+	var updates []*SegmentInfo
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, updates) }()
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 
@@ -2139,6 +2154,7 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 		// update memory status
 		for id, s := range updatePack.segments {
 			m.segments.SetSegment(id, s)
+			updates = append(updates, s)
 		}
 	}
 	mlog.Info(ctx, "meta update: update flush segments info and DataView successfully")

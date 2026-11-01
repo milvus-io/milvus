@@ -509,11 +509,13 @@ std::vector<ExprPtr>
 CompileWithRecorder(const std::vector<expr::TypedExprPtr>& logical_exprs,
                     const segcore::SegmentInternalInterface* segment,
                     int64_t active_count,
-                    const std::shared_ptr<FeatureRecorder>& recorder) {
+                    const std::shared_ptr<FeatureRecorder>& recorder,
+                    const SchemaPtr& schema) {
     PlanOptions options;
     options.feature_recorder = recorder;
     auto query_context = std::make_shared<QueryContext>(
         DEAFULT_QUERY_ID, segment, active_count, MAX_TIMESTAMP, 0, 0, options);
+    query_context->set_read_schema(schema);
     ExecContext context(query_context.get());
     return CompileExpressions(logical_exprs, &context, {}, false);
 }
@@ -551,7 +553,8 @@ TEST_F(DetermineExecPathTest, FeatureBits_ScalarIndexPathAndType) {
     auto recorder = std::make_shared<FeatureRecorder>();
     auto expr = MakeUnaryRangeExpr(
         int64_fid_, DataType::INT64, proto::plan::OpType::Equal, 42);
-    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, recorder);
+    auto compiled =
+        CompileWithRecorder({expr}, segment.get(), N_, recorder, schema_);
     ASSERT_EQ(compiled.size(), 1);
     EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
     EXPECT_EQ(recorder->Bits(),
@@ -563,7 +566,8 @@ TEST_F(DetermineExecPathTest, FeatureBits_BruteForceWithoutIndex) {
     auto segment = CreateSegmentNoIndex();
     auto recorder = std::make_shared<FeatureRecorder>();
     auto expr = MakeTermExpr(int64_fid_, DataType::INT64, {1, 2, 3});
-    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, recorder);
+    auto compiled =
+        CompileWithRecorder({expr}, segment.get(), N_, recorder, schema_);
     ASSERT_EQ(compiled.size(), 1);
     EXPECT_FALSE(compiled[0]->CanExecuteAllAtOnce());
     EXPECT_EQ(recorder->Bits(), BitOf(FeatureBit::FilterPathBruteForce))
@@ -584,7 +588,8 @@ TEST_F(DetermineExecPathTest, FeatureBits_MixedConjunction) {
         std::vector<proto::plan::GenericValue>{});
     auto conj = std::make_shared<expr::LogicalBinaryExpr>(
         expr::LogicalBinaryExpr::OpType::And, indexed, raw);
-    auto compiled = CompileWithRecorder({conj}, segment.get(), N_, recorder);
+    auto compiled =
+        CompileWithRecorder({conj}, segment.get(), N_, recorder, schema_);
     ASSERT_EQ(compiled.size(), 1);
     compiled[0]->CanExecuteAllAtOnce();
     EXPECT_EQ(recorder->Bits(),
@@ -597,7 +602,32 @@ TEST_F(DetermineExecPathTest, FeatureBits_NoRecorderRecordsNothing) {
     auto segment = CreateSegmentWithInt64Index();
     auto expr = MakeUnaryRangeExpr(
         int64_fid_, DataType::INT64, proto::plan::OpType::Equal, 42);
-    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, nullptr);
+    auto compiled =
+        CompileWithRecorder({expr}, segment.get(), N_, nullptr, schema_);
     ASSERT_EQ(compiled.size(), 1);
     EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+}
+
+TEST_F(DetermineExecPathTest, FeatureBits_UsesLogicalSchemaForInternalFilters) {
+    auto segment = CreateSegmentWithInt64Index();
+    auto expr = MakeUnaryRangeExpr(
+        int64_fid_, DataType::INT64, proto::plan::OpType::Equal, 42);
+    for (bool ttl : {true, false}) {
+        auto logical = std::make_shared<Schema>(*schema_);
+        if (ttl) {
+            logical->set_ttl_field_id(int64_fid_);
+        } else {
+            logical->set_namespace_field_id(int64_fid_);
+        }
+        auto recorder = std::make_shared<FeatureRecorder>();
+        auto compiled =
+            CompileWithRecorder({expr}, segment.get(), N_, recorder, logical);
+        EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+        EXPECT_EQ(recorder->Bits(), 0);
+    }
+    auto recorder = std::make_shared<FeatureRecorder>();
+    auto compiled =
+        CompileWithRecorder({expr}, segment.get(), N_, recorder, schema_);
+    EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+    EXPECT_NE(recorder->Bits(), 0);
 }

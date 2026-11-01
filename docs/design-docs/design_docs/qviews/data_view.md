@@ -48,18 +48,15 @@ error. Changing its location is also a data-integrity error. It cannot detect
 duplicate logical data stored under different Segment IDs; loadability,
 completeness, and lineage are projection-function responsibilities.
 
-Manifest version has two modes:
-
-- `0` means indirect loading. QueryCoord watches Coordinator SegmentMeta
-  changes, resolves the latest complete `SegmentInfo`, and freezes it into the
-  corresponding QueryView/load operation. This covers current and legacy
-  Segments, non-StorageV3 Segments, unstable base paths, and manifests that are
-  not yet suitable for direct loading.
-- A positive value identifies a committed canonical StorageV3 Manifest.
-  QueryNode can construct
-  `{rootPath}/insert_log/{collectionID}/{partitionID}/{segmentID}/_metadata/manifest-{version}.avro`
-  and derive all Segment loading information from it. Such a Segment no longer
-  needs the Coordinator SegmentMeta watcher for data updates.
+Manifest version distinguishes an explicit base requirement from indirect
+resolution. Zero supplies no explicit Manifest version; a positive value names
+a committed Manifest version. The current QN resource path supports StorageV3
+with index artifacts in manifests and uses unary `GetQueryViewSegmentLoadInfo`
+to resolve a complete current loading snapshot. Ordinary sealed requirements
+accept compatible versions at or above the target; external bases require the
+exact version. Version zero does not enable a non-V3 fallback. Neither mode uses
+a SegmentMeta subscription. Fully deriving every loading dependency directly
+from a retained Manifest is outside this RPC's current implementation.
 
 Zero is a resolution mode, not a comparable data revision. Every persisted
 DataView must include one `segment_manifest_versions` entry per Segment, even
@@ -200,10 +197,12 @@ Compaction (mix/clustering/L0/sort/bump-schema-version), import commit, copy
 completion, external refresh, drop partition, and truncate do not publish
 membership events. Instead, after their SegmentMeta mutation commits, the owner
 requests an asynchronous reconciliation by calling
-`Manager.Recompute(ctx, collectionID)`. Two additional SegmentMeta mutations
-advance a segment's Manifest version without changing membership and also
-request a recompute: a stats task (e.g. sort) that records a new manifest, and
-a `BatchUpdateManifest` V3 item that bumps a stored Manifest version.
+`Manager.Recompute(ctx, collectionID)`. Successful single/batched Manifest
+publication also requests reconciliation through the shared post-publication
+hook, after catalog and memory updates and outside Segment/Manifest locks.
+This includes index artifacts and Text/JSON stats; notification is preserved
+when SegmentMeta Watch is removed. Metadata-only/no-op reconciliations retain
+the same version when the projected snapshot is unchanged.
 The queue and its worker live inside the Manager: a non-blocking, per-Collection
 deduplicated request (a Collection with a pending request is not queued again),
 drained by a single worker that rebuilds the snapshot against the injected
