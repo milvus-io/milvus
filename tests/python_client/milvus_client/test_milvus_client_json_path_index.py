@@ -424,10 +424,11 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
         # Step 5: partial update data
         new_row = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, 
                                             desired_field_names=[default_primary_key_field_name, default_string_field_name])
-        error = {ct.err_code: 101, 
-                 ct.err_msg: f"failed to query: collection not loaded"}
-        self.upsert(client, collection_name, new_row, partial_update=True,
-                    check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
+        response, _ = self.upsert(client, collection_name, new_row, partial_update=True,
+                                  check_task=CheckTasks.err_res, check_items=error)
+        # err_res checks the message only; also enforce the public business code.
+        assert response.code == error[ct.err_code], response
         
         self.drop_collection(client, collection_name)
 

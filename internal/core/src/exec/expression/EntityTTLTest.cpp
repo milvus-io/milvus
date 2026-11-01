@@ -358,3 +358,31 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
             << "After expiration, all data should be filtered";
     }
 }
+
+// Old and target QueryViews share physical columns but must retain independent
+// TTL semantics while an ALTER is preparing or an older query is draining.
+TEST(PhysicalTime, QueryViewReadSchemaControlsTTL) {
+    auto make_schema = [](bool ttl) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto expiry = schema->AddDebugField("expiry", DataType::TIMESTAMPTZ);
+        schema->set_primary_field_id(pk);
+        if (ttl) {
+            schema->set_ttl_field_id(expiry);
+        }
+        return schema;
+    };
+    for (bool physical_ttl : {false, true}) {
+        auto physical_schema = make_schema(physical_ttl);
+        auto segment = CreateGrowingSegment(physical_schema, empty_index_meta);
+        auto* internal = dynamic_cast<SegmentInternalInterface*>(segment.get());
+        exec::QueryContext old_view("old", internal, 0, 100);
+        exec::QueryContext target_view("target", internal, 0, 100);
+        old_view.set_read_schema(make_schema(false));
+        target_view.set_read_schema(make_schema(true));
+        EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&old_view), nullptr);
+        EXPECT_NE(exec::CreateTTLFieldFilterExpression(&target_view), nullptr);
+        EXPECT_EQ(physical_schema->get_ttl_field_id().has_value(),
+                  physical_ttl);
+    }
+}

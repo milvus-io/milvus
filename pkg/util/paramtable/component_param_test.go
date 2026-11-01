@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -285,6 +286,61 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 	})
 }
 
+func TestProxyEnableAutoLoad(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	item := &params.EnableAutoLoad
+
+	assert.Equal(t, "proxy.enableAutoLoad", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, base.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, base.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestQueryCoordAutoRelease(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := queryCoordConfig{}
+	params.init(base)
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
+	}
+
+	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
+	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
+	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
+	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
+	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
+
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+
+	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+}
+
 func TestComponentParam_StorageIopsParams(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
@@ -502,9 +558,87 @@ func TestComponentParam_IDFSealedStatsLoadConcurrencyRatio(t *testing.T) {
 	assert.Equal(t, 1.0, item.GetAsFloat())
 }
 
-func TestComponentParam(t *testing.T) {
+func TestComponentParam_QueryViewConcurrency(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	for _, test := range []struct {
+		name string
+		key  string
+		item *ParamItem
+	}{
+		{name: "transform log drain", key: "queryNode.queryView.transformLogDrainConcurrencyRatio", item: &params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency},
+		{name: "transform log stream catch-up", key: "streaming.transformLog.catchupConcurrencyRatioPerPChannel", item: &params.StreamingCfg.TransformLogCatchupConcurrencyPerPChannel},
+		{name: "live event dispatch", key: "streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel", item: &params.StreamingCfg.QueryViewLiveEventDispatchConcurrencyPerPChannel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.key, test.item.Key)
+			require.Equal(t, "0.25", test.item.DefaultValue)
+			require.Equal(t, "3.1.0", test.item.Version)
+			for _, cpuCount := range []int{1, 3, 4, 8, 10} {
+				t.Run(fmt.Sprint(cpuCount), func(t *testing.T) {
+					patch := mockey.Mock(hardware.GetCPUNum).Return(cpuCount).Build()
+					defer patch.UnPatch()
+					require.NoError(t, params.Reset(test.key))
+					require.Equal(t, max(1, cpuCount/4), test.item.GetAsInt())
+					for _, ratio := range []struct {
+						value string
+						want  int
+					}{
+						{value: "0.5", want: max(1, cpuCount/2)},
+						{value: "2", want: cpuCount * 2},
+						{value: "0", want: 1},
+						{value: "-1", want: 1},
+					} {
+						require.NoError(t, params.Save(test.key, ratio.value))
+						require.Equal(t, ratio.want, test.item.GetAsInt())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
 	Init()
 	params := Get()
+	item := &params.QueryCoordCfg.QueryViewFullReconsileInterval
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.fullReconsileInterval", item.Key)
+	assert.Equal(t, "10", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 10*time.Second, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "300")
+	assert.Equal(t, 5*time.Minute, item.GetAsDuration(time.Second))
+	params.Save(item.Key, "0")
+	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
+}
+
+func TestComponentParam_QueryViewTargetRowsPerShardNode(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryCoordCfg.QueryViewTargetRowsPerShardNode
+	params.Reset(item.Key)
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryCoord.queryView.targetRowsPerShardNode", item.Key)
+	assert.Equal(t, "100000", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "250000"))
+	assert.EqualValues(t, 250_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "0"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+	assert.NoError(t, params.Save(item.Key, "invalid"))
+	assert.EqualValues(t, 100_000, item.GetAsInt64())
+}
+
+func TestComponentParam(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 
 	t.Run("query node zero copy config key", func(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
@@ -1387,12 +1521,6 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
 		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
 
-		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
-		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
-		assert.Equal(t, 10, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
-		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
-		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
-
 		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
@@ -1757,8 +1885,8 @@ func TestDataCoordForceMergeMemoryFactorConfig(t *testing.T) {
 }
 
 func TestForbiddenItem(t *testing.T) {
-	Init()
-	params := Get()
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 
 	params.baseTable.mgr.OnEvent(&config.Event{
 		Key:   params.CommonCfg.ClusterPrefix.Key,
@@ -1816,8 +1944,8 @@ func TestCachedParam(t *testing.T) {
 }
 
 func TestFallbackParam(t *testing.T) {
-	Init()
-	params := Get()
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 	params.Save("common.chanNamePrefix.cluster", "foo")
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
@@ -1849,17 +1977,16 @@ func TestWriteSegmentIndexToManifest(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 
-	// Off by default: manifest publication is opt-in, and the legacy
-	// etcd-only path must be what a cluster gets without configuration.
+	// QueryView physical preparation follows the published Manifest version.
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "false")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
 	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
-	// A value that does not parse as a boolean reads as false, i.e. the
-	// legacy behavior. Under the old etcd-write polarity this silently
-	// entered the one-way off state; with publication opt-in the failure is
-	// merely "the operator thinks it is on", with no durability consequence.
+	// Explicit invalid boolean values retain the parameter parser's behavior.
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 }

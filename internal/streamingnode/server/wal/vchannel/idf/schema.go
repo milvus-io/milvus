@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -181,7 +180,7 @@ func (b *viewBinding) Prepare(ctx context.Context, loadInfo queryresource.LoadIn
 			return err
 		}
 		fieldView := view
-		fieldView.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: field.key.fieldID}}
+		fieldView.RequiredFields = []*viewpb.LoadFieldConfig{{FieldId: field.key.fieldID}}
 		oracle, err := provider.buildOracle(ctx, fieldView, paramtable.Get().QueryViewCfg.IDFLazyLoadSealedStats.GetAsBool())
 		if err != nil {
 			return err

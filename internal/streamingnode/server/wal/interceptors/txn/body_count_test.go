@@ -25,7 +25,7 @@ func TestCommitBodyCount(t *testing.T) {
 		{"complete", 2, 2, true},
 		{"missing", 2, 1, false},
 		{"upper_retry_duplicate", 1, 2, false},
-		{"empty", 0, 0, true},
+		{"empty", 0, 0, false},
 		{"legacy_nonempty", 0, 2, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,7 +46,11 @@ func TestCommitBodyCount(t *testing.T) {
 				require.False(t, cleaned)
 				s.CommitDone()
 			} else {
-				require.True(t, status.AsStreamingError(err).IsTxnExpired())
+				if tc.actual == 0 {
+					require.ErrorContains(t, err, "cannot commit an empty transaction")
+				} else {
+					require.True(t, status.AsStreamingError(err).IsTxnExpired())
+				}
 				require.Equal(t, message.TxnStateRollbacked, s.State())
 				require.True(t, s.IsExpiredOrDone(4), "must release LastConfirmedMessageID barrier")
 				require.Error(t, s.AddNewMessage(context.Background(), 5), "late retry cannot revive rejected txn")

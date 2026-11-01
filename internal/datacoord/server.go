@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -55,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
@@ -114,6 +116,7 @@ type Server struct {
 	metaStore                           metacache.MetaStore
 	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	collectionDropped                   func(context.Context, int64) (bool, error)
 	segmentManager                      Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -134,8 +137,9 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager       SnapshotManager
-	snapshotExportManager *snapshotExportManager
+	snapshotManager          SnapshotManager
+	restoreCollectionManager RestoreCollectionManager
+	snapshotExportManager    *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -238,8 +242,8 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:              make(chan struct{}),
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
 		notifyStatsChan:     make(chan UniqueID, 1024),
+		notifyIndexChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
@@ -348,10 +352,6 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
-	if err != nil {
-		return err
-	}
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -429,6 +429,10 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	snapshotManager.collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
+	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
@@ -520,6 +524,10 @@ func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.Colle
 	s.dataViewCollectionRecoveryValidator = validator
 }
 
+func (s *Server) SetCollectionDroppedChecker(checker func(context.Context, int64) (bool, error)) {
+	s.collectionDropped = checker
+}
+
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
@@ -545,14 +553,15 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
-		cli:              cli,
-		broker:           s.broker,
-		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
-		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
-		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
-		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
-		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-		dataViewGC:       s.dataViewManager,
+		streamingNodeCatalog: kvstreamingnode.NewCataLog(s.kv),
+		cli:                  cli,
+		broker:               s.broker,
+		enabled:              Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
+		checkInterval:        Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
+		scanInterval:         Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
+		missingTolerance:     Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
+		dropTolerance:        Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewGC:           s.dataViewManager,
 		importJobAlive: func(ctx context.Context, jobID int64) bool {
 			return s.importMeta.GetJob(ctx, jobID) != nil
 		},
@@ -715,6 +724,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
+		if err == nil {
+			recoveredMeta.preparationSchema = coordinatorPreparationSchema
+		}
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -729,6 +741,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// not repeat newMeta's successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
 		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
+	var recoveredImports ImportMeta
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		recoveredImports, err = NewImportMeta(s.ctx, s.catalog, s.allocator, recoveredMeta)
+		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -748,6 +769,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			}),
+			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+			}),
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -757,6 +784,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// make a subsequent initMeta call return early with partial state.
 	recoveredMeta.dataViewManager = manager
 	s.meta = recoveredMeta
+	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	return nil
 }
@@ -1173,6 +1201,12 @@ func (s *Server) Stop() error {
 		s.talonPrewarmInspector.Stop()
 	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		if s.garbageCollector != nil {
+			s.garbageCollector.close()
+		}
+		if s.snapshotExportManager != nil {
+			s.snapshotExportManager.Close()
+		}
 		return nil
 	}
 	mlog.Info(s.ctx, "datacoord server shutdown")
@@ -1315,14 +1349,8 @@ func (s *Server) registerMetricsRequest() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
+	// Internal metadata loading must include a Restoring collection. Public
+	// HasCollection hides it until its copy job publishes the restored data.
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

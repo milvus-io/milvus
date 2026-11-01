@@ -34,8 +34,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -58,7 +59,6 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
@@ -68,7 +68,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -108,6 +107,8 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
+	queryViewSegments     atomic.Pointer[qnview.SegmentResourceManager]
+	queryViewHandler      atomic.Pointer[qnview.QNQueryViewHandler]
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager
@@ -497,14 +498,37 @@ func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
 		mlog.Info(node.ctx, "Query node stop...")
+		migrationCtx, cancelMigration := context.WithTimeout(context.WithoutCancel(node.ctx),
+			paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+		defer cancelMigration()
 		err := node.session.GoingStop()
+		canMigrate := err == nil && util.MustSelectWALName() != message.WALNameRocksmq
+		if !canMigrate {
+			cancelMigration()
+		}
+		handler := node.queryViewHandler.Load()
+		queryViewClosed := make(chan struct{})
+		if handler == nil {
+			close(queryViewClosed)
+		} else {
+			// Share the migration deadline with the legacy path. The handler owns
+			// preparation rejection, migration waiting, and physical resource drain.
+			go func() {
+				defer close(queryViewClosed)
+				if err := handler.Close(migrationCtx); err != nil {
+					mlog.Info(node.ctx, "query view graceful close interrupted, waiting for local cleanup", mlog.Err(err))
+					// Cancellation ends migration, not native ownership. Join the
+					// same cleanup before allowing segcore to be destroyed.
+					_ = handler.Close(context.WithoutCancel(node.ctx))
+				}
+			}()
+		}
 		if err != nil {
 			mlog.Warn(node.ctx, "session fail to go stopping state", mlog.Err(err))
-		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
+		} else if canMigrate { // rocksmq cannot migrate because it uses local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
-			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 			migrateTimeout := paramtable.Get().QueryNodeCfg.MigrateDataTimeout.GetAsDurationByParse()
 			migrateDeadline := time.Now().Add(migrateTimeout)
 
@@ -547,12 +571,13 @@ func (node *QueryNode) Stop() error {
 							})),
 							mlog.Int("channelNum", channelNum),
 						)
+						cancelMigration()
 						break outer
 					}
 				}
 
 				select {
-				case <-timeoutCh:
+				case <-migrationCtx.Done():
 					mlog.Warn(node.ctx, "migrate data timed out", mlog.Int64("ServerID", node.GetNodeID()),
 						mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
@@ -583,6 +608,9 @@ func (node *QueryNode) Stop() error {
 			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(0)
 		}
 
+		// Legacy resources may be empty while QueryViews are still migrating.
+		// Let Close finish with the original deadline before stopping queries.
+		<-queryViewClosed
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		if node.scheduler != nil {
@@ -641,21 +669,7 @@ func (node *QueryNode) SetAddress(address string) {
 // hook is otherwise treated exactly as the plug-in is: the same two Init calls
 // with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
-	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
-
-	if compiled := extension.InstalledQueryHook(); compiled != nil {
-		if path != "" {
-			mlog.Warn(node.ctx, "queryNode.soPath is ignored, a query hook is compiled into this binary",
-				mlog.String("so_path", path))
-		}
-		return node.useQueryHook(compiled)
-	}
-
-	if path == "" {
-		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
-	}
-
-	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
+	hoo, err := optimizers.LoadQueryHook()
 	if err != nil {
 		return err
 	}
@@ -667,11 +681,8 @@ func (node *QueryNode) initHook() error {
 // for a plug-in and a compiled-in hook, which is the point: a hook a
 // distribution compiled in must not be a second-class one.
 func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
-	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init configs for the hook")
-	}
-	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init tuning configs for the hook")
+	if err := optimizers.InitQueryHook(hoo); err != nil {
+		return err
 	}
 
 	node.queryHook = hoo
@@ -680,31 +691,7 @@ func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
 }
 
 func (node *QueryNode) handleQueryHookEvent() {
-	onEvent := func(event *config.Event) {
-		if node.queryHook != nil {
-			if err := node.queryHook.Init(event.Value); err != nil {
-				mlog.Error(node.ctx, "failed to refresh hook config", mlog.Err(err))
-			}
-		}
-	}
-	onEvent2 := func(event *config.Event) {
-		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
-			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
-			switch event.EventType {
-			case config.CreateType, config.UpdateType:
-				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
-					mlog.Warn(node.ctx, "failed to refresh hook tuning config", mlog.Err(err))
-				}
-			case config.DeleteType:
-				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
-					mlog.Warn(node.ctx, "failed to delete hook tuning config", mlog.Err(err))
-				}
-			}
-		}
-	}
-	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
-
-	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+	optimizers.WatchQueryHook(node.ctx, node.queryHook, "queryHook")
 }
 
 // cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files

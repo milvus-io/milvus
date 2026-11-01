@@ -353,7 +353,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 	t.Run("test load", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
-		assert.Equal(t, err, nil)
+		require.NoError(t, err)
 		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
@@ -439,7 +439,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
-		assert.Equal(t, err, nil)
+		require.NoError(t, err)
 		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		prepareTests := []struct {
@@ -530,7 +530,7 @@ func TestAzureObjectStorage(t *testing.T) {
 
 	t.Run("test CopyObject", func(t *testing.T) {
 		testCM, err := newAzureObjectStorageWithConfig(ctx, &config)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer testCM.DeleteContainer(ctx, config.BucketName, &azblob.DeleteContainerOptions{})
 
 		// Test successful copy
@@ -708,6 +708,7 @@ func TestReadFile(t *testing.T) {
 		CloudProvider: "azure",
 	}
 	rcm, err := NewRemoteChunkManager(ctx, c)
+	require.NoError(t, err)
 
 	t.Run("Read", func(t *testing.T) {
 		filePath := "test-Read"

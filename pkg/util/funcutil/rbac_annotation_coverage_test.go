@@ -17,12 +17,11 @@
 package funcutil
 
 import (
+	_ "embed"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -264,17 +263,14 @@ func requireNoRBACAnnotationCoverageErrors(t *testing.T, title string, entries [
 	t.Errorf("%s:\n%s", title, strings.Join(entries, "\n"))
 }
 
+//go:embed rbac_annotation_coverage_test.go
+var rbacAnnotationTestSource string
+
 func requireAllowlistComments(t *testing.T) {
 	t.Helper()
 
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to locate current test file")
-	}
-	source, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("failed to read current test file: %v", err)
-	}
+	const filename = "rbac_annotation_coverage_test.go"
+	source := rbacAnnotationTestSource
 
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, source, parser.ParseComments)
@@ -287,7 +283,7 @@ func requireAllowlistComments(t *testing.T) {
 		t.Fatal("rbacAnnotationAllowlist declaration not found")
 	}
 
-	lines := strings.Split(string(source), "\n")
+	lines := strings.Split(source, "\n")
 	var missingComments []string
 	for _, elt := range allowlist.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)

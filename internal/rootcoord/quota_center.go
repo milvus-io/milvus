@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -441,6 +442,16 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			if queryNodeMetric.CollectionMetrics != nil {
 				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
+			}
+		}
+
+		// Empty and growing-only QueryViews need read quotas too. QN physical
+		// metrics alone do not enumerate them. Keep released-but-resident views
+		// covered until their cleanup completes.
+		if resources := qvresource.Resource(); resources != nil {
+			collections.Insert(resources.ShardViews.CollectionIDs()...)
+			for collectionID := range resources.LoadConfigs.Snapshot().ConfigsMap() {
+				collections.Insert(collectionID)
 			}
 		}
 

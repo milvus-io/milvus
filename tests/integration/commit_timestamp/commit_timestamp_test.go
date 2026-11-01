@@ -105,6 +105,7 @@ func (s *CommitTimestampSuite) listDataSegments(ctx context.Context, collectionI
 // The commit timestamp is composed after the shutdown so that its offset only
 // has to cover what the caller does next, not the shutdown itself.
 func (s *CommitTimestampSuite) setCommitTimestamp(
+	collectionName string,
 	collectionID int64,
 	offset time.Duration,
 ) (uint64, []int64) {
@@ -153,6 +154,15 @@ func (s *CommitTimestampSuite) setCommitTimestamp(
 	s.Require().NotEmpty(segmentIDs, "no flushed segments were modified")
 
 	s.Cluster.AddMixCoord()
+
+	// This fixture changes SegmentInfo out of band rather than appending a
+	// CommitImport. Publish a real WAL fence as well: Strong reads use the
+	// latest relevant write, not wall-clock time or arbitrary etcd edits.
+	// A future commit timestamp must remain invisible until a later barrier.
+	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
+		CollectionNames: []string{collectionName},
+	})
+	s.Require().NoError(merr.CheckRPCCall(flush, err))
 
 	return commitTs, segmentIDs
 }
@@ -305,7 +315,7 @@ func (s *CommitTimestampSuite) TestMVCC_Visibility() {
 	tBefore := tsoutil.ComposeTSByTime(time.Now())
 
 	// Set commit_ts to a future time to test MVCC
-	tCommit, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
+	tCommit, _ := s.setCommitTimestamp(collName, collectionID, commitTsOffset)
 	tAfterCommit := tsoutil.AddPhysicalDurationOnTs(tCommit, 2*time.Second)
 
 	s.buildIndexAndLoad(ctx, collName)
@@ -340,7 +350,7 @@ func (s *CommitTimestampSuite) TestMVCC_StrongConsistency_CommitTsInPast() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// Set commit_ts to now (in the past by the time query runs)
-	s.setCommitTimestamp(collectionID, 0)
+	s.setCommitTimestamp(collName, collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -361,7 +371,7 @@ func (s *CommitTimestampSuite) TestSearch_WithGuaranteeTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	tBefore := tsoutil.ComposeTSByTime(time.Now())
-	tCommit, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
+	tCommit, _ := s.setCommitTimestamp(collName, collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -388,7 +398,7 @@ func (s *CommitTimestampSuite) TestDelete_AfterCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the past so delete_ts > commit_ts
-	s.setCommitTimestamp(collectionID, 0)
+	s.setCommitTimestamp(collName, collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -415,7 +425,7 @@ func (s *CommitTimestampSuite) TestDelete_BeforeCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the future so delete_ts < commit_ts
-	commitTs, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
+	commitTs, _ := s.setCommitTimestamp(collName, collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -440,7 +450,7 @@ func (s *CommitTimestampSuite) TestUpsert_AfterCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the past so upsert_ts > commit_ts
-	s.setCommitTimestamp(collectionID, 0)
+	s.setCommitTimestamp(collName, collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -485,7 +495,7 @@ func (s *CommitTimestampSuite) TestUpsert_BeforeCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the future so upsert_ts < commit_ts
-	commitTs, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
+	commitTs, _ := s.setCommitTimestamp(collName, collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -560,7 +570,7 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 	s.Require().NoError(err)
 	collectionID := showResp.GetCollectionIds()[0]
 
-	commitTs, modifiedSegIDs := s.setCommitTimestamp(collectionID, 0)
+	commitTs, modifiedSegIDs := s.setCommitTimestamp(collName, collectionID, 0)
 	s.Require().GreaterOrEqual(len(modifiedSegIDs), 2,
 		"should have at least 2 segments to compact")
 
@@ -643,7 +653,7 @@ func (s *CommitTimestampSuite) TestGC_ImportSegmentNotPrematurelyDropped() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// Set commit_ts to now
-	s.setCommitTimestamp(collectionID, 0)
+	s.setCommitTimestamp(collName, collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 

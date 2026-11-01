@@ -55,6 +55,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -71,6 +74,17 @@ import (
 )
 
 func initStreamingSystem(t *testing.T) {
+	// DDL-only fixtures have no loaded collections. Index callbacks still use
+	// the real load owner to decide whether a new requirements version is needed.
+	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	previous := qvresource.Resource()
+	qvresource.Init(&qvresource.Resources{
+		LoadConfigs: configs,
+		LoadManager: loadmgr.NewCollectionLoadManager(configs, nil, nil),
+	})
+	t.Cleanup(func() { qvresource.Init(previous) })
+
 	registry.ResetRegistration()
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()

@@ -16,6 +16,7 @@ import (
 //
 // It provides separate entry points for Search and Query, both orchestrating
 // Plan + Search across all shards with streaming reduce and shard-level retry.
+// Public query methods return business merr errors; protocol errors remain internal.
 // Reranking is handled internally via the reranker.Builder injected at construction time.
 // It applies to both single search (e.g., decay, model-based rerank) and HybridSearch
 // (e.g., RRF/weighted across multiple sub-searches).

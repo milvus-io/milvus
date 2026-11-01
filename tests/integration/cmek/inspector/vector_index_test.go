@@ -49,7 +49,7 @@ func TestLocateVectorIndexReturnsCompleteSegmentSets(t *testing.T) {
 	}, nil)
 
 	sets, err := LocateVectorIndex(context.Background(), client, []*datapb.SegmentInfo{{
-		ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 2,
+		ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 3,
 	}}, 101, 51, "HNSW", "L2", 8, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	require.NoError(t, err)
 	require.Equal(t, []VectorIndexSet{{
@@ -74,7 +74,7 @@ func TestLocateVectorIndexRejectsWrongIdentity(t *testing.T) {
 	}, nil)
 
 	_, err := LocateVectorIndex(context.Background(), client, []*datapb.SegmentInfo{{
-		ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 2,
+		ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 3,
 	}}, 101, 51, "HNSW", "L2", 8, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	require.ErrorContains(t, err, "index type")
 }
@@ -90,8 +90,8 @@ func TestLocateVectorIndexRejectsDuplicatePaths(t *testing.T) {
 	}, nil)
 
 	_, err := LocateVectorIndex(context.Background(), client, []*datapb.SegmentInfo{
-		{ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 2},
-		{ID: 32, CollectionID: 11, PartitionID: 21, StorageVersion: 2},
+		{ID: 31, CollectionID: 11, PartitionID: 21, StorageVersion: 3},
+		{ID: 32, CollectionID: 11, PartitionID: 21, StorageVersion: 3},
 	}, 101, 51, "HNSW", "L2", 8, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 	require.ErrorContains(t, err, "belongs to both")
 }
@@ -138,7 +138,7 @@ func TestLocateVectorIndexRejectsIncompleteMetadata(t *testing.T) {
 				Status: merr.Success(), SegmentInfo: map[int64]*indexpb.SegmentInfo{31: info},
 			}, nil)
 			sets, err := LocateVectorIndex(context.Background(), client, []*datapb.SegmentInfo{{
-				ID: 31, CollectionID: 11, StorageVersion: 2,
+				ID: 31, CollectionID: 11, StorageVersion: 3,
 			}}, 101, 51, "HNSW", "L2", 8, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 			require.ErrorContains(t, err, test.want)
 			require.Nil(t, sets)
@@ -161,7 +161,7 @@ func TestLocateVectorIndexRejectsMissingMetadata(t *testing.T) {
 			client := mocks.NewMockMixCoordClient(t)
 			client.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(test.response, test.err)
 			sets, err := LocateVectorIndex(context.Background(), client, []*datapb.SegmentInfo{{
-				ID: 31, CollectionID: 11, StorageVersion: 2,
+				ID: 31, CollectionID: 11, StorageVersion: 3,
 			}}, 101, 51, "HNSW", "L2", 8, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED)
 			require.ErrorContains(t, err, test.want)
 			require.Nil(t, sets)

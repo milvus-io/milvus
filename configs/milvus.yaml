@@ -473,6 +473,7 @@ proxy:
   roleNameValidation:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
@@ -620,6 +621,11 @@ queryCoord:
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
+  autoRelease:
+    enabled: false # whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true
+    idleTTLSeconds: 600
+    checkIntervalSeconds: 30
+    releaseConcurrency: 16 # maximum concurrent automatic collection releases in one scan; changes apply to the next release batch
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -650,6 +656,9 @@ queryCoord:
     enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.
     maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
     maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
+  queryView:
+    fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
+    targetRowsPerShardNode: 100000 # Target number of sealed rows per QueryNode used to derive the free fanout budget for each QueryView shard. Must be positive. Changes take effect on the next reconciliation.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -661,6 +670,8 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
+  queryView:
+    transformLogDrainConcurrencyRatio: 0.25 # QueryNode-wide TransformLog backlog drain worker count is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   groupBy:
     strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
     strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.
@@ -972,11 +983,11 @@ dataCoord:
     # Layout 1 cannot be read by 2.6, so enabling it commits the upgrade and gives up the ability to roll back to 2.6. Existing index files keep the layout they were built with, so this switch only affects index files built from now on.
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
-    # Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
+    # Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
     # New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
     # The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
-    writeSegmentIndexToManifest: false
+    writeSegmentIndexToManifest: true
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
     # Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
@@ -1102,13 +1113,6 @@ dataNode:
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
-    # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 10
-    updateChannelCheckpointMaxParallel: 10
-    updateChannelCheckpointInterval: 60 # the interval duration(in seconds) for datanode to update channel checkpoint of each channel
-    updateChannelCheckpointRPCTimeout: 20 # timeout in seconds for UpdateChannelCheckpoint RPC call
-    maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
-    channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
     concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
@@ -1701,7 +1705,7 @@ queryView:
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
-  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  leaseDuration: 5s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
   logicalSize:
     source: rowCount # LogicalSize source: rowCount uses physical rows; insertBytes uses ceil(segment insert_binlog_size / bytesPerUnit). Unsupported values use rowCount. Missing size falls back to rows, then segmentBaseCost is added. Sampled once when the DataView manager is initialized; requires coordinator restart.
     bytesPerUnit: 64KB # Bytes per logical unit for the insertBytes source, parsed as a size (for example 64KB or 1MB). Non-positive or invalid values use 64KB. Sampled once when the DataView manager is initialized; requires coordinator restart. Missing segment size estimates one unit per physical row.
@@ -1840,6 +1844,8 @@ streaming:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
       softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+  transformLog:
+    catchupConcurrencyRatioPerPChannel: 0.25 # TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
     pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.

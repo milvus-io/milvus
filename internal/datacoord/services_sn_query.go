@@ -103,12 +103,15 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 			}
 			manifestPath = packed.MarshalManifestPath(base, version)
 		}
-		bm25Logs := lo.Map(segment.GetBm25Statslogs(), func(log *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
-			return proto.Clone(log).(*datapb.FieldBinlog)
-		})
-		if err := binlog.DecompressBinLog(storage.BM25Binlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), bm25Logs); err != nil {
-			resp.Status = merr.Status(merr.Wrap(err, "decode query view BM25 log paths"))
-			return resp, nil
+		var bm25Logs []*datapb.FieldBinlog
+		if segment.GetStorageVersion() < storage.StorageV3 {
+			bm25Logs = lo.Map(segment.GetBm25Statslogs(), func(log *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+				return proto.Clone(log).(*datapb.FieldBinlog)
+			})
+			if err := binlog.DecompressBinLog(storage.BM25Binlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), bm25Logs); err != nil {
+				resp.Status = merr.Status(merr.Wrap(err, "decode query view BM25 log paths"))
+				return resp, nil
+			}
 		}
 		byID[segment.GetID()] = &datapb.StreamingNodeBM25Resource{
 			SegmentId:      segment.GetID(),
@@ -157,8 +160,14 @@ func dataViewShardSegmentIDs(shard *viewpb.DataViewOfShard, partitionIDs []int64
 	return segmentIDs
 }
 
-func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	return s.queryViewCollectionIndexInfos(collectionID)
+// GetQueryViewCollectionIndexInfos resolves the exact references of a LoadInfo.
+// With no IDs it lists current selections for publication. Explicit IDs also
+// resolve retained, logically deleted definitions for an older live View.
+func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs ...int64) []*indexpb.IndexInfo {
+	if len(indexIDs) == 0 {
+		return s.queryViewCollectionIndexInfos(collectionID)
+	}
+	return packQueryViewCollectionIndexInfos(s.meta.indexMeta.GetIndexesByID(collectionID, indexIDs))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {

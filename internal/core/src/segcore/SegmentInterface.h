@@ -143,10 +143,6 @@ class SegmentReadSnapshot {
     // state. Consumers that require element-to-row conversion must check it.
     virtual std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const = 0;
-
-    // Must return a non-null schema from the same captured state as the columns.
-    virtual SchemaPtr
-    get_schema_snapshot() const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -240,6 +236,22 @@ class SegmentInterface {
 
     virtual SchemaPtr
     get_schema_snapshot() const = 0;
+
+    virtual bool
+    RequiresExplicitReadSchema() const {
+        return false;
+    }
+
+    // Physical descriptors do not select a logical query schema.
+    virtual FieldMeta
+    get_field_meta(FieldId id) const {
+        return get_schema_snapshot()->operator[](id);
+    }
+
+    virtual bool
+    is_primary_field(FieldId id) const {
+        return get_schema_snapshot()->get_primary_field_id() == id;
+    }
 
     virtual int64_t
     get_deleted_count() const = 0;

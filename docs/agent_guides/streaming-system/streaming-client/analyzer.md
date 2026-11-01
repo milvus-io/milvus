@@ -72,7 +72,12 @@ Inline execution constructs a temporary analyzer and destroys it and each token
 stream on exit. Field execution validates assignment ownership and holds the
 WAL's Working lifetime. FunctionRunnerManager resolves collection ID +
 WAL-vchannel key + field ID using that key's current schema. No Proxy schema
-version is sent or compared. Managed BM25/MinHash analyzers are pinned
+version is sent or compared for public standalone analyzer requests. Internal
+rendering may explicitly set `read_schema_version`, including zero, to select
+the search schema. That path allocates a request-scoped function-runner key for
+the selected schema and releases it after the entire operation. Both tokenize
+and phrase-match operations use this binding across all batches.
+Managed BM25/MinHash analyzers are pinned
 through the entire operation; ordinary analyzer-enabled fields use one copied
 field schema and temporary analyzer for the operation. GC before pin returns a
 transient error; after pin it waits for execution. WAL shutdown waits for admitted field analyzer calls through
@@ -112,7 +117,8 @@ HandlerClient does not interpret business Status or retry business failures.
 Collection identity is pinned before execution: Proxy resolves field/channel
 metadata by the original collection ID, and all streaming recovery attempts retain
 that ID. A same-name drop/recreate cannot redirect a request to the new collection.
-There is no historical schema lookup or schema-version admission check.
+Public standalone requests perform no historical schema lookup or schema-version
+admission check; explicit internal read-schema selection uses the path above.
 
 ## Compatibility
 
@@ -258,3 +264,23 @@ an unsupported new RPC surfaces as Unimplemented.
 - `internal/util/fileresource/pull.go` — process-wide analyzer resource manager access.
 - `internal/util/fileresource/analyzer_resource_manager.go` — ID-keyed loading, download flights, resource ownership and idle leases.
 - `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.
+
+## Lexical highlighting
+
+Proxy's post-search HighlightTask resolves VChannels by the search collection ID
+and invokes this same AnalyzerClient once per field. Each request includes the
+search text, explicit highlight queries and returned corpus texts, retaining
+per-text analyzer names, with token details enabled and hashes disabled. It uses
+current WAL schema, the same contract as RunAnalyzer; there is no historical
+schema request or QueryView/replica discovery in this operation.
+
+`internal/util/function/highlight.BuildFragments` performs token matching,
+overlap merging, UTF-8 byte-to-rune conversion and fragment selection. Both Proxy
+and the legacy delegator endpoint use it, preserving rendering behavior while
+removing Proxy's dependency on QN.GetHighlight. The old internal RPC remains
+available for older callers. Semantic/model-based highlighting is unchanged.
+
+Analyzer business Status propagates without retry or relabeling; streaming
+transport failures follow HandlerClient recovery and surface at the Proxy
+boundary. Malformed token-result cardinality is an internal error and must not
+publish partial highlight results. No new SN RPC or client lifecycle is needed.

@@ -42,6 +42,7 @@ import (
 
 type Broker interface {
 	DescribeCollection(ctx context.Context, collectionID UniqueID) (*milvuspb.DescribeCollectionResponse, error)
+	GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
@@ -81,6 +82,16 @@ func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collect
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (broker *CoordinatorBroker) GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error) {
+	reader, ok := broker.mixCoord.(interface {
+		GetCollectionProperties(context.Context, int64) ([]*commonpb.KeyValuePair, error)
+	})
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("collection properties provider is unavailable")
+	}
+	return reader.GetCollectionProperties(ctx, collectionID)
 }
 
 func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {

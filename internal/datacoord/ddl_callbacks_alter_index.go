@@ -31,5 +31,8 @@ func (s *DDLCallbacks) alterIndexV2AckCallback(ctx context.Context, result messa
 	indexModels := lo.Map(indexes, func(index *indexpb.FieldIndex, _ int) *model.Index {
 		return model.UnmarshalIndexModel(index)
 	})
-	return s.meta.indexMeta.AlterIndex(ctx, indexModels...)
+	if err := s.meta.indexMeta.AlterIndex(ctx, indexModels...); err != nil {
+		return err
+	}
+	return nil
 }

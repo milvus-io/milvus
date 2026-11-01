@@ -3,18 +3,28 @@ package snview
 import (
 	"context"
 	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestPChannelViewSyncServerRejectsUnavailableWAL(t *testing.T) {
@@ -30,8 +40,9 @@ func TestPChannelViewSyncServerRejectsUnavailableWAL(t *testing.T) {
 	err := server.SyncQueryView(stream)
 
 	require.Error(t, err)
-	streamingErr := streamingstatus.AsStreamingError(streamingstatus.ConvertStreamingError("ViewSyncService.SyncQueryView", err))
+	streamingErr := streamingstatus.AsStreamingError(err)
 	require.True(t, streamingErr.IsWrongStreamingNode())
+	require.Same(t, server.walManager.(*fakeViewSyncWALManager).err, err) // wire encoding belongs to the interceptor
 }
 
 func TestPChannelViewSyncServerClosesStreamWhenWALCloses(t *testing.T) {
@@ -197,3 +208,42 @@ func (s *testSyncQueryViewServerStream) SetTrailer(metadata.MD)       {}
 func (s *testSyncQueryViewServerStream) Context() context.Context     { return s.ctx }
 func (s *testSyncQueryViewServerStream) SendMsg(interface{}) error    { return nil }
 func (s *testSyncQueryViewServerStream) RecvMsg(interface{}) error    { return nil }
+
+func TestViewSyncTransportUsesViewErrorProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+		code    viewpb.ViewCode
+	}{
+		{"missing WAL", streamingstatus.NewChannelNotExist("p0"), viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY},
+		{"old term", streamingstatus.NewUnmatchedChannelTerm("p0", 1, 2), viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY},
+		{"closed manager", streamingstatus.NewOnShutdownError("closed"), viewpb.ViewCode_VIEW_CODE_ON_SHUTDOWN},
+	} {
+		mockey.PatchConvey(tc.name, t, func() {
+			mockey.Mock((*fakeViewSyncWALManager).GetAvailableWAL).Return(nil, tc.failure).Build()
+			listener := bufconn.Listen(1024 * 1024)
+			server := grpc.NewServer(grpc.StreamInterceptor(serviceinterceptor.NewServiceStreamServerInterceptor()))
+			viewpb.RegisterViewSyncServiceServer(server, NewPChannelViewSyncServer(&fakeViewSyncWALManager{}))
+			go func() { _ = server.Serve(listener) }()
+			defer server.Stop()
+			defer listener.Close()
+			conn, err := grpc.NewClient("passthrough:///view-sync", grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }),
+				grpc.WithStreamInterceptor(serviceinterceptor.NewServiceStreamClientInterceptor(typeutil.StreamingNodeRole)))
+			require.NoError(t, err)
+			defer conn.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			ctx = worknodehandler.EncodeQueryViewPChannelToOutgoingContext(ctx, types.PChannelInfo{Name: "p0", Term: 1, AccessMode: types.AccessModeRW})
+			stream, err := viewpb.NewViewSyncServiceClient(conn).SyncQueryView(ctx)
+			require.NoError(t, err)
+			_, err = stream.Recv()
+			require.Error(t, err)
+			require.Equal(t, tc.code, viewerror.AsViewError(err).Code)
+			for _, detail := range grpcstatus.Convert(err).Details() {
+				_, isStreaming := detail.(*streamingpb.StreamingError)
+				require.False(t, isStreaming)
+			}
+		})
+	}
+}

@@ -6,12 +6,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// PublishedRecovery captures the exact old serving obligation. Its membership,
-// manifests and load snapshot must not be replaced with the target schema's base.
+// PublishedRecovery captures the latest view while data preparation for the
+// target schema is pending. Recovery preserves its exact base;
+// once a newer view exists, only that view may be replaced.
 type PublishedRecovery struct {
-	View      *viewpb.QueryViewOfShard
-	Preparing *viewpb.QueryViewOfShard
-	Sizes     map[int64]int64
+	View  *viewpb.QueryViewOfShard
+	Sizes map[int64]int64
 }
 
 func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecovery {
@@ -20,23 +20,11 @@ func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecov
 	if m.releaseRequested || m.closed || m.publishedSchema == nil || *m.publishedSchema >= targetSchema {
 		return nil
 	}
-	var source *CoordQueryViewStateMachine
-	for _, sm := range m.views {
-		if sm.View().GetMeta().GetSchemaVersion() != *m.publishedSchema ||
-			(sm.State() != qviews.QueryViewStateUp && sm.State() != qviews.QueryViewStateUnrecoverable) {
-			continue
-		}
-		if source == nil || sm.Version().GT(source.Version()) {
-			source = sm
-		}
-	}
-	if source == nil {
+	source := m.latestViewLocked()
+	if source == nil || source.View().GetMeta().GetSchemaVersion() != *m.publishedSchema || !recoverablePlacementState(source.State()) {
 		return nil
 	}
 	snapshot := &PublishedRecovery{View: source.viewWithState(source.State()), Sizes: make(map[int64]int64)}
-	if preparing := m.preparingAtSchemaLocked(*m.publishedSchema); preparing != nil {
-		snapshot.Preparing = preparing.viewWithState(preparing.State())
-	}
 	if ref := source.Ref(); ref != nil {
 		for _, node := range source.View().GetQueryNode() {
 			for _, partition := range node.GetPartitions() {
@@ -51,12 +39,19 @@ func (m *ShardViewManager) PublishedRecovery(targetSchema int32) *PublishedRecov
 	return snapshot
 }
 
-func (m *ShardViewManager) preparingAtSchemaLocked(schema int32) *CoordQueryViewStateMachine {
+func recoverablePlacementState(state qviews.QueryViewState) bool {
+	switch state {
+	case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady, qviews.QueryViewStateUp, qviews.QueryViewStateUnrecoverable:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *ShardViewManager) latestViewLocked() *CoordQueryViewStateMachine {
 	var result *CoordQueryViewStateMachine
 	for _, sm := range m.views {
-		if sm.View().GetMeta().GetSchemaVersion() == schema &&
-			(sm.State() == qviews.QueryViewStatePreparing || sm.State() == qviews.QueryViewStateReady) &&
-			(result == nil || sm.Version().GT(result.Version())) {
+		if result == nil || sm.Version().GT(result.Version()) {
 			result = sm
 		}
 	}
@@ -73,54 +68,18 @@ func (m *ShardViewManager) refreshNewestPreparingLocked() {
 	}
 }
 
-// A target placement can later have to recover the published schema. Subscribe
-// from its retained floor on first acquisition so that repair never rewinds a
-// live node's shared TransformLogBuffer or starts a second replay.
-func (m *ShardViewManager) publishedRetentionStartLocked(meta *viewpb.QueryViewMeta) uint64 {
-	start := meta.GetTransformStartAfterTimetick()
-	if m.publishedSchema == nil || meta.GetSchemaVersion() <= *m.publishedSchema {
-		return start
-	}
-	for _, sm := range m.views {
-		if sm.View().GetMeta().GetSchemaVersion() != *m.publishedSchema {
-			continue
-		}
-		switch sm.State() {
-		case qviews.QueryViewStateUp, qviews.QueryViewStatePreparing, qviews.QueryViewStateReady, qviews.QueryViewStateUnrecoverable:
-			start = min(start, sm.View().GetMeta().GetTransformStartAfterTimetick())
-		}
-	}
-	return start
-}
-
-func (m *ShardViewManager) keepPublishedRecoverySourceLocked(source *CoordQueryViewStateMachine) bool {
-	if m.releaseRequested || m.publishedSchema == nil || source.View().GetMeta().GetSchemaVersion() != *m.publishedSchema {
-		return false
-	}
-	targetExists := false
-	for _, sm := range m.views {
-		schema := sm.View().GetMeta().GetSchemaVersion()
-		if schema == *m.publishedSchema {
-			if sm.State() == qviews.QueryViewStateUp ||
-				(sm.State() == qviews.QueryViewStateUnrecoverable && sm.Version().GT(source.Version())) {
-				return false
-			}
-		}
-		if schema > *m.publishedSchema {
-			targetExists = true
-		}
-	}
-	return targetExists
-}
-
 func (m *ShardViewManager) validatePreparationLocked(view *viewpb.QueryViewOfShard, source *qviews.QueryViewVersion) error {
 	meta := view.GetMeta()
 	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
+	if err := m.validatePreparingLocked(version); err != nil {
+		return err
+	}
 	if source == nil {
-		return m.validatePreparingLocked(version)
+		return nil
 	}
 	retained := m.views[*source]
-	if m.releaseRequested || m.closed || retained == nil || m.publishedSchema == nil ||
+	if retained == nil || retained != m.latestViewLocked() || m.publishedSchema == nil ||
+		!recoverablePlacementState(retained.State()) ||
 		meta.GetSchemaVersion() != *m.publishedSchema || retained.View().GetMeta().GetSchemaVersion() != *m.publishedSchema ||
 		!version.EQ(retained.Version().DataVersion) || meta.GetLoadInfoVersion() != retained.View().GetMeta().GetLoadInfoVersion() {
 		return merr.WrapErrServiceUnavailableMsg("published schema recovery source for shard %s changed; replan", m.shardID.String())

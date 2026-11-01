@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "view.proto";
 import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
@@ -13,6 +14,7 @@ import "schema.proto";
 import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
+
 
 service QueryCoord {
     rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
@@ -36,9 +38,12 @@ service QueryCoord {
 
     rpc GetPartitionStates(GetPartitionStatesRequest)
         returns (GetPartitionStatesResponse) {
+        option deprecated = true;
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
+    rpc GetQueryViewSegmentLoadInfo(GetQueryViewSegmentLoadInfoRequest)
+        returns (GetQueryViewSegmentLoadInfoResponse) {}
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -56,6 +61,7 @@ service QueryCoord {
     }
     rpc GetShardLeaders(GetShardLeadersRequest)
         returns (GetShardLeadersResponse) {
+        option deprecated = true;
     }
 
     rpc CheckHealth(milvus.CheckHealthRequest)
@@ -103,9 +109,12 @@ service QueryCoord {
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
-  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){
+    option deprecated = true;
+  }
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -260,6 +269,8 @@ message LoadCollectionRequest {
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    optional bool load_all_fields = 11;
+    bool skip_load_dynamic_field = 12;
 }
 
 message ReleaseCollectionRequest {
@@ -292,6 +303,8 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    optional bool load_all_fields = 13;
+    bool skip_load_dynamic_field = 14;
 }
 
 message ReleasePartitionsRequest {
@@ -323,6 +336,44 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated view.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
+    repeated view.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+}
+
+// Current complete loading snapshots for segments in one collection. Consumers
+// validate each manifest against their View requirement; this is not a history API.
+message GetQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated int64 segmentIDs = 3;
+}
+
+message GetQueryViewSegmentLoadInfoResponse {
+    // Request-wide errors only. Segment-specific failures belong in results.
+    common.Status status = 1;
+    // One result per distinct requested ID, including failed segments.
+    repeated QueryViewSegmentLoadInfoResult results = 2;
+    repeated index.IndexInfo index_info_list = 3;
+}
+
+message QueryViewSegmentLoadInfoResult {
+    int64 segmentID = 1;
+    common.Status status = 2;
+    SegmentLoadInfo load_info = 3;
 }
 
 message GetShardLeadersRequest {
@@ -463,6 +514,9 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of this exact physical base, fetched atomically with its
+    // manifest/binlogs. QueryView carries only the shard buffer retention floor.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -1205,19 +1259,8 @@ message ListLoadedSegmentsResponse {
     repeated int64 segmentIDs = 2;
 }
 
-
-message GetQueryViewLoadInfoRequest {
+message EnsureCollectionReadyRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
-    uint64 version = 3;
-}
-
-message GetQueryViewLoadInfoResponse {
-    common.Status status = 1;
-    int64 collectionID = 2;
-    uint64 version = 3;
-    repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
-    repeated index.IndexInfo index_info_list = 6;
-    repeated messages.LoadFieldConfig required_fields = 7;
+    repeated string expected_vchannels = 3;
 }

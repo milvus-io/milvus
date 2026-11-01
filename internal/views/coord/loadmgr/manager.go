@@ -15,17 +15,20 @@ type DirtyCollectionNotifier func(collectionID int64)
 // CollectionLoadManager is the Coord-side facade over desired load config
 // lifecycle.
 type CollectionLoadManager struct {
-	store  *LoadConfigStore
-	notify DirtyCollectionNotifier
+	store    *LoadConfigStore
+	notify   DirtyCollectionNotifier
+	replicas ReplicaConfigResources
 }
 
 func NewCollectionLoadManager(
 	store *LoadConfigStore,
 	notify DirtyCollectionNotifier,
+	replicas ReplicaConfigResources,
 ) *CollectionLoadManager {
 	return &CollectionLoadManager{
-		store:  store,
-		notify: notify,
+		store:    store,
+		notify:   notify,
+		replicas: replicas,
 	}
 }
 
@@ -68,6 +71,23 @@ func (m *CollectionLoadManager) apply(ctx context.Context, cfg *LoadConfig) erro
 	return nil
 }
 
+// RefreshIndexes publishes the definitions committed by the index DDL callback.
+// The caller holds the collection broadcast guard. An unloaded collection has
+// no requirements to publish; its next Load captures the committed definitions.
+func (m *CollectionLoadManager) RefreshIndexes(ctx context.Context, collectionID int64) error {
+	m.store.collectionLocks.Lock(collectionID)
+	defer m.store.collectionLocks.Unlock(collectionID)
+	cfg := m.store.GetConfig(collectionID)
+	if cfg == nil {
+		return nil
+	}
+	if err := m.store.putLocked(ctx, cfg); err != nil {
+		return err
+	}
+	m.notifyCollection(collectionID)
+	return nil
+}
+
 // ReleaseCollection removes desired state. Existing views are intentionally
 // left in the registry; the Balancer sees "desired absent + current exists"
 // and releases them through ShardViewManager.RequestRelease.
@@ -79,9 +99,7 @@ func (m *CollectionLoadManager) ReleaseCollection(
 		return nil
 	}
 	collectionID := msg.GetCollectionId()
-	if err := m.store.Remove(ctx, collectionID); err != nil {
-		return err
-	}
+	m.store.StopPlanning(collectionID)
 	m.notifyCollection(collectionID)
 	return nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -86,7 +87,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	defer runtime.Close()
 	current := qviews.DataVersion{StreamingVersion: 10}
 	next := qviews.DataVersion{StreamingVersion: 11}
-	snapshot := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, PartitionIDs: []int64{10}, LoadInfoVersion: 5, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: current, Segments: []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{Binlogs: []*streamingpb.L1SegmentBinLogs{{Bm25Binlog: growingLogs}}}, InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}}}}}}
+	snapshot := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, PartitionIDs: []int64{10}, LoadInfoVersion: 5, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: current, Segments: []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{Binlogs: []*streamingpb.L1SegmentBinLogs{{Bm25Binlog: growingLogs}}}, InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}}}}}}
 	binding, err := prepareTestView(t, runtime, snapshot)
 	require.NoError(t, err)
 	require.NoError(t, binding.Prepare(ctx, nil))

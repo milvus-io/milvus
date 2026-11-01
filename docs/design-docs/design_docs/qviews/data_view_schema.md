@@ -31,9 +31,11 @@ persistence leaves the published snapshot unchanged and permits retry.
 
 The native cache publication retains the same SchemaVersion as its DataView.
 While the sampled authorized target differs, ordinary target planning waits for
-a later publication. Published-old-schema recovery uses its retained exact data
-and load identities independently. Once a certified newer DataView arrives, it
-may supersede an older-schema Preparing view.
+a later publication. Recovery may reuse the latest QueryView's exact data and
+load identities while target data is pending. It cannot select an older view
+after a newer QueryView has been registered, even if the newer view fails.
+Once a certified newer DataView is planned, its preparation supersedes any
+older-schema Preparing/Ready view; every schema shares one preparation slot.
 
 This extraction includes DataView publication, the native/proto contract,
 Balancer consumption and the `PrepareDataViewSchema` dependency interface.

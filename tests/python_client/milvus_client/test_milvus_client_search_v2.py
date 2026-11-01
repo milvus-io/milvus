@@ -8,7 +8,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType
+from pymilvus import DataType, SegmentState
 from utils.util_log import test_log as log
 from utils.util_pymilvus import epsilon
 
@@ -2170,78 +2170,70 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_ignore_growing(self):
-        """
-        target: test search ignoring growing segment
-        method: 1. create a collection, insert data, create index and load
-                2. insert data again
-                3. search ignore_growing=True, inside/outside search params
-        expected: searched successfully
-        """
-        # 1. create a collection
+        """Ignore only Growing rows, including both parameter encodings and handoff."""
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 64
+        nb = ct.default_nb
         schema = self.create_schema(client)[0]
         self.add_field(schema, field_name=ct.default_primary_field_name, datatype=DataType.INT64, is_primary=True)
         self.add_field(schema, field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
-        self.create_collection(client, collection_name, schema=schema)
+        self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
 
-        # 2. insert data again
-        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        sealed_ids = set(range(nb))
+        growing_start = nb * 5
+        all_ids = sealed_ids | set(range(growing_start, growing_start + nb))
+        data = cf.gen_row_data_by_schema(nb=nb, schema=schema)
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
 
-        # build index
         index_params, _ = self.prepare_index_params(client)
         index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_index(client, collection_name, index_params=index_params)
         self.load_collection(client, collection_name)
+        search_vectors = cf.gen_vectors(1, dim=dim)
 
-        # 3. insert data again
-        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=ct.default_nb * 5)
+        def assert_sealed_rows(expected):
+            # Deduplicate replicas and inspect serving Sealed resources, not
+            # merely DataCoord's persisted data or a completed Flush RPC.
+            segments = client.list_loaded_segments(collection_name, timeout=60)
+            rows = {
+                segment.segment_id: segment.num_rows for segment in segments if segment.state == SegmentState.Sealed
+            }
+            assert sum(rows.values()) == expected, f"Serving Sealed segments changed: {rows}"
+
+        def assert_search_ids(expected_ids, **kwargs):
+            results = self.search(
+                client,
+                collection_name,
+                search_vectors,
+                anns_field=ct.default_float_vec_field_name,
+                limit=len(all_ids),
+                consistency_level="Strong",
+                **kwargs,
+            )[0]
+            assert len(results) == 1
+            assert len(results[0].ids) == len(expected_ids)
+            assert set(results[0].ids) == expected_ids
+
+        assert_sealed_rows(nb)
+        data = cf.gen_row_data_by_schema(nb=nb, schema=schema, start=growing_start)
         self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
+        # Do not Flush this batch: bracket the checks with resource snapshots
+        # so an automatic handoff cannot silently change the test's premise.
+        assert_sealed_rows(nb)
+        assert_search_ids(all_ids, search_params={})
+        assert_search_ids(sealed_ids, search_params={}, ignore_growing=True)
+        assert_search_ids(sealed_ids, search_params={"ignore_growing": True})
+        assert_sealed_rows(nb)
 
-        # 4. search with param ignore_growing=True
-        search_params = {}
-        search_vectors = cf.gen_vectors(ct.default_nq, dim=dim)
-        res1 = self.search(
-            client,
-            collection_name,
-            search_vectors,
-            anns_field=ct.default_float_vec_field_name,
-            search_params=search_params,
-            limit=ct.default_limit,
-            ignore_growing=True,
-            check_task=CheckTasks.check_search_results,
-            check_items={
-                "enable_milvus_client_api": True,
-                "nq": ct.default_nq,
-                "limit": ct.default_limit,
-                "pk_name": ct.default_primary_field_name,
-                "metric": "COSINE",
-            },
-        )[0]
-        search_params = {"ignore_growing": True}
-        res2 = self.search(
-            client,
-            collection_name,
-            search_vectors,
-            anns_field=ct.default_float_vec_field_name,
-            search_params=search_params,
-            limit=ct.default_limit,
-            check_task=CheckTasks.check_search_results,
-            check_items={
-                "enable_milvus_client_api": True,
-                "nq": ct.default_nq,
-                "limit": ct.default_limit,
-                "pk_name": ct.default_primary_field_name,
-                "metric": "COSINE",
-            },
-        )[0]
-        for i in range(ct.default_nq):
-            assert max(res1[i].ids) < ct.default_nb * 5
-            assert max(res2[i].ids) < ct.default_nb * 5
+        self.flush(client, collection_name)
+        # Flush persists data; refresh_load also waits for the serving handoff.
+        self.refresh_load(client, collection_name, timeout=60)
+        assert_sealed_rows(len(all_ids))
+        assert_search_ids(all_ids, search_params={})
+        assert_search_ids(all_ids, search_params={}, ignore_growing=True)
+        assert_search_ids(all_ids, search_params={"ignore_growing": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_json_fields_comparison_in_filter(self):

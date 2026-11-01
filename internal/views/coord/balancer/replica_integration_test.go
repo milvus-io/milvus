@@ -10,13 +10,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -92,15 +91,12 @@ func TestReplicaControllerZeroCapacityHandoff(t *testing.T) {
 }
 
 func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
-	for _, patch := range []*mockey.Mocker{
-		mockey.Mock((*querycoord.Catalog).GetCollections).Return([]*querypb.CollectionLoadInfo{{CollectionID: 1}}, nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo{1: {{CollectionID: 1, PartitionID: 1}}}, nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetReplicas).Return([]*querypb.Replica{{ID: 10, CollectionID: 1, ResourceGroup: "rg1"}, {ID: 11, CollectionID: 1, ResourceGroup: "rg1"}}, nil).Build(),
-	} {
-		t.Cleanup(func() { patch.UnPatch() })
-	}
-	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), querycoord.NewCatalog(nil))
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
+	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{
+		CollectionID: 1, PartitionIDs: []int64{1},
+		Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10, ResourceGroup: "rg1"}, {ReplicaID: 11, ResourceGroup: "rg1"}},
+	}))
 	var lost atomic.Int64
 	var holdDrops atomic.Bool
 	var dropMu sync.Mutex

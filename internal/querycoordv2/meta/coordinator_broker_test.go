@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,6 +39,69 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// The embedded mock has no Describe expectation: falling back to Describe is
+// an error, even when the lightweight reader returns a metadata error.
+type collectionPropertiesMixCoord struct {
+	*mocks.MixCoord
+	properties   []*commonpb.KeyValuePair
+	err          error
+	ctx          context.Context
+	collectionID int64
+}
+
+func (m *collectionPropertiesMixCoord) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	m.ctx = ctx
+	m.collectionID = collectionID
+	return m.properties, m.err
+}
+
+func TestCoordinatorBrokerGetCollectionProperties(t *testing.T) {
+	ctx := context.Background()
+	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}}
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		err        error
+	}{
+		{name: "published properties", properties: properties},
+		{name: "no overrides"},
+		{name: "collection not found", err: merr.ErrCollectionNotFound},
+		{name: "metadata not ready", err: merr.ErrServiceNotReady},
+		{name: "canceled", err: context.Canceled},
+		{name: "deadline exceeded", err: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &collectionPropertiesMixCoord{MixCoord: mocks.NewMixCoord(t), properties: tc.properties, err: tc.err}
+			broker := NewCoordinatorBroker(source)
+			got, err := broker.GetCollectionProperties(ctx, 123)
+			require.Equal(t, tc.err, err, "metadata errors must pass through unchanged")
+			require.Equal(t, tc.properties, got)
+			require.Equal(t, ctx, source.ctx)
+			require.Equal(t, int64(123), source.collectionID)
+		})
+	}
+
+	t.Run("no reader does not fall back to Describe", func(t *testing.T) {
+		broker := NewCoordinatorBroker(mocks.NewMixCoord(t))
+		properties, err := broker.GetCollectionProperties(ctx, 123)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.Nil(t, properties)
+	})
+
+	t.Run("allocation-free forwarding", func(t *testing.T) {
+		source := &collectionPropertiesMixCoord{MixCoord: mocks.NewMixCoord(t), properties: properties}
+		broker := NewCoordinatorBroker(source)
+		var got []*commonpb.KeyValuePair
+		var err error
+		allocs := testing.AllocsPerRun(100, func() {
+			got, err = broker.GetCollectionProperties(ctx, 123)
+		})
+		require.NoError(t, err)
+		require.Same(t, properties[0], got[0])
+		require.Zero(t, allocs)
+	})
+}
 
 type CoordinatorBrokerRootCoordSuite struct {
 	suite.Suite

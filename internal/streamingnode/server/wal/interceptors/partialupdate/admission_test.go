@@ -140,7 +140,7 @@ func TestValidateCommitRejectsTermAndReadConflicts(t *testing.T) {
 
 	t.Run("stale read", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
-		state.pkVersions.channel("v1").retainedSinceTS = 200
+		state.pkVersions.channel("v1").forgottenWriteTS = 200
 		state.recordTxnBegin(1)
 		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
 		state.recordTxnWrites(1, []any{int64(10)})

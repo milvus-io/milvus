@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -43,6 +44,13 @@ func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Contex
 	)
 	log.Info(ctx, "refreshExternalCollectionV2AckCallback received")
 
+	starts := make(map[string]uint64, len(result.Results))
+	for channel, fence := range result.Results {
+		if !funcutil.IsControlChannel(channel) {
+			starts[channel] = fence.TimeTick
+		}
+	}
+
 	// Submit refresh job using the pre-allocated jobID from WAL
 	// This ensures idempotency - if the job already exists, it will be skipped
 	jobID, err := s.externalCollectionRefreshManager.SubmitRefreshJobWithID(
@@ -52,6 +60,7 @@ func (s *DDLCallbacks) refreshExternalCollectionV2AckCallback(ctx context.Contex
 		header.CollectionName,
 		header.ExternalSource,
 		header.ExternalSpec,
+		starts,
 	)
 	if err != nil {
 		// Classify errors to determine if we should block WAL processing

@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -524,10 +523,10 @@ func TestManagerClassifiesLoadInfoPreparationFailure(t *testing.T) {
 	}
 }
 
-func loadFields(fieldIDs ...int64) []*messagespb.LoadFieldConfig {
-	fields := make([]*messagespb.LoadFieldConfig, 0, len(fieldIDs))
+func loadFields(fieldIDs ...int64) []*viewpb.LoadFieldConfig {
+	fields := make([]*viewpb.LoadFieldConfig, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
-		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
+		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: fieldID})
 	}
 	return fields
 }

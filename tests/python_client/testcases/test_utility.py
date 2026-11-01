@@ -1,3 +1,4 @@
+import random
 import threading
 import time
 
@@ -1437,9 +1438,18 @@ class TestUtilityAdvanced(TestcaseBase):
             ),
         )
 
-        for _ in range(segment_num):
-            # insert random pks
-            data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
+        # Keep PKs unique across batches so search deduplication cannot reduce
+        # topK. Shuffle their insertion order to exercise segment sorting.
+        primary_keys = list(range(nb * segment_num))
+        if primary_field == "varchar_pk":
+            primary_keys = [str(pk) for pk in primary_keys]
+        random.shuffle(primary_keys)
+        for batch in range(segment_num):
+            data = cf.gen_values(
+                self.collection_wrap.schema,
+                nb=nb,
+                default_values={primary_field: primary_keys[batch * nb : (batch + 1) * nb]},
+            )
             self.collection_wrap.insert(data)
             self.collection_wrap.flush()
 

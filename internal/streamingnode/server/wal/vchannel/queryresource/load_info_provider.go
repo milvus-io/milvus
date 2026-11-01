@@ -5,8 +5,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -45,8 +45,8 @@ func (p *futureLoadInfoProvider) QueryViewLoadInfo(ctx context.Context, collecti
 	}, nil
 }
 
-func nonNilLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
-	nonNil := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+func nonNilLoadFields(fields []*viewpb.LoadFieldConfig) []*viewpb.LoadFieldConfig {
+	nonNil := make([]*viewpb.LoadFieldConfig, 0, len(fields))
 	for _, field := range fields {
 		if field != nil {
 			nonNil = append(nonNil, field)

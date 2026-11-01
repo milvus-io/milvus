@@ -88,7 +88,7 @@ func newSnapshotExportManager(
 	meta *snapshotExportMeta,
 	snapshotManager *snapshotManager,
 ) *snapshotExportManager {
-	managerCtx, cancel := context.WithCancel(ctx)
+	managerCtx, cancel := context.WithCancel(ctx) //nolint:gosec // G118: ownership transfers to the returned manager; Close cancels it.
 	return &snapshotExportManager{
 		ctx:             managerCtx,
 		cancel:          cancel,

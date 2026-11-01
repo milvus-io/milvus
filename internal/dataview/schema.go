@@ -44,7 +44,7 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	if project != nil {
 		changed := state.changed.Listen(syncutil.VersionedListenAtLatest)
 		var err error
-		segments, err = project(ctx, state.id)
+		segments, err = project(ctx, state.id, base)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -58,6 +58,9 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	var stats map[int64]SegmentStats
 	if project != nil {
 		if err := rebuildSegments(next, segments); err != nil {
+			return nil, nil, err
+		}
+		if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
 			return nil, nil, err
 		}
 		stats = buildSegmentStats(segments)

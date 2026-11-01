@@ -334,7 +334,8 @@ func (s *Suite) TestExecFeatures() {
 
 	s.Run("json_flat", func() {
 		// JSON statistics take precedence over a JSON index on the same
-		// field, so the request turns them off to reach the flat index.
+		// field. Disable them to exercise the flat index. By design, its
+		// scalar predicates also match array elements at the same JSON path.
 		noStats := map[string]*schemapb.TemplateValue{
 			common.ExprUseJSONStatsKey: {Val: &schemapb.TemplateValue_BoolVal{BoolVal: false}},
 		}

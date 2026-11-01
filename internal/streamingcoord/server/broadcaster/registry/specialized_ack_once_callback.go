@@ -24,10 +24,14 @@ import (
 // Collection
 var RegisterTruncateCollectionV2AckOnceCallback = registerMessageAckOnceCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 
+// Import completion registers its replay fence before the SN checkpoint can pass it.
+var RegisterCommitImportV2AckOnceCallback = registerMessageAckOnceCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
+
 func resetMessageAckOnceCallbacks() {
 	messageAckOnceCallbacksMu.Lock()
 	defer messageAckOnceCallbacksMu.Unlock()
 	messageAckOnceCallbacks = map[message.MessageTypeWithVersion]*syncutil.Future[messageInnerAckOnceCallback]{
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckOnceCallback](),
+		message.MessageTypeCommitImportV2:       syncutil.NewFuture[messageInnerAckOnceCallback](),
 	}
 }

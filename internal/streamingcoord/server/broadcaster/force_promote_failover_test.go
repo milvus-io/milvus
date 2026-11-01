@@ -124,8 +124,13 @@ func (w *walController) defaultAppend(ctx context.Context, msgs []message.Mutabl
 		// Auto ack: simulate streaming node consuming and acking the message
 		broadcastID := msg.BroadcastHeader().BroadcastID
 		vchannel := msg.VChannel()
+		testCtx := w.t.Context()
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-testCtx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
 			w.ackMessage(broadcastID, vchannel)
 		}()
 	}
@@ -133,7 +138,11 @@ func (w *walController) defaultAppend(ctx context.Context, msgs []message.Mutabl
 }
 
 func (w *walController) ackMessage(broadcastID uint64, vchannel string) {
-	bc := w.broadcaster.Get()
+	ctx := w.t.Context()
+	bc, err := w.broadcaster.GetWithContext(ctx)
+	if err != nil {
+		return
+	}
 	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&messagespb.DropCollectionMessageHeader{}).
 		WithBody(&msgpb.DropCollectionRequest{}).
@@ -145,11 +154,15 @@ func (w *walController) ackMessage(broadcastID uint64, vchannel string) {
 		WithLastConfirmed(walimplstest.NewTestMessageID(1)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(w.idCounter.Inc()))
 
-	for {
-		if err := bc.Ack(context.Background(), msg); err == nil {
-			break
+	for ctx.Err() == nil {
+		if err := bc.Ack(ctx, msg); err == nil {
+			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 

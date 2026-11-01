@@ -21,19 +21,26 @@ import (
 	"os"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type MockRootCoord struct {
@@ -75,7 +82,8 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	os.Exit(m.Run())
+	code := m.Run()
+	os.Exit(code)
 }
 
 func Test_NewServer(t *testing.T) {
@@ -312,6 +320,79 @@ func Test_NewServer(t *testing.T) {
 
 	err = server.Stop()
 	assert.NoError(t, err)
+}
+
+type fakeQueryViewMetadataMixCoordClient struct {
+	types.MixCoordClient
+}
+
+func (*fakeQueryViewMetadataMixCoordClient) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest, ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	panic("patch GetQueryViewLoadInfo with mockey")
+}
+
+func newTestQueryViewLoadMetadataProvider(client types.MixCoordClient) *lazyQueryViewLoadMetadataProvider {
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(client)
+	return &lazyQueryViewLoadMetadataProvider{mixCoord: future}
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfo(t *testing.T) {
+	indexes := []*indexpb.IndexInfo{{CollectionID: 100, FieldID: 101, IndexName: "vec_idx"}}
+	client := &fakeQueryViewMetadataMixCoordClient{}
+	var requests []*querypb.GetQueryViewLoadInfoRequest
+	mock := mockey.Mock((*fakeQueryViewMetadataMixCoordClient).GetQueryViewLoadInfo).To(func(_ *fakeQueryViewMetadataMixCoordClient, _ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		requests = append(requests, &querypb.GetQueryViewLoadInfoRequest{CollectionID: req.GetCollectionID(), Version: req.GetVersion()})
+		return &querypb.GetQueryViewLoadInfoResponse{
+			Status: merr.Success(), CollectionID: 100, Version: 7,
+			PartitionIDs:  []int64{10, 20},
+			LoadFields:    []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+			IndexInfoList: indexes,
+		}, nil
+	}).Build()
+	t.Cleanup(func() { mock.UnPatch() })
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	info, err := provider.GetQueryViewLoadInfo(context.Background(), 100, qnview.QueryViewLoadInfoVersion(7))
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), info.CollectionID)
+	assert.Equal(t, qnview.QueryViewLoadInfoVersion(7), info.Version)
+	assert.Equal(t, []int64{10, 20}, info.PartitionIDs)
+	assert.Equal(t, []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}, info.LoadFields)
+	assert.Equal(t, indexes, info.IndexInfos)
+	require.Len(t, requests, 1)
+	assert.Equal(t, int64(100), requests[0].GetCollectionID())
+	assert.Equal(t, uint64(7), requests[0].GetVersion())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfoErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		rpcErr    error
+		statusErr error
+		want      error
+	}{
+		{name: "recoverable transport", rpcErr: merr.WrapErrNodeNotMatch(1, 2), want: merr.ErrNodeNotMatch},
+		{name: "permanent transport", rpcErr: merr.WrapErrCollectionNotFound(100), want: merr.ErrCollectionNotFound},
+		{name: "response status", statusErr: merr.WrapErrCollectionNotFound(100), want: merr.ErrCollectionNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeQueryViewMetadataMixCoordClient{}
+			var requests []*querypb.GetQueryViewLoadInfoRequest
+			mock := mockey.Mock((*fakeQueryViewMetadataMixCoordClient).GetQueryViewLoadInfo).To(func(_ *fakeQueryViewMetadataMixCoordClient, _ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+				requests = append(requests, &querypb.GetQueryViewLoadInfoRequest{CollectionID: req.GetCollectionID(), Version: req.GetVersion()})
+				return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Status(tc.statusErr)}, tc.rpcErr
+			}).Build()
+			t.Cleanup(func() { mock.UnPatch() })
+			provider := newTestQueryViewLoadMetadataProvider(client)
+			info, err := provider.GetQueryViewLoadInfo(t.Context(), 100, qnview.QueryViewLoadInfoVersion(7))
+			require.ErrorIs(t, err, tc.want)
+			require.Empty(t, info)
+			require.Len(t, requests, 1, "retry belongs to the resource scheduler, not this provider")
+			assert.Equal(t, int64(100), requests[0].GetCollectionID())
+			assert.Equal(t, uint64(7), requests[0].GetVersion())
+		})
+	}
 }
 
 func Test_Run(t *testing.T) {

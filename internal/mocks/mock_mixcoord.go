@@ -3917,6 +3917,65 @@ func (_c *MixCoord_DropVirtualChannel_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// EnsureCollectionReady provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) EnsureCollectionReady(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EnsureCollectionReady")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.EnsureCollectionReadyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.EnsureCollectionReadyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_EnsureCollectionReady_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EnsureCollectionReady'
+type MixCoord_EnsureCollectionReady_Call struct {
+	*mock.Call
+}
+
+// EnsureCollectionReady is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.EnsureCollectionReadyRequest
+func (_e *MixCoord_Expecter) EnsureCollectionReady(_a0 interface{}, _a1 interface{}) *MixCoord_EnsureCollectionReady_Call {
+	return &MixCoord_EnsureCollectionReady_Call{Call: _e.mock.On("EnsureCollectionReady", _a0, _a1)}
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) Run(run func(_a0 context.Context, _a1 *querypb.EnsureCollectionReadyRequest)) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.EnsureCollectionReadyRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_EnsureCollectionReady_Call) RunAndReturn(run func(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error)) *MixCoord_EnsureCollectionReady_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExportSnapshot provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ExportSnapshot(_a0 context.Context, _a1 *datapb.ExportSnapshotRequest) (*datapb.ExportSnapshotResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6053,6 +6112,11 @@ func (_c *MixCoord_GetQueryViewLoadInfo_Call) Return(_a0 *querypb.GetQueryViewLo
 func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)) *MixCoord_GetQueryViewLoadInfo_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
 }
 
 // GetQuotaMetrics provides a mock function with given fields: _a0, _a1
@@ -8783,53 +8847,6 @@ func (_c *MixCoord_ManualCompaction_Call) Return(_a0 *milvuspb.ManualCompactionR
 }
 
 func (_c *MixCoord_ManualCompaction_Call) RunAndReturn(run func(context.Context, *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)) *MixCoord_ManualCompaction_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ManualUpdateCurrentTarget provides a mock function with given fields: ctx, collectionID
-func (_m *MixCoord) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	ret := _m.Called(ctx, collectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ManualUpdateCurrentTarget")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
-		r0 = rf(ctx, collectionID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MixCoord_ManualUpdateCurrentTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ManualUpdateCurrentTarget'
-type MixCoord_ManualUpdateCurrentTarget_Call struct {
-	*mock.Call
-}
-
-// ManualUpdateCurrentTarget is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-func (_e *MixCoord_Expecter) ManualUpdateCurrentTarget(ctx interface{}, collectionID interface{}) *MixCoord_ManualUpdateCurrentTarget_Call {
-	return &MixCoord_ManualUpdateCurrentTarget_Call{Call: _e.mock.On("ManualUpdateCurrentTarget", ctx, collectionID)}
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Run(run func(ctx context.Context, collectionID int64)) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) Return(_a0 error) *MixCoord_ManualUpdateCurrentTarget_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MixCoord_ManualUpdateCurrentTarget_Call) RunAndReturn(run func(context.Context, int64) error) *MixCoord_ManualUpdateCurrentTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -12105,6 +12122,13 @@ func (_c *MixCoord_WatchChannels_Call) Return(_a0 *datapb.WatchChannelsResponse,
 func (_c *MixCoord_WatchChannels_Call) RunAndReturn(run func(context.Context, *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)) *MixCoord_WatchChannels_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+// GetQueryViewSegmentLoadInfos is patched with mockey by QueryView tests.
+
+// GetQueryViewSegmentLoadInfo is patched with mockey by QueryView tests.
+func (_m *MixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
 }
 
 // NewMixCoord creates a new instance of MixCoord. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

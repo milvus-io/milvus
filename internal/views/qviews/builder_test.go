@@ -9,6 +9,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+func TestQueryViewBuilderOwnsPlacementCopy(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1, ReplicaId: 10, Vchannel: "v1", SchemaVersion: 7, LoadInfoVersion: 8,
+			Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 2}, QueryVersion: 3}, TransformStartAfterTimetick: 99,
+		},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{
+			{PartitionId: 100, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{5}},
+		}}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 100, Version: 6}}},
+	}
+	b := NewQueryViewAtCoordBuilderFromView(view)
+	b.Assignments()[1][100][0] = 999
+	require.Equal(t, int64(101), view.QueryNode[0].Partitions[0].SegmentIds[0])
+	b = NewQueryViewAtCoordBuilderFromView(view)
+	b.SetAssignments(map[int64]map[int64][]int64{2: {100: {101}}})
+	result := b.Build()
+	require.Equal(t, []int64{5}, result.QueryNode[0].Partitions[0].SegmentManifestVersions)
+	require.Equal(t, int32(7), result.Meta.SchemaVersion)
+	require.Equal(t, uint64(8), result.Meta.LoadInfoVersion)
+	require.Equal(t, uint64(99), result.Meta.TransformStartAfterTimetick)
+	require.Equal(t, int64(6), result.StreamingNode.PartitionStats[0].Version)
+}
+
 func TestQueryViewAtCoordBuilder(t *testing.T) {
 	shardView := &viewpb.DataViewOfShard{
 		Vchannel: "v1",
@@ -16,7 +40,8 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 			{PartitionId: 1, SegmentIds: []int64{100, 101, 102}},
 			{PartitionId: 2, SegmentIds: []int64{200, 201}},
 		},
-		TransformStartAfterTimetick: 12345,
+		GrowingTransformStartAfterTimetick:   12345,
+		CompactedTransformStartAfterTimetick: 12345,
 	}
 	dataView := &viewpb.DataViewOfCollection{
 		CollectionId:  10,
@@ -118,9 +143,10 @@ func TestQueryViewBuilderPreservesSegmentTransformStarts(t *testing.T) {
 		CollectionId: 1,
 		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1},
 		Shards: []*viewpb.DataViewOfShard{{
-			Vchannel:                    "v1",
-			TransformStartAfterTimetick: 40,
-			Partitions:                  []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentManifestVersions: []int64{3, 4}}},
+			Vchannel:                             "v1",
+			GrowingTransformStartAfterTimetick:   40,
+			CompactedTransformStartAfterTimetick: 50,
+			Partitions:                           []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentTransformStartAfterTimeticks: []uint64{50, 70}, SegmentManifestVersions: []int64{3, 4}}},
 		}},
 	}
 	result := NewQueryViewAtCoordBuilder(1, view, "v1").SetAssignments(map[int64]map[int64][]int64{100: {1: {20, 10}}}).Build()

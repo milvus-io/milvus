@@ -18,88 +18,36 @@ package querycoordv2
 
 import (
 	"context"
+	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// Deprecated: QueryView no longer uses independently controlled checkers.
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
-	log := mlog.With()
-	log.Info(ctx, "list checkers request received")
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to list checkers", mlog.Err(err))
-		return &querypb.ListCheckersResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	checkers := s.checkerController.Checkers()
-	checkerIDSet := typeutil.NewSet(req.CheckerIDs...)
-
-	resp := &querypb.ListCheckersResponse{
-		Status: merr.Success(),
-	}
-	for _, checker := range checkers {
-		if checkerIDSet.Len() == 0 || checkerIDSet.Contain(int32(checker.ID())) {
-			resp.CheckerInfos = append(resp.CheckerInfos, &querypb.CheckerInfo{
-				Id:        int32(checker.ID()),
-				Activated: checker.IsActive(),
-				Desc:      checker.ID().String(),
-				Found:     true,
-			})
-			checkerIDSet.Remove(int32(checker.ID()))
-		}
-	}
-
-	for _, id := range checkerIDSet.Collect() {
-		resp.CheckerInfos = append(resp.CheckerInfos, &querypb.CheckerInfo{
-			Id:    id,
-			Found: false,
-		})
-	}
-
-	return resp, nil
+	return &querypb.ListCheckersResponse{
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "ListCheckers is deprecated; use CheckBalanceStatus for QueryView balance configuration")),
+	}, nil
 }
 
+// Deprecated: use ResumeBalance to enable optional QueryView balancing.
 func (s *Server) ActivateChecker(ctx context.Context, req *querypb.ActivateCheckerRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-	log.Info(ctx, "activate checker request received")
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to activate checker", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if err := s.checkerController.Activate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn(ctx, "failed to activate checker", mlog.Err(err))
-		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
-	}
-	return merr.Success(), nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "ActivateChecker is deprecated; use ResumeBalance for QueryView balancing")), nil
 }
 
+// Deprecated: use SuspendBalance to disable optional QueryView balancing.
 func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateCheckerRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-	log.Info(ctx, "deactivate checker request received")
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to deactivate checker", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	if err := s.checkerController.Deactivate(utils.CheckerType(req.CheckerID)); err != nil {
-		log.Warn(ctx, "failed to deactivate checker", mlog.Err(err))
-		return merr.Status(merr.WrapErrParameterInvalidMsg("invalid checker type %d: %v", req.CheckerID, err)), nil
-	}
-	return merr.Success(), nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "DeactivateChecker is deprecated; use SuspendBalance for QueryView balancing")), nil
 }
 
 // ListQueryNode return all available node list, for each node, return it's (nodeID, ip_address)
@@ -170,52 +118,15 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 		}, nil
 	}
 
-	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetNodeID()))
-	channels := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetNodeID()))
+	// QueryNodes no longer host channel delegators. Read confirmed segment
+	// resources from QueryView reports, not the retired distribution heartbeat.
 	return &querypb.GetQueryNodeDistributionResponse{
 		Status:           merr.Success(),
-		ChannelNames:     lo.Map(channels, func(c *meta.DmChannel, _ int) string { return c.GetChannelName() }),
-		SealedSegmentIDs: lo.Map(segments, func(s *meta.Segment, _ int) int64 { return s.GetID() }),
+		SealedSegmentIDs: s.qviewsRuntime.shardViewRegistry.LoadedSegmentsOnNode(req.GetNodeID()),
 	}, nil
 }
 
-func (s *Server) SuspendChannelBalance(ctx context.Context) error {
-	log := mlog.With()
-	log.Info(ctx, "SuspendChannelBalance request received")
-
-	errMsg := "failed to suspend channel balance for all querynode"
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return err
-	}
-	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "false"); err != nil {
-		log.Warn(ctx, err.Error(), mlog.Err(err))
-		return err
-	}
-	log.Info(ctx, "SuspendChannelBalance request finished successfully")
-	return nil
-}
-
-func (s *Server) ResumeChannelBalance(ctx context.Context) error {
-	log := mlog.With()
-	log.Info(ctx, "ResumeChannelBalance request received")
-
-	errMsg := "failed to resume channel balance for all querynode"
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return err
-	}
-
-	if err := paramtable.Get().Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, "true"); err != nil {
-		log.Warn(ctx, err.Error(), mlog.Err(err))
-		return err
-	}
-	log.Info(ctx, "ResumeChannelBalance request finished successfully")
-
-	return nil
-}
-
-// SuspendBalance background balance for all query node, include stopping balance and auto balance
+// SuspendBalance disables optional QueryView placement optimization.
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
 	log := mlog.With()
 	log.Info(ctx, "SuspendBalance request received")
@@ -225,7 +136,7 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 		return merr.Status(err), nil
 	}
 
-	err := s.checkerController.Deactivate(utils.BalanceChecker)
+	err := alterBalanceConfig(false)
 	if err != nil {
 		log.Warn(ctx, errMsg, mlog.Err(err))
 		return merr.Status(err), nil
@@ -234,7 +145,7 @@ func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalance
 	return merr.Success(), nil
 }
 
-// ResumeBalance background balance for all query node, include stopping balance and auto balance
+// ResumeBalance enables optional QueryView placement optimization.
 func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
 	log := mlog.With()
 
@@ -245,13 +156,24 @@ func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRe
 		return merr.Status(err), nil
 	}
 
-	err := s.checkerController.Activate(utils.BalanceChecker)
+	err := alterBalanceConfig(true)
 	if err != nil {
 		log.Warn(ctx, errMsg, mlog.Err(err))
 		return merr.Status(err), nil
 	}
 
 	return merr.Success(), nil
+}
+
+// alterBalanceConfig uses the same persistent update and synchronous local
+// refresh as AlterConfig. A process-local Save would mask later etcd updates.
+func alterBalanceConfig(enabled bool) error {
+	manager := paramtable.GetBaseTable().Manager()
+	source, ok := manager.GetEtcdSource()
+	if !ok {
+		return merr.WrapErrServiceUnavailableMsg("cannot alter balance configuration: etcd source is not enabled")
+	}
+	return manager.UpdateConfigInEtcd(source, paramtable.Get().QueryViewCfg.BalancerOptimizationEnabled.Key, strconv.FormatBool(enabled))
 }
 
 // CheckBalanceStatus checks whether balance is active or suspended
@@ -267,33 +189,10 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 		}, nil
 	}
 
-	isActive, err := s.checkerController.IsActive(utils.BalanceChecker)
-	if err != nil {
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return &querypb.CheckBalanceStatusResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
 	return &querypb.CheckBalanceStatusResponse{
 		Status:   merr.Success(),
-		IsActive: isActive,
+		IsActive: paramtable.Get().QueryViewCfg.BalancerOptimizationEnabled.GetAsBool(),
 	}, nil
-}
-
-func (s *Server) CheckChannelBalanceActive(ctx context.Context) (bool, error) {
-	log := mlog.With()
-	log.Info(ctx, "ResumeChannelBalance request received")
-
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, "failed to resume channel balance", mlog.Err(err))
-		return false, err
-	}
-	active := paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool()
-
-	log.Info(ctx, "ResumeChannelBalance request finished successfully", mlog.Bool("active", active))
-
-	return active, nil
 }
 
 // IsNodeSuspended checks if a specific node is suspended based on the provided request.
@@ -372,288 +271,59 @@ func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest)
 // if no segment_id specified, default to transfer all segment on the source node.
 // if no target_nodeId specified, default to move segment to all other nodes
 func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegmentRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-
-	log.Info(ctx, "TransferSegment request received",
-		mlog.Int64("source", req.GetSourceNodeID()),
-		mlog.Int64("dest", req.GetTargetNodeID()),
-		mlog.Int64("segment", req.GetSegmentID()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load balance"
-		log.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-	}
-
-	// check whether srcNode is healthy
-	srcNode := req.GetSourceNodeID()
-	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		err := merr.WrapErrNodeNotAvailable(srcNode, "the source node is invalid")
 		return merr.Status(err), nil
 	}
-
-	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
-	for _, replica := range replicas {
-		// when no dst node specified, default to use all other nodes in same
-		dstNodeSet := typeutil.NewUniqueSet()
-		if req.GetToAllNodes() {
-			dstNodeSet.Insert(replica.GetRWNodes()...)
-		} else {
-			// check whether dstNode is healthy
-			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
-				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
-				return merr.Status(err), nil
-			}
-			if streamingutil.IsStreamingServiceEnabled() {
-				sqn := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
-				if sqn.Contain(req.GetTargetNodeID()) {
-					return merr.Status(
-						merr.WrapErrParameterInvalidMsg("embedded query node in streaming node can't be the destination of transfer segment")), nil
-				}
-			}
-			dstNodeSet.Insert(req.GetTargetNodeID())
-		}
-		dstNodeSet.Remove(srcNode)
-
-		// check sealed segment list
-		segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(srcNode))
-
-		toBalance := typeutil.NewSet[*meta.Segment]()
-		if req.GetTransferAll() {
-			toBalance.Insert(segments...)
-		} else {
-			// check whether sealed segment exist
-			segment, ok := lo.Find(segments, func(s *meta.Segment) bool { return s.GetID() == req.GetSegmentID() })
-			if !ok {
-				err := merr.WrapErrSegmentNotFound(req.GetSegmentID(), "segment not found in source node")
-				return merr.Status(err), nil
-			}
-
-			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
-			if !existInTarget {
-				log.Info(ctx, "segment doesn't exist in current target, skip it", mlog.Int64("segmentID", req.GetSegmentID()))
-			} else {
-				toBalance.Insert(segment)
-			}
-		}
-
-		err := s.balanceSegments(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
-		if err != nil {
-			msg := "failed to balance segments"
-			log.Warn(ctx, msg, mlog.Err(err))
-			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-		}
+	// CopyMode is retained on the wire but ignored: QueryView only supports move.
+	var destinations, segments []int64
+	if !req.GetToAllNodes() {
+		destinations = []int64{req.GetTargetNodeID()}
 	}
-	return merr.Success(), nil
+	if !req.GetTransferAll() {
+		segments = []int64{req.GetSegmentID()}
+	}
+	return merr.Status(s.manualMoveSegments(ctx, 0, req.GetSourceNodeID(), destinations, segments)), nil
 }
 
-// transfer channel from source to target,
-// if no channel_name specified, default to transfer all channel on the source node.
-// if no target_nodeId specified, default to move channel to all other nodes
+// TransferChannel moves whole PChannels between StreamingNodes and waits for
+// their target WAL assignments to be confirmed. VChannel input selects its
+// PChannel, including the other collections on that PChannel.
 func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-
-	log.Info(ctx, "TransferChannel request received",
-		mlog.Int64("source", req.GetSourceNodeID()),
-		mlog.Int64("dest", req.GetTargetNodeID()),
-		mlog.String("channel", req.GetChannelName()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load balance"
-		log.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-	}
-
-	// check whether srcNode is healthy
-	srcNode := req.GetSourceNodeID()
-	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		err := merr.WrapErrNodeNotAvailable(srcNode, "the source node is invalid")
 		return merr.Status(err), nil
 	}
-
-	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
-	for _, replica := range replicas {
-		// when no dst node specified, default to use all other nodes in same
-		dstNodeSet := typeutil.NewUniqueSet()
-		if req.GetToAllNodes() {
-			if streamingutil.UseStreamingQueryNodeAsDelegator() {
-				dstNodeSet.Insert(replica.GetRWSQNodes()...)
-			} else {
-				dstNodeSet.Insert(replica.GetRWNodes()...)
-			}
-		} else {
-			// check whether dstNode is healthy
-			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
-				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
-				return merr.Status(err), nil
-			}
-			dstNodeSet.Insert(req.GetTargetNodeID())
-		}
-		dstNodeSet.Remove(srcNode)
-
-		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
-		toBalance := typeutil.NewSet[*meta.DmChannel]()
-		if req.GetTransferAll() {
-			toBalance.Insert(channels...)
-		} else {
-			// check whether sealed segment exist
-			channel, ok := lo.Find(channels, func(ch *meta.DmChannel) bool { return ch.GetChannelName() == req.GetChannelName() })
-			if !ok {
-				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
-				return merr.Status(err), nil
-			}
-			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
-			if !existInTarget {
-				log.Info(ctx, "channel doesn't exist in current target, skip it", mlog.String("channelName", channel.GetChannelName()))
-			} else {
-				toBalance.Insert(channel)
-			}
-		}
-
-		err := s.balanceChannels(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
-		if err != nil {
-			msg := "failed to balance channels"
-			log.Warn(ctx, msg, mlog.Err(err))
-			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-		}
+	if req.GetCopyMode() {
+		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "WAL transfer does not support copy mode")), nil
 	}
-	return merr.Success(), nil
-}
-
-func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
-	mlog.Info(ctx, "ClearReadTaskQueue request received",
-		mlog.String("taskType", req.GetTaskType()),
-		mlog.String("reason", req.GetReason()))
-
-	resp := &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
+	if req.GetSourceNodeID() <= 0 || (!req.GetToAllNodes() && (req.GetTargetNodeID() <= 0 || req.GetTargetNodeID() == req.GetSourceNodeID())) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("expected a positive source SN and a different positive target SN")), nil
 	}
-
-	nodes := s.nodeMgr.GetAll()
-	group := &errgroup.Group{}
-	results := make(chan *internalpb.ClearReadTaskQueueComponentResult, len(nodes))
-	for _, node := range nodes {
-		if node.IsStoppingState() {
-			continue
-		}
-		nodeID := node.ID()
-		group.Go(func() error {
-			nodeResp, err := s.cluster.ClearReadTaskQueue(ctx, nodeID, req)
-			if errors.Is(err, merr.ErrServiceUnimplemented) {
-				return nil
-			}
-			if err != nil {
-				results <- &internalpb.ClearReadTaskQueueComponentResult{
-					Status: merr.Status(err),
-					Role:   typeutil.QueryNodeRole,
-					NodeID: nodeID,
-				}
-				return merr.Wrapf(err, "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
-			}
-
-			if len(nodeResp.GetResults()) > 0 {
-				for _, result := range nodeResp.GetResults() {
-					results <- result
-				}
-			} else {
-				results <- &internalpb.ClearReadTaskQueueComponentResult{
-					Status:          nodeResp.GetStatus(),
-					Role:            typeutil.QueryNodeRole,
-					NodeID:          nodeID,
-					QueuedCleared:   nodeResp.GetQuerynodeQueuedCleared(),
-					QueuedNqCleared: nodeResp.GetQueuedNqCleared(),
-				}
-			}
-			if !merr.Ok(nodeResp.GetStatus()) {
-				return merr.Wrapf(merr.Error(nodeResp.GetStatus()), "ClearReadTaskQueue failed, queryNodeID = %d", nodeID)
-			}
-			return nil
-		})
+	if !req.GetTransferAll() && req.GetChannelName() == "" {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("channel_name is required unless transfer_all is set")), nil
 	}
-
-	err := group.Wait()
-	close(results)
-	for result := range results {
-		resp.Results = append(resp.Results, result)
-		if result.GetRole() == typeutil.QueryNodeRole && merr.Ok(result.GetStatus()) {
-			resp.QuerynodeQueuedCleared += result.GetQueuedCleared()
-			resp.QueuedNqCleared += result.GetQueuedNqCleared()
-		}
+	transfer := walbalancer.TransferChannelsRequest{SourceNodeID: req.GetSourceNodeID()}
+	if !req.GetToAllNodes() {
+		transfer.TargetNodeID = req.GetTargetNodeID()
 	}
+	if !req.GetTransferAll() {
+		transfer.ChannelName = req.GetChannelName()
+	}
+	b, err := walbalance.GetWithContext(ctx)
 	if err != nil {
-		resp.Status = merr.Status(err)
+		return merr.Status(err), nil
 	}
-
-	mlog.Info(ctx, "cleared querynode read task queues",
-		mlog.String("taskType", req.GetTaskType()),
-		mlog.String("reason", req.GetReason()),
-		mlog.Int("queryNodes", len(resp.GetResults())),
-		mlog.Int64("queuedCleared", resp.GetQuerynodeQueuedCleared()),
-		mlog.Int64("queuedNQCleared", resp.GetQueuedNqCleared()),
-		mlog.Err(err))
-	return resp, nil
+	return merr.Status(b.TransferChannels(ctx, transfer)), nil
 }
 
+// Deprecated: the legacy scheduler cannot clear QueryView execution queues.
+func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
+	return &internalpb.ClearReadTaskQueueResponse{
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "ClearReadTaskQueue is deprecated; no queues were cleared")),
+	}, nil
+}
+
+// Deprecated: QueryView migration APIs wait for the accepted view to become Up.
+// Resource-ID coverage cannot establish migration completion or safe node drain.
 func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-
-	log.Info(ctx, "CheckQueryNodeDistribution request received",
-		mlog.Int64("source", req.GetSourceNodeID()),
-		mlog.Int64("dest", req.GetTargetNodeID()))
-
-	errMsg := "failed to check query node distribution"
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	sourceNode := s.nodeMgr.Get(req.GetSourceNodeID())
-	if sourceNode == nil {
-		err := merr.WrapErrNodeNotFound(req.GetSourceNodeID(), "source node not found")
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	targetNode := s.nodeMgr.Get(req.GetTargetNodeID())
-	if targetNode == nil {
-		err := merr.WrapErrNodeNotFound(req.GetTargetNodeID(), "target node not found")
-		log.Warn(ctx, errMsg, mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	// check channel list
-	channelOnSrc := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetSourceNodeID()))
-	channelOnDst := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetTargetNodeID()))
-	channelDstMap := lo.SliceToMap(channelOnDst, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
-		return ch.GetChannelName(), ch
-	})
-	for _, ch := range channelOnSrc {
-		if s.targetMgr.GetDmChannel(ctx, ch.GetCollectionID(), ch.GetChannelName(), meta.CurrentTargetFirst) == nil {
-			continue
-		}
-
-		if _, ok := channelDstMap[ch.GetChannelName()]; !ok {
-			return merr.Status(merr.WrapErrChannelLack(ch.GetChannelName())), nil
-		}
-	}
-
-	// check whether all segments exist in source node has been loaded in target node
-	segmentOnSrc := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetSourceNodeID()))
-	segmentOnDst := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetTargetNodeID()))
-	segmentDstMap := lo.SliceToMap(segmentOnDst, func(s *meta.Segment) (int64, *meta.Segment) {
-		return s.GetID(), s
-	})
-	for _, segment := range segmentOnSrc {
-		if s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTargetFirst) == nil {
-			continue
-		}
-
-		if _, ok := segmentDstMap[segment.GetID()]; !ok {
-			return merr.Status(merr.WrapErrSegmentLack(segment.GetID())), nil
-		}
-	}
-	return merr.Success(), nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "CheckQueryNodeDistribution is deprecated; LoadBalance and TransferSegment wait for QueryView handoff, but do not guarantee safe node shutdown")), nil
 }

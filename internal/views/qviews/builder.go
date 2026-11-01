@@ -1,10 +1,47 @@
 package qviews
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
+
+// NewQueryViewAtCoordBuilderFromView owns a placement copy while preserving the
+// exact data, schema, load and physical metadata of its planning source.
+func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryViewAtCoordBuilder {
+	m := view.GetMeta()
+	b := &QueryViewAtCoordBuilder{
+		collectionID: m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
+		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
+		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
+		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
+		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
+		partitionStatsVersions: make(map[int64]int64),
+	}
+	for _, node := range view.GetQueryNode() {
+		partitions := make(map[int64][]int64)
+		for _, p := range node.GetPartitions() {
+			partitions[p.GetPartitionId()] = slices.Clone(p.GetSegmentIds())
+			for i, id := range p.GetSegmentIds() {
+				if i < len(p.GetSegmentManifestVersions()) {
+					b.segmentManifestVersions[id] = p.GetSegmentManifestVersions()[i]
+				}
+			}
+		}
+		b.assignments[node.GetNodeId()] = partitions
+	}
+	for _, p := range view.GetStreamingNode().GetPartitionStats() {
+		b.partitionStatsVersions[p.GetPartitionId()] = p.GetVersion()
+	}
+	return b
+}
+
+// Assignments is mutable only by the owner of this builder. The owner must not
+// retain or mutate it after submitting the builder.
+func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
+	return b.assignments
+}
 
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {
@@ -18,6 +55,7 @@ type QueryViewAtCoordBuilder struct {
 	schemaVersion               int32
 	assignments                 map[int64]map[int64][]int64
 	segmentManifestVersions     map[int64]int64
+	partitionStatsVersions      map[int64]int64
 }
 
 func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfCollection, vchannel string) *QueryViewAtCoordBuilder {
@@ -32,7 +70,9 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		panic("vchannel " + vchannel + " not found in DataViewOfCollection")
 	}
 	manifests := make(map[int64]int64)
+	stats := make(map[int64]int64)
 	for _, partition := range shardView.GetPartitions() {
+		stats[partition.GetPartitionId()] = partition.GetPartitionStatsVersion()
 		for idx, segmentID := range partition.GetSegmentIds() {
 			if idx < len(partition.GetSegmentManifestVersions()) {
 				manifests[segmentID] = partition.GetSegmentManifestVersions()[idx]
@@ -45,10 +85,11 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),
-		transformStartAfterTimetick: shardView.GetTransformStartAfterTimetick(),
+		transformStartAfterTimetick: min(shardView.GetGrowingTransformStartAfterTimetick(), shardView.GetCompactedTransformStartAfterTimetick()),
 		queryVersion:                1,
 		assignments:                 make(map[int64]map[int64][]int64),
 		segmentManifestVersions:     manifests,
+		partitionStatsVersions:      stats,
 	}
 }
 
@@ -122,9 +163,26 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		queryNodes = append(queryNodes, &viewpb.QueryViewOfQueryNode{NodeId: nodeID, Partitions: partitions})
 	}
 
+	stats := &viewpb.QueryViewOfStreamingNode{}
+	selected := make(map[int64]bool)
+	for _, node := range queryNodes {
+		for _, partition := range node.GetPartitions() {
+			selected[partition.GetPartitionId()] = true
+		}
+	}
+	ids := make([]int64, 0, len(selected))
+	for id := range selected {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		if version := b.partitionStatsVersions[id]; version > 0 {
+			stats.PartitionStats = append(stats.PartitionStats, &viewpb.ClusteredPartitionStats{PartitionId: id, Version: version})
+		}
+	}
 	return &viewpb.QueryViewOfShard{
 		Meta:          meta,
 		QueryNode:     queryNodes,
-		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+		StreamingNode: stats,
 	}
 }

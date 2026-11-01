@@ -305,11 +305,8 @@ class QueryContext : public Context {
 
     SchemaPtr
     get_schema_snapshot() const {
-        if (read_snapshot_) {
-            auto schema = read_snapshot_->get_schema_snapshot();
-            AssertInfo(schema != nullptr,
-                       "query read snapshot must provide a non-null schema");
-            return schema;
+        if (segment_->type() == SegmentType::Sealed) {
+            return get_read_schema();
         }
         return segment_->get_schema_snapshot();
     }
@@ -367,6 +364,20 @@ class QueryContext : public Context {
         return enable_sub_expr_cache_write_;
     }
 
+    // Logical read semantics belong to the plan's schema, independently of
+    // the schema used to encode/load the shared physical segment.
+    void
+    set_read_schema(SchemaPtr schema) {
+        read_schema_ = std::move(schema);
+    }
+
+    SchemaPtr
+    get_read_schema() const {
+        AssertInfo(read_schema_ || !segment_->RequiresExplicitReadSchema(),
+                   "sealed View query requires an explicit read schema");
+        return read_schema_ ? read_schema_ : segment_->get_schema_snapshot();
+    }
+
     void
     set_read_snapshot(std::shared_ptr<const segcore::SegmentReadSnapshot> s) {
         read_snapshot_ = std::move(s);
@@ -421,6 +432,7 @@ class QueryContext : public Context {
     // Expressions borrow the raw pointer at construction; the shared_ptr here
     // is the single owner for the whole ExecuteTask.
     std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_{nullptr};
+    SchemaPtr read_schema_;
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};

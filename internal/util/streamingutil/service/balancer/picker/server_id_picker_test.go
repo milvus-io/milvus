@@ -135,3 +135,45 @@ func TestFailFastPickDistinguishesDisconnectedAndRemovedSessions(t *testing.T) {
 	_, err = p.Pick(balancer.PickInfo{Ctx: contextutil.WithPickServerID(context.Background(), 1)})
 	assert.ErrorIs(t, err, balancer.ErrNoSubConnAvailable)
 }
+
+func TestPickerRecordsSelectedServerAndPreservesRouting(t *testing.T) {
+	builder := &serverIDPickerBuilder{}
+	p := builder.Build(bbalancer.PickerBuildInfo{
+		ReadySCs: map[balancer.SubConn]base.SubConnInfo{
+			&testSubConn{}: {Address: resolver.Address{Addr: "node-7:1234", BalancerAttributes: attributes.WithServerID(new(attributes.Attributes), 7)}},
+			&testSubConn{}: {Address: resolver.Address{Addr: "node-9:1234", BalancerAttributes: attributes.WithServerID(new(attributes.Attributes), 9)}},
+		},
+	})
+	ctx := contextutil.WithPickServerID(context.Background(), contextutil.UnspecifiedServerID)
+	_, err := p.Pick(balancer.PickInfo{Ctx: ctx})
+	assert.NoError(t, err)
+	first := contextutil.GetPickedServerID(ctx)
+	id, ok := contextutil.GetPickServerID(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, first, id)
+	// Filling an unspecified ID must not turn the next attempt into forced routing.
+	_, err = p.Pick(balancer.PickInfo{Ctx: ctx})
+	assert.NoError(t, err)
+	assert.NotEqual(t, first, contextutil.GetPickedServerID(ctx))
+
+	forced := contextutil.WithPickServerID(context.Background(), 7)
+	for range 2 {
+		_, err = p.Pick(balancer.PickInfo{Ctx: forced})
+		assert.NoError(t, err)
+		assert.EqualValues(t, 7, contextutil.GetPickedServerID(forced))
+	}
+	// Session removal clears an old successful pick, but preserves the route.
+	empty := builder.Build(bbalancer.PickerBuildInfo{})
+	_, err = empty.Pick(balancer.PickInfo{Ctx: forced})
+	assert.Error(t, err)
+	assert.Equal(t, contextutil.UnspecifiedServerID, contextutil.GetPickedServerID(forced))
+	id, ok = contextutil.GetPickServerID(forced)
+	assert.True(t, ok)
+	assert.EqualValues(t, 7, id)
+
+	_, err = empty.Pick(balancer.PickInfo{Ctx: ctx})
+	assert.Error(t, err)
+	assert.Equal(t, contextutil.UnspecifiedServerID, contextutil.GetPickedServerID(ctx))
+	_, ok = contextutil.GetPickServerID(ctx)
+	assert.False(t, ok)
+}
