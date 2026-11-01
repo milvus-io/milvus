@@ -191,18 +191,8 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		return false, 0
 	}
 
-	entry := &idempotencyview.Record{
-		SourceMessageID:        result.MessageID,
-		SourceTimeTick:         result.CommitTimeTick,
-		LastConfirmedMessageID: result.LastConfirmedMessageID,
-		IdempotencyKey:         string(pending.Key),
-		InsertResult:           result.IdempotentResult,
-	}
 	delete(w.inflight, pending.Key)
-	w.entries[pending.Key] = entry
-	w.bytes += entry.Size()
-	w.insertCommitOrderLocked(pending.Key, entry.SourceTimeTick)
-	evicted := w.evictLocked()
+	entry, evicted := w.storeLocked(pending.Key, result)
 	observeWindowEviction(vchannelOf(msg), evicted)
 	observeWindowEntries(vchannelOf(msg), len(w.entries))
 	observeWindowInflight(vchannelOf(msg), len(w.inflight))
@@ -210,6 +200,54 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 	pending.result = PendingResult{Entry: entry, OwnerResolved: true}
 	close(pending.done)
 	return true, evicted
+}
+
+// Record remembers a write that this window never arbitrated: a replicated
+// write, which the replicate interceptor appends unconditionally. There is no
+// inflight phase and no waiter to resolve. An entry already held for the key is
+// replaced: the source cluster evicted the key and a client legally reused it,
+// so the newer write is the one a retry must see. Returns the number of
+// entries evicted by the byte cap.
+func (w *Window) Record(key IdempotencyKey, result CommitResult, msg message.MutableMessage) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	_, evicted := w.storeLocked(key, result)
+	observeWindowEviction(vchannelOf(msg), evicted)
+	observeWindowEntries(vchannelOf(msg), len(w.entries))
+	return evicted
+}
+
+// storeLocked installs the committed entry for key, accounts its bytes, places
+// it in commit order and enforces the byte cap. An entry already held for the
+// key is released first, so bytes and commit order carry the key once.
+func (w *Window) storeLocked(key IdempotencyKey, result CommitResult) (*idempotencyview.Record, int) {
+	if old, ok := w.entries[key]; ok {
+		w.bytes -= old.Size()
+		w.removeCommitOrderLocked(key)
+	}
+	entry := &idempotencyview.Record{
+		SourceMessageID:        result.MessageID,
+		SourceTimeTick:         result.CommitTimeTick,
+		LastConfirmedMessageID: result.LastConfirmedMessageID,
+		IdempotencyKey:         string(key),
+		InsertResult:           result.IdempotentResult,
+	}
+	w.entries[key] = entry
+	w.bytes += entry.Size()
+	w.insertCommitOrderLocked(key, entry.SourceTimeTick)
+	return entry, w.evictLocked()
+}
+
+// removeCommitOrderLocked drops key from commitOrder. A key is present at most
+// once, so the first match is the only one.
+func (w *Window) removeCommitOrderLocked(key IdempotencyKey) {
+	for i, k := range w.commitOrder {
+		if k == key {
+			w.commitOrder = append(w.commitOrder[:i], w.commitOrder[i+1:]...)
+			return
+		}
+	}
 }
 
 func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessage) bool {
