@@ -32,7 +32,7 @@ type LoadInfoRefProvider interface {
 // event; DirtyViewFlushScheduler owns all cross-shard batching and I/O.
 //
 // Invariants (maintained by all methods):
-//   - At most one Preparing or Ready per schema; preparingView tracks the newest.
+//   - At most one Preparing or Ready, regardless of SchemaVersion.
 //   - At most one Up view per SchemaVersion; published and target schemas may coexist.
 //
 // Thread-safety: All methods are thread-safe.
@@ -435,17 +435,16 @@ func segmentSet(segments []int64) map[int64]bool {
 //   - If the DataVersion matches existing views, QV = max(existing QV for same DV) + 1.
 //   - Otherwise, QV = 1.
 //
-// Preemption replaces obsolete target preparations, preserving any recovery
-// preparation for the published schema.
+// Preemption replaces the previous Preparing or Ready, including recovery.
 //
 // Validation: The new DataVersion must not be lower than any existing view's DataVersion.
 func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
 	return m.addPreparing(ctx, builder, nil, nil)
 }
 
-// AddPublishedRecovery changes placement of a retained published-schema view.
-// It preserves that view's exact data and load identities while a newer schema
-// prepares independently. Ordinary planning still cannot roll DataVersion back.
+// AddPublishedRecovery changes placement of the latest view while the target
+// schema's data is not ready. It preserves the exact data and load identities,
+// and cannot run behind a newer view or bypass the DataVersion rollback check.
 func (m *ShardViewManager) AddPublishedRecovery(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source qviews.QueryViewVersion) error {
 	return m.addPreparing(ctx, builder, &source, nil)
 }
@@ -500,7 +499,7 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		return err
 	}
 	if source != nil {
-		// Published-schema recovery is a separate availability obligation.
+		// Recover the latest placement without waiting for its failed nodes.
 		m.prepareBackoff.notBefore = time.Time{}
 	}
 	qv := m.nextQueryVersion(newDV)
@@ -509,7 +508,6 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	if source != nil {
 		view.Meta.TransformStartAfterTimetick = m.views[*source].View().GetMeta().GetTransformStartAfterTimetick()
 	}
-	view.Meta.TransformStartAfterTimetick = m.publishedRetentionStartLocked(view.Meta)
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
 	sm.releaseLoadInfo = releaseLoadInfo
 	sm.preparation = preparation
@@ -517,16 +515,9 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		preparation.Version = sm.Version()
 	}
 
-	// Different schema generations have independent preparation obligations.
-	// Preserve published recovery while superseding obsolete target work.
+	// All schemas and recovery share one preparation slot.
 	for _, preparing := range m.views {
 		if preparing.State() != qviews.QueryViewStatePreparing && preparing.State() != qviews.QueryViewStateReady {
-			continue
-		}
-		schema := preparing.View().GetMeta().GetSchemaVersion()
-		replace := schema == view.GetMeta().GetSchemaVersion() ||
-			(source == nil && (m.publishedSchema == nil || schema != *m.publishedSchema))
-		if !replace {
 			continue
 		}
 		// A delayed target has not registered sync callbacks yet. Node loss or
@@ -690,9 +681,12 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 //
 // Must be called under m.mu.
 func (m *ShardViewManager) advanceUnrecoverableToDropping() {
+	latest := m.latestViewLocked()
 	for _, sm := range m.views {
 		if sm.State() == qviews.QueryViewStateUnrecoverable {
-			if m.keepPublishedRecoverySourceLocked(sm) {
+			// Keep the latest failed version until its replacement is registered.
+			// A delayed Up report for an older view must not discard this base.
+			if !m.releaseRequested && sm == latest {
 				continue
 			}
 			key := m.keyForStateMachine(sm)

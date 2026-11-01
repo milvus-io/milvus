@@ -17,10 +17,10 @@
 
 ## 1. Overview
 
-The agreed [schema-handoff refactor](schema_evolution.md) retains published-old
-schema coverage while target-schema views prepare and reach Up. It replaces
-the single-Up assumptions below with schema-aware selection and retirement;
-existing lifecycle state enums remain. That implementation is pending.
+The [schema-handoff contract](schema_evolution.md) retains existing published-old
+Up views while target-schema views prepare and reach Up. Serving selection and
+retirement are schema-aware, but preparation is not split by schema: each shard
+on one replica has at most one Preparing or Ready view.
 
 `ShardViewManager` is the in-memory owner of the QueryViews for one shard on one
 replica. It is responsible for:
@@ -200,6 +200,21 @@ and preempts an existing Preparing or Ready view. `RequestRelease` starts the
 normal teardown of all views in the shard. Both methods mutate state under
 `m.mu`, atomically consume the resulting effects into one `dirtyViewEvent`,
 submit that event to the Scheduler, and then release the lock.
+
+`AddPublishedRecovery` may re-place only the greatest resident QueryView, with
+its exact DataVersion, SchemaVersion and LoadInfoVersion. It uses the same
+DataVersion rollback check as ordinary preparation, before and after acquiring
+external references. A newer target view, including an Unrecoverable one,
+prevents recovery of an older published view. A new preparation preempts the
+previous Preparing/Ready regardless of schema. Balancer uses the retained
+published base only while it remains the latest view and target data is pending;
+after target preparation starts, ordinary planning recovers the target.
+
+The latest Unrecoverable view remains until its replacement is registered or the
+shard is explicitly released. Even a delayed older Up report must not clean it
+up. Replacement registration and old-view cleanup share the manager lock and
+dirty event; persistence completes before cleanup is sent to workers. This
+retained metadata carries the version boundary without a separate watermark.
 
 ## 4. Internal Flow
 

@@ -113,11 +113,7 @@ func (s *importTestBase) runTestAutoID() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		s.True(len(segment.GetBinlogs()) > 0)
-		s.NoError(CheckLogID(segment.GetBinlogs()))
-		s.True(len(segment.GetDeltalogs()) == 0)
-		s.True(len(segment.GetStatslogs()) > 0)
-		s.NoError(CheckLogID(segment.GetStatslogs()))
+		s.assertImportedSegmentMetadata(segment, fieldSchema1.GetFieldID())
 	}
 
 	// create index

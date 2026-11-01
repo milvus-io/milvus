@@ -52,9 +52,9 @@ type SourceCollectionInfo struct {
 	SegmentIDs   []int64
 	insertedIDs  *schemapb.IDs
 	snapshotURI  string
-	// Timestamp range retained in source column-group metadata.
-	l1MinTs uint64 // min timestamp from L1 column groups
-	l1MaxTs uint64 // max timestamp from L1 column groups
+	// Exact timestamp range retained in the source SegmentStats.
+	l1MinTs uint64
+	l1MaxTs uint64
 }
 
 func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
@@ -193,21 +193,17 @@ func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *S
 		s.Require().NotEmpty(segment.GetManifestPath())
 	}
 
-	// V3 column-group summaries retain row timestamp bounds even though
-	// actual data-file discovery uses the Manifest.
+	// V3 persists exact row timestamp bounds in SegmentStats; legacy
+	// FieldBinlog arrays need not be present in the catalog.
 	var l1MinTs uint64 = math.MaxUint64
 	var l1MaxTs uint64 = 0
 	for _, segment := range segments {
-		for _, fieldBinlog := range segment.GetBinlogs() {
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				if binlog.GetTimestampFrom() < l1MinTs {
-					l1MinTs = binlog.GetTimestampFrom()
-				}
-				if binlog.GetTimestampTo() > l1MaxTs {
-					l1MaxTs = binlog.GetTimestampTo()
-				}
-			}
-		}
+		stats := segment.GetStats()
+		s.Require().NotNil(stats)
+		s.Require().Positive(stats.GetTimestampFrom())
+		s.Require().GreaterOrEqual(stats.GetTimestampTo(), stats.GetTimestampFrom())
+		l1MinTs = min(l1MinTs, stats.GetTimestampFrom())
+		l1MaxTs = max(l1MaxTs, stats.GetTimestampTo())
 	}
 
 	s.Require().NotEqual(uint64(math.MaxUint64), l1MinTs)

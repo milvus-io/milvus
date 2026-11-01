@@ -348,10 +348,14 @@ The resource manager maintains two distinct version boundaries:
 
 - Admission uses the highest DataVersion already accepted during the current
   runtime/reference lifetime. A lower new acquisition is rejected through
-  `OnUnrecoverable`, including acquisitions from a different replica. Equal
-  versions and idempotent existing references remain valid. Removing the highest
-  reference does not lower this boundary; already retained older views continue
-  serving according to their lifecycle and leases.
+  `OnUnrecoverable` unless another reference still retains the exact DataVersion,
+  SchemaVersion and LoadInfoVersion. Such cross-replica reuse does not rewind
+  reclamation. Equal versions and idempotent existing references remain valid.
+  Removing the highest reference does not lower this boundary; already retained
+  older views continue serving according to their lifecycle and leases. Once the
+  last reference to an old base is released, new acquisitions cannot revive it
+  in that runtime. The Dropped acknowledgement follows reference release and
+  resource reclamation preparation; it is not merely receipt of the request.
 - Reclamation uses the minimum DataVersion among retained references. Reference
   removal, recomputing this minimum and delivering `Advance` are serialized by
   the manager. Runtime keeps its non-monotonic advance assertion. Initialization's
