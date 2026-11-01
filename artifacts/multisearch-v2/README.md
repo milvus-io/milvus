@@ -1,6 +1,6 @@
 # Evidence for the native v3.0.5 MultiSearch prototype
 
-The English HTML report includes the design, core implementation, build provenance,
+The English HTML and PDF reports include the design, core implementation, build provenance,
 functional results, and performance measurements. `performance-summary.json`
 contains one row per measured run; `comparison.json` aggregates the two-CPU runs.
 Group latency includes all eight logical searches for both ordinary Search and

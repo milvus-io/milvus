@@ -1,130 +1,220 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Native Milvus MultiSearch — design and performance evidence</title><style>*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#1c293a;font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1160px;margin:32px auto;background:white;padding:56px;border-radius:16px}h1{font-size:42px;line-height:1.14;letter-spacing:-1.2px;margin:12px 0 22px}h2{font-size:25px;margin-top:42px;border-top:1px solid #dce4ee;padding-top:24px}h3{font-size:19px;margin-top:28px}.eyebrow{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:#176681}.lead{font-size:20px;color:#506176}.verdict{background:#ecf6f8;border-left:5px solid #08798b;padding:22px 26px;margin:28px 0}.verdict p:last-child{margin-bottom:0}.chart svg{width:100%;height:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin:18px 0;overflow-wrap:anywhere}td,th{text-align:left;border-bottom:1px solid #dce4ee;padding:10px 9px}th{background:#eef3f7;font-weight:650}tr:nth-child(even){background:#fafbfd}pre{background:#142538;color:#e7f0f7;padding:22px;border-radius:9px;overflow:auto;font:12px/1.55 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}code{font:0.88em ui-monospace,monospace}a{color:#08778c}.flow{background:#f5f8fb;padding:20px;text-align:center;border:1px solid #dce4ee;border-radius:12px}.flow div{border:1px solid #bad1dc;background:white;padding:12px;max-width:680px;margin:auto;border-radius:6px}.flow b{display:block;font-size:13px;color:#60768a;margin:8px}.small,footer{font-size:13px;color:#607087}footer{border-top:1px solid #dce4ee;padding-top:20px;margin-top:35px}li{margin:9px 0}details{background:#f5f8fb;padding:14px;margin:10px 0}summary{cursor:pointer;font-weight:600}@media print{body{background:white;font-size:11px}main{margin:0;padding:10px;max-width:none}h1{font-size:30px}h2{font-size:20px}h3{font-size:16px}pre{font-size:9px}table{font-size:10px}h2,h3{break-after:avoid}tr,.verdict,.flow{break-inside:avoid}details{display:none}@page{size:A4;margin:16mm}}</style><main><div class="eyebrow">Milvus engineering prototype · 31 October 2026</div>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Native Milvus MultiSearch — design and performance evidence</title><style>*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#1c293a;font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1160px;margin:32px auto;background:white;padding:56px;border-radius:16px}h1{font-size:42px;line-height:1.14;letter-spacing:-1.2px;margin:12px 0 22px}h2{font-size:25px;margin-top:42px;border-top:1px solid #dce4ee;padding-top:24px}h3{font-size:19px;margin-top:28px}.eyebrow{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:#176681}.lead{font-size:20px;color:#506176}.verdict{background:#ecf6f8;border-left:5px solid #08798b;padding:22px 26px;margin:28px 0}.verdict p:last-child{margin-bottom:0}.chart svg{width:100%;height:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin:18px 0;overflow-wrap:anywhere}td,th{text-align:left;border-bottom:1px solid #dce4ee;padding:10px 9px}th{background:#eef3f7;font-weight:650}tr:nth-child(even){background:#fafbfd}pre{background:#142538;color:#e7f0f7;padding:22px;border-radius:9px;overflow:auto;font:12px/1.55 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}code{font:0.88em ui-monospace,monospace}a{color:#08778c}.flow{background:#f5f8fb;padding:20px;text-align:center;border:1px solid #dce4ee;border-radius:12px}.flow div{border:1px solid #bad1dc;background:white;padding:12px;max-width:680px;margin:auto;border-radius:6px}.flow b{display:block;font-size:13px;color:#60768a;margin:8px}.small,footer{font-size:13px;color:#607087}footer{border-top:1px solid #dce4ee;padding-top:20px;margin-top:35px}li{margin:9px 0}details{background:#f5f8fb;padding:14px;margin:10px 0}summary{cursor:pointer;font-weight:600}@media print{body{background:white;font-size:11px}main{margin:0;padding:10px;max-width:none}h1{font-size:30px}h2{font-size:20px}h3{font-size:16px}pre{font-size:9px}table{font-size:10px}h2,h3{break-after:avoid}tr,.verdict,.flow{break-inside:avoid}details{display:none}@page{size:A4;margin:16mm}}pre { line-height: 125%; }
+td.linenos .normal { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+span.linenos { color: #6e7681; background-color: #0d1117; padding-left: 5px; padding-right: 5px; }
+td.linenos .special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+span.linenos.special { color: #e6edf3; background-color: #6e7681; padding-left: 5px; padding-right: 5px; }
+.code-block .hll { background-color: #6e7681 }
+.code-block { background: #0d1117; color: #e6edf3 }
+.code-block .c { color: #8b949e; font-style: italic } /* Comment */
+.code-block .err { color: #f85149 } /* Error */
+.code-block .esc { color: #e6edf3 } /* Escape */
+.code-block .g { color: #e6edf3 } /* Generic */
+.code-block .k { color: #ff7b72 } /* Keyword */
+.code-block .l { color: #a5d6ff } /* Literal */
+.code-block .n { color: #e6edf3 } /* Name */
+.code-block .o { color: #ff7b72; font-weight: bold } /* Operator */
+.code-block .x { color: #e6edf3 } /* Other */
+.code-block .p { color: #e6edf3 } /* Punctuation */
+.code-block .ch { color: #8b949e; font-style: italic } /* Comment.Hashbang */
+.code-block .cm { color: #8b949e; font-style: italic } /* Comment.Multiline */
+.code-block .cp { color: #8b949e; font-weight: bold; font-style: italic } /* Comment.Preproc */
+.code-block .cpf { color: #8b949e; font-style: italic } /* Comment.PreprocFile */
+.code-block .c1 { color: #8b949e; font-style: italic } /* Comment.Single */
+.code-block .cs { color: #8b949e; font-weight: bold; font-style: italic } /* Comment.Special */
+.code-block .gd { color: #ffa198; background-color: #490202 } /* Generic.Deleted */
+.code-block .ge { color: #e6edf3; font-style: italic } /* Generic.Emph */
+.code-block .gr { color: #ffa198 } /* Generic.Error */
+.code-block .gh { color: #79c0ff; font-weight: bold } /* Generic.Heading */
+.code-block .gi { color: #56d364; background-color: #0f5323 } /* Generic.Inserted */
+.code-block .go { color: #8b949e } /* Generic.Output */
+.code-block .gp { color: #8b949e } /* Generic.Prompt */
+.code-block .gs { color: #e6edf3; font-weight: bold } /* Generic.Strong */
+.code-block .gu { color: #79c0ff } /* Generic.Subheading */
+.code-block .gt { color: #ff7b72 } /* Generic.Traceback */
+.code-block .g-Underline { color: #e6edf3; text-decoration: underline } /* Generic.Underline */
+.code-block .kc { color: #79c0ff } /* Keyword.Constant */
+.code-block .kd { color: #ff7b72 } /* Keyword.Declaration */
+.code-block .kn { color: #ff7b72 } /* Keyword.Namespace */
+.code-block .kp { color: #79c0ff } /* Keyword.Pseudo */
+.code-block .kr { color: #ff7b72 } /* Keyword.Reserved */
+.code-block .kt { color: #ff7b72 } /* Keyword.Type */
+.code-block .ld { color: #79c0ff } /* Literal.Date */
+.code-block .m { color: #a5d6ff } /* Literal.Number */
+.code-block .s { color: #a5d6ff } /* Literal.String */
+.code-block .na { color: #e6edf3 } /* Name.Attribute */
+.code-block .nb { color: #e6edf3 } /* Name.Builtin */
+.code-block .nc { color: #f0883e; font-weight: bold } /* Name.Class */
+.code-block .no { color: #79c0ff; font-weight: bold } /* Name.Constant */
+.code-block .nd { color: #d2a8ff; font-weight: bold } /* Name.Decorator */
+.code-block .ni { color: #ffa657 } /* Name.Entity */
+.code-block .ne { color: #f0883e; font-weight: bold } /* Name.Exception */
+.code-block .nf { color: #d2a8ff; font-weight: bold } /* Name.Function */
+.code-block .nl { color: #79c0ff; font-weight: bold } /* Name.Label */
+.code-block .nn { color: #ff7b72 } /* Name.Namespace */
+.code-block .nx { color: #e6edf3 } /* Name.Other */
+.code-block .py { color: #79c0ff } /* Name.Property */
+.code-block .nt { color: #7ee787 } /* Name.Tag */
+.code-block .nv { color: #79c0ff } /* Name.Variable */
+.code-block .ow { color: #ff7b72; font-weight: bold } /* Operator.Word */
+.code-block .pm { color: #e6edf3 } /* Punctuation.Marker */
+.code-block .w { color: #6e7681 } /* Text.Whitespace */
+.code-block .mb { color: #a5d6ff } /* Literal.Number.Bin */
+.code-block .mf { color: #a5d6ff } /* Literal.Number.Float */
+.code-block .mh { color: #a5d6ff } /* Literal.Number.Hex */
+.code-block .mi { color: #a5d6ff } /* Literal.Number.Integer */
+.code-block .mo { color: #a5d6ff } /* Literal.Number.Oct */
+.code-block .sa { color: #79c0ff } /* Literal.String.Affix */
+.code-block .sb { color: #a5d6ff } /* Literal.String.Backtick */
+.code-block .sc { color: #a5d6ff } /* Literal.String.Char */
+.code-block .dl { color: #79c0ff } /* Literal.String.Delimiter */
+.code-block .sd { color: #a5d6ff } /* Literal.String.Doc */
+.code-block .s2 { color: #a5d6ff } /* Literal.String.Double */
+.code-block .se { color: #79c0ff } /* Literal.String.Escape */
+.code-block .sh { color: #79c0ff } /* Literal.String.Heredoc */
+.code-block .si { color: #a5d6ff } /* Literal.String.Interpol */
+.code-block .sx { color: #a5d6ff } /* Literal.String.Other */
+.code-block .sr { color: #79c0ff } /* Literal.String.Regex */
+.code-block .s1 { color: #a5d6ff } /* Literal.String.Single */
+.code-block .ss { color: #a5d6ff } /* Literal.String.Symbol */
+.code-block .bp { color: #e6edf3 } /* Name.Builtin.Pseudo */
+.code-block .fm { color: #d2a8ff; font-weight: bold } /* Name.Function.Magic */
+.code-block .vc { color: #79c0ff } /* Name.Variable.Class */
+.code-block .vg { color: #79c0ff } /* Name.Variable.Global */
+.code-block .vi { color: #79c0ff } /* Name.Variable.Instance */
+.code-block .vm { color: #79c0ff } /* Name.Variable.Magic */
+.code-block .il { color: #a5d6ff } /* Literal.Number.Integer.Long */pre.code-block{background:#0d1117;color:#e6edf3}pre.code-block code{font-size:1em}pre.code-block,pre.code-block *{-webkit-print-color-adjust:exact;print-color-adjust:exact}</style><main><div class="eyebrow">Milvus engineering prototype · 31 October 2026</div>
 <h1>MultiSearch through the existing Milvus service</h1>
 <p class="lead">A native Python method and gRPC API that package independent searches across databases and collections into one call, with bounded dispatch through the existing Proxy Search path.</p>
 <div class="verdict"><strong>What this experiment demonstrates</strong><p>The corrected implementation works over native gRPC on standalone Milvus. Under the two-CPU contention workload, MultiSearch achieved +8.2% logical throughput versus stock v3.0.5, with group p99 changing -5.3% and ordinary-Search probe p99 changing -7.1%. The modified ordinary Search path showed a +3.3% group-p99 increase and -0.4% throughput change, which remains a review caveat. Observed CPU utilization was 97.0% for stock and 97.0% for MultiSearch.</p><p>These are measurements of this workload, not a general latency or production-readiness guarantee. The Kubernetes evidence and remaining limits appear below.</p></div>
 <h2>1. The product contract</h2>
 <p>A consultation may need searches in multiple medical collections, each with its own vector dimension, metric, filter, output fields and topK. MultiSearch transports a list of those independent requests. Every item includes its own database and collection. Results stay separate and retain input order; there is no score fusion or cross-collection atomic snapshot.</p>
-<pre><code>client.multi_search([
-    {"id": "papers", "db_name": "literature", "collection_name": "papers",
-     "data": [paper_vector], "anns_field": "embedding", "limit": 10},
-    {"id": "guidelines", "db_name": "clinical", "collection_name": "guidelines",
-     "data": [guideline_vector], "anns_field": "vector", "limit": 3},
-], max_concurrent_searches=8, timeout=5)</code></pre>
+<pre class="code-block" data-language="python"><code><span class="n">client</span><span class="o">.</span><span class="n">multi_search</span><span class="p">([</span>
+    <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;papers&quot;</span><span class="p">,</span> <span class="s2">&quot;db_name&quot;</span><span class="p">:</span> <span class="s2">&quot;literature&quot;</span><span class="p">,</span> <span class="s2">&quot;collection_name&quot;</span><span class="p">:</span> <span class="s2">&quot;papers&quot;</span><span class="p">,</span>
+     <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">paper_vector</span><span class="p">],</span> <span class="s2">&quot;anns_field&quot;</span><span class="p">:</span> <span class="s2">&quot;embedding&quot;</span><span class="p">,</span> <span class="s2">&quot;limit&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">},</span>
+    <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;guidelines&quot;</span><span class="p">,</span> <span class="s2">&quot;db_name&quot;</span><span class="p">:</span> <span class="s2">&quot;clinical&quot;</span><span class="p">,</span> <span class="s2">&quot;collection_name&quot;</span><span class="p">:</span> <span class="s2">&quot;guidelines&quot;</span><span class="p">,</span>
+     <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">guideline_vector</span><span class="p">],</span> <span class="s2">&quot;anns_field&quot;</span><span class="p">:</span> <span class="s2">&quot;vector&quot;</span><span class="p">,</span> <span class="s2">&quot;limit&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">},</span>
+<span class="p">],</span> <span class="n">max_concurrent_searches</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+</code></pre>
 <p>This extends the actual <code>MilvusClient</code>, <code>GrpcHandler</code> and <code>MilvusService</code>. The public RPC is <code>/milvus.proto.milvus.MilvusService/MultiSearch</code>. It uses the existing authenticated client channel. The protocol and SDK changes are provided as companion patches to their actual repositories; they are unpublished dependencies.</p>
 <p>Transport batching reduces client-to-Proxy RPC count, not the underlying search work. Under an illustrative independent 3% per-RPC failure model, 100 calls have a 95.2% probability of at least one failure. One batched call has one transport exposure, but loses all its results if that call fails. Real PSC failures can be correlated; this prototype does not establish a 3% production question failure rate or validate any GCP SLA claim.</p>
 <h2>2. Why the wait does not consume a parent search worker</h2>
 <div class="flow"><div>Python multi_search()</div><b>↓ one existing-service RPC</b><div>Proxy envelope admission + bounded dispatcher goroutines</div><b>↓ each item, independent DB and parameters</b><div>Ordinary Search entry chain: authentication · RBAC · quota · hooks</div><b>↓</b><div>Server.Search → Proxy.Search → ordinary DQL queue → QueryNode</div><b>↓</b><div>Ordered independent outcomes → one response</div></div>
 <p>The concern about tying up threads is valid if the parent is put in the same finite worker pool as its children: all pool slots could wait for children that cannot run. Here, the parent stays outside the DQL pool. <code>WaitGroup.Wait()</code> and channel receives park Go goroutines instead of spinning or reserving an OS thread. The ordinary Search tasks still occupy their normal scheduler slots while executing. Waiting retains request/result state, and scheduling, serialization, allocation and leaf computation still cost CPU.</p>
 <p>Current HybridSearch converts one database/collection request into a SearchRequest with SubReqs, then enqueues one search task and performs collection-local execution/reduction. It is a useful example of waiting for search completion, but its shared collection and ranking semantics do not provide independent cross-database dispatch. MultiSearch reuses the ordinary Search path separately for each item.</p>
-<h3>Existing task wait</h3><pre><code>func (tc *TaskCondition) WaitToFinish() error {
-	select {
-	case &lt;-tc.ctx.Done():
-		return errors.Wrap(tc.ctx.Err(), &quot;proxy TaskCondition context Done&quot;)
-	case err := &lt;-tc.done:
-		return err
-	}
-}</code></pre><h3>Actual dispatcher implementation</h3><p>The code below is extracted from the prototype. The semaphore is shared by all batches on this Proxy. The worker count is bounded per batch. The parent waits outside the search scheduler.</p><pre><code>parallelism := e.limits.Parallelism
-	if requested := req.GetMaxConcurrentSearches(); requested &gt; 0 {
-		parallelism = min(parallelism, int(requested))
-	}
-	// The RPC handler and these bounded workers stay outside the DQL pool.
-	for range min(parallelism, len(req.Items)) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for ctx.Err() == nil {
-				i := int(next.Add(1) - 1)
-				if i &gt;= len(req.Items) {
-					return
-				}
-				select {
-				case e.active &lt;- struct{}{}:
-				case &lt;-ctx.Done():
-					return
-				}
-				if ctx.Err() != nil {
-					&lt;-e.active
-					return
-				}
-				item := req.Items[i]
-				// Search and entry interceptors may mutate the request. Never share
-				// caller-owned request pointers between workers (or retry attempts).
-				search := proto.Clone(item.Search).(*milvuspb.SearchRequest)
-				result, err := e.search(ctx, search)
-				&lt;-e.active
-				outcome := &amp;milvuspb.SearchOutcome{Id: item.Id, Result: result}
-				if err != nil {
-					s := status.Convert(err)
-					outcome.Result = nil
-					outcome.GrpcCode, outcome.GrpcMessage = int32(s.Code()), s.Message()
-				} else if result == nil || result.Status == nil {
-					outcome.Result = &amp;milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg(&quot;Search returned no result status&quot;))}
-				}
-				// Reserve protobuf framing overhead as well as outcome bytes.
-				if resultBytes.Add(int64(proto.Size(outcome)+16)) &gt; int64(e.limits.MaxResponseBytes) {
-					overflow.Store(true)
-					cancel()
-					return
-				}
-				out.Items[i] = outcome
-			}
-		}()
-	}
-	wg.Wait()</code></pre><h3>Actual integration with the ordinary Search entry</h3><p>A Go method call does not automatically invoke gRPC interceptors. The callback explicitly re-enters the shared Search chain before calling the existing server method. Request cloning and independent mutable RPC statistics prevent sibling state sharing.</p><pre><code>entry := proxyEntryInterceptor(limiter, getMetaCache)
-	search := func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-		// Fork mutable stats; the access-log interceptor similarly allocates
-		// an independent object. Identity, deadlines and tracing are inherited.
-		ctx = metrics.WithIndependentRPCStats(ctx)
-		resp, err := entry(ctx, req, &amp;grpc.UnaryServerInfo{Server: s, FullMethod: milvuspb.MilvusService_Search_FullMethodName},
-			func(ctx context.Context, req any) (any, error) {
-				return s.Search(ctx, req.(*milvuspb.SearchRequest))
-			})
-		if err != nil {
-			return nil, err
-		}
-		result, ok := resp.(*milvuspb.SearchResults)
-		if !ok || result == nil {
-			return &amp;milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg(&quot;Search entry returned an invalid response&quot;))}, nil
-		}
-		return result, nil
-	}</code></pre><h3>Actual public protocol additions</h3><pre><code>message MultiSearchRequest {
-  repeated MultiSearchItem items = 1;
-  // Zero uses the server default. Positive values are capped by server policy.
-  uint32 max_concurrent_searches = 2;
-}
-message MultiSearchItem {
-  string id = 1;
-  SearchRequest search = 2;
-}
-message SearchOutcome {
-  string id = 1;
-  SearchResults result = 2;
-  int32 grpc_code = 3;
-  string grpc_message = 4;
-}
-message MultiSearchResponse {
-  common.Status status = 1;
-  repeated SearchOutcome items = 2;
-}</code></pre><h3>Actual Python RPC call and item preparation</h3><pre><code>def multi_search(self, searches, max_concurrent_searches=0, timeout=None, context=None):
-        &quot;&quot;&quot;Execute independent searches with one RPC and no whole-batch retry.&quot;&quot;&quot;
-        if not searches:
-            raise ParamError(message=&quot;multi_search requires at least one search&quot;)
-        if not isinstance(max_concurrent_searches, int) or not 0 &lt;= max_concurrent_searches &lt; 2**32:
-            raise ParamError(message=&quot;max_concurrent_searches must be a uint32&quot;)
-        request = milvus_types.MultiSearchRequest(max_concurrent_searches=max_concurrent_searches)
-        decimals = []
-        for i, source in enumerate(searches):
-            args = dict(source)
-            item_id = str(args.pop(&quot;id&quot;, i))
-            child_context = args.pop(&quot;context&quot;, context)
-            db_name = args.pop(&quot;db_name&quot;, child_context.get_db_name() if child_context else &quot;&quot;)
-            child_context = CallContext(db_name=db_name)
-            decimals.append(args.get(&quot;round_decimal&quot;, -1))
-            child = self._prepare_search_request(timeout=timeout, context=child_context, **args)
-            child.db_name = db_name
-            request.items.add(id=item_id, search=child)
-        response = self._stub.MultiSearch(request, timeout=timeout, metadata=_api_level_md(context))
-        check_status(response.status)</code></pre><h2>3. Concurrency controls and established precedent</h2>
+<h3>Existing task wait</h3><pre class="code-block" data-language="go"><code><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">tc</span><span class="w"> </span><span class="o">*</span><span class="nx">TaskCondition</span><span class="p">)</span><span class="w"> </span><span class="nx">WaitToFinish</span><span class="p">()</span><span class="w"> </span><span class="kt">error</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">select</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">tc</span><span class="p">.</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Done</span><span class="p">():</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">errors</span><span class="p">.</span><span class="nx">Wrap</span><span class="p">(</span><span class="nx">tc</span><span class="p">.</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Err</span><span class="p">(),</span><span class="w"> </span><span class="s">&quot;proxy TaskCondition context Done&quot;</span><span class="p">)</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">tc</span><span class="p">.</span><span class="nx">done</span><span class="p">:</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre><h3>Actual dispatcher implementation</h3><p>The code below is extracted from the prototype. The semaphore is shared by all batches on this Proxy. The worker count is bounded per batch. The parent waits outside the search scheduler.</p><pre class="code-block" data-language="go"><code><span class="nx">parallelism</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">limits</span><span class="p">.</span><span class="nx">Parallelism</span>
+<span class="k">if</span><span class="w"> </span><span class="nx">requested</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">req</span><span class="p">.</span><span class="nx">GetMaxConcurrentSearches</span><span class="p">();</span><span class="w"> </span><span class="nx">requested</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">parallelism</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">min</span><span class="p">(</span><span class="nx">parallelism</span><span class="p">,</span><span class="w"> </span><span class="nb">int</span><span class="p">(</span><span class="nx">requested</span><span class="p">))</span>
+<span class="p">}</span>
+<span class="c1">// The RPC handler and these bounded workers stay outside the DQL pool.</span>
+<span class="k">for</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">min</span><span class="p">(</span><span class="nx">parallelism</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="w">    </span><span class="k">go</span><span class="w"> </span><span class="kd">func</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">defer</span><span class="w"> </span><span class="nx">wg</span><span class="p">.</span><span class="nx">Done</span><span class="p">()</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Err</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">i</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">int</span><span class="p">(</span><span class="nx">next</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">i</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">select</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">active</span><span class="w"> </span><span class="o">&lt;-</span><span class="w"> </span><span class="kd">struct</span><span class="p">{}{}:</span>
+<span class="w">            </span><span class="k">case</span><span class="w"> </span><span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Done</span><span class="p">():</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">ctx</span><span class="p">.</span><span class="nx">Err</span><span class="p">()</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="o">&lt;-</span><span class="nx">e</span><span class="p">.</span><span class="nx">active</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="nx">item</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">req</span><span class="p">.</span><span class="nx">Items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+<span class="w">            </span><span class="c1">// Search and entry interceptors may mutate the request. Never share</span>
+<span class="w">            </span><span class="c1">// caller-owned request pointers between workers (or retry attempts).</span>
+<span class="w">            </span><span class="nx">search</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">proto</span><span class="p">.</span><span class="nx">Clone</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">Search</span><span class="p">).(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">)</span>
+<span class="w">            </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">search</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">search</span><span class="p">)</span>
+<span class="w">            </span><span class="o">&lt;-</span><span class="nx">e</span><span class="p">.</span><span class="nx">active</span>
+<span class="w">            </span><span class="nx">outcome</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchOutcome</span><span class="p">{</span><span class="nx">Id</span><span class="p">:</span><span class="w"> </span><span class="nx">item</span><span class="p">.</span><span class="nx">Id</span><span class="p">,</span><span class="w"> </span><span class="nx">Result</span><span class="p">:</span><span class="w"> </span><span class="nx">result</span><span class="p">}</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">s</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">status</span><span class="p">.</span><span class="nx">Convert</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">Result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">GrpcCode</span><span class="p">,</span><span class="w"> </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">GrpcMessage</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nb">int32</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">Code</span><span class="p">()),</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">Message</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">result</span><span class="p">.</span><span class="nx">Status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">outcome</span><span class="p">.</span><span class="nx">Result</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">{</span><span class="nx">Status</span><span class="p">:</span><span class="w"> </span><span class="nx">merr</span><span class="p">.</span><span class="nx">Status</span><span class="p">(</span><span class="nx">merr</span><span class="p">.</span><span class="nx">WrapErrServiceInternalMsg</span><span class="p">(</span><span class="s">&quot;Search returned no result status&quot;</span><span class="p">))}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="c1">// Reserve protobuf framing overhead as well as outcome bytes.</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">resultBytes</span><span class="p">.</span><span class="nx">Add</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">proto</span><span class="p">.</span><span class="nx">Size</span><span class="p">(</span><span class="nx">outcome</span><span class="p">)</span><span class="o">+</span><span class="mi">16</span><span class="p">))</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="nb">int64</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">limits</span><span class="p">.</span><span class="nx">MaxResponseBytes</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">overflow</span><span class="p">.</span><span class="nx">Store</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+<span class="w">                </span><span class="nx">cancel</span><span class="p">()</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="nx">out</span><span class="p">.</span><span class="nx">Items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">outcome</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}()</span>
+<span class="p">}</span>
+<span class="nx">wg</span><span class="p">.</span><span class="nx">Wait</span><span class="p">()</span>
+</code></pre><h3>Actual integration with the ordinary Search entry</h3><p>A Go method call does not automatically invoke gRPC interceptors. The callback explicitly re-enters the shared Search chain before calling the existing server method. Request cloning and independent mutable RPC statistics prevent sibling state sharing.</p><pre class="code-block" data-language="go"><code><span class="nx">entry</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">proxyEntryInterceptor</span><span class="p">(</span><span class="nx">limiter</span><span class="p">,</span><span class="w"> </span><span class="nx">getMetaCache</span><span class="p">)</span>
+<span class="nx">search</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Fork mutable stats; the access-log interceptor similarly allocates</span>
+<span class="w">    </span><span class="c1">// an independent object. Identity, deadlines and tracing are inherited.</span>
+<span class="w">    </span><span class="nx">ctx</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">metrics</span><span class="p">.</span><span class="nx">WithIndependentRPCStats</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+<span class="w">    </span><span class="nx">resp</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">entry</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">grpc</span><span class="p">.</span><span class="nx">UnaryServerInfo</span><span class="p">{</span><span class="nx">Server</span><span class="p">:</span><span class="w"> </span><span class="nx">s</span><span class="p">,</span><span class="w"> </span><span class="nx">FullMethod</span><span class="p">:</span><span class="w"> </span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">MilvusService_Search_FullMethodName</span><span class="p">},</span>
+<span class="w">        </span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="w"> </span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="kt">any</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="nx">s</span><span class="p">.</span><span class="nx">Search</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">req</span><span class="p">.(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchRequest</span><span class="p">))</span>
+<span class="w">        </span><span class="p">})</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="kc">nil</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">resp</span><span class="p">.(</span><span class="o">*</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">!</span><span class="nx">ok</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="o">&amp;</span><span class="nx">milvuspb</span><span class="p">.</span><span class="nx">SearchResults</span><span class="p">{</span><span class="nx">Status</span><span class="p">:</span><span class="w"> </span><span class="nx">merr</span><span class="p">.</span><span class="nx">Status</span><span class="p">(</span><span class="nx">merr</span><span class="p">.</span><span class="nx">WrapErrServiceInternalMsg</span><span class="p">(</span><span class="s">&quot;Search entry returned an invalid response&quot;</span><span class="p">))},</span><span class="w"> </span><span class="kc">nil</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">result</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre><h3>Actual public protocol additions</h3><pre class="code-block" data-language="protobuf"><code><span class="kd">message</span><span class="w"> </span><span class="nc">MultiSearchRequest</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">repeated</span><span class="w"> </span><span class="n">MultiSearchItem</span><span class="w"> </span><span class="na">items</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// Zero uses the server default. Positive values are capped by server policy.</span>
+<span class="w">  </span><span class="kt">uint32</span><span class="w"> </span><span class="na">max_concurrent_searches</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">MultiSearchItem</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">string</span><span class="w"> </span><span class="na">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">  </span><span class="n">SearchRequest</span><span class="w"> </span><span class="na">search</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">SearchOutcome</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">string</span><span class="w"> </span><span class="na">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">  </span><span class="n">SearchResults</span><span class="w"> </span><span class="na">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">int32</span><span class="w"> </span><span class="na">grpc_code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">string</span><span class="w"> </span><span class="na">grpc_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="kd">message</span><span class="w"> </span><span class="nc">MultiSearchResponse</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">common.Status</span><span class="w"> </span><span class="na">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+<span class="w">  </span><span class="k">repeated</span><span class="w"> </span><span class="n">SearchOutcome</span><span class="w"> </span><span class="na">items</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre><h3>Actual Python RPC call and item preparation</h3><pre class="code-block" data-language="python"><code><span class="k">def</span> <span class="nf">multi_search</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">searches</span><span class="p">,</span> <span class="n">max_concurrent_searches</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">context</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Execute independent searches with one RPC and no whole-batch retry.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">searches</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">ParamError</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s2">&quot;multi_search requires at least one search&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">max_concurrent_searches</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">max_concurrent_searches</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="o">**</span><span class="mi">32</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">ParamError</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s2">&quot;max_concurrent_searches must be a uint32&quot;</span><span class="p">)</span>
+    <span class="n">request</span> <span class="o">=</span> <span class="n">milvus_types</span><span class="o">.</span><span class="n">MultiSearchRequest</span><span class="p">(</span><span class="n">max_concurrent_searches</span><span class="o">=</span><span class="n">max_concurrent_searches</span><span class="p">)</span>
+    <span class="n">decimals</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">source</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">searches</span><span class="p">):</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">source</span><span class="p">)</span>
+        <span class="n">item_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;id&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">))</span>
+        <span class="n">child_context</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;context&quot;</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span>
+        <span class="n">db_name</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;db_name&quot;</span><span class="p">,</span> <span class="n">child_context</span><span class="o">.</span><span class="n">get_db_name</span><span class="p">()</span> <span class="k">if</span> <span class="n">child_context</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">child_context</span> <span class="o">=</span> <span class="n">CallContext</span><span class="p">(</span><span class="n">db_name</span><span class="o">=</span><span class="n">db_name</span><span class="p">)</span>
+        <span class="n">decimals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;round_decimal&quot;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">child</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare_search_request</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="n">context</span><span class="o">=</span><span class="n">child_context</span><span class="p">,</span> <span class="o">**</span><span class="n">args</span><span class="p">)</span>
+        <span class="n">child</span><span class="o">.</span><span class="n">db_name</span> <span class="o">=</span> <span class="n">db_name</span>
+        <span class="n">request</span><span class="o">.</span><span class="n">items</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">id</span><span class="o">=</span><span class="n">item_id</span><span class="p">,</span> <span class="n">search</span><span class="o">=</span><span class="n">child</span><span class="p">)</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stub</span><span class="o">.</span><span class="n">MultiSearch</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="n">_api_level_md</span><span class="p">(</span><span class="n">context</span><span class="p">))</span>
+    <span class="n">check_status</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">status</span><span class="p">)</span>
+</code></pre><h2>3. Concurrency controls and established precedent</h2>
 <p><a href="https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-msearch">Elasticsearch's established _msearch API</a> batches independent searches, including searches targeting different indices. Its <code>max_concurrent_searches</code> bounds concurrent sub-searches; the documented default is max(1, data nodes × min(search thread-pool size, 10)). Its <code>max_concurrent_shard_requests</code> separately limits each sub-search's concurrent shard requests per node, defaulting to 5. These distinguish request-level and shard-level pressure. This is a mature API pattern, not evidence that Milvus automatically inherits Elasticsearch's performance or fairness properties.</p>
 <table><tr><th>Prototype control</th><th>Default</th><th>Purpose</th></tr>
 <tr><td>max_concurrent_searches (request)</td><td>0 = server default</td><td>Caller can lower item concurrency; cannot exceed the server cap.</td></tr>
@@ -134,46 +224,47 @@ message MultiSearchResponse {
 <tr><td>Request / response limits</td><td>4 / 16 MiB</td><td>Bound accepted payload and retained aggregate response.</td></tr>
 <tr><td>timeoutSeconds</td><td>30</td><td>Upper bound on parent context; an earlier client deadline wins.</td></tr></table>
 <p>These controls are not a reservation for ordinary Search, a per-tenant fair scheduler or a cluster-wide concurrency limit. The prototype adds no new shard-concurrency control. The capacity tests use 128 shared permits and 32 admitted batches so MultiSearch is not compared with an artificially smaller logical-inflight limit.</p>
-<h2>4. Reproducible build and functional evidence</h2><p>The stock reference is the latest stable 3.0 release found at test time: <a href="https://github.com/milvus-io/milvus/releases/tag/v3.0.5">v3.0.5</a>, source <code>af15c807513eb6508ae22d0f3a6484e8937be1a5</code>. This is a released-build comparison, not a claim about every later master commit. The modified Go binary uses the stock image's unchanged native libraries.</p><pre><code>{
-  &quot;milvus_base_tag&quot;: &quot;v3.0.5&quot;,
-  &quot;milvus_base_commit&quot;: &quot;af15c807513eb6508ae22d0f3a6484e8937be1a5&quot;,
-  &quot;milvus_proto_base_commit&quot;: &quot;2f00c7cf17db3ab3bb7b93ea8f2a7261bcc264da&quot;,
-  &quot;pymilvus_base_commit&quot;: &quot;f63a1aa2816205c165f04d33e658b06e9b1cee11&quot;,
-  &quot;stock_image&quot;: &quot;milvusdb/milvus@sha256:b9b79b4a284b41cd12d60abc418310f84621fa4c977d409b38f501519a7ccf8a&quot;,
-  &quot;native_libraries&quot;: &quot;unchanged from the stock v3.0.5 image&quot;,
-  &quot;build_tags&quot;: &quot;dynamic,sonic,with_jemalloc,bytedance_tango&quot;,
-  &quot;go&quot;: &quot;go1.26.9&quot;,
-  &quot;pgo&quot;: &quot;configs/pgo/default.pgo (empty in source checkout)&quot;,
-  &quot;server_cpu_cores&quot;: 4,
-  &quot;server_cpuset_active&quot;: &quot;64-67&quot;,
-  &quot;server_cpuset_inactive&quot;: &quot;68-71&quot;,
-  &quot;load_generator_cpuset&quot;: &quot;32-39&quot;,
-  &quot;storage&quot;: &quot;bounded 4 GiB tmpfs; CPU/read benchmark, not disk I/O&quot;,
-  &quot;rows&quot;: 160000,
-  &quot;collections&quot;: 8,
-  &quot;databases&quot;: 2,
-  &quot;index&quot;: &quot;FLAT&quot;,
-  &quot;dimensions&quot;: [
-    128,
-    192,
-    256
-  ],
-  &quot;metric_types&quot;: [
-    &quot;L2&quot;,
-    &quot;IP&quot;,
-    &quot;COSINE&quot;
-  ],
-  &quot;modified_binary_sha256&quot;: &quot;627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36&quot;,
-  &quot;stock_binary_sha256&quot;: &quot;8ea7eaad6eab04babe04b0eab6bbec4be58153f0df720aa3825177ed9fff70ee&quot;,
-  &quot;cpu_model&quot;: &quot;Intel Xeon Gold 6338N @ 2.20GHz&quot;,
-  &quot;host_logical_cpus&quot;: 128,
-  &quot;host_physical_cores&quot;: 64,
-  &quot;host_shared&quot;: true,
-  &quot;cpu_pinning_note&quot;: &quot;CPU sets restrict scheduling; sibling hyperthreads and NUMA memory placement are not reserved.&quot;,
-  &quot;saturation_cpu_limit&quot;: 2,
-  &quot;saturation_cpuset&quot;: &quot;64-65&quot;,
-  &quot;saturation_GOMAXPROCS&quot;: 4
-}</code></pre><p>The standalone fixture contains 160,000 deterministic vectors across two databases, each with the same four collection names. Dimensions are 128/192/256; metrics are L2/IP/COSINE; indexes are FLAT. Fifty-item functional requests vary topK and compare IDs, fields and scores with ordinary Search.</p><table><tr><th>Verification</th><th>Result</th></tr><tr><td>dispatcher tests</td><td>9</td></tr><tr><td>dispatcher race tests</td><td>passed</td></tr><tr><td>per item rpc stats race test</td><td>passed</td></tr><tr><td>proxy server and stream regression</td><td>passed</td></tr><tr><td>new sdk tests</td><td>3</td></tr><tr><td>existing sdk search tests</td><td>7</td></tr><tr><td>standalone native api tests</td><td>12</td></tr><tr><td>full repository suite run</td><td>False</td></tr><tr><td>kubernetes</td><td>passed: 12 native API checks on each of two Proxy replicas (24 checks)</td></tr><tr><td>performance</td><td>30 runs completed: 24 four-CPU runs and 6 two-CPU contention runs</td></tr><tr><td>sdk search tests after formatting</td><td>10</td></tr></table><details><summary>functional.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><details><summary>kubernetes-functional.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><details><summary>kubernetes-functional-proxy2.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><p>Coverage includes independent cross-database RBAC, missing databases, invalid vector dimensions, duplicate IDs, item and byte limits, deadlines, cancellation recovery, permit cleanup and status preservation. Race tests exercise dispatch and mutable statistics. The full repository test suite was not run. Dynamic quota rejection was traced through the shared interceptor but not fault-injected in this v3.0.5 run.</p>
+<h2>4. Reproducible build and functional evidence</h2><p>The stock reference is the latest stable 3.0 release found at test time: <a href="https://github.com/milvus-io/milvus/releases/tag/v3.0.5">v3.0.5</a>, source <code>af15c807513eb6508ae22d0f3a6484e8937be1a5</code>. This is a released-build comparison, not a claim about every later master commit. The modified Go binary uses the stock image's unchanged native libraries.</p><pre class="code-block" data-language="json"><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;milvus_base_tag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;v3.0.5&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;milvus_base_commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;af15c807513eb6508ae22d0f3a6484e8937be1a5&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;milvus_proto_base_commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2f00c7cf17db3ab3bb7b93ea8f2a7261bcc264da&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;pymilvus_base_commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;f63a1aa2816205c165f04d33e658b06e9b1cee11&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stock_image&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;milvusdb/milvus@sha256:b9b79b4a284b41cd12d60abc418310f84621fa4c977d409b38f501519a7ccf8a&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;native_libraries&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;unchanged from the stock v3.0.5 image&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;build_tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dynamic,sonic,with_jemalloc,bytedance_tango&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;go&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;go1.26.9&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;pgo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;configs/pgo/default.pgo (empty in source checkout)&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;server_cpu_cores&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;server_cpuset_active&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;64-67&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;server_cpuset_inactive&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;68-71&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;load_generator_cpuset&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;32-39&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;storage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bounded 4 GiB tmpfs; CPU/read benchmark, not disk I/O&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rows&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">160000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;collections&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;databases&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;index&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FLAT&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;dimensions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="mi">128</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">192</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">256</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;metric_types&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="s2">&quot;L2&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;IP&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;COSINE&quot;</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;modified_binary_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stock_binary_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;8ea7eaad6eab04babe04b0eab6bbec4be58153f0df720aa3825177ed9fff70ee&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cpu_model&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Intel Xeon Gold 6338N @ 2.20GHz&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;host_logical_cpus&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;host_physical_cores&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;host_shared&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cpu_pinning_note&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;CPU sets restrict scheduling; sibling hyperthreads and NUMA memory placement are not reserved.&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;saturation_cpu_limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;saturation_cpuset&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;64-65&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;saturation_GOMAXPROCS&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span>
+<span class="p">}</span>
+</code></pre><p>The standalone fixture contains 160,000 deterministic vectors across two databases, each with the same four collection names. Dimensions are 128/192/256; metrics are L2/IP/COSINE; indexes are FLAT. Fifty-item functional requests vary topK and compare IDs, fields and scores with ordinary Search.</p><table><tr><th>Verification</th><th>Result</th></tr><tr><td>dispatcher tests</td><td>9</td></tr><tr><td>dispatcher race tests</td><td>passed</td></tr><tr><td>per item rpc stats race test</td><td>passed</td></tr><tr><td>proxy server and stream regression</td><td>passed</td></tr><tr><td>new sdk tests</td><td>3</td></tr><tr><td>existing sdk search tests</td><td>7</td></tr><tr><td>standalone native api tests</td><td>12</td></tr><tr><td>full repository suite run</td><td>False</td></tr><tr><td>kubernetes</td><td>passed: 12 native API checks on each of two Proxy replicas (24 checks)</td></tr><tr><td>performance</td><td>30 runs completed: 24 four-CPU runs and 6 two-CPU contention runs</td></tr><tr><td>sdk search tests after formatting</td><td>10</td></tr></table><details><summary>functional.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><details><summary>kubernetes-functional.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><details><summary>kubernetes-functional-proxy2.json: 12 checks, all passed = True</summary><ul><li>One native MilvusService.MultiSearch RPC; no client Search fan-out — PASS</li><li>Envelope rejects missing and invalid credentials before dispatch — PASS</li><li>50 searches match ordinary Search across two databases and four shared collection names — PASS</li><li>Input dictionaries and connection database remain unchanged — PASS</li><li>Omitted item database inherits client default while explicit override works — PASS</li><li>Missing database and invalid dimension isolated from successful siblings — PASS</li><li>Reject duplicate ids — PASS</li><li>Reject 129 items — PASS</li><li>Reject oversized request — PASS</li><li>Same collection name in different databases has independent RBAC — PASS</li><li>Envelope deadline — PASS</li><li>Successful request after cancellation — PASS</li></ul></details><p>Coverage includes independent cross-database RBAC, missing databases, invalid vector dimensions, duplicate IDs, item and byte limits, deadlines, cancellation recovery, permit cleanup and status preservation. Race tests exercise dispatch and mutable statistics. The full repository test suite was not run. Dynamic quota rejection was traced through the shared interceptor but not fault-injected in this v3.0.5 run.</p>
 <h3>Distributed Kubernetes check</h3><p>The same image is deployed in an isolated namespace on a single-node Kubernetes v1.30 development cluster: two Proxy replicas plus separate mixcoord, QueryNode, DataNode, StreamingNode, etcd and MinIO pods. A separate fixture has 2,048 vectors across the same two-database/eight-collection layout. Both Proxy replicas are addressed directly through local port forwarding, and the full native API verification suite is run against each. The running binary hash is recorded. This is a functional distributed-path check, not a multi-node availability or performance test.</p>
 <h2>5. Performance methodology</h2>
 <p>All paths execute identical groups of eight logical searches. Search sends eight concurrent ordinary RPCs; MultiSearch sends one RPC with eight items. Latency measures the time to complete the whole group in both cases. Performance items use nq=1 and topK 5–8; loaded batches contain eight items. Fifty-item batches are tested functionally, not benchmarked here. A compiled Go client avoids measuring Python fan-out limitations as server performance. Requests are pre-built and use the same vectors, parameters and authorization.</p>

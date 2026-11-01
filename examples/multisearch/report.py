@@ -3,7 +3,13 @@
 import html
 import json
 import statistics
+import re
+import textwrap
 from pathlib import Path
+
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
 
 root = Path("artifacts/multisearch-v2")
 summary = json.loads((root / "performance-summary.json").read_text())
@@ -13,13 +19,23 @@ rows = summary["runs"]
 escape = html.escape
 
 
+formatter = HtmlFormatter(style="github-dark", nowrap=True)
+
+
+def highlighted(source, language):
+    source = textwrap.dedent(source).strip().expandtabs(4)
+    tokens = highlight(source, get_lexer_by_name(language), formatter)
+    return f'<pre class="code-block" data-language="{language}"><code>{tokens}</code></pre>'
+
+
 def code(path, start=None, end=None):
     s = Path(path).read_text()
     if start:
         s = s[s.index(start) :]
     if end:
         s = s[: s.index(end)]
-    return "<pre><code>" + escape(s.strip()) + "</code></pre>"
+    language = {".go": "go", ".py": "python", ".proto": "protobuf"}[Path(path).suffix]
+    return highlighted(s, language)
 
 
 def quantile(values, p=0.99):
@@ -153,7 +169,7 @@ body += """<h2>3. Concurrency controls and established precedent</h2>
 <p>These controls are not a reservation for ordinary Search, a per-tenant fair scheduler or a cluster-wide concurrency limit. The prototype adds no new shard-concurrency control. The capacity tests use 128 shared permits and 32 admitted batches so MultiSearch is not compared with an artificially smaller logical-inflight limit.</p>
 <h2>4. Reproducible build and functional evidence</h2>"""
 body += f"""<p>The stock reference is the latest stable 3.0 release found at test time: <a href="https://github.com/milvus-io/milvus/releases/tag/v3.0.5">v3.0.5</a>, source <code>{manifest['milvus_base_commit']}</code>. This is a released-build comparison, not a claim about every later master commit. The modified Go binary uses the stock image's unchanged native libraries.</p>"""
-body += "<pre><code>" + escape(json.dumps(manifest, indent=2)) + "</code></pre>"
+body += highlighted(json.dumps(manifest, indent=2), "json")
 body += """<p>The standalone fixture contains 160,000 deterministic vectors across two databases, each with the same four collection names. Dimensions are 128/192/256; metrics are L2/IP/COSINE; indexes are FLAT. Fifty-item functional requests vary topK and compare IDs, fields and scores with ordinary Search.</p>"""
 body += "<table><tr><th>Verification</th><th>Result</th></tr>"
 for name, value in verification.items():
@@ -209,6 +225,16 @@ body += f"""</table><p>Across {len(rows)} recorded performance runs: {summary['t
 <p>Review <code>internal/proxy/multisearch.go</code>, <code>internal/distributed/proxy/multisearch.go</code>, the shared interceptor integration in <code>service.go</code>, and the two companion patches. Reproduction scripts, unit tests, functional tests and the load driver live under <code>examples/multisearch</code>. The design document is <code>docs/design-docs/multisearch.md</code>.</p>
 <footer>Evidence generated from local test artifacts. Latest-stable release reference checked on 2026-10-31. Prototype scope and unverified behavior are stated explicitly.</footer>"""
 css = """*{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#1c293a;font:16px/1.6 system-ui,-apple-system,sans-serif}main{max-width:1160px;margin:32px auto;background:white;padding:56px;border-radius:16px}h1{font-size:42px;line-height:1.14;letter-spacing:-1.2px;margin:12px 0 22px}h2{font-size:25px;margin-top:42px;border-top:1px solid #dce4ee;padding-top:24px}h3{font-size:19px;margin-top:28px}.eyebrow{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:#176681}.lead{font-size:20px;color:#506176}.verdict{background:#ecf6f8;border-left:5px solid #08798b;padding:22px 26px;margin:28px 0}.verdict p:last-child{margin-bottom:0}.chart svg{width:100%;height:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin:18px 0;overflow-wrap:anywhere}td,th{text-align:left;border-bottom:1px solid #dce4ee;padding:10px 9px}th{background:#eef3f7;font-weight:650}tr:nth-child(even){background:#fafbfd}pre{background:#142538;color:#e7f0f7;padding:22px;border-radius:9px;overflow:auto;font:12px/1.55 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}code{font:0.88em ui-monospace,monospace}a{color:#08778c}.flow{background:#f5f8fb;padding:20px;text-align:center;border:1px solid #dce4ee;border-radius:12px}.flow div{border:1px solid #bad1dc;background:white;padding:12px;max-width:680px;margin:auto;border-radius:6px}.flow b{display:block;font-size:13px;color:#60768a;margin:8px}.small,footer{font-size:13px;color:#607087}footer{border-top:1px solid #dce4ee;padding-top:20px;margin-top:35px}li{margin:9px 0}details{background:#f5f8fb;padding:14px;margin:10px 0}summary{cursor:pointer;font-weight:600}@media print{body{background:white;font-size:11px}main{margin:0;padding:10px;max-width:none}h1{font-size:30px}h2{font-size:20px}h3{font-size:16px}pre{font-size:9px}table{font-size:10px}h2,h3{break-after:avoid}tr,.verdict,.flow{break-inside:avoid}details{display:none}@page{size:A4;margin:16mm}}"""
+# The inline public API example is Python; source excerpts and JSON are already
+# highlighted above. Embed all tokens/CSS so offline HTML and PDF need no JS/CDN.
+body = re.sub(
+    r"<pre><code>(.*?)</code></pre>",
+    lambda match: highlighted(html.unescape(match.group(1)), "python"),
+    body,
+    flags=re.DOTALL,
+)
+css += formatter.get_style_defs(".code-block")
+css += "pre.code-block{background:#0d1117;color:#e6edf3}pre.code-block code{font-size:1em}pre.code-block,pre.code-block *{-webkit-print-color-adjust:exact;print-color-adjust:exact}"
 (root / "multisearch-report.html").write_text(
     '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Native Milvus MultiSearch — design and performance evidence</title><style>'
     + css

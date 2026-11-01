@@ -1,0 +1,2 @@
+Pygments==2.15.1
+matplotlib==3.8.4
