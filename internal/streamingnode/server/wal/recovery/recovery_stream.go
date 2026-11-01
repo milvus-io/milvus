@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -41,6 +42,8 @@ func (r *recoveryStorageImpl) recoverFromStream(
 			return
 		}
 	}()
+	tombstones := utility.NewTxnTombstones()
+	tombstones.Advance(lastTimeTickMessage.TimeTick())
 L:
 	for {
 		select {
@@ -51,6 +54,8 @@ L:
 				// The recovery stream is reach the end, we can stop the recovery.
 				break L
 			}
+			// Recover results before ObserveMessage filters already checkpointed effects.
+			tombstones.Observe(msg)
 			r.ObserveMessage(ctx, msg)
 		}
 	}
@@ -59,6 +64,7 @@ L:
 	}
 	snapshot = r.getSnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	snapshot.TxnTombstones = tombstones
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
 		mlog.Int("vchannels", len(snapshot.VChannels)),

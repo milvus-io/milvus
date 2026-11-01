@@ -118,6 +118,8 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 	}
 	defer p.lifetime.Done()
 
+	// Transport failures retry this same message. Only the server's business
+	// error decides whether the caller may replay a transaction with a new ID.
 	for {
 		// get producer.
 		producerHandler, err := p.producer.GetProducerAfterAvailable(ctx)
@@ -152,6 +154,7 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 				if err := p.rateLimiter.WaitUntilAvailable(ctx); err != nil {
 					return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 				}
+				continue // Admission rejection did not reach WAL.
 			}
 		}
 	}
