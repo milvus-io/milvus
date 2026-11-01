@@ -1076,6 +1076,56 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLQuery), float64(4))
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLSearch), float64(5))
 	})
+
+	t.Run("test write cool-off persists across rounds", func(t *testing.T) {
+		Params.Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
+		defer Params.Reset(Params.QuotaConfig.DMLLimitEnabled.Key)
+		Params.Save(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "100")
+		defer Params.Reset(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key)
+		Params.Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
+		defer Params.Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
+		Params.Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, "0.8")
+		defer Params.Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
+		Params.Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, "0.9")
+		defer Params.Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
+		Params.Save(Params.QuotaConfig.FactorChangeThreshold.Key, "0.05")
+		defer Params.Reset(Params.QuotaConfig.FactorChangeThreshold.Key)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{0: {1: {}}}).Maybe()
+		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
+		quotaCenter.collectionIDToDBID = collectionIDToDBID
+
+		baseline := Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
+		rounds := []struct {
+			memoryUsage uint64  // of 1000, water levels at 800 and 900
+			rateRatio   float64 // expected insert rate / baseline
+		}{
+			{850, 0.5},  // factor 0.5
+			{850, 0.5},  // same factor, the throttled rate must survive the limiter reset
+			{852, 0.5},  // factor 0.48 is within the threshold of 0.5, keep 0.5
+			{870, 0.3},  // factor 0.3
+			{804, 0.96}, // factor 0.96
+			{700, 1},    // only the time tick factor 1 is left, lift the throttling
+		}
+		for i, round := range rounds {
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms: metricsinfo.HardwareMetrics{MemoryUsage: round.memoryUsage, Memory: 1000},
+					// No time tick delay, so the time tick factor is 1 every round.
+					Fgm:    metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphChannel: "dml"},
+					Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{1}},
+				},
+			}
+			assert.NoError(t, quotaCenter.calculateRates())
+			limiter, ok := quotaCenter.rateLimiter.GetCollectionLimiters(0, 1).GetLimiters().Get(internalpb.RateType_DMLInsert)
+			assert.True(t, ok)
+			assert.InDelta(t, baseline*round.rateRatio, float64(limiter.Limit()), 1, "round %d", i+1)
+		}
+	})
 }
 
 // A collection that is neither loaded nor has a healthy segment is named by no
