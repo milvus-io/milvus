@@ -47,6 +47,8 @@ extraConfigFiles:
         # enable storage v3
         useLoonFFI: true
     dataCoord:
+      import:
+        enableImportV3: true
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
       targetScalarIndexVersion: 5

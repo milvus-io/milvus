@@ -3065,7 +3065,14 @@ class TestCreateImportJob(RestImportTestBase):
             rsp = self.import_job_client.get_import_job_progress(job_id)
             if rsp["data"]["state"] == "Failed":
                 reason = rsp["data"].get("reason", "").lower()
-                assert "dim" in reason or "dimension" in reason or "mismatch" in reason
+                # Import V3's Parquet reader reports vector-length alignment
+                # instead of using the legacy dimension-mismatch wording.
+                assert (
+                    "dim" in reason
+                    or "dimension" in reason
+                    or "mismatch" in reason
+                    or ("length of vector is not aligned" in reason and f"expected {dim} but got {wrong_dim}" in reason)
+                ), reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to vector dimension mismatch in Parquet"

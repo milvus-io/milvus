@@ -92,6 +92,8 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      import:
+        enableImportV3: true
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
       targetScalarIndexVersion: 5
