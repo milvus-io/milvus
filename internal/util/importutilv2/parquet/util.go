@@ -65,6 +65,12 @@ func WrapNullElementErr(field *schemapb.FieldSchema) error {
 		fmt.Sprintf("array element is not allowed to be null value for field '%s'", field.GetName()))
 }
 
+func WrapNullStructElementErr(structName string, element int) error {
+	return merr.WrapErrImportFailedMsg(
+		"element %d of struct field '%s' is null; a struct element cannot be null, set its sub-field values to null instead",
+		element, structName)
+}
+
 func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
 	// Create map for all fields including sub-fields from StructArrayFields
 	allFields := typeutil.GetAllFieldSchemas(schema)
@@ -97,7 +103,8 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 				return nil, merr.WrapErrImportFailedMsg("struct field is not a list of structs: %s", structField.Name)
 			}
 			nestedStructs[structField.Name] = i
-			// Verify struct fields match
+			// Verify struct fields match. An element-nullable sub-field may be
+			// absent: it is filled with null elements (see below).
 			for _, subField := range structField.Fields {
 				fieldName, err := typeutil.ExtractStructFieldName(subField.Name)
 				if err != nil {
@@ -110,7 +117,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 						break
 					}
 				}
-				if !found {
+				if !found && !subField.GetElementNullable() {
 					return nil, merr.WrapErrImportFailedMsg("field not found in struct: %s", fieldName)
 				}
 			}
@@ -180,28 +187,48 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		listType := pqSchema.Field(columnIndex).Type.(*arrow.ListType)
 		structType := listType.Elem().(*arrow.StructType)
 
-		// Create reader for each sub-field
-		for _, subField := range structField.Fields {
-			// Find field index in struct
+		// Find the index of each sub-field in the arrow struct, -1 if absent.
+		fieldIndices := make([]int, len(structField.Fields))
+		presentSubFields := 0
+		for j, subField := range structField.Fields {
 			fieldName, err := typeutil.ExtractStructFieldName(subField.Name)
 			if err != nil {
 				return nil, merr.WrapErrImportFailed(err.Error())
 			}
 
-			fieldIndex := -1
+			fieldIndices[j] = -1
 			for i, f := range structType.Fields() {
 				if f.Name == fieldName {
-					fieldIndex = i
+					fieldIndices[j] = i
 					break
 				}
 			}
 
-			if fieldIndex == -1 {
+			if fieldIndices[j] == -1 {
+				if subField.GetElementNullable() {
+					continue
+				}
 				return nil, merr.WrapErrImportFailedMsg("field not found in struct: %s", fieldName)
 			}
+			presentSubFields++
+		}
 
-			// Create struct field reader
-			reader, err := NewStructFieldReader(ctx, fileReader, columnIndex, fieldIndex, subField)
+		// Create reader for each sub-field. An absent element-nullable sub-field
+		// is filled with null elements by the DataNode from a present sibling.
+		// When the column carries none of the sub-fields (all its children were
+		// dropped or are unknown), no sibling gives the element counts, so the
+		// absent sub-fields are read from the shape of the column itself.
+		for j, subField := range structField.Fields {
+			var reader *FieldReader
+			var err error
+			switch {
+			case fieldIndices[j] != -1:
+				reader, err = NewStructFieldReader(ctx, fileReader, columnIndex, fieldIndices[j], structField.GetName(), subField)
+			case presentSubFields == 0:
+				reader, err = NewStructNullElementsReader(ctx, fileReader, columnIndex, structField.GetName(), subField)
+			default:
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -215,8 +242,9 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	for _, field := range nameToField {
 		// auto-id field, function output field already checked
 		// dynamic field, nullable field, default value field, not provided or provided both ok
+		// element-nullable struct sub-field, filled with null elements
 		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
-			field.GetNullable() || field.GetDefaultValue() != nil {
+			field.GetNullable() || field.GetDefaultValue() != nil || field.GetElementNullable() {
 			continue
 		}
 		// the other field must be provided
@@ -434,6 +462,15 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 	case schemapb.DataType_Geometry:
 		return &arrow.StringType{}, nil
 	case schemapb.DataType_Array:
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			return convertNestedArrayToArrowType(field, isArray)
+		}
+		if isArray {
+			// Only a nested Array has an Array element, and it carries a nested
+			// type_schema; the schema was validated at DDL time.
+			return nil, merr.WrapErrImportSysFailedMsg(
+				"field '%s' has element type Array but no nested type_schema", field.GetName())
+		}
 		elemType, err := convertToArrowDataType(field, true)
 		if err != nil {
 			return nil, err
@@ -483,6 +520,106 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 	}
 }
 
+// nestedArrayLeaf resolves the leaf of a nested Array<Array<T>> field. The
+// schema was validated at DDL time, so a chain that does not resolve to exactly
+// two list levels is a Milvus bug.
+func nestedArrayLeaf(field *schemapb.FieldSchema) (schemapb.DataType, bool, error) {
+	leaf, leafNullable, depth, err := typeutil.GetFieldArrayLeaf(field)
+	if err != nil {
+		return schemapb.DataType_None, false, merr.WrapErrServiceInternalErr(err, "resolve Array leaf of field %s", field.GetName())
+	}
+	if depth != 2 {
+		return schemapb.DataType_None, false, merr.WrapErrImportSysFailedMsg(
+			"nested Array field '%s' supports exactly two list levels, got %d", field.GetName(), depth)
+	}
+	return leaf, leafNullable, nil
+}
+
+// convertNestedArrayToArrowType returns the arrow type of a nested
+// Array<Array<T>> field: list<T> for one element (a struct child, isArray=true)
+// and list<list<T>> for the whole field. Item nullability follows the
+// type_schema: the inner array is nullable iff element_nullable, the leaf iff
+// the leaf node is nullable.
+func convertNestedArrayToArrowType(field *schemapb.FieldSchema, isArray bool) (arrow.DataType, error) {
+	leaf, leafNullable, err := nestedArrayLeaf(field)
+	if err != nil {
+		return nil, err
+	}
+	leafType, err := convertToArrowDataType(&schemapb.FieldSchema{Name: field.GetName(), DataType: leaf}, false)
+	if err != nil {
+		return nil, err
+	}
+	inner := arrow.ListOfField(arrow.Field{
+		Name:     "item",
+		Type:     leafType,
+		Nullable: leafNullable,
+		Metadata: arrow.Metadata{},
+	})
+	if isArray {
+		return inner, nil
+	}
+	return arrow.ListOfField(arrow.Field{
+		Name:     "item",
+		Type:     inner,
+		Nullable: field.GetElementNullable(),
+		Metadata: arrow.Metadata{},
+	}), nil
+}
+
+// structChildArrowType returns the arrow type of one element of a struct
+// sub-field, i.e. the type of its child in the list<struct> column.
+func structChildArrowType(subField *schemapb.FieldSchema) (arrow.DataType, error) {
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		return convertToArrowDataType(subField, true)
+	case schemapb.DataType_ArrayOfVector:
+		return convertElementTypeOfVectorArrayToArrowType(subField)
+	default:
+		return nil, merr.WrapErrImportFailedMsg("unsupported data type in struct field: %v", subField.GetDataType())
+	}
+}
+
+// isStructChildConvertible reports whether a struct child of arrow type src can
+// be read into subField. Unlike isArrowDataTypeConvertible, the arrow null type
+// is checked against the nullability of the level it appears at: a null child
+// iff element_nullable, a list<null> nested child iff the leaf is nullable.
+// The row-level nullable flag never applies to a child.
+func isStructChildConvertible(src arrow.DataType, subField *schemapb.FieldSchema) (bool, error) {
+	if src.ID() == arrow.NULL {
+		return subField.GetElementNullable(), nil
+	}
+	expected, err := structChildArrowType(subField)
+	if err != nil {
+		return false, err
+	}
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		if !typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			return isArrowDataTypeConvertible(src, expected, subField, false), nil
+		}
+		_, leafNullable, err := nestedArrayLeaf(subField)
+		if err != nil {
+			return false, err
+		}
+		srcList, ok := src.(*arrow.ListType)
+		if !ok {
+			return false, nil
+		}
+		if srcList.Elem().ID() == arrow.NULL {
+			return leafNullable, nil
+		}
+		return isArrowDataTypeConvertible(srcList.Elem(), expected.(*arrow.ListType).Elem(), subField, false), nil
+	case schemapb.DataType_ArrayOfVector:
+		// A vector cannot hold null components, whatever the row nullability.
+		if srcList, ok := src.(*arrow.ListType); ok && srcList.Elem().ID() == arrow.NULL {
+			return false, nil
+		}
+		return isArrowDataTypeConvertible(src, expected, subField, false), nil
+	default:
+		return false, nil
+	}
+}
+
 // This method is used only by import util and related tests. Returned arrow.Schema
 // doesn't include function output fields.
 func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
@@ -521,32 +658,17 @@ func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bo
 				return nil, merr.WrapErrImportFailed(err.Error())
 			}
 
-			var arrDataType arrow.DataType
-			switch subField.DataType {
-			case schemapb.DataType_Array:
-				arrDataType, err = convertToArrowDataType(subField, true)
-				if err != nil {
-					return nil, err
-				}
-
-			case schemapb.DataType_ArrayOfVector:
-				arrDataType, err = convertElementTypeOfVectorArrayToArrowType(subField)
-				if err != nil {
-					return nil, err
-				}
-
-			default:
-				err = merr.WrapErrParameterInvalidMsg("unsupported data type in struct: %v", subField.DataType.String())
-			}
-
+			arrDataType, err := structChildArrowType(subField)
 			if err != nil {
 				return nil, err
 			}
 
+			// A child value is one struct element, so its nullability is the
+			// element-level one; row nulls are null list slots.
 			structFields = append(structFields, arrow.Field{
 				Name:     fieldName,
 				Type:     arrDataType,
-				Nullable: subField.GetNullable(),
+				Nullable: subField.GetElementNullable(),
 			})
 		}
 
@@ -557,7 +679,7 @@ func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bo
 		arrFields = append(arrFields, arrow.Field{
 			Name:     structField.Name,
 			Type:     listType,
-			Nullable: false,
+			Nullable: structField.GetNullable(),
 		})
 	}
 
@@ -624,7 +746,8 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 			structFieldMap[arrowField.Name] = arrowField
 		}
 
-		// Verify each sub-field in the struct
+		// Verify each sub-field in the struct. Children that match no sub-field
+		// (unknown or dropped sub-fields) are ignored and never read.
 		for _, subField := range structField.Fields {
 			// Extract actual field name (remove structName[] prefix if present)
 			fieldName, err := typeutil.ExtractStructFieldName(subField.Name)
@@ -634,38 +757,28 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 
 			arrowSubField, ok := structFieldMap[fieldName]
 			if !ok {
+				// filled with null elements, see CreateFieldReaders
+				if subField.GetElementNullable() {
+					continue
+				}
 				return merr.WrapErrImportFailedMsg("sub-field '%s' not found in struct '%s' of arrow schema",
 					fieldName, structField.Name)
 			}
 
-			// Convert Milvus field type to expected Arrow type
-			var expectedArrowType arrow.DataType
-
-			switch subField.DataType {
-			case schemapb.DataType_Array:
-				// For Array type, need to convert based on element type
-				expectedArrowType, err = convertToArrowDataType(subField, true)
-				if err != nil {
-					return err
-				}
-			case schemapb.DataType_ArrayOfVector:
-				expectedArrowType, err = convertElementTypeOfVectorArrayToArrowType(subField)
-				if err != nil {
-					return err
-				}
-			default:
-				return merr.WrapErrImportFailedMsg("unsupported data type in struct field: %v", subField.DataType)
+			expectedArrowType, err := structChildArrowType(subField)
+			if err != nil {
+				return err
 			}
 
 			// Check if the arrow type is convertible to the expected type
-			if !isArrowDataTypeConvertible(arrowSubField.Type, expectedArrowType, subField, false) {
+			convertible, err := isStructChildConvertible(arrowSubField.Type, subField)
+			if err != nil {
+				return err
+			}
+			if !convertible {
 				return merr.WrapErrImportFailedMsg("sub-field '%s' in struct '%s' type mis-match, expect arrow type '%s', got '%s'",
 					fieldName, structField.Name, expectedArrowType.String(), arrowSubField.Type.String())
 			}
-		}
-
-		if len(structFieldMap) != len(structField.Fields) {
-			return merr.WrapErrImportFailedMsg("struct field number dismatch: %s, expect %d, got %d", structField.Name, len(structField.Fields), len(structFieldMap))
 		}
 	}
 

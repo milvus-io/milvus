@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type reader struct {
@@ -41,7 +42,22 @@ type reader struct {
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
+// ValidateSchema rejects collections that NumPy files cannot fill. NumPy
+// carries one file per top-level field and has no form for a struct field, so a
+// collection with any struct field is rejected instead of importing its struct
+// rows as null or failing later with unaligned rows.
+func ValidateSchema(schema *schemapb.CollectionSchema) error {
+	if structFields := schema.GetStructArrayFields(); len(structFields) > 0 {
+		return merr.WrapErrImportFailedMsg("numpy import does not support struct field '%s'; use JSON, CSV or Parquet files",
+			structFields[0].GetName())
+	}
+	return nil
+}
+
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
+	if err := ValidateSchema(schema); err != nil {
+		return nil, err
+	}
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
