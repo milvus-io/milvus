@@ -1,0 +1,5 @@
+*
+!bin/
+!bin/milvus
+!configs/
+!configs/**

@@ -7997,6 +7997,65 @@ func (_c *MockProxy_ManualCompaction_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// MultiSearch provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) MultiSearch(_a0 context.Context, _a1 *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MultiSearch")
+	}
+
+	var r0 *milvuspb.MultiSearchResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.MultiSearchRequest) *milvuspb.MultiSearchResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.MultiSearchResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.MultiSearchRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_MultiSearch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiSearch'
+type MockProxy_MultiSearch_Call struct {
+	*mock.Call
+}
+
+// MultiSearch is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.MultiSearchRequest
+func (_e *MockProxy_Expecter) MultiSearch(_a0 interface{}, _a1 interface{}) *MockProxy_MultiSearch_Call {
+	return &MockProxy_MultiSearch_Call{Call: _e.mock.On("MultiSearch", _a0, _a1)}
+}
+
+func (_c *MockProxy_MultiSearch_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.MultiSearchRequest)) *MockProxy_MultiSearch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.MultiSearchRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_MultiSearch_Call) Return(_a0 *milvuspb.MultiSearchResponse, _a1 error) *MockProxy_MultiSearch_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_MultiSearch_Call) RunAndReturn(run func(context.Context, *milvuspb.MultiSearchRequest) (*milvuspb.MultiSearchResponse, error)) *MockProxy_MultiSearch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) OperatePrivilege(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

@@ -1,0 +1,13 @@
+{
+  "dispatcher_tests": 9,
+  "dispatcher_race_tests": "passed",
+  "per_item_rpc_stats_race_test": "passed",
+  "proxy_server_and_stream_regression": "passed",
+  "new_sdk_tests": 3,
+  "existing_sdk_search_tests": 7,
+  "standalone_native_api_tests": 12,
+  "full_repository_suite_run": false,
+  "kubernetes": "passed: 12 native API checks on each of two Proxy replicas (24 checks)",
+  "performance": "30 runs completed: 24 four-CPU runs and 6 two-CPU contention runs",
+  "sdk_search_tests_after_formatting": 10
+}

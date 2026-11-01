@@ -50,12 +50,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
-	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -338,23 +336,11 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return metaCacheProvider.GetMetaCache()
 	}
 
+	configureMultiSearch(s.proxy, limiter, getMetaCache)
 	var unaryServerOption grpc.ServerOption
 	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
-		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
-			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
-			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
-			proxy.UnaryServerHookInterceptor(),
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptorWithMetaCache(getMetaCache, limiter),
-			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.TraceLogInterceptor,
-			connection.KeepActiveInterceptor,
-		))
+		unaryServerOption = grpc.UnaryInterceptor(proxyEntryInterceptor(limiter, getMetaCache))
 		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
 		// unary chain, so they must be authenticated and authorized through a
 		// dedicated stream interceptor chain. Without this the external server

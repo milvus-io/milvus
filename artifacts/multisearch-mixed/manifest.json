@@ -1,0 +1,41 @@
+{
+  "server_base": "Milvus v3.0.5 af15c80751",
+  "server_binary_sha256": "627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36",
+  "server_binary_changed": false,
+  "harness_sha256": "03347c07e42315268249919b6870f77b50553b320eaf218da7d7b722f48dc5cf",
+  "server_cpu_limit": 2,
+  "server_cpuset": "64-65",
+  "gomaxprocs": 4,
+  "client_cpuset": "32-39",
+  "fixture_rows": 160000,
+  "fixture_databases": 2,
+  "fixture_collections": 8,
+  "fixture_index": "FLAT",
+  "resident_workers": 128,
+  "secondary_batch_size": 8,
+  "fixed_offered_logical_qps": [
+    160,
+    480
+  ],
+  "fixed_offered_group_caps": {
+    "160": 16,
+    "480": 32
+  },
+  "closed_loop_group_cap": 16,
+  "multi_search_shared_permits": 128,
+  "multi_search_max_batches": 32,
+  "query_node_policy": "fifo (with task merging)",
+  "identity": "same root test identity on separate client connections",
+  "phase_seconds": {
+    "warmup": 5,
+    "baseline": 15,
+    "mixed": 30,
+    "recovery": 15
+  },
+  "stable_window_prefix_excluded_seconds": 3,
+  "repetitions": 2,
+  "repetition_order": "forward then reversed; first 160/s pair excluded and replaced in Search-then-MultiSearch order after the main suite",
+  "storage": "4 GiB tmpfs; same fixture as original comparison",
+  "shared_host": true,
+  "excluded_runs_audit": "excluded-runs.json"
+}

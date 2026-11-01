@@ -1,0 +1,36 @@
+{
+  "coordinator_race_tests": {
+    "passed": true,
+    "test_functions": 12
+  },
+  "grpc_integration_and_existing_server_stream_race_tests": {
+    "passed": true
+  },
+  "stats_isolation_race_test": {
+    "passed": true
+  },
+  "python_sdk_tests": {
+    "passed": true,
+    "tests": 3
+  },
+  "standalone_native_checks": {
+    "passed": true,
+    "tests": 12
+  },
+  "kubernetes_native_checks_per_proxy": {
+    "passed": true,
+    "tests": 12,
+    "replicas": 2
+  },
+  "full_go_suite_run": false,
+  "native_cpp_rust_rebuilt": false,
+  "initial_test_fixture_issue": "The new bufconn integration test omitted accesslog.InitAccessLogger; fixed fixture and reran successfully. Production logger behavior unchanged.",
+  "fresh_mixed_traffic": {
+    "total_completed_all_phases_including_warmup": 280665,
+    "errors_all": 0,
+    "drops": 0,
+    "generator_late_groups": 0,
+    "formal_runs": 4
+  },
+  "container_cpu_settings_restored": true
+}

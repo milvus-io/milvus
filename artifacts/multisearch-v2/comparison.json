@@ -1,0 +1,53 @@
+{
+  "two_cpu": {
+    "Stock v3.0.5 / Search": {
+      "qps": 1151.111111111111,
+      "cpu": 0.9702039979388041,
+      "p99": 156.844,
+      "probe": 132.269,
+      "probe_samples": 1174,
+      "errors": 0,
+      "drops": 0,
+      "goroutines": 1159.0,
+      "memory": 848.30078125,
+      "throttle": 0.04318181818181818,
+      "threads": 45.0,
+      "repeats": 2
+    },
+    "Modified / Search": {
+      "qps": 1146.1333333333332,
+      "cpu": 0.9685076755036073,
+      "p99": 161.96,
+      "probe": 128.909,
+      "probe_samples": 1162,
+      "errors": 0,
+      "drops": 0,
+      "goroutines": 1168.0,
+      "memory": 844.25390625,
+      "throttle": 0.060227272727272727,
+      "threads": 44.0,
+      "repeats": 2
+    },
+    "Modified / MultiSearch": {
+      "qps": 1245.8666666666666,
+      "cpu": 0.9696422548626111,
+      "p99": 148.579,
+      "probe": 122.818,
+      "probe_samples": 1278,
+      "errors": 0,
+      "drops": 0,
+      "goroutines": 970.0,
+      "memory": 840.765625,
+      "throttle": 0.1,
+      "threads": 44.0,
+      "repeats": 2
+    }
+  },
+  "multisearch_vs_stock_percent": {
+    "qps": 8.231660231660221,
+    "group_p99": -5.269567213281978,
+    "probe_p99": -7.145287255517174
+  },
+  "modified_search_vs_stock_qps_percent": -0.4324324324324391,
+  "modified_search_vs_stock_p99_percent": 3.2618397898549034
+}

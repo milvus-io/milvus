@@ -2413,6 +2413,13 @@ type AccessLogConfig struct {
 }
 
 type proxyConfig struct {
+	MultiSearchMaxItems          ParamItem `refreshable:"false"`
+	MultiSearchParallelism       ParamItem `refreshable:"false"`
+	MultiSearchGlobalParallelism ParamItem `refreshable:"false"`
+	MultiSearchMaxBatches        ParamItem `refreshable:"false"`
+	MultiSearchMaxRequestBytes   ParamItem `refreshable:"false"`
+	MultiSearchMaxResponseBytes  ParamItem `refreshable:"false"`
+	MultiSearchTimeoutSeconds    ParamItem `refreshable:"false"`
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
@@ -2499,6 +2506,48 @@ func positiveProxyLimitFormatter(defaultValue string) func(string) string {
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
+	p.MultiSearchMaxItems = ParamItem{
+		Key: "proxy.multiSearch.maxItems", DefaultValue: "128", Version: "3.0.0",
+		Doc: "MultiSearch prototype maxItems; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchMaxItems.Init(base.mgr)
+
+	p.MultiSearchParallelism = ParamItem{
+		Key: "proxy.multiSearch.parallelism", DefaultValue: "16", Version: "3.0.0",
+		Doc: "MultiSearch prototype parallelism; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchParallelism.Init(base.mgr)
+
+	p.MultiSearchGlobalParallelism = ParamItem{
+		Key: "proxy.multiSearch.globalParallelism", DefaultValue: "64", Version: "3.0.0",
+		Doc: "MultiSearch prototype globalParallelism; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchGlobalParallelism.Init(base.mgr)
+
+	p.MultiSearchMaxBatches = ParamItem{
+		Key: "proxy.multiSearch.maxBatches", DefaultValue: "8", Version: "3.0.0",
+		Doc: "MultiSearch prototype maxBatches; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchMaxBatches.Init(base.mgr)
+
+	p.MultiSearchMaxRequestBytes = ParamItem{
+		Key: "proxy.multiSearch.maxRequestBytes", DefaultValue: "4194304", Version: "3.0.0",
+		Doc: "MultiSearch prototype maxRequestBytes; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchMaxRequestBytes.Init(base.mgr)
+
+	p.MultiSearchMaxResponseBytes = ParamItem{
+		Key: "proxy.multiSearch.maxResponseBytes", DefaultValue: "16777216", Version: "3.0.0",
+		Doc: "MultiSearch prototype maxResponseBytes; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchMaxResponseBytes.Init(base.mgr)
+
+	p.MultiSearchTimeoutSeconds = ParamItem{
+		Key: "proxy.multiSearch.timeoutSeconds", DefaultValue: "30", Version: "3.0.0",
+		Doc: "MultiSearch prototype timeoutSeconds; positive integer, fixed at startup.", Export: true,
+	}
+	p.MultiSearchTimeoutSeconds.Init(base.mgr)
+
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
 		Version:      "2.2.0",

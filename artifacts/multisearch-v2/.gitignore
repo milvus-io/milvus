@@ -1,0 +1,18 @@
+# Keep reviewable summaries in git. Raw measurements and rendered files are in
+# the local review bundle; the scripts reproduce them.
+*
+!.gitignore
+!README.md
+!build-manifest.json
+!verification-summary.json
+!failure-audit.md
+!functional.json
+!kubernetes-functional.json
+!kubernetes-functional-proxy2.json
+!kubernetes-summary.json
+!kubernetes-binary-sha256.txt
+!performance-summary.json
+!comparison.json
+!multisearch-report.html
+!multisearch-report.pdf
+!performance-chart.svg

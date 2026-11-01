@@ -1,0 +1,24 @@
+etcd:
+  auth:
+    enabled: false
+common:
+  security:
+    authorizationEnabled: true
+mq:
+  type: woodpecker
+woodpecker:
+  storage:
+    type: local
+log:
+  level: warn
+rootCoord:
+  dmlChannelNum: 2
+proxy:
+  multiSearch:
+    maxItems: 128
+    parallelism: 16
+    globalParallelism: 128
+    maxBatches: 32
+    maxRequestBytes: 4194304
+    maxResponseBytes: 16777216
+    timeoutSeconds: 30

@@ -1,0 +1,23 @@
+[
+  {
+    "offered_secondary_qps": 160,
+    "resident_retention_delta_pp": 1.3713054104638522,
+    "resident_mixed_p99_delta_percent": -1.1622630092779418,
+    "secondary_qps_delta_percent": 0.18518518518519933,
+    "secondary_group_p99_delta_percent": -2.4993788362612457
+  },
+  {
+    "offered_secondary_qps": 480,
+    "resident_retention_delta_pp": 4.453640858307906,
+    "resident_mixed_p99_delta_percent": -5.217728605425654,
+    "secondary_qps_delta_percent": -0.12334258402714182,
+    "secondary_group_p99_delta_percent": -5.65524564586476
+  },
+  {
+    "offered_secondary_qps": 0,
+    "resident_retention_delta_pp": 2.211109568754732,
+    "resident_mixed_p99_delta_percent": -2.880114698564873,
+    "secondary_qps_delta_percent": 4.336437718277053,
+    "secondary_group_p99_delta_percent": -3.3473692469645266
+  }
+]
