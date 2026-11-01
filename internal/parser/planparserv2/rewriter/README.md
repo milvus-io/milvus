@@ -102,6 +102,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
   - OR: Merge overlapping or adjacent `BinaryRangeExpr` nodes into wider interval
     - `(10 < x < 25) OR (20 < x < 40)` → `(10 < x < 40)` (overlapping)
     - `(10 < x <= 20) OR (20 <= x < 30)` → `(10 < x < 30)` (adjacent with inclusive)
+    - Integer columns (Int8/Int16/Int32/Int64, including array elements) also merge inclusive bounds one apart: `(1 <= x <= 1) OR (2 <= x <= 2)` → `(1 <= x <= 2)`. JSON and float columns do not, since they can hold values between two integers.
     - Disjoint intervals remain separate: `(10 < x < 20) OR (30 < x < 40)` → remains as OR
   - Inclusivity handling: AND prefers exclusive on equal bounds (stronger), OR prefers inclusive (weaker)
 
