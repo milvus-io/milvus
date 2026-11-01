@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -212,9 +213,19 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	defer sp.End()
 	toReduceResults := inputs[0].([]*internalpb.SearchResults)
 	metricType := getMetricType(toReduceResults)
+	if op.isSearchAggregation {
+		info := reduce.NewReduceSearchResultInfo(op.nq, op.topK).WithOffset(op.offset).WithSearchAggregation(true).
+			WithGroupSize(op.queryInfos[0].GetGroupSize()).
+			WithGroupByFieldIdsFromProto(op.queryInfos[0].GetGroupByFieldId(), op.queryInfos[0].GetGroupByFieldIds())
+		rows, err := reduceSearchAggregationRows(op.traceCtx, toReduceResults, op.nq, op.topK, info.EffectiveOffset(), info.GetGroupSize(), info.GetGroupByFieldIds(), metricType, op.primaryFieldSchema.GetDataType(), op.collectionID, op.partitionIDs)
+		if err != nil {
+			return nil, err
+		}
+		return []any{rows, []string{metricType}}, nil
+	}
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
-		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
+		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.collectionID, op.partitionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +296,7 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		subMetricType := getMetricType(internalResults)
 		result, err := reduceResults(
 			op.traceCtx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType,
-			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs)
+			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, op.collectionID, op.partitionIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -698,20 +709,18 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(inputs) < 2 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: missing inputs (pipeline wire)")
 	}
-	reducedList, ok := inputs[0].([]*milvuspb.SearchResults)
+	rows, ok := inputs[0].(*search_agg.ReducedRows)
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("aggregateOperator: expected []*milvuspb.SearchResults, got %T (pipeline wire)", inputs[0])
+		return nil, merr.WrapErrServiceInternalMsg("aggregateOperator: expected *search_agg.ReducedRows, got %T (pipeline wire)", inputs[0])
 	}
-	// Upstream searchReduceOp has already done cross-shard composite-key reduce
-	// and produced a single *milvuspb.SearchResults wrapping one SearchResultData.
-	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
+	if rows == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
 	metrics, ok := inputs[1].([]string)
 	if !ok || len(metrics) != 1 {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
+	computer := search_agg.NewSearchAggregationComputerFromRows(rows, op.aggCtx, metrics[0])
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -737,7 +746,7 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 			Topks:          make([]int64, op.aggCtx.NQ),
 			AggBuckets:     aggBuckets,
 			AggTopks:       aggTopks,
-			AllSearchCount: aggregatedAllSearchCount(reducedList),
+			AllSearchCount: rows.AllSearchCount,
 		},
 	}
 	return []any{result}, nil
@@ -3089,8 +3098,8 @@ var searchWithAggPipe = &pipelineDef{
 	name: "searchWithAgg",
 	nodes: []*nodeDef{
 		{
-			// searchReduceOp performs cross-shard composite-key group reduce
-			// (reduceSearchResultDataWithMultiGroupBy) before hierarchy compute.
+			// searchReduceOp retains selected source rows and composite groups
+			// before hierarchical aggregation.
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
 			outputs: []string{"reduced", "metrics"},
