@@ -229,6 +229,20 @@ func TestOption_GetCSVSep(t *testing.T) {
 	}
 }
 
+func TestOption_GetLanceVersion(t *testing.T) {
+	_, err := GetLanceVersion(Options{})
+	assert.Error(t, err)
+	_, err = GetLanceVersion(Options{{Key: LanceVersion, Value: ""}})
+	assert.Error(t, err)
+	for _, bad := range []string{"abc", "-1", "1.5"} {
+		_, err = GetLanceVersion(Options{{Key: LanceVersion, Value: bad}})
+		assert.Error(t, err, bad)
+	}
+	v, err := GetLanceVersion(Options{{Key: LanceVersion, Value: "3"}})
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(3), v)
+}
+
 func TestOption_GetCSVNullKey(t *testing.T) {
 	options := []*commonpb.KeyValuePair{}
 	nullKey, err := GetCSVNullKey(options)
