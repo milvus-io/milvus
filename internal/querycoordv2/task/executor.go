@@ -182,6 +182,9 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	// later step in a multi-action task gets its own full budget rather than
 	// sharing whatever was left of an earlier step's.
 	task.ActivateDeadline(step)
+	// Keep physical-copy reservations until this callback returns, even if
+	// the scheduler cancels and retires the task first.
+	task.refOwnership()
 
 	go func() {
 		mlog.Info(context.TODO(), "execute the action of task")
@@ -209,6 +212,7 @@ func (ex *Executor) removeTask(task Task, step int) {
 	}
 
 	ex.executingTasks.Remove(task.Index())
+	task.unrefOwnership()
 	if _, isChannel := task.Actions()[step].(*ChannelAction); isChannel {
 		ex.channelTaskNum.Dec()
 	} else {

@@ -116,6 +116,17 @@ type Task interface {
 
 	// MarshalJSON marshal task info to json
 	MarshalJSON() ([]byte, error)
+
+	// holdOwnership gives the scheduler's reference to the task's physical-copy
+	// reservations; release runs once the last reference is dropped.
+	holdOwnership(release func())
+	// refOwnership adds a reference for an admitted executor callback.
+	refOwnership()
+	// unrefOwnership drops one reference.
+	unrefOwnership()
+	// callbackInFlight reports whether an executor callback still holds a
+	// reference. Executors take it under the collection lock.
+	callbackInFlight() bool
 	Name() string
 	GetReason() string
 
@@ -160,8 +171,10 @@ type baseTask struct {
 	priority Priority
 	err      error
 	actions  []Action
-	step     int
-	reason   string
+	// The scheduler advances step under the collection lock; monitoring reads
+	// it independently when serializing task statistics.
+	step   atomic.Int32
+	reason string
 
 	// span for tracing
 	span trace.Span
@@ -169,6 +182,11 @@ type baseTask struct {
 
 	// startTs
 	startTs atomic.Time
+
+	// Physical-copy reservations outlive retirement while an executor
+	// callback still runs: Cancel does not wait for the RPC to return.
+	ownershipRefs    atomic.Int32
+	releaseOwnership func()
 }
 
 func newBaseTask(ctx context.Context, timeout time.Duration, source Source, collectionID typeutil.UniqueID, replica *meta.Replica, shard string, taskTag string) *baseTask {
@@ -389,13 +407,31 @@ func (task *baseTask) Actions() []Action {
 	return task.actions
 }
 
+func (task *baseTask) holdOwnership(release func()) {
+	task.releaseOwnership = release
+	task.ownershipRefs.Store(1)
+}
+
+func (task *baseTask) refOwnership() {
+	task.ownershipRefs.Inc()
+}
+
+func (task *baseTask) unrefOwnership() {
+	if task.ownershipRefs.Dec() == 0 && task.releaseOwnership != nil {
+		task.releaseOwnership()
+	}
+}
+
+func (task *baseTask) callbackInFlight() bool {
+	return task.ownershipRefs.Load() > 1
+}
+
 func (task *baseTask) Step() int {
-	return task.step
+	return int(task.step.Load())
 }
 
 func (task *baseTask) StepUp() int {
-	task.step++
-	return task.step
+	return int(task.step.Inc())
 }
 
 func (task *baseTask) IsFinished(distMgr *meta.DistributionManager) bool {
@@ -524,6 +560,9 @@ func (task *SegmentTask) SetShardLeaderID(id int64) {
 
 type ChannelTask struct {
 	*baseTask
+	// watchVersion is the generation carried by every Watch this task sends,
+	// so re-sending it does not advance an already subscribed delegator.
+	watchVersion atomic.Int64
 }
 
 // NewChannelTask creates a ChannelTask with actions,
@@ -562,6 +601,13 @@ func NewChannelTask(ctx context.Context,
 
 func (task *ChannelTask) Channel() string {
 	return task.shard
+}
+
+// WatchVersion returns the delegator version this task subscribes with,
+// fixed when the task first sends a Watch.
+func (task *ChannelTask) WatchVersion() int64 {
+	task.watchVersion.CompareAndSwap(0, time.Now().UnixNano())
+	return task.watchVersion.Load()
 }
 
 func (task *ChannelTask) Index() string {

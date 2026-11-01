@@ -89,6 +89,13 @@ func (q *channelQueryView) GetVersion() int64 {
 	return q.version
 }
 
+// HasPartitions reports whether the view serves exactly the given partitions.
+// A view is replaced as a whole, so its partition set is never mutated.
+func (q *channelQueryView) HasPartitions(partitions []int64) bool {
+	requested := typeutil.NewUniqueSet(partitions...)
+	return requested.Len() == q.partitions.Len() && q.partitions.Contain(requested.Collect()...)
+}
+
 func (q *channelQueryView) Serviceable() bool {
 	dataReady := q.loadedRatio.Load() >= 1.0
 	// for now, we only support collection level target(data view), so we need to wait for the query view is synced by coord
