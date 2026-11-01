@@ -1,0 +1,38 @@
+version: '3.5'
+
+services:
+  sglang:
+    container_name: milvus-sglang
+    image: lmsysorg/sglang:v0.5.21
+    command:
+      - sglang
+      - serve
+      - --model-path
+      - Qwen/Qwen3-Embedding-0.6B
+      - --revision
+      - f57bff507cba2367b3afbfbc9847736d3f2479cb
+      - --is-embedding
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30000"
+    gpus: all
+    ipc: host
+    ports:
+      - "30000:30000"
+    volumes:
+      - ${HF_HOME:?set HF_HOME to a writable Hugging Face cache directory}:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:30000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  standalone:
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+      - ./milvus-sglang.yaml:/milvus/configs/milvus.yaml:ro
+    depends_on:
+      sglang:
+        condition: service_healthy

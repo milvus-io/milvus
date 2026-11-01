@@ -89,6 +89,9 @@ func TestFunctionConfig(t *testing.T) {
 		"huggingface.credential",
 		"huggingface.url",
 		"huggingface.enable",
+		"sglang.credential",
+		"sglang.url",
+		"sglang.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")

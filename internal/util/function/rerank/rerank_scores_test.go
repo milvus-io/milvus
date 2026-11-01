@@ -124,6 +124,15 @@ func rerankProviderCases() []rerankProviderCase {
 				return newTeiProvider(endpointParams(url), nil, creds())
 			},
 		},
+		{
+			name: "sglang",
+			body: func(pairs []rerankPair) string {
+				return renderItems(pairs, "index", "score")
+			},
+			newProvider: func(url string) (ModelProvider, error) {
+				return newSGLangProvider(endpointParams(url), nil, creds())
+			},
+		},
 	}
 }
 

@@ -34,12 +34,14 @@ const (
 	providerParamName       string = "provider"
 	vllmProviderName        string = "vllm"
 	teiProviderName         string = "tei"
+	sglangProviderName      string = "sglang"
 	siliconflowProviderName string = "siliconflow"
 	cohereProviderName      string = "cohere"
 	voyageaiProviderName    string = "voyageai"
 	aliProviderName         string = "ali"
 	zillizProviderName      string = "zilliz"
 	huggingFaceProviderName string = "huggingface"
+	sglangProviderName      string = "sglang"
 )
 
 func parseMaxBatch(maxBatch string) (int, error) {
@@ -114,6 +116,8 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 				return newVllmProvider(params, conf, credentials)
 			case teiProviderName:
 				return newTeiProvider(params, conf, credentials)
+			case sglangProviderName:
+				return newSGLangProvider(params, conf, credentials)
 			case siliconflowProviderName:
 				return newSiliconflowProvider(params, conf, credentials, extraInfo)
 			case cohereProviderName:
@@ -127,6 +131,8 @@ func NewModelProvider(params []*commonpb.KeyValuePair, extraInfo *models.ModelEx
 				return newZillizProvider(params, conf, extraInfo)
 			case huggingFaceProviderName:
 				return newHuggingFaceProvider(params, conf, credentials, extraInfo)
+			case sglangProviderName:
+				return newSGLangProvider(params, conf, credentials)
 			default:
 				return nil, merr.WrapErrParameterInvalidMsg("unknown rerank model provider:%s", param.Value)
 			}
