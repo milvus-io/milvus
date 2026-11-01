@@ -7824,6 +7824,71 @@ func Test_ValidateUtil_checkJSONData(t *testing.T) {
 		err := v.checkJSONFieldData(data, f)
 		assert.Error(t, err)
 	})
+
+	jsonFieldData := func(rows [][]byte, validData []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			FieldName: "json",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{
+						JsonData: &schemapb.JSONArray{Data: rows},
+					},
+				},
+			},
+			ValidData: validData,
+		}
+	}
+
+	t.Run("accepts every JSON document shape", func(t *testing.T) {
+		v := NewValidateUtil(WithMaxLenCheck())
+		f := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}
+		rows := [][]byte{[]byte(`{}`), []byte(`{"a":[1,"x"]}`), []byte(`[1]`), []byte(`"s"`), []byte(`1.5`), []byte(`true`), []byte(`null`)}
+		assert.NoError(t, v.checkJSONFieldData(jsonFieldData(rows, nil), f))
+	})
+
+	t.Run("rejects a row that is not one JSON document", func(t *testing.T) {
+		f := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON}
+		for name, bad := range map[string][]byte{
+			"empty":         {},
+			"nil":           nil,
+			"malformed":     []byte(`{"a":`),
+			"trailing data": []byte(`{} {}`),
+			"bare word":     []byte(`abc`),
+			"invalid utf8":  []byte("\"\xff\""),
+		} {
+			t.Run(name, func(t *testing.T) {
+				// The check does not depend on the max length option.
+				v := NewValidateUtil()
+				err := v.checkJSONFieldData(jsonFieldData([][]byte{[]byte(`{}`), bad}, nil), f)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "json field 'json' holds an invalid JSON document at data index 1")
+			})
+		}
+	})
+
+	t.Run("nullable field skips placeholders of null rows only", func(t *testing.T) {
+		v := NewValidateUtil()
+		f := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON, Nullable: true}
+		// expanded: one entry per row, the null row carries an empty placeholder
+		assert.NoError(t, v.checkJSONFieldData(jsonFieldData(
+			[][]byte{[]byte(`{}`), nil, []byte(`[1]`)}, []bool{true, false, true}), f))
+		// compact: one entry per non-null row
+		assert.NoError(t, v.checkJSONFieldData(jsonFieldData(
+			[][]byte{[]byte(`{}`), []byte(`[1]`)}, []bool{true, false, true}), f))
+		// an empty value on a row marked valid is still rejected
+		assert.ErrorIs(t, v.checkJSONFieldData(jsonFieldData(
+			[][]byte{[]byte(`{}`), {}}, []bool{true, true}), f), merr.ErrParameterInvalid)
+		// without valid_data every row is non-null
+		assert.ErrorIs(t, v.checkJSONFieldData(jsonFieldData(
+			[][]byte{[]byte(`{}`), {}}, nil), f), merr.ErrParameterInvalid)
+	})
+
+	t.Run("rows read back from storage are not re-judged", func(t *testing.T) {
+		f := &schemapb.FieldSchema{DataType: schemapb.DataType_JSON, Nullable: true}
+		stored := jsonFieldData([][]byte{[]byte(`{}`), {}}, nil)
+		assert.NoError(t, NewValidateUtil(WithStoredFields("json")).checkJSONFieldData(stored, f))
+		assert.ErrorIs(t, NewValidateUtil(WithStoredFields("other")).checkJSONFieldData(stored, f), merr.ErrParameterInvalid)
+	})
 }
 
 func Test_ValidateUtil_checkLongFieldData(t *testing.T) {

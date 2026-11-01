@@ -293,6 +293,22 @@ TEST_F(JsonFlatIndexTest, TestExistsQuery) {
     ASSERT_FALSE(result[2]);  // not exist
 }
 
+// Older clients could store a valid nullable JSON row whose bytes are empty.
+// Such a row has no document: the build must not throw and must treat it as a
+// row where no path exists, distinct from a null row.
+TEST(JsonFlatIndexEmptyDocumentTest, BuildsWithEmptyValidDocument) {
+    auto json_index = BuildInMemoryJsonFlatIndex(
+        {R"({"a": 1})", "", R"({"a": 2})", ""}, {true, true, true, false});
+
+    auto executor = json_index->create_executor<int64_t>("/a");
+    auto exists = executor->Exists();
+    ASSERT_EQ(exists.size(), 4);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);  // valid, empty bytes
+    EXPECT_TRUE(exists[2]);
+    EXPECT_FALSE(exists[3]);  // null
+}
+
 TEST(JsonFlatIndexExactPathExistsTest, DistinguishesObjectSubpaths) {
     auto json_index = BuildInMemoryJsonFlatIndex({
         R"({"a": 1})",

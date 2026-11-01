@@ -1876,7 +1876,25 @@ func (it *UpsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
-	if err := fieldvalidator.NewValidateUtil(fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()).
+	validateOpts := []fieldvalidator.ValidateOption{fieldvalidator.WithNANCheck(), fieldvalidator.WithOverflowCheck(), fieldvalidator.WithMaxLenCheck(), fieldvalidator.WithMaxCapCheck()}
+	if it.req.GetPartialUpdate() {
+		// The merge filled the fields the request omits from the stored rows.
+		// A request may name the dynamic field "" (REST does); it is $meta here.
+		requested := typeutil.NewSet(lo.Map(it.partialUpdateOriginalFields, func(f *schemapb.FieldData, _ int) string {
+			if f.GetIsDynamic() {
+				return common.MetaFieldName
+			}
+			return f.GetFieldName()
+		})...)
+		var stored []string
+		for _, f := range it.upsertMsg.InsertMsg.GetFieldsData() {
+			if !requested.Contain(f.GetFieldName()) {
+				stored = append(stored, f.GetFieldName())
+			}
+		}
+		validateOpts = append(validateOpts, fieldvalidator.WithStoredFields(stored...))
+	}
+	if err := fieldvalidator.NewValidateUtil(validateOpts...).
 		Validate(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema.SchemaHelper, it.upsertMsg.InsertMsg.NRows()); err != nil {
 		return err
 	}
