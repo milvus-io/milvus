@@ -57,6 +57,9 @@ type CompactionInspector interface {
 	// isFull returns true if the task queue is full, or pending and running
 	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
+	// getRemainingCapacity returns how many tasks can still be enqueued before
+	// isFull holds; a negative value means the pool is unbounded
+	getRemainingCapacity() int
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
@@ -829,6 +832,27 @@ func (c *compactionInspector) isFull() bool {
 	running := len(c.executingTasks)
 	c.executingGuard.RUnlock()
 	return pending+running >= maxTaskNum
+}
+
+// getRemainingCapacity returns how many tasks can still be enqueued before
+// isFull holds: the room left in the queue, and under
+// dataCoord.compaction.maxTaskNum the room left for pending and running
+// tasks together. A negative value means unbounded.
+func (c *compactionInspector) getRemainingCapacity() int {
+	pending := c.queueTasks.Len()
+	left := -1
+	if c.queueTasks.capacity > 0 {
+		left = max(c.queueTasks.capacity-pending, 0)
+	}
+	if maxTaskNum := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt(); maxTaskNum > 0 {
+		c.executingGuard.RLock()
+		running := len(c.executingTasks)
+		c.executingGuard.RUnlock()
+		if capped := max(maxTaskNum-pending-running, 0); left < 0 || capped < left {
+			left = capped
+		}
+	}
+	return left
 }
 
 func (c *compactionInspector) checkDelay(t CompactionTask) {
