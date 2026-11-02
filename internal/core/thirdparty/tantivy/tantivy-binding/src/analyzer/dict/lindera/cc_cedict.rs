@@ -1,11 +1,14 @@
 use super::fetch;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
+#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-cc-cedict"))]
+use crate::error::TantivyBindingError;
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::cc_cedict::CcCedictBuilder;
 
 #[cfg(feature = "lindera-cc-cedict")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(not(feature = "lindera-cc-cedict"))]
+#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-cc-cedict")))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, CcCedictBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -13,6 +16,16 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
             e.to_string()
         ))
     })
+}
+
+// Online download is compiled out; only a dictionary already built under
+// `build_dir` can be used.
+#[cfg(all(
+    not(feature = "analyzer-remote-tls"),
+    not(feature = "lindera-cc-cedict")
+))]
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::ensure_prebuilt(params, "cc-cedict")
 }
 
 #[cfg(not(feature = "lindera-cc-cedict"))]
@@ -52,7 +65,10 @@ pub fn load_cc_cedict(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(feature = "lindera-cc-cedict", feature = "analyzer-remote-tls")
+))]
 mod tests {
     use super::load_cc_cedict;
     use env_logger;
@@ -66,6 +82,7 @@ mod tests {
         assert!(result.is_ok(), "err: {}", result.err().unwrap())
     }
 
+    #[cfg(feature = "analyzer-remote-tls")]
     #[test]
     fn test_fetch_cc_cedict() {
         use lindera_dictionary;

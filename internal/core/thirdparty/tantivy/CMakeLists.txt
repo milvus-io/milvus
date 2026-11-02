@@ -1,5 +1,6 @@
 set(TANTIVY_FEATURES_LIST "" CACHE STRING "List of Cargo features to enable")
 string(REPLACE ";" "," TANTIVY_FEATURES "${TANTIVY_FEATURES_LIST}")
+option(TANTIVY_ANALYZER_REMOTE_TLS "Enable Lindera HTTPS dictionary fetch and gRPC tokenizer TLS (rustls/ring). Disable for FIPS builds." ON)
 
 set(CARGO_SEARCH_PATHS "$ENV{HOME}/.cargo/bin")
 if (NOT "$ENV{CARGO_HOME}" STREQUAL "")
@@ -18,10 +19,15 @@ else ()
     set(TARGET_DIR "release")
 endif ()
 
+if (NOT TANTIVY_ANALYZER_REMOTE_TLS)
+    set(CARGO_CMD ${CARGO_CMD} --no-default-features)
+endif ()
+
 if (TANTIVY_FEATURES)
     set(CARGO_CMD ${CARGO_CMD} --features ${TANTIVY_FEATURES})
 endif ()
 message("Cargo command: ${CARGO_CMD}")
+message(STATUS "TANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS}")
 
 set(TOKENIZER_PROTO ${CMAKE_BINARY_DIR}/thirdparty/milvus-proto/proto/tokenizer.proto)
 
