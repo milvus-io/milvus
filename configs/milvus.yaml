@@ -1402,6 +1402,12 @@ common:
     # management port. The endpoint requires HTTP Basic Auth as root. See
     # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
     featureUsageEnabled: false
+    # Configured initial Broker URLs for External Tables, including legacy Azure Brokers.
+    # Redirects follow storage SDK defaults; redirect targets are not checked.
+    # JSON array string, not a YAML list or comma-separated URLs.
+    # Example: '["https://broker.example.com/token?scope=a,b"]'
+    # Empty or [] denies all Brokers. Restart all components after changing this value.
+    credentialBrokerAllowedEndpoints: "[]"
     internaltlsEnabled: false
     tlsMode: 0
   featureUsage:

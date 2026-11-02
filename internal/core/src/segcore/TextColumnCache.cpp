@@ -68,7 +68,8 @@ TextColumnCache::GetOrCreateReader(
 
     milvus_storage::lob_column::LobColumnConfig config;
     config.lob_base_path = lob_base_path;
-    config.properties = properties;
+    config.properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
 
     auto reader_result = reader_factory_(std::move(fs), config);
     if (!reader_result.ok()) {

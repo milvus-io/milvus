@@ -2436,12 +2436,16 @@ func TestMakePropertiesFromStorageConfig_AllFields(t *testing.T) {
 		UseVirtualHost:    true,
 		RequestTimeoutMs:  5000,
 		MaxConnections:    237,
+		SslTlsMinVersion:  "1.3",
+		UseCrc32CChecksum: true,
 	}
 	props, err := MakePropertiesFromStorageConfig(config, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
 	assert.Equal(t, "237", loonPropertyString(props, PropertyFSMaxConnections))
+	assert.Equal(t, "1.3", loonPropertyString(props, PropertyFSTLSMinVersion))
+	assert.Equal(t, "true", loonPropertyString(props, PropertyFSUseCRC32CChecksum))
 }
 
 // An unset MaxConnections must leave the key absent, not emit "0".

@@ -98,7 +98,7 @@ VortexColumnGroup::VortexColumnGroup(
 
     for (const auto& file : files) {
         auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-            *properties, file.path);
+            properties, file.path);
         if (!fs_result.ok()) {
             ThrowVortexStatus(fs_result.status(),
                               ErrorCode::FileOpenFailed,

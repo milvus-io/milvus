@@ -77,12 +77,12 @@ TEST(ArrowFileSystem,
     CStorageConfig job = {};
     auto properties = MakeInternalPropertiesFromStorageConfig(job);
     EXPECT_EQ(milvus_storage::api::GetValueNoError<uint32_t>(
-                  *properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
+                  properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
               250);
     job.crt_queue_sizes = 125;
     properties = MakeInternalPropertiesFromStorageConfig(job);
     EXPECT_EQ(milvus_storage::api::GetValueNoError<uint32_t>(
-                  *properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
+                  properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
               125);
 }
 
