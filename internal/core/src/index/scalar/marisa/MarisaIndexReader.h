@@ -28,6 +28,7 @@
 #include <marisa.h>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -77,6 +78,9 @@ class MarisaMmapOwner final {
 // Immutable owner/view bundle shared by readers. Owner fields precede the trie
 // so the trie is destroyed before mapped paths are removed by MarisaMmapOwner.
 struct MarisaIndexStorage final {
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
     std::shared_ptr<MarisaMmapOwner> mmap_owner;
     std::shared_ptr<const std::vector<int64_t>> str_ids_owner;
     std::shared_ptr<const std::vector<uint32_t>> csr_index_owner;
@@ -92,6 +96,27 @@ struct MarisaIndexStorage final {
     DataType value_type{DataType::VARCHAR};
     // Exact bytes owned through mmap-backed staging files.
     size_t file_backed_bytes{0};
+};
+
+/** @brief Owns one Marisa storage version shared by request readers. */
+class MarisaIndex final : public IIndex,
+                          public std::enable_shared_from_this<MarisaIndex> {
+ public:
+    explicit MarisaIndex(std::shared_ptr<const MarisaIndexStorage> storage);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override {
+    }
+
+ private:
+    friend class MarisaIndexReader;
+    std::shared_ptr<const MarisaIndexStorage> storage_;
 };
 
 class MarisaIndexReader final : public IIndexReaderBase,
@@ -161,6 +186,10 @@ class MarisaIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
+    friend class MarisaIndex;
+    MarisaIndexReader(std::shared_ptr<const MarisaIndex> index,
+                      milvus::OpContext* op_ctx);
+
     size_t
     LookupKeyId(std::string_view value) const;
 
@@ -172,7 +201,8 @@ class MarisaIndexReader final : public IIndexReaderBase,
     bool
     InLexicographicOrder() const;
 
-    std::shared_ptr<const MarisaIndexStorage> storage_;
+    std::shared_ptr<const MarisaIndex> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index

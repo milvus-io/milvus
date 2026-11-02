@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -108,6 +109,9 @@ class FmIndexStorage final {
     int64_t
     FileBytes() const;
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
  private:
     FmIndexStorage(std::shared_ptr<const FmIndexMappedFile> mapped_file,
                    std::shared_ptr<const fmindex::FMIndex> engine,
@@ -128,6 +132,29 @@ class FmIndexStorage final {
     bool nullable_{false};
     int64_t memory_usage_{0};
     int64_t file_bytes_{0};
+};
+
+/** @brief Owns one Fm storage version shared by request readers. */
+class FmIndex final : public IIndex,
+                      public std::enable_shared_from_this<FmIndex> {
+ public:
+    explicit FmIndex(std::shared_ptr<const FmIndexStorage> storage,
+                     double cost_ratio = 0.001);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override {
+    }
+
+ private:
+    friend class FmIndexReader;
+    std::shared_ptr<const FmIndexStorage> storage_;
+    double cost_ratio_;
 };
 
 class FmIndexReader final : public IIndexReaderBase,
@@ -187,6 +214,10 @@ class FmIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
+    friend class FmIndex;
+    FmIndexReader(std::shared_ptr<const FmIndex> index,
+                  milvus::OpContext* op_ctx);
+
     // O(|pattern|) occurrence count; -1 means "unknown, accept".
     int64_t
     PatternCount(std::string_view pattern, PatternOp op) const;
@@ -222,12 +253,8 @@ class FmIndexReader final : public IIndexReaderBase,
     bool
     RegexGuardAccepts(std::string_view pattern) const;
 
-    std::shared_ptr<const FmIndexStorage> storage_;
-
-    // The cost ratio is fixed for this reader's lifetime. TODO: if live query
-    // configuration updates are required, inject a policy callback instead of
-    // assuming this construction-time value follows later changes.
-    double cost_ratio_{0.001};
+    std::shared_ptr<const FmIndex> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index

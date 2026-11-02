@@ -135,8 +135,7 @@ MarisaMmapOwner::Csr() const {
     return reinterpret_cast<const uint32_t*>(csr_data_);
 }
 
-MarisaIndexReader::MarisaIndexReader(
-    std::shared_ptr<const MarisaIndexStorage> storage)
+MarisaIndex::MarisaIndex(std::shared_ptr<const MarisaIndexStorage> storage)
     : storage_(std::move(storage)) {
     AssertInfo(storage_ != nullptr, "marisa reader requires shared storage");
     AssertInfo(storage_->trie != nullptr, "marisa reader requires a trie");
@@ -155,14 +154,39 @@ MarisaIndexReader::MarisaIndexReader(
                "marisa reader requires STRING, VARCHAR, or TEXT");
 }
 
+IndexMetadata
+MarisaIndex::Metadata() const {
+    return {ReaderCaps{.predicate = true,
+                       .pattern_match = true,
+                       .value_lookup = true,
+                       .cheap_value_lookup = true},
+            Domain::Row,
+            storage_->value_type,
+            static_cast<int64_t>(storage_->str_ids_size)};
+}
+
+IIndexReaderBasePtr
+MarisaIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new MarisaIndexReader(shared_from_this(), op_ctx));
+}
+
+MarisaIndexReader::MarisaIndexReader(
+    std::shared_ptr<const MarisaIndexStorage> storage)
+    : MarisaIndexReader(std::make_shared<MarisaIndex>(std::move(storage)),
+                        nullptr) {
+}
+
+MarisaIndexReader::MarisaIndexReader(std::shared_ptr<const MarisaIndex> index,
+                                     milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
+}
+
 MarisaIndexReader::~MarisaIndexReader() = default;
 
 ReaderCaps
 MarisaIndexReader::Caps() const {
-    return ReaderCaps{.predicate = true,
-                      .pattern_match = true,
-                      .value_lookup = true,
-                      .cheap_value_lookup = true};
+    return index_->Metadata().caps;
 }
 
 Domain
@@ -172,49 +196,51 @@ MarisaIndexReader::CoordDomain() const {
 
 int64_t
 MarisaIndexReader::Count() const {
-    return static_cast<int64_t>(storage_->str_ids_size);
+    return static_cast<int64_t>(index_->storage_->str_ids_size);
 }
 
 DataType
 MarisaIndexReader::ValueType() const {
-    return storage_->value_type;
+    return index_->storage_->value_type;
+}
+
+cachinglayer::ResourceUsage
+MarisaIndexStorage::CellByteSize() const {
+    size_t bytes = sizeof(MarisaIndexStorage);
+    if (!mmap_owner) {
+        AddUsageBytes(bytes, trie->total_size());
+    }
+    if (str_ids_owner) {
+        AddUsageBytes(bytes, str_ids_owner->capacity() * sizeof(int64_t));
+    }
+    if (csr_index_owner) {
+        AddUsageBytes(bytes, csr_index_owner->capacity() * sizeof(uint32_t));
+    }
+    if (csr_offsets_owner) {
+        AddUsageBytes(bytes, csr_offsets_owner->capacity() * sizeof(uint32_t));
+    }
+    return {ToUsageBytes(bytes), ToUsageBytes(file_backed_bytes)};
 }
 
 int64_t
 MarisaIndexReader::MemoryUsage() const {
-    size_t bytes = sizeof(MarisaIndexStorage);
-    if (!storage_->mmap_owner) {
-        AddUsageBytes(bytes, storage_->trie->total_size());
-    }
-    if (storage_->str_ids_owner) {
-        AddUsageBytes(bytes,
-                      storage_->str_ids_owner->capacity() * sizeof(int64_t));
-    }
-    if (storage_->csr_index_owner) {
-        AddUsageBytes(bytes,
-                      storage_->csr_index_owner->capacity() * sizeof(uint32_t));
-    }
-    if (storage_->csr_offsets_owner) {
-        AddUsageBytes(
-            bytes, storage_->csr_offsets_owner->capacity() * sizeof(uint32_t));
-    }
-    return ToUsageBytes(bytes);
+    return index_->storage_->CellByteSize().memory_bytes;
 }
 
 cachinglayer::ResourceUsage
 MarisaIndexReader::CellByteSize() const {
-    return {MemoryUsage(), ToUsageBytes(storage_->file_backed_bytes)};
+    return index_->storage_->CellByteSize();
 }
 
 TargetBitmap
 MarisaIndexReader::In(size_t n, const std::string_view* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "marisa In received a null value array");
-    TargetBitmap result(storage_->str_ids_size);
+    TargetBitmap result(index_->storage_->str_ids_size);
     for (size_t i = 0; i < n; ++i) {
         const auto key_id = LookupKeyId(values[i]);
         if (key_id != MARISA_INVALID_KEY_ID) {
-            SetRowsForKey(*storage_, key_id, true, result);
+            SetRowsForKey(*index_->storage_, key_id, true, result);
         }
     }
     return result;
@@ -224,15 +250,15 @@ TargetBitmap
 MarisaIndexReader::NotIn(size_t n, const std::string_view* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "marisa NotIn received a null value array");
-    TargetBitmap result(storage_->str_ids_size, true);
+    TargetBitmap result(index_->storage_->str_ids_size, true);
     for (size_t i = 0; i < n; ++i) {
         const auto key_id = LookupKeyId(values[i]);
         if (key_id != MARISA_INVALID_KEY_ID) {
-            SetRowsForKey(*storage_, key_id, false, result);
+            SetRowsForKey(*index_->storage_, key_id, false, result);
         }
     }
-    for (size_t row = 0; row < storage_->str_ids_size; ++row) {
-        if (IsNullKeyId(storage_->str_ids[row])) {
+    for (size_t row = 0; row < index_->storage_->str_ids_size; ++row) {
+        if (IsNullKeyId(index_->storage_->str_ids[row])) {
             result.reset(row);
         }
     }
@@ -248,10 +274,10 @@ MarisaIndexReader::Range(const std::string_view& value, CompareOp op) const {
         return NotIn(1, &value);
     }
 
-    TargetBitmap result(storage_->str_ids_size);
+    TargetBitmap result(index_->storage_->str_ids_size);
     const bool ordered = InLexicographicOrder();
     marisa::Agent agent;
-    while (storage_->trie->predictive_search(agent)) {
+    while (index_->storage_->trie->predictive_search(agent)) {
         const std::string_view key(agent.key().ptr(), agent.key().length());
         bool matches = false;
         switch (op) {
@@ -275,7 +301,7 @@ MarisaIndexReader::Range(const std::string_view& value, CompareOp op) const {
                           "invalid comparison operator for marisa range");
         }
         if (matches) {
-            SetRowsForKey(*storage_, agent.key().id(), true, result);
+            SetRowsForKey(*index_->storage_, agent.key().id(), true, result);
         } else if (ordered &&
                    (op == CompareOp::LessThan || op == CompareOp::LessEqual) &&
                    key >= value) {
@@ -290,7 +316,7 @@ MarisaIndexReader::Range(const std::string_view& lo,
                          bool lo_inc,
                          const std::string_view& hi,
                          bool hi_inc) const {
-    TargetBitmap result(storage_->str_ids_size);
+    TargetBitmap result(index_->storage_->str_ids_size);
     if (lo > hi || (lo == hi && !(lo_inc && hi_inc))) {
         return result;
     }
@@ -304,12 +330,12 @@ MarisaIndexReader::Range(const std::string_view& lo,
     marisa::Agent agent;
     agent.set_query(lo.data(), common_size);
     const bool ordered = InLexicographicOrder();
-    while (storage_->trie->predictive_search(agent)) {
+    while (index_->storage_->trie->predictive_search(agent)) {
         const std::string_view key(agent.key().ptr(), agent.key().length());
         const bool above_lo = lo_inc ? key >= lo : key > lo;
         const bool below_hi = hi_inc ? key <= hi : key < hi;
         if (above_lo && below_hi) {
-            SetRowsForKey(*storage_, agent.key().id(), true, result);
+            SetRowsForKey(*index_->storage_, agent.key().id(), true, result);
         } else if (ordered && !below_hi) {
             break;
         }
@@ -319,18 +345,18 @@ MarisaIndexReader::Range(const std::string_view& lo,
 
 std::optional<std::string>
 MarisaIndexReader::Lookup(int64_t offset) const {
-    AssertInfo(
-        offset >= 0 && static_cast<size_t>(offset) < storage_->str_ids_size,
-        "marisa lookup offset {} is out of range [0, {})",
-        offset,
-        storage_->str_ids_size);
-    const auto key_id = storage_->str_ids[offset];
+    AssertInfo(offset >= 0 &&
+                   static_cast<size_t>(offset) < index_->storage_->str_ids_size,
+               "marisa lookup offset {} is out of range [0, {})",
+               offset,
+               index_->storage_->str_ids_size);
+    const auto key_id = index_->storage_->str_ids[offset];
     if (IsNullKeyId(key_id)) {
         return std::nullopt;
     }
     marisa::Agent agent;
-    const auto value =
-        ReverseKey(*storage_->trie, static_cast<size_t>(key_id), agent, offset);
+    const auto value = ReverseKey(
+        *index_->storage_->trie, static_cast<size_t>(key_id), agent, offset);
     return std::string(value);
 }
 
@@ -346,28 +372,30 @@ MarisaIndexReader::Gather(
     marisa::Agent agent;
     for (int64_t i = 0; i < count; ++i) {
         const auto offset = offsets[i];
-        AssertInfo(
-            offset >= 0 && static_cast<size_t>(offset) < storage_->str_ids_size,
-            "marisa gather offset {} is out of range [0, {})",
-            offset,
-            storage_->str_ids_size);
-        const auto key_id = storage_->str_ids[offset];
+        AssertInfo(offset >= 0 && static_cast<size_t>(offset) <
+                                      index_->storage_->str_ids_size,
+                   "marisa gather offset {} is out of range [0, {})",
+                   offset,
+                   index_->storage_->str_ids_size);
+        const auto key_id = index_->storage_->str_ids[offset];
         if (IsNullKeyId(key_id)) {
             out(i, nullptr, false);
             continue;
         }
-        const auto value = ReverseKey(
-            *storage_->trie, static_cast<size_t>(key_id), agent, offset);
+        const auto value = ReverseKey(*index_->storage_->trie,
+                                      static_cast<size_t>(key_id),
+                                      agent,
+                                      offset);
         out(i, &value, true);
     }
 }
 
 TargetBitmap
 MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
-    TargetBitmap result(storage_->str_ids_size);
+    TargetBitmap result(index_->storage_->str_ids_size);
     if (op == PatternOp::PrefixMatch) {
         for (const auto key_id : PrefixMatchKeyIds(pattern)) {
-            SetRowsForKey(*storage_, key_id, true, result);
+            SetRowsForKey(*index_->storage_, key_id, true, result);
         }
         return result;
     }
@@ -381,11 +409,12 @@ MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
     }
 
     marisa::Agent agent;
-    for (size_t key_id = 0; key_id < storage_->csr_num_keys; ++key_id) {
-        if (storage_->csr_index[key_id] == storage_->csr_index[key_id + 1]) {
+    for (size_t key_id = 0; key_id < index_->storage_->csr_num_keys; ++key_id) {
+        if (index_->storage_->csr_index[key_id] ==
+            index_->storage_->csr_index[key_id + 1]) {
             continue;
         }
-        const auto value = ReverseKey(*storage_->trie, key_id, agent);
+        const auto value = ReverseKey(*index_->storage_->trie, key_id, agent);
         bool matches = false;
         switch (op) {
             case PatternOp::Match:
@@ -407,7 +436,7 @@ MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
                           "invalid pattern operator for marisa index");
         }
         if (matches) {
-            SetRowsForKey(*storage_, key_id, true, result);
+            SetRowsForKey(*index_->storage_, key_id, true, result);
         }
     }
     return result;
@@ -415,9 +444,9 @@ MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
 
 TargetBitmap
 MarisaIndexReader::IsNull() const {
-    TargetBitmap result(storage_->str_ids_size);
-    for (size_t row = 0; row < storage_->str_ids_size; ++row) {
-        if (IsNullKeyId(storage_->str_ids[row])) {
+    TargetBitmap result(index_->storage_->str_ids_size);
+    for (size_t row = 0; row < index_->storage_->str_ids_size; ++row) {
+        if (IsNullKeyId(index_->storage_->str_ids[row])) {
             result.set(row);
         }
     }
@@ -426,9 +455,9 @@ MarisaIndexReader::IsNull() const {
 
 TargetBitmap
 MarisaIndexReader::IsNotNull() const {
-    TargetBitmap result(storage_->str_ids_size);
-    for (size_t row = 0; row < storage_->str_ids_size; ++row) {
-        if (!IsNullKeyId(storage_->str_ids[row])) {
+    TargetBitmap result(index_->storage_->str_ids_size);
+    for (size_t row = 0; row < index_->storage_->str_ids_size; ++row) {
+        if (!IsNullKeyId(index_->storage_->str_ids[row])) {
             result.set(row);
         }
     }
@@ -439,7 +468,7 @@ size_t
 MarisaIndexReader::LookupKeyId(std::string_view value) const {
     marisa::Agent agent;
     agent.set_query(value.data(), value.size());
-    if (!storage_->trie->lookup(agent)) {
+    if (!index_->storage_->trie->lookup(agent)) {
         return MARISA_INVALID_KEY_ID;
     }
     return agent.key().id();
@@ -450,7 +479,7 @@ MarisaIndexReader::PrefixMatchKeyIds(std::string_view prefix) const {
     std::vector<size_t> result;
     marisa::Agent agent;
     agent.set_query(prefix.data(), prefix.size());
-    while (storage_->trie->predictive_search(agent)) {
+    while (index_->storage_->trie->predictive_search(agent)) {
         result.push_back(agent.key().id());
     }
     return result;
@@ -458,7 +487,7 @@ MarisaIndexReader::PrefixMatchKeyIds(std::string_view prefix) const {
 
 bool
 MarisaIndexReader::InLexicographicOrder() const {
-    return storage_->trie->node_order() == MARISA_LABEL_ORDER;
+    return index_->storage_->trie->node_order() == MARISA_LABEL_ORDER;
 }
 
 }  // namespace milvus::index

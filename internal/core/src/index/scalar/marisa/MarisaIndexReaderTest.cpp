@@ -19,10 +19,50 @@
 #include <string_view>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/scalar/marisa/MarisaIndexReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 
 namespace milvus::index::test {
 namespace {
+
+TEST(MarisaIndexOwnershipTest, ReadersRetainStorageAndOwnedValues) {
+    auto trie = std::make_shared<marisa::Trie>();
+    marisa::Keyset keys;
+    keys.push_back("apple");
+    trie->build(keys);
+    auto storage = std::make_shared<MarisaIndexStorage>();
+    storage->trie = std::move(trie);
+    storage->str_ids_owner = std::make_shared<const std::vector<int64_t>>(
+        std::initializer_list<int64_t>{0, -1});
+    storage->csr_index_owner = std::make_shared<const std::vector<uint32_t>>(
+        std::initializer_list<uint32_t>{0, 1});
+    storage->csr_offsets_owner = std::make_shared<const std::vector<uint32_t>>(
+        std::initializer_list<uint32_t>{0});
+    storage->str_ids = storage->str_ids_owner->data();
+    storage->str_ids_size = 2;
+    storage->csr_index = storage->csr_index_owner->data();
+    storage->csr_offsets = storage->csr_offsets_owner->data();
+    storage->csr_num_keys = 1;
+    std::weak_ptr<const MarisaIndexStorage> lifetime = storage;
+    auto index = std::make_shared<MarisaIndex>(std::move(storage));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 2);
+    index.reset();
+    const auto* values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(first.get());
+    ASSERT_NE(values, nullptr);
+    auto owned = values->Lookup(0);
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 1);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+    EXPECT_EQ(owned, "apple");
+}
 
 TEST(MarisaIndexReaderTest, AdvertisesVarcharQueries) {
     for (const auto name : {"MarisaVarchar",

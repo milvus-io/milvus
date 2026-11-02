@@ -23,12 +23,45 @@
 #include <vector>
 
 #include "common/RegexQuery.h"
+#include "index/scalar/fmindex/FmIndexReader.h"
+#include "index/fmindex/FMIndex.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
 
 namespace milvus::index::test {
 namespace {
+
+TEST(FmIndexOwnershipTest, ReadersRetainSharedStorage) {
+    auto engine = std::make_shared<fmindex::FMIndex>();
+    const std::vector<std::string_view> docs{"apple", "banana"};
+    engine->Build(docs, 32);
+    auto storage = FmIndexStorage::Create(nullptr,
+                                          std::move(engine),
+                                          TargetBitmap(2, false),
+                                          2,
+                                          DataType::VARCHAR,
+                                          false,
+                                          FmIndexStateOrigin::Builder);
+    std::weak_ptr<const FmIndexStorage> lifetime = storage;
+    auto index = std::make_shared<FmIndex>(std::move(storage));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 2);
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* pattern =
+        dynamic_cast<const IPatternMatchReader*>(second.get());
+    ASSERT_NE(pattern, nullptr);
+    const auto hits = pattern->PatternMatch("apple", PatternOp::PrefixMatch);
+    ASSERT_EQ(hits.size(), 2);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
 
 TEST(FmIndexReaderTest, AdvertisesSelectiveVarcharPatternPolicy) {
     for (const auto name : {"FmIndexVarchar",
