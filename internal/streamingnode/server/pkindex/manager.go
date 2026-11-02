@@ -101,6 +101,10 @@ type ManagerConfig struct {
 	Shared *engine.SharedResources
 	// AllocID allocates the IDs of new tables.
 	AllocID func(ctx context.Context) (int64, error)
+	// SyncIDAllocator, when not nil, drops the IDs that AllocID keeps in a
+	// local batch. A handover calls it before it gives its tables new IDs
+	// after index.ErrSSTReclaimed.
+	SyncIDAllocator func()
 	// Store moves tables between local disk and object storage.
 	Store TableStore
 	// StorageRootPath is the root path of the object storage

@@ -492,3 +492,109 @@ func (idx *testIndex) uploadAndCommit(ctx context.Context, p *pendingHandover) e
 	}
 	return idx.commit(ctx, p)
 }
+
+// reclaimAt makes the fake manifest service reject a flush that adds a table
+// at or below id, as after garbage collection raised the reclaimed SST ID.
+func (ti *testIndex) reclaimAt(id sst.ID) {
+	ti.committer.set(func(c *fakeCommitter) {
+		if c.cur == nil {
+			c.cur = &FakeManifest{
+				View:       ManifestView{SSTBasePath: ti.sstBasePath},
+				PKDataType: schemapb.DataType_Int64,
+			}
+		}
+		c.cur.MaxReclaimedSSTID = id
+	})
+}
+
+// TestReclaimedTablesAreRenamed checks that a flush rejected with
+// ErrSSTReclaimed is sent again at once, with the same tables and checkpoint
+// under new IDs above every ID allocated before.
+func TestReclaimedTablesAreRenamed(t *testing.T) {
+	idx := newTestIndex(t)
+	idx.insert(t, 10, 1, 2, 3)
+	idx.observed.Store(50)
+	idx.reclaimAt(5000)
+	idx.syncFloor.Store(1_000_000)
+
+	require.True(t, idx.handover(t))
+
+	reqs := idx.committer.requestList()
+	require.Len(t, reqs, 2)
+	first, second := reqs[0], reqs[1]
+	assert.Equal(t, first.CheckpointTimeTick, second.CheckpointTimeTick)
+	require.Len(t, second.AddTables, len(first.AddTables))
+	for i, ref := range second.AddTables {
+		old := first.AddTables[i]
+		assert.LessOrEqual(t, int64(old.ID), int64(5000))
+		assert.Greater(t, int64(ref.ID), int64(1_000_000))
+		old.ID = ref.ID
+		assert.Equal(t, old, ref, "only the ID changes")
+		assert.NoFileExists(t, committedPath(idx.committedDir, first.AddTables[i].ID))
+		assert.FileExists(t, committedPath(idx.committedDir, ref.ID))
+	}
+	assert.EqualValues(t, 1, idx.syncs.Load())
+	assert.EqualValues(t, 2*len(first.AddTables), idx.store.uploads.Load(), "the tables are uploaded again under the new keys")
+	assert.Subset(t, storeIDs(t, idx.store, idx.sstBasePath), refIDs(second.AddTables))
+
+	assert.Nil(t, idx.pending.Load())
+	assert.EqualValues(t, 50, idx.LastCommittedTimeTick())
+	assert.Equal(t, int64(1), idx.currentInstalledVersion())
+	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
+	for _, pk := range []int64{1, 2, 3} {
+		assert.EqualValues(t, 10, idx.segmentOf(t, pk))
+	}
+}
+
+// TestReclaimedTwiceBacksOff checks that a second ErrSSTReclaimed in one step
+// fails the step with a non-fatal error, and that the pending request keeps
+// the newest IDs for the next step.
+func TestReclaimedTwiceBacksOff(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	idx.insert(t, 10, 1, 2)
+	idx.observed.Store(50)
+	idx.reclaimAt(5000) // a sync does not get past it
+
+	_, err := idx.Index.handover(ctx)
+	require.True(t, errors.Is(err, ErrSSTReclaimed), "%v", err)
+	assert.False(t, IsFatal(err))
+	require.Len(t, idx.committer.requestList(), 2)
+	p := idx.pending.Load()
+	require.NotNil(t, p)
+	assert.True(t, p.uploadedAt.IsZero())
+	for _, ref := range p.request.AddTables {
+		assert.FileExists(t, p.local[ref.ID])
+	}
+
+	idx.syncFloor.Store(1_000_000)
+	require.True(t, idx.handover(t))
+	reqs := idx.committer.requestList()
+	require.Len(t, reqs, 4, "the pending IDs are still at or below the reclaimed sst ID once more")
+	for _, ref := range reqs[3].AddTables {
+		assert.Greater(t, int64(ref.ID), int64(1_000_000))
+	}
+	assert.EqualValues(t, 50, idx.LastCommittedTimeTick())
+}
+
+// TestAppliedRetryIsNotReclaimed checks that a retry of an applied flush
+// whose response was lost succeeds with the same request after garbage
+// collection raised the reclaimed SST ID above its tables.
+func TestAppliedRetryIsNotReclaimed(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	idx.insert(t, 10, 1, 2)
+	idx.observed.Store(50)
+	idx.committer.set(func(c *fakeCommitter) { c.loseNext = true })
+
+	_, err := idx.Index.handover(ctx)
+	require.Error(t, err)
+	idx.reclaimAt(1_000_000)
+
+	require.True(t, idx.handover(t))
+	reqs := idx.committer.requestList()
+	require.Len(t, reqs, 2)
+	assert.Equal(t, reqs[0], reqs[1])
+	assert.Zero(t, idx.syncs.Load())
+	assert.EqualValues(t, 50, idx.LastCommittedTimeTick())
+}

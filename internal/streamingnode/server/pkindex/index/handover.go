@@ -112,12 +112,26 @@ func (idx *Index) handover(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	// keep the pending request on every failure below: a retry must send
-	// the same request
-	if err := idx.upload(ctx, p); err != nil {
-		return false, err
-	}
-	if err := idx.commit(ctx, p); err != nil {
-		return false, err
+	// the same request, except after ErrSSTReclaimed
+	for renamed := false; ; renamed = true {
+		if err := idx.upload(ctx, p); err != nil {
+			return false, err
+		}
+		err := idx.commit(ctx, p)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrSSTReclaimed) {
+			return false, err
+		}
+		// the flush did not take effect: send the tables under new IDs, at
+		// once the first time; after that the step fails and backs off
+		if rerr := idx.renameTables(ctx, p); rerr != nil {
+			return false, rerr
+		}
+		if renamed {
+			return false, err
+		}
 	}
 	idx.pending.Store(nil)
 	idx.logger.Debug(ctx, "primary key index handover committed",
@@ -210,6 +224,50 @@ func (idx *Index) upload(ctx context.Context, p *pendingHandover) error {
 		}
 	}
 	p.uploadedAt = start
+	return nil
+}
+
+// renameTables gives every table of the pending request p a new ID after the
+// manifest service returned ErrSSTReclaimed: garbage collection may have
+// deleted the uploaded objects, and the manifest service rejects the old IDs
+// for good. The frozen generations and covered stay the same, so the Index
+// does not rotate again. It first syncs the ID allocator, so that the new IDs
+// are above every ID allocated before, links each local file under its new
+// ID, and clears the upload time, so that the next step uploads the tables
+// under the new keys. On error p does not change. The local links under the
+// old IDs are removed; the objects under the old keys are garbage.
+func (idx *Index) renameTables(ctx context.Context, p *pendingHandover) error {
+	if idx.cfg.SyncIDAllocator != nil {
+		idx.cfg.SyncIDAllocator()
+	}
+	tables := make([]TableRef, 0, len(p.request.AddTables))
+	local := make(map[sst.ID]string, len(p.request.AddTables))
+	for _, t := range p.request.AddTables {
+		raw, err := idx.cfg.AllocID(ctx)
+		if err != nil {
+			return errors.Wrapf(err, "allocate a new id for sst %d", int64(t.ID))
+		}
+		id := sst.ID(raw)
+		path := committedPath(idx.committedDir, id)
+		if err := os.Link(p.local[t.ID], path); err != nil && !errors.Is(err, fs.ErrExist) {
+			return pkroot.MarkIO(err, "link sst %d to %s", int64(t.ID), path)
+		}
+		t.ID = id
+		tables = append(tables, t)
+		local[id] = path
+	}
+	old := p.local
+	request := *p.request
+	request.AddTables = tables
+	p.request, p.local, p.uploadedAt = &request, local, time.Time{}
+	for id, path := range old {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			idx.logger.Warn(ctx, "failed to remove the local link of a renamed table",
+				mlog.Int64("sstID", int64(id)), mlog.String("path", path), mlog.Err(err))
+		}
+	}
+	idx.logger.Info(ctx, "primary key index handover renamed its tables, the manifest may have reclaimed the old ids",
+		mlog.Int("ssts", len(tables)), mlog.Uint64("checkpointTimeTick", p.covered))
 	return nil
 }
 

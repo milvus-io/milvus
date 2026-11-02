@@ -71,6 +71,7 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 			id, err := resource.Resource().IDAllocator().Allocate(ctx)
 			return int64(id), err
 		},
+		SyncIDAllocator: func() { resource.Resource().IDAllocator().Sync() },
 		Store:           objstore.New(cm),
 		StorageRootPath: cm.RootPath(),
 		// TODO: a later change injects the Committer over the manifest

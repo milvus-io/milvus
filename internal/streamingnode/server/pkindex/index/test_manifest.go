@@ -32,6 +32,9 @@ type FakeManifest struct {
 	// LastFlushTerm is the term of the last flush that changed the manifest.
 	LastFlushTerm int64
 	PKDataType    schemapb.DataType
+	// MaxReclaimedSSTID is the reclaimed SST ID of the manifest pointer: a
+	// flush must not add a table at or below it.
+	MaxReclaimedSSTID sst.ID
 }
 
 // clone returns a copy of m that shares no slice with m.
@@ -53,6 +56,7 @@ func (m *FakeManifest) clone() *FakeManifest {
 //   - a checkpoint that does not move forward: cur when the term is the term
 //     of the last flush (an applied retry), else ErrRejected,
 //   - a table that is in cur or listed twice: ErrRejected,
+//   - a table at or below cur.MaxReclaimedSSTID: ErrSSTReclaimed,
 //   - else the next version with the new tables in front.
 func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath string) (*FakeManifest, bool, error) {
 	if args.PChannelTerm < assigned {
@@ -82,6 +86,11 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 			return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: duplicate table %d", args.VChannel, t.ID)
 		}
 		seen[t.ID] = struct{}{}
+	}
+	for _, t := range args.AddTables {
+		if t.ID <= cur.MaxReclaimedSSTID {
+			return nil, false, errors.Wrapf(ErrSSTReclaimed, "vchannel %s: table %d, reclaimed sst ID %d", args.VChannel, t.ID, cur.MaxReclaimedSSTID)
+		}
 	}
 	next := cur.clone()
 	next.View.Version++
