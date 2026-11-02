@@ -49,6 +49,8 @@ type env struct {
 	// beforeReclaim, when set, runs after the GC selected SSTs and before it
 	// raises the reclaimed SST ID through mgr.
 	beforeReclaim func()
+	// paused is the Paused hook of the GC; nil means never paused.
+	paused Paused
 }
 
 // reclaimer is the Reclaimer of the GC of an env: it runs beforeReclaim, then
@@ -73,7 +75,7 @@ func newEnv(t *testing.T, cfg Config) *env {
 			return nil, nil
 		}
 		return e.inFlight(ctx, collectionID, vchannel)
-	})
+	}, func(collectionID int64) bool { return e.paused != nil && e.paused(collectionID) })
 	require.NoError(t, err)
 	g.now = func() time.Time { return e.now }
 	e.gc = g
@@ -450,7 +452,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"retain duration": {Interval: time.Minute, Grace: time.Hour, RetainDuration: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil, nil)
+			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil, nil, nil)
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}
@@ -458,7 +460,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 
 func TestNewAcceptsMinGrace(t *testing.T) {
 	_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot,
-		Config{Interval: time.Minute, Grace: MinGrace}, nil, nil)
+		Config{Interval: time.Minute, Grace: MinGrace}, nil, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -695,6 +697,44 @@ func TestReclaimFailureSkipsSSTSweep(t *testing.T) {
 	assert.True(t, e.has(sstKey("v", 7)))
 
 	e.pointers.WriteErr = nil
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.False(t, e.has(sstKey("v", 7)))
+}
+
+func TestPausedCollectionIsSkipped(t *testing.T) {
+	e := newEnv(t, testConfig)
+	ctx := context.Background()
+	e.create(t, "v")
+	e.upload(t, "v", 7)
+	e.now = e.now.Add(3 * time.Hour)
+
+	e.paused = func(collectionID int64) bool { return collectionID == 1 }
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.True(t, e.has(sstKey("v", 7)))
+	assert.Zero(t, e.pointer(t, "v").GetMaxReclaimedSstId(), "a paused collection is not scanned")
+
+	e.paused = func(collectionID int64) bool { return collectionID == 2 }
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.False(t, e.has(sstKey("v", 7)), "a pause of another collection does not stop it")
+}
+
+// TestPauseDuringScanSkipsDeletes checks that a pause that comes after GC
+// selected the objects of a vchannel stops their delete.
+func TestPauseDuringScanSkipsDeletes(t *testing.T) {
+	e := newEnv(t, testConfig)
+	ctx := context.Background()
+	e.create(t, "v")
+	e.upload(t, "v", 7)
+	e.now = e.now.Add(3 * time.Hour)
+
+	paused := false
+	e.paused = func(int64) bool { return paused }
+	e.beforeReclaim = func() { paused = true }
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.True(t, e.has(sstKey("v", 7)))
+
+	paused = false
+	e.beforeReclaim = nil
 	require.NoError(t, e.gc.RunOnce(ctx))
 	assert.False(t, e.has(sstKey("v", 7)))
 }

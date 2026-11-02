@@ -68,6 +68,11 @@ type Reclaimer interface {
 	AdvanceMaxReclaimedSSTID(ctx context.Context, collectionID int64, vchannel string, pointer string, id int64) error
 }
 
+// Paused reports whether garbage collection of a collection is paused, for
+// example by a backup that copies the object storage. A nil Paused means that
+// the GC is never paused.
+type Paused func(collectionID int64) bool
+
 // InFlightOutputs returns the SST IDs that running compactions of a vchannel
 // may still commit. It must list an output from before its upload until its
 // commit takes effect or its task is abandoned for good. A nil function means
@@ -84,6 +89,7 @@ type GC struct {
 	cfg       Config
 	reclaimer Reclaimer
 	inFlight  InFlightOutputs
+	paused    Paused
 	now       func() time.Time
 
 	cancel context.CancelFunc
@@ -92,16 +98,21 @@ type GC struct {
 
 // New returns a GC over the pointers in meta and the objects in store, under
 // rootPath of the object storage. Before it deletes SSTs of a vchannel, it
-// raises the reclaimed SST ID of the pointer through reclaimer. It returns
+// raises the reclaimed SST ID of the pointer through reclaimer. It deletes
+// nothing of a collection while paused reports true for it. It returns
 // ErrInvalidConfig when cfg.Interval is not positive, cfg.Grace is below
 // MinGrace, or a retention value is negative.
 func New(meta manifest.MetaStore, store manifest.ObjectStore, rootPath string,
-	cfg Config, reclaimer Reclaimer, inFlight InFlightOutputs,
+	cfg Config, reclaimer Reclaimer, inFlight InFlightOutputs, paused Paused,
 ) (*GC, error) {
 	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
-	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, reclaimer: reclaimer, inFlight: inFlight, now: time.Now}, nil
+	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, reclaimer: reclaimer, inFlight: inFlight, paused: paused, now: time.Now}, nil
+}
+
+func (g *GC) isPaused(collectionID int64) bool {
+	return g.paused != nil && g.paused(collectionID)
 }
 
 // Start runs one round every cfg.Interval until ctx is done or Close is
@@ -148,7 +159,7 @@ func (g *GC) RunOnce(ctx context.Context) error {
 			return nil
 		}
 		collectionID, vchannel, ok := manifest.ParsePointerKey(key)
-		if !ok {
+		if !ok || g.isPaused(collectionID) {
 			continue
 		}
 		if err := g.runVChannel(ctx, collectionID, vchannel); err != nil {
@@ -220,6 +231,13 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 
 	drop := append(bodies, ssts...)
 	if len(drop) == 0 {
+		return nil
+	}
+	if g.isPaused(collectionID) {
+		// a pause came during the scan; the raised reclaimed sst ID only
+		// makes a flush use new IDs, and the next round deletes
+		mlog.Info(ctx, "pkindex gc skips the deletes of vchannel, gc is paused",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel))
 		return nil
 	}
 	if err := g.store.MultiRemove(ctx, drop); err != nil {

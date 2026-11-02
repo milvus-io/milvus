@@ -534,6 +534,22 @@ the parameter is seconds. A duration string such as `"1h"` reads as 0, so GC
 does not start. Compaction outputs do not depend on `grace`, because they are in
 the in-flight set until their commit takes effect.
 
+### Enable and pause
+
+GC of the primary key index follows the same controls as the garbage
+collector of the segments:
+
+- DataCoord creates it only when `dataCoord.enableGarbageCollection` is true.
+  The manifest service runs in both cases.
+- It follows the pauses of `GcControl` (`GcCommand_Pause` and
+  `GcCommand_Resume`), which backup tools use while they copy the object
+  storage. A global pause stops it for all collections, and a collection
+  pause stops it for that collection. It checks the pause before each
+  vchannel and again just before it deletes the objects of a vchannel, so
+  after a pause at most a delete that already started completes.
+  `GetGcStatus` reads the same pause records, so its result also applies to
+  this GC.
+
 ### Layout mismatch
 
 GC skips a vchannel when the current body key is not directly under the layout
@@ -590,6 +606,10 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   GC has no input for these tables yet.
 - **Pointer listing cost.** Each GC round lists all pointers in one call. The
   cost with very many vchannels is not measured.
+- **TiKV lock tests.** Two tests of the pessimistic guard lock on TiKV need
+  a real TiKV (`MILVUS_TIKV_TEST_PD`) and do not run in CI. The mock TiKV
+  covers the lock, the lock again after a write conflict, and the failure of
+  a lock.
 - **Starved SST deletes.** GC raises the reclaimed SST ID on the condition
   that the pointer did not change since its read. A vchannel that commits more
   often than GC takes to scan it gets no SST deleted. This delays deletes and

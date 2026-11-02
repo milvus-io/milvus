@@ -6516,3 +6516,22 @@ func TestGarbageCollector_recycleUnusedImportV3Prefixes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exist)
 }
+
+func TestGarbageCollectorIsPaused(t *testing.T) {
+	gc := &garbageCollector{
+		pauseUntil:       NewGCPauseRecords(),
+		pausedCollection: typeutil.NewConcurrentMap[int64, *gcPauseRecords](),
+	}
+	assert.False(t, gc.isPaused(1))
+
+	coll := NewGCPauseRecords()
+	_, err := coll.Insert("t", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	gc.pausedCollection.Insert(1, coll)
+	assert.True(t, gc.isPaused(1))
+	assert.False(t, gc.isPaused(2))
+
+	_, err = gc.pauseUntil.Insert("t", time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.True(t, gc.isPaused(2), "a global pause covers every collection")
+}

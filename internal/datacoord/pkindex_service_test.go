@@ -178,3 +178,26 @@ func TestInitPKIndexInvalidGCConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
 }
+
+func TestInitPKIndexGCDisabled(t *testing.T) {
+	key := Params.DataCoordCfg.EnableGarbageCollection.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer client.Close()
+	kv := etcdkv.NewEtcdKV(client, "pkindex-init-"+uuid.NewString()+"/meta")
+
+	s := &Server{ctx: context.Background(), kv: kv, pkindexService: pkindexservice.New()}
+	s.initPKIndex(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
+	assert.Nil(t, s.pkindexGC)
+
+	resp, err := s.pkindexService.GetRecoveryManifests(context.Background(), &pkindexpb.GetRecoveryManifestsRequest{
+		Targets: []*pkindexpb.ManifestTarget{{CollectionId: 1, Vchannel: "v"}},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())
+}

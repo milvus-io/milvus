@@ -27,9 +27,11 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tikverr "github.com/tikv/client-go/v2/error"
+	tikv "github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
 	"github.com/tikv/client-go/v2/txnkv/transaction"
 	"golang.org/x/exp/maps"
@@ -1384,4 +1386,73 @@ func TestTxnGuardKeyWriteWaitsForGuardedWrite(t *testing.T) {
 	value, err := kv.Load(ctx, guard)
 	require.NoError(t, err)
 	assert.Equal(t, "t2", value)
+}
+
+// mockGuardLock makes the first LockKeys of a guarded write return first, and
+// the later ones lock for real. It returns the number of LockKeys calls.
+func mockGuardLock(t *testing.T, first func(lockCtx *tikv.LockCtx, keys [][]byte) error) *int {
+	var original func(*transaction.KVTxn, context.Context, *tikv.LockCtx, ...[]byte) error
+	calls := 0
+	patch := mockey.Mock((*transaction.KVTxn).LockKeys).Origin(&original).To(
+		func(txn *transaction.KVTxn, ctx context.Context, lockCtx *tikv.LockCtx, keys ...[]byte) error {
+			calls++
+			if calls == 1 {
+				return first(lockCtx, keys)
+			}
+			return original(txn, ctx, lockCtx, keys...)
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return &calls
+}
+
+// A write conflict on the lock of the guard key, as when the key changed
+// after the lock timestamp, makes the lock retry at a newer timestamp, and
+// the guarded write commits.
+func TestTxnGuardKeyLockRetriesOnWriteConflict(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_relock")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const guard = "claim/p"
+	require.NoError(t, kv.Save(ctx, guard, "t1"))
+	calls := mockGuardLock(t, func(lockCtx *tikv.LockCtx, keys [][]byte) error {
+		ts := lockCtx.ForUpdateTS
+		return tikverr.NewErrWriteConflictWithArgs(ts, ts+1, ts+1, keys[0], kvrpcpb.WriteConflict_PessimisticRetry)
+	})
+
+	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/a": "v"}, nil, predicates.ValueEqual(guard, "t1")))
+	assert.Equal(t, 2, *calls)
+	value, err := kv.Load(ctx, "pointer/a")
+	require.NoError(t, err)
+	assert.Equal(t, "v", value)
+}
+
+// Another lock failure ends the lock loop at once. The write retry of the
+// call runs a new transaction a bounded number of times, then the call fails
+// and writes nothing.
+func TestTxnGuardKeyLockFailureFailsTheWrite(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/guard_lock_fail")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const guard = "claim/p"
+	require.NoError(t, kv.Save(ctx, guard, "t1"))
+	calls := 0
+	patch := mockey.Mock((*transaction.KVTxn).LockKeys).To(
+		func(*transaction.KVTxn, context.Context, *tikv.LockCtx, ...[]byte) error {
+			calls++
+			return errors.New("region unavailable")
+		}).Build()
+
+	err := kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/a": "v"}, nil, predicates.ValueEqual(guard, "t1"))
+	assert.True(t, errors.Is(err, merr.ErrIoFailed), "%v", err)
+	assert.GreaterOrEqual(t, calls, 1, "one lock for each transaction of the write retry")
+	patch.UnPatch()
+	has, err := kv.Has(ctx, "pointer/a")
+	require.NoError(t, err)
+	assert.False(t, has)
 }
