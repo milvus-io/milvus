@@ -2515,7 +2515,7 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalidErr(err, "%s of field %s should be an integer, but got %T", prop.Key, fieldName, prop.Value)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", prop.Key, fieldName)
 			}
 
 			defaultMaxVarCharLength := paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
