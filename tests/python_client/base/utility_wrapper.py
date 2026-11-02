@@ -20,6 +20,9 @@ class ApiUtilityWrapper:
     ut = utility
     role = None
 
+    def __init__(self, role_names=None):
+        self.role_names = [] if role_names is None else role_names
+
     def do_bulk_insert(
         self,
         collection_name,
@@ -375,6 +378,7 @@ class ApiUtilityWrapper:
         return res, check_result
 
     def drop_collection(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.drop_collection, collection_name, timeout, using])
         check_result = ResponseChecker(
@@ -536,6 +540,8 @@ class ApiUtilityWrapper:
     def create_role(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.role.create], **kwargs)
+        if is_succ and self.role.name not in self.role_names:
+            self.role_names.append(self.role.name)
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, **kwargs).run()
         return res, check_result
 

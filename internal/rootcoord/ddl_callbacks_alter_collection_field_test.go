@@ -85,6 +85,24 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "field1", "key1", "value1")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
+	// The struct sub-field origin marker is internal: it can be neither set
+	// nor deleted as a field property.
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.StructSubFieldAddedKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -152,12 +170,11 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
 }
 
-func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
+func TestDDLCallbacksRejectTopLevelNestedArray(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	fieldName := "nested_array"
 
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
@@ -165,7 +182,7 @@ func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
 			{
-				Name:        fieldName,
+				Name:        "nested_array",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Array,
 				TypeSchema: &schemapb.TypeSchema{
@@ -186,34 +203,7 @@ func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
 		CollectionName: collectionName,
 		Schema:         schemaBytes,
 	})
-	require.NoError(t, merr.CheckRPCCall(resp, err))
-
-	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		FieldName:      fieldName,
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.MaxCapacityKey, Value: "64"},
-		},
-	})
-	require.NoError(t, merr.CheckRPCCall(resp, err))
-
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	var field *schemapb.FieldSchema
-	for _, candidate := range coll.ToCollectionSchemaPB().GetFields() {
-		if candidate.GetName() == fieldName {
-			field = candidate
-			break
-		}
-	}
-	require.NotNil(t, field)
-	fieldCapacity, err := typeutil.NewKvPairs(field.GetTypeParams()).Get(common.MaxCapacityKey)
-	require.NoError(t, err)
-	rootCapacity, err := typeutil.NewKvPairs(field.GetTypeSchema().GetTypeParams()).Get(common.MaxCapacityKey)
-	require.NoError(t, err)
-	require.Equal(t, "64", fieldCapacity)
-	require.Equal(t, fieldCapacity, rootCapacity)
+	require.ErrorContains(t, merr.CheckRPCCall(resp, err), "nested array can only be in a struct array field")
 }
 
 func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {

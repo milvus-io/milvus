@@ -22,6 +22,7 @@
 
 #include "common/Geometry.h"
 #include "common/Types.h"
+#include "index/SharedValidityBitmap.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
@@ -48,8 +49,8 @@ class RTreeIndexState final {
     const std::vector<std::shared_ptr<const RTreeQueryEngine>>&
     Engines() const;
 
-    const std::vector<size_t>&
-    NullOffsets() const;
+    const SharedValidityBitmap::Snapshot&
+    Validity() const;
 
     int64_t
     Count() const;
@@ -66,17 +67,19 @@ class RTreeIndexState final {
     static std::shared_ptr<const RTreeIndexState>
     CreateFromValidatedShards(
         std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        SharedValidityBitmap::Snapshot validity,
         int64_t total_num_rows);
 
     RTreeIndexState(
         std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        SharedValidityBitmap::Snapshot validity,
         int64_t total_num_rows,
         int64_t memory_usage);
 
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines_;
-    std::shared_ptr<const std::vector<size_t>> null_offsets_;
+    // Shared complete words plus a private partial word; sealed offsets are
+    // discarded after coordinate validation and this snapshot's construction.
+    SharedValidityBitmap::Snapshot validity_;
     int64_t total_num_rows_{0};
     int64_t memory_usage_{0};
 };
@@ -117,6 +120,9 @@ class RTreeIndexReader final : public IIndexReaderBase,
     // performs its exact distance check afterwards.
     TargetBitmap
     Candidates(SpatialOp op, const Geometry& query_geom) const override;
+
+    const SharedValidityBitmap::Snapshot&
+    Validity() const;
 
     // ---- INullReader -----------------------------------------------
 

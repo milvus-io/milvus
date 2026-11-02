@@ -602,6 +602,23 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    // Field IDs of the segment's row columns (binlogs and column groups of
+    // the manifest), including fields that are no longer in the schema.
+    // Unlike CollectDataFields it leaves out fields that only an index with
+    // raw data provides: such an index can be built from a field's default
+    // for a segment that has no row column of it, so it does not show when
+    // the segment's rows were written.
+    [[nodiscard]] std::set<FieldId>
+    GetRowColumnFieldIds() const {
+        return CollectRowColumnFields();
+    }
+
+    // Whether an index of the field provides its raw data.
+    [[nodiscard]] bool
+    FieldIndexHasRawData(FieldId field_id) const {
+        return field_index_has_raw_data_.count(field_id) > 0;
+    }
+
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||
@@ -803,6 +820,15 @@ class SegmentLoadInfo {
     // manifest revision.
     void
     InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source);
+
+    // StorageV2 binlogs written by 2.6.0/2.6.1 carry no child_fields and key a
+    // multi-field column group by a group id below START_USER_FIELDID, so the
+    // fields it stores are known only from its packed file footer. Every load
+    // diff keys fields by child_fields, so fill them in from the footer before
+    // computing one. A group whose files match one already resolved in
+    // `known` reuses its child_fields instead of reading the footer again.
+    void
+    ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest
@@ -1217,6 +1243,10 @@ class SegmentLoadInfo {
 
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
+
+    // Binlog and manifest column-group fields, without index raw data.
+    [[nodiscard]] std::set<FieldId>
+    CollectRowColumnFields() const;
 
     ProtoType info_;
 

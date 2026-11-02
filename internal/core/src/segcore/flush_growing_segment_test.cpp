@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstdint>
@@ -29,6 +30,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/TmpPath.h"
+#include "storage/MmapManager.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "knowhere/index/index_factory.h"
@@ -1162,6 +1164,74 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
 
     C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
     std::string segment_path = test_dir_ + "/segment_vector_array";
+    config.segment_path = segment_path.c_str();
+    config.read_version = -1;
+    config.retry_limit = 3;
+    config.text_field_ids = nullptr;
+    config.text_lob_paths = nullptr;
+    config.num_text_columns = 0;
+
+    CFlushResult result{};
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
+
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_EQ(result.num_rows, N);
+
+    auto field_datas = ReadFlushedFieldData(segment_path,
+                                            result,
+                                            vec_array_fid,
+                                            DataType::VECTOR_ARRAY,
+                                            false,
+                                            4,
+                                            DataType::VECTOR_FLOAT);
+    ASSERT_EQ(field_datas.size(), 1);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), N);
+
+    auto expected = dataset.get_col<VectorFieldProto>(vec_array_fid);
+    for (int i = 0; i < N; i++) {
+        auto actual = static_cast<const milvus::VectorArray*>(
+            field_datas[0]->RawValue(i));
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(actual->physical_length(), array_len);
+        EXPECT_EQ(actual->output_data().SerializeAsString(),
+                  expected[i].SerializeAsString());
+    }
+
+    FreeFlushResult(&result);
+}
+
+// A plain ArrayOfVector field with growing mmap on stores its rows in an mmap
+// chunk, which must be read through view_physical_element() when flushing.
+TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTripGrowingMmap) {
+    auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+    const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
+    mmap_config.growing_enable_mmap = true;
+    auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
+        mmap_config.growing_enable_mmap = saved_growing_mmap;
+    });
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto vec_array_fid = schema->AddDebugVectorArrayField(
+        "emb_list", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    ASSERT_NE(segment, nullptr);
+
+    constexpr int N = 4;
+    constexpr int array_len = 3;
+    auto dataset = DataGen(schema, N, 42, 0, 1, array_len);
+    segment->PreInsert(N);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
+
+    C_FLUSH_CONFIG_WITH_SCHEMA(config, schema);
+    std::string segment_path = test_dir_ + "/segment_vector_array_mmap";
     config.segment_path = segment_path.c_str();
     config.read_version = -1;
     config.retry_limit = 3;

@@ -20,8 +20,11 @@
 #include <cstdint>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
+#include <memory>
 #include <set>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -29,6 +32,7 @@
 #include "common/Slice.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
@@ -37,6 +41,7 @@
 #include "storage/artifact/LocalFileUtils.h"
 
 namespace milvus::storage::test {
+
 namespace {
 
 class BorrowedFileWriter final : public IndexEntryWriter {
@@ -178,6 +183,136 @@ TEST(V1ArtifactIOTest, RoundTripsSlicedEntryThroughProductionTransport) {
               (std::vector<uint8_t>(payload.begin(), payload.end())));
 
     sink.ReleaseLocalStaging();
+}
+
+class V1BorrowedFileTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        const auto local =
+            LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        root_ = LocalDirectory::CreateOwned(local->GetRootPath(),
+                                            "milvus-borrowed-file-XXXXXX",
+                                            "V1 borrowed file test");
+        StorageConfig config;
+        config.storage_type = "local";
+        config.root_path = root_->Path() + "/remote";
+        context_ =
+            std::make_unique<FileManagerContext>(FieldDataMeta{1, 2, 3, 100},
+                                                 IndexMeta{3,
+                                                           100,
+                                                           740074,
+                                                           1,
+                                                           "borrowed_file",
+                                                           "field",
+                                                           DataType::INT64,
+                                                           1,
+                                                           false},
+                                                 CreateChunkManager(config),
+                                                 InitArrowFileSystem(config));
+    }
+
+    std::filesystem::path
+    StagedPath(const std::string& name) const {
+        const auto local =
+            LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+        auto prefix = GenIndexPathPrefix(local, 740074, 1, 3, 100, false);
+        while (!prefix.empty() && prefix.back() == '/') {
+            prefix.pop_back();
+        }
+        const auto base = std::filesystem::path(prefix);
+        for (const auto& entry :
+             std::filesystem::directory_iterator(base.parent_path())) {
+            const auto path = entry.path() / "artifact_sink" / name;
+            if (entry.path().filename().string().starts_with(
+                    base.filename().string() + "_") &&
+                std::filesystem::exists(path)) {
+                return path;
+            }
+        }
+        return {};
+    }
+
+    std::shared_ptr<LocalDirectory> root_;
+    std::unique_ptr<FileManagerContext> context_;
+};
+
+TEST_F(V1BorrowedFileTest, SameFilesystemLinksAndPreservesBorrowedSource) {
+    FileSliceSizeGuard slice_size(3);
+    const auto source_path = root_->Path() + "/borrowed";
+    const auto name = std::filesystem::path(root_->Path()).filename().string();
+    const std::string payload("payload\0abc", 11);
+    {
+        std::ofstream file(source_path, std::ios::binary);
+        file.write(payload.data(), payload.size());
+        ASSERT_TRUE(file.good());
+    }
+    std::vector<std::string> remote_paths;
+    {
+        V1DiskSink sink(*context_);
+        sink.WriteEntryFromLocalFile(name, source_path);
+        EXPECT_EQ(std::filesystem::hard_link_count(source_path), 2);
+        const auto stats = sink.Finish();
+        for (const auto& file : stats.Files()) {
+            remote_paths.push_back(file.file_name);
+        }
+    }
+    EXPECT_EQ(std::filesystem::hard_link_count(source_path), 1);
+    std::ifstream file(source_path, std::ios::binary);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(file), {}), payload);
+    V1RemoteSource source(*context_,
+                          remote_paths,
+                          {},
+                          ArtifactStorageNamespace::Index,
+                          V1SourceLayout::DiskFiles);
+    EXPECT_EQ(source.ReadEntry(name),
+              (std::vector<uint8_t>(payload.begin(), payload.end())));
+}
+
+TEST_F(V1BorrowedFileTest, LinkFailuresPreserveDiagnosticsAndExistingEntry) {
+    {
+        V1DiskSink sink(*context_);
+        try {
+            sink.WriteEntryFromLocalFile("missing", root_->Path() + "/missing");
+            FAIL() << "a missing source must fail link and copy";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FileWriteFailed);
+            const auto missing =
+                std::make_error_code(std::errc::no_such_file_or_directory)
+                    .message();
+            const std::string message(error.what());
+            EXPECT_NE(message.find("hard link: " + missing), std::string::npos);
+            EXPECT_NE(message.find("copy: " + missing), std::string::npos);
+        }
+        EXPECT_THROW(sink.Finish(), SegcoreError);
+    }
+    const auto source_path = root_->Path() + "/borrowed";
+    const auto name = std::filesystem::path(root_->Path()).filename().string();
+    {
+        std::ofstream file(source_path);
+        file << "source";
+        ASSERT_TRUE(file.good());
+    }
+    V1DiskSink sink(*context_);
+    sink.WriteEntryFromLocalFile(name + "_seed", source_path);
+    const auto seed = StagedPath(name + "_seed");
+    ASSERT_FALSE(seed.empty());
+    const auto conflict = seed.parent_path() / name;
+    {
+        std::ofstream file(conflict);
+        file << "existing";
+        ASSERT_TRUE(file.good());
+    }
+    try {
+        sink.WriteEntryFromLocalFile(name, source_path);
+        FAIL() << "an existing entry must reject staging";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FileWriteFailed);
+        EXPECT_EQ(std::string(error.what()).find("; copy:"), std::string::npos);
+    }
+    std::ifstream file(conflict);
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(file), {}),
+              "existing");
 }
 
 }  // namespace

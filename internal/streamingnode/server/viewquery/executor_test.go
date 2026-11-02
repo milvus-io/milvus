@@ -22,7 +22,7 @@ func TestDirectSegmentTaskExecutorSearchBuildsStreamingRequestFromHandles(t *tes
 	legacyReq := &internalpb.SearchRequest{CollectionID: 10}
 	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99}
 	tasks := []snview.SNSearchSegmentTask{
-		{Handle: fakeGrowingSegmentHandle{id: 1, partitionID: 10}, Request: legacyReq, MVCC: mvcc, VChannel: "v1"},
+		{Handle: fakeGrowingSegmentHandle{id: 1, partitionID: 10}, Request: legacyReq, MVCC: mvcc, VChannel: "v1", Options: &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}},
 		{Handle: fakeGrowingSegmentHandle{id: 2, partitionID: 10}, Request: legacyReq, MVCC: mvcc, VChannel: "v1"},
 	}
 
@@ -31,6 +31,8 @@ func TestDirectSegmentTaskExecutorSearchBuildsStreamingRequestFromHandles(t *tes
 	require.NoError(t, err)
 	assert.Same(t, runner.result, result)
 	require.NotNil(t, runner.req)
+	assert.True(t, runner.req.GetFilterOnly())
+	assert.True(t, runner.req.GetEnableExprCache())
 	assert.Equal(t, querypb.DataScope_Streaming, runner.req.GetScope())
 	assert.Equal(t, []int64{1, 2}, runner.req.GetSegmentIDs())
 	assert.Equal(t, []string{"v1"}, runner.req.GetDmlChannels())

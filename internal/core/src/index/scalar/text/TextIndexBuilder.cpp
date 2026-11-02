@@ -260,18 +260,6 @@ TextIndexBuilder::AddBatch(const ScalarBuildBatch<std::string_view>& batch) {
     const auto n = batch.values.size();
     CheckAppend(count_, n);
 
-    if (batch.validity) {
-        size_t null_count = 0;
-        for (size_t i = 0; i < n; ++i) {
-            null_count += batch.validity[i] ? 0 : 1;
-        }
-        if (null_count >
-            std::numeric_limits<size_t>::max() - null_offsets_.size()) {
-            ThrowInfo(DataTypeInvalid, "text null-offset count overflows");
-        }
-        null_offsets_.reserve(null_offsets_.size() + null_count);
-    }
-
     static const std::string empty;
     std::string scratch;
     for (size_t i = 0; i < n; ++i) {

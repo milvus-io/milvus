@@ -22,18 +22,27 @@ func (w *walAdaptorImpl) QueryViewHandler() worknodehandler.QueryViewHandler {
 	return w.queryViewHandler
 }
 
+func (w *walAdaptorImpl) Statistics(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
+	h, err := w.queryViewTaskHandler(qviews.FromProtoShardID(req.GetShardId()))
+	if err != nil {
+		return 0, err
+	}
+	return h.Statistics(ctx, req)
+}
+
 func (w *walAdaptorImpl) AcquireSearchSegmentTasks(
 	ctx context.Context,
 	shardID qviews.ShardID,
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
 	h, err := w.queryViewTaskHandler(shardID)
 	if err != nil {
 		return nil, err
 	}
-	return h.AcquireSearchSegmentTasks(ctx, shardID, version, mvcc, req)
+	return h.AcquireSearchSegmentTasks(ctx, shardID, version, mvcc, req, selection)
 }
 
 func (w *walAdaptorImpl) AcquireQuerySegmentTasks(
@@ -42,12 +51,13 @@ func (w *walAdaptorImpl) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
 	h, err := w.queryViewTaskHandler(shardID)
 	if err != nil {
 		return nil, err
 	}
-	return h.AcquireQuerySegmentTasks(ctx, shardID, version, mvcc, req)
+	return h.AcquireQuerySegmentTasks(ctx, shardID, version, mvcc, req, selection)
 }
 
 func (w *walAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.SNQueryViewHandler, error) {

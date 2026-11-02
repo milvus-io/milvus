@@ -455,20 +455,22 @@ class TlsHttpClientFactory : public Aws::Http::HttpClientFactory {
 static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG =
     "GoogleHttpClientFactory";
 
+// Records a GCS endpoint that Milvus itself is configured to use.
+// GoogleHttpClientFactory sends GCP credentials only to these endpoints and to
+// Google's *.googleapis.com.
+void
+AddGcsEndpointForCredentials(const std::string& address, bool use_ssl);
+
+// Process-wide AWS SDK HTTP factory for GCP IAM. Only the first Aws::InitAPI
+// in a process takes effect, so it also serves milvus-storage. It
+// authenticates a request for Milvus' own GCS bucket with Milvus' IAM
+// provider, and any other GCS request with the provider milvus-storage's
+// GcpCredentialRegistry holds for its endpoint and bucket, as milvus-storage's
+// own GCP factory does. Every other request is left alone.
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
-    explicit GoogleHttpClientFactory(
-        std::shared_ptr<google::cloud::oauth2_internal::Credentials>
-            credentials,
-        const std::string& tls_min_version = "")
+    explicit GoogleHttpClientFactory(const std::string& tls_min_version = "")
         : tls_min_version_(tls_min_version) {
-        credentials_ = credentials;
-    }
-
-    void
-    SetCredentials(std::shared_ptr<google::cloud::oauth2_internal::Credentials>
-                       credentials) {
-        credentials_ = credentials;
     }
 
     std::shared_ptr<Aws::Http::HttpClient>
@@ -493,32 +495,11 @@ class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
     }
 
     std::shared_ptr<Aws::Http::HttpRequest>
-    CreateHttpRequest(
-        const Aws::Http::URI& uri,
-        Aws::Http::HttpMethod method,
-        const Aws::IOStreamFactory& streamFactory) const override {
-        auto request =
-            Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
-                GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
-        request->SetResponseStreamFactory(streamFactory);
-        auto auth_header =
-            google::cloud::oauth2_internal::AuthorizationHeader(*credentials_);
-        if (!auth_header.ok()) {
-            ThrowInfo(IsRetryableGcpStatus(auth_header.status().code())
-                          ? ErrorCode::S3Error
-                          : ErrorCode::UnexpectedError,
-                      fmt::format("get authorization failed, errcode: {}",
-                                  google::cloud::StatusCodeToString(
-                                      auth_header.status().code())));
-        }
-        request->SetHeaderValue(auth_header->first.c_str(),
-                                auth_header->second.c_str());
-
-        return request;
-    }
+    CreateHttpRequest(const Aws::Http::URI& uri,
+                      Aws::Http::HttpMethod method,
+                      const Aws::IOStreamFactory& streamFactory) const override;
 
  private:
-    std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials_;
     std::string tls_min_version_;
 };
 

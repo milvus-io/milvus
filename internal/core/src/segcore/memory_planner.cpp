@@ -45,6 +45,7 @@
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/LoadAdmissionController.h"
+#include "storage/Util.h"
 
 namespace milvus::segcore {
 
@@ -201,6 +202,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const milvus_storage::ArrowFileSystemPtr& fs,
                  const std::shared_ptr<arrow::Schema> schema,
                  milvus::proto::common::LoadPriority priority) {
+    auto close_channel = folly::makeGuard([&channel] { channel->close(); });
     try {
         AssertInfo(remote_files.size() == row_group_lists.size(),
                    "[StorageV2] Number of remote files must match number of "
@@ -227,6 +229,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
                 futures;
             futures.reserve(blocks.size());
+            // A failed submit/read/get must not leave sibling readers running
+            // after the producer future completes or closes its channel.
+            auto join_readers = folly::makeGuard(
+                [&futures] { milvus::storage::DrainFutures(futures); });
 
             auto reader_memory_limit = std::max<int64_t>(
                 memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
@@ -296,11 +302,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 channel->push(field_data);
             }
         }
-
-        channel->close();
     } catch (std::exception& e) {
         LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
-        channel->close();
         // Rethrow the original exception object: `throw e;` would copy-construct
         // a plain std::exception (slicing off SegcoreError and its error code),
         // so the cgo boundary's dynamic_cast could no longer recover the typed

@@ -120,6 +120,9 @@ void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
 
 void
+SegcoreSetLazyIndexSlotEnabled(const bool value);
+
+void
 SegcoreSetLazyColumnGroupEnabled(const bool value);
 
 bool

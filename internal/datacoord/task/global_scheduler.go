@@ -36,6 +36,10 @@ const NullNodeID = -1
 type GlobalScheduler interface {
 	Enqueue(task Task)
 	AbortAndRemoveTask(taskID int64)
+	// Finalize releases scheduler ownership and runs cleanup after in-flight
+	// callbacks finish. Cleanup must leave the task terminal before removing its
+	// metadata, so a previously submitted Create callback cannot dispatch it.
+	Finalize(taskID int64, cleanup func())
 	// GetPendingTaskCount returns the number of queued tasks of the given type.
 	// The queue is shared by every task type, so callers that gate admission for
 	// one kind of work must scope the count to that kind, otherwise an unrelated
@@ -113,6 +117,9 @@ func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
 }
 
 func (s *globalTaskScheduler) Enqueue(task Task) {
+	s.mu.RLock(task.GetTaskID())
+	defer s.mu.RUnlock(task.GetTaskID())
+
 	if s.pendingTasks.Get(task.GetTaskID()) != nil {
 		return
 	}
@@ -147,6 +154,16 @@ func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 		s.pendingTasks.Remove(taskID)
 	}
 	s.backoffs.Remove(taskID)
+}
+
+func (s *globalTaskScheduler) Finalize(taskID int64, cleanup func()) {
+	s.mu.Lock(taskID)
+	defer s.mu.Unlock(taskID)
+
+	s.pendingTasks.Remove(taskID)
+	s.runningTasks.Remove(taskID)
+	s.backoffs.Remove(taskID)
+	cleanup()
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -278,19 +295,33 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
+		// Pop removes the task from the queue before it acquires this lock.
+		// Finalize may have completed in that window, so check the state before
+		// GetTaskSlot reads metadata that cleanup may already have removed.
+		taskID := task.GetTaskID()
+		s.mu.RLock(taskID)
+		switch task.GetTaskState() {
+		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+			s.backoffs.Remove(taskID)
+			s.mu.RUnlock(taskID)
+			continue
+		}
 		// A task in failure backoff gives way: it re-enters the queue after
 		// this round and is dispatched once its delay elapses, so one
 		// persistently failing task cannot occupy the scheduler.
 		if s.taskInBackoff(task) {
 			delayed = append(delayed, task)
+			s.mu.RUnlock(taskID)
 			continue
 		}
 		taskSlot := task.GetTaskSlot()
 		nodeID := s.pickNode(slotHeap, taskSlot)
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
+			s.mu.RUnlock(taskID)
 			break
 		}
+		s.mu.RUnlock(taskID)
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
@@ -327,7 +358,17 @@ func (s *globalTaskScheduler) schedule() {
 		futures = append(futures, future)
 	}
 	for _, task := range delayed {
-		s.pendingTasks.Push(task)
+		// Finalize can run while this task waits in delayed. Re-check under
+		// the same lock before putting it back, just like the no-slot path.
+		taskID := task.GetTaskID()
+		s.mu.RLock(taskID)
+		switch task.GetTaskState() {
+		case taskcommon.None, taskcommon.Finished, taskcommon.Failed:
+			s.backoffs.Remove(taskID)
+		default:
+			s.pendingTasks.Push(task)
+		}
+		s.mu.RUnlock(taskID)
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -344,6 +385,12 @@ func (s *globalTaskScheduler) check() {
 		future := s.checkPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			// A captured task may have been finalized while this callback was
+			// waiting for a worker or the task lock. Its late query must not
+			// overwrite terminal metadata or put it back in the pending queue.
+			if current, ok := s.runningTasks.Get(task.GetTaskID()); !ok || current != task {
+				return struct{}{}, nil
+			}
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:

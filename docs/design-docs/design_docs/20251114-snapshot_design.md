@@ -209,10 +209,11 @@ length to prevent allocations based on corrupt block headers.
       - Populate StorageV2 manifest paths if present
    d. Return complete SnapshotData
 
-2. ListSnapshots(collectionID) - List all snapshots for a collection
-   - List all files in metadata/ directory
-   - Parse each metadata file to extract SnapshotInfo
-   - Return list of SnapshotInfo
+2. ListSnapshots(collectionID) - List lightweight metadata for a collection
+   - Read SnapshotInfo from the DataCoord in-memory cache
+   - Project name, create_ts and description into detached summaries
+   - Sort summaries by create_ts descending, then name ascending
+   - Do not read object storage or wait for segment reference indexes
 ```
 
 **Performance Optimization**: The `includeSegments` parameter allows DataCoord to defer loading heavy segment data. During startup, only metadata is loaded (includeSegments=false), and full segment data is loaded on-demand when needed for restore operations.
@@ -236,7 +237,7 @@ type SnapshotManager interface {
     CreateSnapshot(ctx context.Context, collectionID int64, name, description string) (int64, error)
     DropSnapshot(ctx context.Context, name string) error
     DescribeSnapshot(ctx context.Context, name string) (*SnapshotData, error)
-    ListSnapshots(ctx context.Context, collectionID, partitionID int64) ([]string, error)
+    ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error)
 
     // Restore operations
     RestoreSnapshot(ctx context.Context, snapshotName string, targetCollectionID int64) (int64, error)
@@ -406,8 +407,9 @@ List:
 
 Describe:
   User Request -> Proxy DescribeSnapshot -> DataCoord
-    -> SnapshotMeta.GetSnapshot()
-    -> Return SnapshotInfo
+    -> SnapshotMeta.ReadSnapshotData(includeSegments=false)
+    -> Read metadata JSON from object storage (no segment manifests)
+    -> Return snapshot details
 
 Restore:
   User Request -> Proxy RestoreSnapshot -> RootCoord
@@ -858,6 +860,12 @@ message DropSnapshotResponse {
 2. Delete metadata file and all manifest files referenced in ManifestList from S3
 3. Remove reference relationships from memory
 
+Snapshot descriptions supplied to CreateSnapshot are limited by
+`proxy.maxSnapshotDescriptionLength` (default 1024 UTF-8 bytes), checked by
+Proxy before forwarding the request to DataCoord. Existing descriptions remain
+unchanged; this limit bounds newly created descriptions, not the total size of a
+list response.
+
 ### ListSnapshots
 
 **Function**: List all snapshots for specified collection
@@ -875,9 +883,56 @@ message ListSnapshotsRequest {
 ```protobuf
 message ListSnapshotsResponse {
   common.Status status = 1;
-  repeated string snapshots = 2;    // list of snapshot names
+  repeated string snapshots = 2;    // retained for existing clients
+  repeated SnapshotSummary snapshot_summaries = 3;
 }
 ```
+
+The internal `SnapshotSummary` contains `name` (string, field 1), `create_ts`
+(int64, field 2), and `description` (string, field 3). The public summary also
+has `create_utc_ts` (int64, field 4). Proxy explicitly maps the internal message
+and derives the UTC field; DataCoord and persisted snapshot metadata keep the
+original TT without another stored timestamp.
+
+DataCoord reads only cached metadata and returns both lists from the same
+sorted result: `create_ts` descending, then `name` ascending. Each name at index
+`i` equals `snapshot_summaries[i].name`. The timestamp is unchanged from Describe;
+it is a Milvus hybrid timestamp, not Unix milliseconds or creation completion
+time. A zero timestamp is preserved. Existing snapshot visibility and concurrent
+list semantics remain unchanged; internal 2PC state is not exposed.
+
+The public summary exposes `create_utc_ts` at field 4. It is Unix milliseconds
+extracted from `create_ts`
+using `tsoutil.ParseHybridTs`: the physical time of the snapshot WAL boundary,
+not the time snapshot creation completed. This minimum channel timestamp is a
+compatibility summary, not a shared visibility boundary for all channels.
+Zero remains zero and means unknown; older servers that omit the new field also
+decode as zero. Existing `create_ts` values and field numbers are unchanged.
+Entries with the same Unix millisecond may have different logical TT parts;
+sorting continues to use the original TT, not the derived milliseconds.
+
+REST retains its `data` array of names and adds a top-level `snapshotSummaries`
+array with `name`, `createTs`, `createUtcTs`, and `description`. Both timestamps
+use the existing int64 formatting/header convention. Empty summaries are `[]`.
+DescribeSnapshot and its REST response remain unchanged.
+
+Go SDK `ListSnapshotSummaries` and PyMilvus MilvusClient
+`list_snapshot_summaries` expose summaries without changing the existing
+name-list methods. On an older server that returns names without summaries,
+the new methods report that snapshot summaries are unsupported and never call
+DescribeSnapshot. Callers can upgrade the server or explicitly use the existing
+name-list methods. Go returns a service-unimplemented error; PyMilvus raises
+ServerVersionIncompatibleException. Both methods use only ListSnapshots and
+preserve the server-provided order without sorting locally. If both response lists
+are empty, they return an empty list. Protobuf repeated fields have no presence
+bit, so that response cannot distinguish an empty collection on an older server
+from one on a newer server.
+
+Go SDK exposes `GetCreateUtcTs()` on SnapshotSummary. PyMilvus exposes
+`create_utc_ts` on SnapshotSummary. Clients preserve the server field, including
+zero; they do not synthesize it from the legacy TT or issue another RPC.
+PyMilvus appends the new dataclass field with a default of zero to preserve
+positional constructors. SnapshotInfo and DescribeSnapshot remain unchanged.
 
 ### DescribeSnapshot
 

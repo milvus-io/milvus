@@ -21,7 +21,11 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
+	replicas        *replicaDirectory
+	maxUpVersion    *qviews.QueryViewVersion
+	preparingViews  int
 	mu              sync.Mutex
+	recoveryChanged chan struct{}
 	closed          bool
 	detached        bool
 	ctx             context.Context
@@ -38,6 +42,8 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
+	advertisedUp bool
+	preparing    bool
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
@@ -98,8 +104,9 @@ func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) 
 		entry := s.views[version]
 		v := version // capture loop variable
 		s.resMgr.Acquire(AcquireResource{
-			Key:  key,
-			Meta: entry.sm.Meta(),
+			Key:            key,
+			Meta:           entry.sm.Meta(),
+			PartitionStats: entry.sm.SNView().GetPartitionStats(),
 			OnReady: func() {
 				s.notifyRecoveringDone(v)
 			},
@@ -137,6 +144,11 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
+	if s.replicas != nil {
+		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, nil, false)
+	}
+	s.maxUpVersion = nil
+	s.notifyRecoveryChangedLocked()
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
 	for version, entry := range s.views {
@@ -170,14 +182,16 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			sm := newSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
 			entry = &snViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
+			s.publishReplicaLocked(entry)
 			// SN SM constructor generates a Preparing report.
 			s.consumeReport(entry)
 
 			// Tell ResourceManager to prepare resources. Callbacks will drive SM progress.
 			version := key.QueryViewVersion
 			s.resMgr.Acquire(AcquireResource{
-				Key:  key,
-				Meta: sm.Meta(),
+				Key:            key,
+				Meta:           sm.Meta(),
+				PartitionStats: sm.SNView().GetPartitionStats(),
 				OnReady: func() {
 					s.notifyReady(version)
 				},
@@ -306,9 +320,11 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 // persisting, Coord would believe the state advanced while SN lost it.
 // Caller must hold s.mu.
 func (s *snShardView) consumeReportPersistAndCleanup(version qviews.QueryViewVersion, entry *snViewEntry) {
+	s.notifyRecoveryChangedLocked()
 	if !s.consumeAndPersist(entry) {
 		return
 	}
+	s.publishReplicaLocked(entry)
 	s.consumeReport(entry)
 	s.consumeAndRelease(version, entry)
 	s.cleanupIfDropped(version, entry)
@@ -386,18 +402,30 @@ func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry 
 }
 
 func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	return s.acquireUpViewForSchema(ctx, nil)
+}
+
+// tryAcquireUpViewForSchema returns a notification only when a matching view
+// is recovering and no matching Up view can serve. Inspecting state and taking
+// the notification under the same mutex prevents a lost recovery wakeup.
+func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
+	recovering := false
 	for version, entry := range s.views {
 		s.advancePendingDownLocked(version, entry)
+		if schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema {
+			continue
+		}
+		if entry.sm.IsRecovering() {
+			recovering = true
+		}
 		if entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
@@ -406,10 +434,42 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 			selectedVersion = version
 		}
 	}
-	if selected == nil {
-		return nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
+	if selected != nil {
+		return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil, nil
 	}
-	return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil
+	if recovering {
+		return nil, s.recoveryChangedLocked(), nil
+	}
+	return nil, nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
+}
+
+func (s *snShardView) acquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, error) {
+	for {
+		lease, changed, err := s.tryAcquireUpViewForSchema(ctx, schema)
+		if changed == nil {
+			return lease, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-changed:
+		}
+	}
+}
+
+// Caller holds the shard mutex. Notifications carry no references to resources.
+func (s *snShardView) recoveryChangedLocked() <-chan struct{} {
+	if s.recoveryChanged == nil {
+		s.recoveryChanged = make(chan struct{})
+	}
+	return s.recoveryChanged
+}
+
+func (s *snShardView) notifyRecoveryChangedLocked() {
+	if s.recoveryChanged != nil {
+		close(s.recoveryChanged)
+		s.recoveryChanged = nil
+	}
 }
 
 func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
@@ -425,5 +485,46 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 	if entry.queryRefs == 0 && entry.releasePending {
 		entry.releasePending = false
 		s.startReleaseLocked(version, entry)
+	}
+}
+
+// publishReplicaLocked follows successful persistence and precedes entry cleanup.
+// Recovery, lease timers and Coord pushes all use the same transition drain.
+func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
+	state := entry.sm.State()
+	preparing := state == qviews.QueryViewStatePreparing || state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUpRecovering
+	preparingChanged := entry.preparing != preparing
+	if preparingChanged {
+		if preparing {
+			s.preparingViews++
+		} else {
+			s.preparingViews--
+		}
+		entry.preparing = preparing
+	}
+	up := state == qviews.QueryViewStateUp
+	if entry.advertisedUp == up && !preparingChanged {
+		return
+	}
+	if entry.advertisedUp != up {
+		entry.advertisedUp = up
+		version := entry.View.QueryViewKey().QueryViewVersion
+		if up {
+			if s.maxUpVersion == nil || version.GT(*s.maxUpVersion) {
+				s.maxUpVersion = &version
+			}
+		} else if s.maxUpVersion != nil && version.EQ(*s.maxUpVersion) {
+			s.maxUpVersion = nil
+			// Only retirement of the advertised maximum scans retained versions.
+			for candidate, other := range s.views {
+				if other.advertisedUp && (s.maxUpVersion == nil || candidate.GT(*s.maxUpVersion)) {
+					v := candidate
+					s.maxUpVersion = &v
+				}
+			}
+		}
+	}
+	if s.replicas != nil {
+		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, s.maxUpVersion, s.preparingViews > 0)
 	}
 }

@@ -19,6 +19,7 @@
 #include <aws/core/Aws.h>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/core/client/DefaultRetryStrategy.h>
 #include <aws/core/endpoint/AWSPartitions.h>
 #include <aws/core/http/HttpClient.h>
@@ -34,6 +35,8 @@
 #include <functional>
 
 #include "storage/minio/GuardedS3EndpointProvider.h"
+#include "storage/minio/MinioChunkManager.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 
 namespace milvus::storage {
 namespace {
@@ -48,6 +51,7 @@ using Aws::S3::Endpoint::S3EndpointProvider;
 class RecordingHttpClient : public Aws::Http::HttpClient {
  public:
     mutable int requests = 0;
+    mutable int metadata_requests = 0;
     mutable Aws::String authorization;
     Aws::Http::HttpResponseCode status = Aws::Http::HttpResponseCode::OK;
     bool network_error = false;
@@ -62,6 +66,28 @@ class RecordingHttpClient : public Aws::Http::HttpClient {
             std::make_shared<Aws::Http::Standard::StandardHttpResponse>(
                 request);
         response->SetResponseCode(status);
+        if (request->GetUri().GetAuthority() == "169.254.169.254") {
+            ++metadata_requests;
+            const auto& path = request->GetUri().GetPath();
+            if (path == "/latest/api/token") {
+                response->GetResponseBody() << "test-imds-token";
+            } else if (path ==
+                       "/latest/meta-data/placement/availability-zone") {
+                response->GetResponseBody() << "us-east-1a";
+            } else if (path == "/latest/meta-data/iam/security-credentials") {
+                response->GetResponseBody() << "test-node-role";
+            } else if (path ==
+                       "/latest/meta-data/iam/security-credentials/"
+                       "test-node-role") {
+                response->GetResponseBody()
+                    << R"({"Code":"Success","AccessKeyId":"NODE_AK",)"
+                       R"("SecretAccessKey":"NODE_SK","Token":"NODE_TOKEN",)"
+                       R"("Expiration":"2099-01-01T00:00:00Z"})";
+            } else {
+                ADD_FAILURE() << "Unexpected IMDS path: " << path;
+            }
+            return response;
+        }
         if (network_error) {
             response->SetClientErrorType(CoreErrors::NETWORK_CONNECTION);
             response->SetClientErrorMessage("test connection failure");
@@ -135,6 +161,7 @@ class FixedEndpointProvider : public S3EndpointProvider {
 void
 RunWithSdk(const std::function<void(RecordingHttpClient&)>& test) {
     setenv("AWS_EC2_METADATA_DISABLED", "true", 1);
+    setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", "http://169.254.169.254", 1);
     setenv("AWS_CONFIG_FILE", "/dev/null", 1);
     setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
     unsetenv("AWS_REGION");
@@ -462,6 +489,146 @@ TEST_F(S3EndpointAuthGuardDeathTest, DefaultsAndEndpointOverridesPreserved) {
         }),
         ::testing::ExitedWithCode(0),
         "");
+}
+
+TEST_F(S3EndpointAuthGuardDeathTest,
+       ChunkManagersAcceptEnvironmentCredentialsWithoutSessionToken) {
+    ASSERT_EXIT(RunWithSdk([](RecordingHttpClient& http) {
+                    setenv("AWS_ACCESS_KEY_ID", "ENV_AK", 1);
+                    setenv("AWS_SECRET_ACCESS_KEY", "ENV_SK", 1);
+                    unsetenv("AWS_SESSION_TOKEN");
+                    unsetenv("AWS_EC2_METADATA_ENABLE");
+
+                    StorageConfig config;
+                    config.address = "s3.example.test";
+                    config.bucket_name = "test-bucket";
+                    config.region = "us-east-1";
+                    config.useIAM = true;
+                    EXPECT_NO_THROW({ AwsChunkManager manager(config); });
+                    EXPECT_NO_THROW({ MinioChunkManager manager(config); });
+                    EXPECT_EQ(http.requests, 2);
+                    EXPECT_NE(http.authorization.find("Credential=ENV_AK/"),
+                              Aws::String::npos);
+                }),
+                ::testing::ExitedWithCode(0),
+                "");
+}
+
+TEST_F(S3EndpointAuthGuardDeathTest, AwsCredentialsRequireOptInForNodeRole) {
+    ASSERT_EXIT(
+        RunWithSdk([](RecordingHttpClient& http) {
+            unsetenv("AWS_ACCESS_KEY_ID");
+            unsetenv("AWS_SECRET_ACCESS_KEY");
+            unsetenv("AWS_SESSION_TOKEN");
+            unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE");
+            unsetenv("AWS_ROLE_ARN");
+            unsetenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI");
+            unsetenv("AWS_CONTAINER_CREDENTIALS_FULL_URI");
+            setenv("AWS_DEFAULT_REGION", "us-east-1", 1);
+            setenv("AWS_EC2_METADATA_DISABLED", "false", 1);
+
+            const char* const disabled_values[] = {nullptr, "", "false", "1"};
+            for (const auto* const value : disabled_values) {
+                SCOPED_TRACE(value == nullptr ? "unset" : value);
+                if (value == nullptr) {
+                    unsetenv("AWS_EC2_METADATA_ENABLE");
+                } else {
+                    setenv("AWS_EC2_METADATA_ENABLE", value, 1);
+                }
+                milvus_storage::AwsCredentialsProviderChain chain;
+                EXPECT_TRUE(chain.GetAWSCredentials().IsEmpty());
+                EXPECT_EQ(http.metadata_requests, 0);
+                // These are the only allowed credential sources by default.
+                const auto& providers = chain.GetProviders();
+                ASSERT_EQ(providers.size(), 2);
+                EXPECT_NE(std::dynamic_pointer_cast<
+                              Aws::Auth::EnvironmentAWSCredentialsProvider>(
+                              providers[0]),
+                          nullptr);
+                EXPECT_NE(
+                    std::dynamic_pointer_cast<
+                        Aws::Auth::STSAssumeRoleWebIdentityCredentialsProvider>(
+                        providers[1]),
+                    nullptr);
+            }
+
+            setenv("AWS_EC2_METADATA_ENABLE", "TrUe", 1);
+            milvus_storage::AwsCredentialsProviderChain enabled_chain;
+            const auto node_credentials = enabled_chain.GetAWSCredentials();
+            EXPECT_EQ(node_credentials.GetAWSAccessKeyId(), "NODE_AK");
+            EXPECT_EQ(node_credentials.GetSessionToken(), "NODE_TOKEN");
+            EXPECT_GT(http.metadata_requests, 0);
+
+            const auto metadata_requests = http.metadata_requests;
+            setenv("AWS_ACCESS_KEY_ID", "ENV_AK", 1);
+            setenv("AWS_SECRET_ACCESS_KEY", "ENV_SK", 1);
+            milvus_storage::AwsCredentialsProviderChain environment_chain;
+            const auto credentials = environment_chain.GetAWSCredentials();
+            EXPECT_EQ(credentials.GetAWSAccessKeyId(), "ENV_AK");
+            EXPECT_TRUE(credentials.GetSessionToken().empty());
+            EXPECT_EQ(http.metadata_requests, metadata_requests);
+        }),
+        ::testing::ExitedWithCode(0),
+        "");
+}
+
+TEST_F(S3EndpointAuthGuardDeathTest,
+       ChunkManagersClassifyMissingAwsCredentials) {
+    ASSERT_EXIT(
+        RunWithSdk([](RecordingHttpClient& http) {
+            unsetenv("AWS_ACCESS_KEY_ID");
+            unsetenv("AWS_SECRET_ACCESS_KEY");
+            unsetenv("AWS_SESSION_TOKEN");
+            unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE");
+            unsetenv("AWS_ROLE_ARN");
+            unsetenv("AWS_EC2_METADATA_ENABLE");
+
+            StorageConfig config;
+            config.address = "s3.example.test";
+            config.bucket_name = "test-bucket";
+            config.region = "us-east-1";
+            config.useIAM = true;
+            for (const bool aws : {true, false}) {
+                SCOPED_TRACE(aws ? "AwsChunkManager" : "MinioChunkManager");
+                try {
+                    if (aws) {
+                        AwsChunkManager manager(config);
+                    } else {
+                        MinioChunkManager manager(config);
+                    }
+                    ADD_FAILURE() << "Missing credentials must be rejected";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(), ErrorCode::ConfigInvalid);
+                }
+            }
+            EXPECT_EQ(http.requests, 0);
+        }),
+        ::testing::ExitedWithCode(0),
+        "");
+}
+
+TEST_F(S3EndpointAuthGuardDeathTest,
+       AwsCredentialsDoNotFallBackToNodeRoleOnWebIdentityFailure) {
+    ASSERT_EXIT(RunWithSdk([](RecordingHttpClient& http) {
+                    unsetenv("AWS_ACCESS_KEY_ID");
+                    unsetenv("AWS_SECRET_ACCESS_KEY");
+                    unsetenv("AWS_SESSION_TOKEN");
+                    unsetenv("AWS_EC2_METADATA_ENABLE");
+                    setenv("AWS_EC2_METADATA_DISABLED", "false", 1);
+                    setenv("AWS_DEFAULT_REGION", "us-east-1", 1);
+                    setenv("AWS_ROLE_ARN",
+                           "arn:aws:iam::123456789012:role/pod-role",
+                           1);
+                    // Reading this token fails before any STS request can be sent.
+                    setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "/dev/null/token", 1);
+
+                    milvus_storage::AwsCredentialsProviderChain chain;
+                    EXPECT_TRUE(chain.GetAWSCredentials().IsEmpty());
+                    EXPECT_TRUE(chain.GetAWSCredentials().IsEmpty());
+                    EXPECT_EQ(http.metadata_requests, 0);
+                }),
+                ::testing::ExitedWithCode(0),
+                "");
 }
 
 }  // namespace

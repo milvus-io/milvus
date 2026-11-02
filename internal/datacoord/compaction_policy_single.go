@@ -96,7 +96,7 @@ func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
 	ctx context.Context,
 	segmentID int64,
 ) CompactionView {
-	log := mlog.With(mlog.FieldSegmentID(segmentID))
+	log := mlog.WithLazy(mlog.FieldSegmentID(segmentID))
 	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
 		log.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction")
 		return nil
@@ -171,7 +171,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	collectionID int64,
 	collectionTTL time.Duration,
 ) ([]CompactionView, []CompactionView, error) {
-	log := mlog.With(mlog.FieldCollectionID(collectionID))
+	log := mlog.WithLazy(mlog.FieldCollectionID(collectionID))
 	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
 		log.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction")
 		return nil, nil, nil
@@ -246,7 +246,7 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 // triggerOneCollection returns the collection's single compaction views, the
 // sort views of its invisible and of its visible segments, and the trigger ID.
 func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, []CompactionView, []CompactionView, int64, error) {
-	log := mlog.With(mlog.FieldCollectionID(collectionID))
+	log := mlog.WithLazy(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to get collection from handler",

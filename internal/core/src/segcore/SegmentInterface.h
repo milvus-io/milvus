@@ -283,10 +283,17 @@ class SegmentInterface {
     virtual void
     CreateTextIndex(FieldId field_id, milvus::OpContext* op_ctx = nullptr) = 0;
 
-    // Metadata-only lookup. Execution selects one exact entry before pinning;
-    // capabilities from separate entries must never be combined.
+    // Resolves complete index capabilities for query execution. Sealed lazy
+    // indexes may read artifact metadata here; callers that only need to
+    // inspect registrations must use IndexRegistrations instead.
     virtual FieldIndexCapability
-    IndexCapability(FieldId field_id) const = 0;
+    ResolveIndexCapability(milvus::OpContext* op_ctx,
+                           FieldId field_id) const = 0;
+
+    // Reads registrations without initializing lazy indexes. Used for lifecycle
+    // operations, vector-index lookup, and feature accounting.
+    virtual std::vector<IndexRegistration>
+    IndexRegistrations(FieldId field_id) const = 0;
 
     // Sealed index pinning. Missing keys return an empty pin; cache loading
     // failures propagate. The reader remains uniquely owned by its cache cell.
@@ -852,6 +859,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::unique_ptr<DataArray>
     bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t count) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   int64_t row_begin,
+                                   int64_t count,
+                                   const IStructElementOffsets& offsets) const;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript_not_exist_field(const milvus::FieldMeta& field_meta,
+                                   const int64_t* row_ids,
                                    int64_t count) const;
 
  protected:

@@ -46,10 +46,14 @@ import (
 // It returns true for:
 //   - ErrCompacted: the watched revision has been compacted; re-watch from a
 //     fresh revision (pre-existing behavior).
-//   - ErrLeaderChanged: authentication while opening a watch stream can fail
-//     during an election. clientv3 converts the error to an EtcdError, which
-//     the watch reconnect loop treats as a halt error. Re-establish the watch
-//     after the leader stabilizes; the snapshot Get can hit this error too.
+//   - transient server errors (see IsRetriableEtcdErr): with etcd auth
+//     enabled, clientv3 authenticates before opening every watch stream.
+//     Authenticate is a raft request, so it fails with leader changed, no
+//     leader, server stopped, request timed out, ... while a member restarts
+//     or the cluster elects a leader. clientv3 converts the failure to an
+//     EtcdError, which the watch reconnect loop treats as a halt error, so the
+//     watch is canceled with that error instead of being reconnected. The
+//     watch owner must re-establish the watch once etcd recovers.
 //   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
 //     with etcd auth enabled, the auth token held by a client can be
 //     invalidated server-side (the default "simple" token is GC'd after idle
@@ -68,34 +72,35 @@ import (
 // back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
 // source of Unauthenticated, so matching the sentinel is both sufficient and
 // narrower than trusting the code.
-//
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	return errors.Is(err, rpctypes.ErrCompacted) ||
-		errors.Is(err, rpctypes.ErrLeaderChanged) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision)
+		errors.Is(err, rpctypes.ErrAuthOldRevision) ||
+		IsRetriableEtcdErr(err)
 }
 
 // IsRetriableEtcdErr reports whether an etcd error is transient and safe to
 // retry the same request against.
 //
-// It returns true for the leader-election / availability errors a single-node
-// embedded etcd returns while it is still electing its leader during startup
-// (e.g. "etcdserver: leader changed", "etcdserver: no leader", the various
-// request-timeout sentinels) as well as a generic gRPC Unavailable (no
-// connection established yet). These are the errors that Session.Init /
-// Session.Register can legitimately observe during a cold start and should
-// backoff-and-retry rather than treat as fatal.
+// etcd marks every server-side availability error (leader changed, no leader,
+// server stopped, the request-timeout family, unhealthy cluster, ...) with
+// codes.Unavailable, the same criterion clientv3 itself uses to decide that an
+// immutable request may be retried. The error reaches callers either as a gRPC
+// status or, once clientv3 has converted it, as an rpctypes.EtcdError carrying
+// that code, so both forms are classified by code rather than by enumerating
+// sentinels. A generic gRPC Unavailable (no connection established yet) is
+// covered by the same rule. Two transient errors use other codes and are
+// matched explicitly: ErrNotLeader (FailedPrecondition) and ErrTooManyRequests
+// (ResourceExhausted, which etcd also uses for the non-transient
+// "database space exceeded").
 //
 // Genuine authorization failures, permission denials, data loss (corrupt
-// cluster) and other non-transient errors carry different codes and are
-// deliberately NOT retriable.
+// cluster), quota exhaustion and other non-transient errors carry different
+// codes and are deliberately NOT retriable.
 func IsRetriableEtcdErr(err error) bool {
 	if err == nil {
 		return false
@@ -104,17 +109,14 @@ func IsRetriableEtcdErr(err error) bool {
 	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
 		return false
 	}
-	return errors.Is(err, rpctypes.ErrLeaderChanged) ||
-		errors.Is(err, rpctypes.ErrNoLeader) ||
-		errors.Is(err, rpctypes.ErrNotLeader) ||
-		errors.Is(err, rpctypes.ErrNotCapable) ||
-		errors.Is(err, rpctypes.ErrTimeout) ||
-		errors.Is(err, rpctypes.ErrTimeoutDueToLeaderFail) ||
-		errors.Is(err, rpctypes.ErrTimeoutDueToConnectionLost) ||
-		errors.Is(err, rpctypes.ErrTimeoutWaitAppliedIndex) ||
-		errors.Is(err, rpctypes.ErrUnhealthy) ||
-		errors.Is(err, rpctypes.ErrClusterVersionUnavailable) ||
-		status.Code(err) == codes.Unavailable
+	if errors.Is(err, rpctypes.ErrNotLeader) || errors.Is(err, rpctypes.ErrTooManyRequests) {
+		return true
+	}
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		return etcdErr.Code() == codes.Unavailable
+	}
+	return status.Code(err) == codes.Unavailable
 }
 
 type ClientOption func(*clientv3.Config)

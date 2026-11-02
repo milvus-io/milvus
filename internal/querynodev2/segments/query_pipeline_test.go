@@ -279,7 +279,7 @@ func TestRunQNQueryPipeline(t *testing.T) {
 
 	// Regression test for https://github.com/milvus-io/milvus/issues/48603
 	// When sparse filter prunes all segments on a QN worker, emptySegcoreResult
-	// must return a valid aggregation result (e.g., count=0) instead of empty FieldsData.
+	// must return an aggregate identity for its empty contribution.
 	t.Run("all empty segcore results with count aggregation", func(t *testing.T) {
 		countAgg := []*planpb.Aggregate{{Op: planpb.AggregateOp_count}}
 		req := buildQueryReqForDelegator(-1, nil, nil, nil, countAgg)
@@ -290,15 +290,14 @@ func TestRunQNQueryPipeline(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, out.GetFieldsData(), 1, "count(*) should produce exactly 1 fieldData")
 		countVal := out.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-		require.Len(t, countVal, 1)
-		assert.Equal(t, int64(0), countVal[0], "count(*) on empty segments should be 0")
+		require.Equal(t, []int64{0}, countVal, "count identity is zero")
 	})
 }
 
 func TestEmptySegcoreResultAggregation(t *testing.T) {
 	schema := testQueryPipelineSchema()
 
-	t.Run("count aggregation returns count=0", func(t *testing.T) {
+	t.Run("count aggregation returns its zero identity", func(t *testing.T) {
 		countAgg := []*planpb.Aggregate{{Op: planpb.AggregateOp_count}}
 		req := buildQueryReqForDelegator(-1, nil, nil, nil, countAgg)
 
@@ -307,11 +306,10 @@ func TestEmptySegcoreResultAggregation(t *testing.T) {
 		require.Len(t, result.GetFieldsData(), 1)
 		assert.Equal(t, schemapb.DataType_Int64, result.GetFieldsData()[0].GetType())
 		countVal := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()
-		require.Len(t, countVal, 1)
-		assert.Equal(t, int64(0), countVal[0])
+		require.Equal(t, []int64{0}, countVal)
 	})
 
-	t.Run("group by with count aggregation returns empty group + count=0", func(t *testing.T) {
+	t.Run("group by with count aggregation returns zero groups", func(t *testing.T) {
 		countAgg := []*planpb.Aggregate{{Op: planpb.AggregateOp_count}}
 		groupBy := []int64{101} // group by "age" (Int64)
 		req := buildQueryReqForDelegator(-1, nil, nil, groupBy, countAgg)
@@ -340,7 +338,7 @@ func TestDelegatorPipelineCountWithEmptyWorkerResult(t *testing.T) {
 	countAgg := []*planpb.Aggregate{{Op: planpb.AggregateOp_count}}
 	req := buildQueryReqForDelegator(-1, nil, nil, nil, countAgg)
 
-	// Simulate: worker1 returned count=5, worker2 returned count=0 (from emptySegcoreResult fix)
+	// Simulate: worker1 returned count=5, worker2 has no aggregate contribution.
 	worker1 := &internalpb.RetrieveResults{
 		FieldsData: []*schemapb.FieldData{makeInt64Field(0, "", []int64{5})},
 	}

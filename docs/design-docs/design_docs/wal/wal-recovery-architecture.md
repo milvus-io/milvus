@@ -155,6 +155,16 @@ when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
 The barrier is delivered once, and no second logical scanner is opened.
 
+The sync operator publishes QueryMVCC from the complete ACK prefix before
+appending its confirmation to WAL and WAB. The acknowledged data is already
+durable; queries still wait for runtime consumption to reach their granted
+Growing/Transform targets. Consequently WAL and WAB consumers cannot dispatch a
+Flush and expose its new DataView/QueryView before the corresponding query
+frontiers are published. RecoveryStorage adds no per-message publication wait.
+MVCCManager remains owned by WAL initialization. After bounded recovery, the
+opener registers recovered live channels at the opening fence before append
+admission and live replay resume.
+
 WAB protects the live suffix from construction onward. RecoveryStorage marks
 only the complete prefix it has observed and dispatched as evictable, after each
 confirmation. Actual eviction retains the original capacity/TTL policy.

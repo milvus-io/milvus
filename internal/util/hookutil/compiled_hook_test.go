@@ -86,18 +86,19 @@ func TestInitHookIgnoresANilHook(t *testing.T) {
 	assert.True(t, ok)
 }
 
-// Two authorities for the same question is a deployment mistake, and it is
-// reported rather than silently resolved by start-up order.
-func TestInitHookRefusesACompiledInHookBesideAPlugin(t *testing.T) {
+// A compiled-in hook is used and proxy.soPath is ignored.
+func TestInitHookIgnoresProxySoPathBesideACompiledInHook(t *testing.T) {
 	paramtable.Init()
 	installHook(t, MockAPIHook{User: "root"})
 	p := paramtable.Get()
-	require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
+	require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/no-such-hook.so"))
 	t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
 
-	err := initHook()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only one can")
+	require.NoError(t, initHook())
+
+	got, err := GetHook().VerifyAPIKey("whatever")
+	assert.NoError(t, err)
+	assert.Equal(t, "root", got, "the compiled-in hook answers; the path is not loaded")
 }
 
 // initRecordingHook is a compiled-in hook that remembers how it was
@@ -296,14 +297,11 @@ func TestInitHookWithoutAnExtensionKeepsTheDefault(t *testing.T) {
 }
 
 // common.panicWhenPluginFail lets a deployment carry on without a plug-in that
-// failed to load. A compiled-in hook is treated by two rules. Setting
-// proxy.soPath beside it is a contradiction in the deployment - both answer
-// VerifyAPIKey and the request interception - so it stops the proxy whatever
-// the setting says, form or not. Any other failure of a compiled-in hook stops
-// the proxy only when a form is installed: the distribution switched the
-// coordinators' behaviors on too, so serving through the default hook would
-// run half of it. A plug-in's failure keeps the setting's meaning
-// (TestHookInitLogError).
+// failed to load. A failure of a compiled-in hook stops the proxy when a form
+// is installed: the distribution switched the coordinators' behaviors on too,
+// so serving through the default hook would run half of it. A proxy.soPath set
+// beside a compiled-in hook is no failure at all: the path is ignored. A
+// plug-in's failure keeps the setting's meaning (TestHookInitLogError).
 func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t *testing.T) {
 	paramtable.Init()
 	p := paramtable.Get()
@@ -322,23 +320,26 @@ func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t 
 			InitOnceHook()
 		})
 	})
-	// No form here: the soPath conflict is fatal on its own, not by way of the
-	// form rule.
-	t.Run("it is configured beside a plug-in", func(t *testing.T) {
+	// proxy.soPath is ignored beside a form's compiled-in hook.
+	t.Run("a plug-in path is configured beside it", func(t *testing.T) {
 		installHook(t, MockAPIHook{User: "root"})
-		require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
+		ext.SetForm()
+		require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/no-such-hook.so"))
 		t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
-		assert.Panics(t, func() {
+		assert.NotPanics(t, func() {
 			initOnce = sync.Once{}
 			InitOnceHook()
 		})
+		got, err := GetHook().VerifyAPIKey("whatever")
+		assert.NoError(t, err)
+		assert.Equal(t, "root", got)
 	})
 }
 
 // A distribution that installs a hook WITHOUT declaring a form has switched
 // nothing in the coordinators, so a hook that cannot initialize is a plug-in's
 // failure: it follows panicWhenPluginFail instead of always stopping the
-// proxy. (A soPath beside it is still fatal - see the test above.)
+// proxy.
 func TestInitOnceHookFollowsPanicWhenPluginFailWithoutAForm(t *testing.T) {
 	paramtable.Init()
 	p := paramtable.Get()

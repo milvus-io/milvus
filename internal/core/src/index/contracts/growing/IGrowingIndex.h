@@ -83,10 +83,12 @@ class IGrowingIndex {
  public:
     virtual ~IGrowingIndex() = default;
 
-    // Give interval-based writers an execution point before a query pins the
-    // current generation. Synchronously publishing implementations need no
-    // work and use this default. Errors propagate instead of falling back to
-    // an older generation.
+    // Writer-side maintenance hook for deferred publishers such as Tantivy
+    // and R-Tree. Callers may invoke it before pinning, but committing is not
+    // intrinsically required to pin an already published record. Synchronous
+    // publishers need no publication work here and must not wait for their
+    // in-flight Build/Add. Errors propagate instead of being masked by an old
+    // generation; a vector owner only checks an already published poison.
     virtual void
     CommitIfNeeded() {
     }

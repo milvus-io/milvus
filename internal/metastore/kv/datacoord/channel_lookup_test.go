@@ -21,10 +21,14 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -71,4 +75,61 @@ func TestChannelExists(t *testing.T) {
 			require.Equal(t, 1, load.Times())
 		})
 	}
+}
+
+func TestRemoveDroppedChannelFlags(t *testing.T) {
+	t.Run("removes only removed flags", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		flags := map[string]string{
+			"live_channel":     NonRemoveFlagTomestone,
+			"legacy_channel_1": RemoveFlagTomestone,
+			"legacy_channel_2": RemoveFlagTomestone,
+		}
+		txn.EXPECT().WalkWithPrefix(mock.Anything, ChannelRemovePrefix+"/", mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+				for channel, value := range flags {
+					// The walk reports keys under the meta root path.
+					if err := fn([]byte("root/"+prefix+channel), []byte(value)); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		var removed []string
+		txn.EXPECT().MultiRemove(mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, keys []string) error {
+				removed = append(removed, keys...)
+				return nil
+			})
+		catalog := NewCatalog(txn, "root", "")
+
+		count, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+		// Only the "removed" flags go; the live channel keeps its flag.
+		assert.ElementsMatch(t, []string{
+			buildChannelRemovePath("legacy_channel_1"),
+			buildChannelRemovePath("legacy_channel_2"),
+		}, removed)
+	})
+
+	t.Run("walk fails", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		catalog := NewCatalog(txn, "root", "")
+		_, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("remove fails", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+				return fn([]byte(prefix+"ch1"), []byte(RemoveFlagTomestone))
+			})
+		txn.EXPECT().MultiRemove(mock.Anything, []string{buildChannelRemovePath("ch1")}).Return(errors.New("mock error"))
+		catalog := NewCatalog(txn, "root", "")
+		_, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+		assert.Error(t, err)
+	})
 }

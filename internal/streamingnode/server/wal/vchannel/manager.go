@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -26,6 +27,7 @@ import (
 )
 
 type PChannelManagerConfig struct {
+	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 
@@ -85,7 +87,7 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 	segmentsByVChannel := groupSegmentsByVChannel(config.Segments)
 	manager := &PChannelRecoveryManager{
 		pchannel:                config.PChannel,
-		queryDispatcher:         queryresource.NewDispatcher(4),
+		queryDispatcher:         queryresource.NewConfiguredDispatcher(),
 		queryTransformLogStream: walsummary.NewStream(config.SummaryManager),
 		modules:                 typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
 		segmentsByVChannel:      segmentsByVChannel,
@@ -354,6 +356,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
 		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
 		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,
+		QueryStatsChunkManager:     m.config.QueryStatsChunkManager,
 		QueryDispatcher:            m.queryDispatcher,
 		TransformLogStream:         m.queryTransformLogStream,
 		SummaryManager:             m.config.SummaryManager,
@@ -483,7 +486,7 @@ func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
 }
 
 func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {
-	runtime, ok := m.GetQueryRuntime(key)
+	runtime, ok := m.GetQueryReadRuntime(key)
 	if !ok {
 		return nil, false
 	}
@@ -525,4 +528,12 @@ func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel st
 		_ = stream.Close()
 	}()
 	return stream, nil
+}
+
+func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryReadRuntime(key)
 }

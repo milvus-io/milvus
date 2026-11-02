@@ -341,8 +341,9 @@ typedef struct CFlushConfig {
     const void* schema_blob;  // serialized CollectionSchema for this flush task
     int64_t schema_length;    // length of schema_blob in bytes
     int64_t read_version;     // version to read (-1 = latest)
-    uint32_t retry_limit;     // retry limit for commit
-    const char* writer_format;          // writer.format
+    int64_t read_manifest_size;  // byte size of that manifest, <= 0 = unknown
+    uint32_t retry_limit;        // retry limit for commit
+    const char* writer_format;   // writer.format
     const char* schema_based_pattern;   // writer.split.schema_based.patterns
     const char* schema_based_formats;   // writer.split.schema_based.formats
     int64_t* allowed_field_ids;         // projected field IDs to flush
@@ -375,8 +376,9 @@ typedef struct CFlushConfig {
  */
 typedef struct CFlushResult {
     char* manifest_path;  // path to the committed manifest (caller must free)
-    int64_t committed_version;   // committed version number
-    int64_t num_rows;            // number of rows flushed
+    int64_t committed_version;  // committed version number
+    int64_t manifest_size;  // byte size of the committed manifest, -1 = unknown
+    int64_t num_rows;       // number of rows flushed
     uint64_t timestamp_from;     // minimum row timestamp flushed
     uint64_t timestamp_to;       // maximum row timestamp flushed
     int64_t* field_ids;          // field ids for per-field flush summaries

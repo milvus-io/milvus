@@ -11,12 +11,14 @@
 
 #include <fmt/core.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <iosfwd>
 #include <map>
@@ -30,9 +32,12 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 #include "NamedType/named_type_impl.hpp"
 #include "NamedType/underlying_functionalities.hpp"
+#include "arrow/api.h"
+#include "arrow/filesystem/localfs.h"
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
 #include "cachinglayer/CacheSlot.h"
@@ -52,6 +57,7 @@
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -60,7 +66,11 @@
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
+#include "milvus-storage/format/vortex/vortex_writer.h"
+#include "milvus-storage/properties.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/VortexColumn.h"
+#include "mmap/VortexColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -183,6 +193,7 @@ struct OffsetsPreparationProbe {
     enum class Failure { None, Read, Cancel, Allocation };
     Failure failure = Failure::None;
     int calls = 0;
+    int bulk_is_valid_calls = 0;
 };
 
 class ProbedVectorArrayColumn : public ChunkedVectorArrayColumn {
@@ -208,6 +219,16 @@ class ProbedVectorArrayColumn : public ChunkedVectorArrayColumn {
             case OffsetsPreparationProbe::Failure::None:
                 return;
         }
+    }
+
+    void
+    BulkIsValid(OpContext* op_ctx,
+                std::function<void(bool, size_t)> fn,
+                const int64_t* offsets = nullptr,
+                int64_t count = 0) const override {
+        ++probe_->bulk_is_valid_calls;
+        ChunkedVectorArrayColumn::BulkIsValid(
+            op_ctx, std::move(fn), offsets, count);
     }
 
  private:
@@ -862,6 +883,536 @@ TEST(test_chunk_segment,
     column->ManualEvictCache();
     EXPECT_EQ(segment->GetStructElementOffsets(field), offsets);
     EXPECT_EQ(probe->calls, 4);
+}
+
+// A sibling loaded after the struct offsets were published shares them: every
+// child of a struct row has the same element count, so the mapping is not
+// rebuilt per child.
+TEST(test_chunk_segment, StructOffsetsSharedBySiblingLoadedLater) {
+    auto schema = std::make_shared<Schema>();
+    auto first =
+        schema->AddDebugArrayField("items[first]", DataType::INT32, false);
+    auto second =
+        schema->AddDebugArrayField("items[second]", DataType::INT32, false);
+    constexpr int64_t row_count = 3;
+    auto dataset = segcore::DataGen(schema,
+                                    row_count,
+                                    /*seed=*/42,
+                                    /*ts_offset=*/0,
+                                    /*repeat_count=*/1,
+                                    /*array_len=*/2);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto make_load_info = [&](FieldId field_id) {
+        for (const auto& data : dataset.raw_->fields_data()) {
+            if (data.field_id() == field_id.get()) {
+                auto field_data = segcore::CreateFieldDataFromDataArray(
+                    row_count, &data, (*schema)[field_id]);
+                return PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                      kPartitionID,
+                                                      kSegmentID,
+                                                      field_id.get(),
+                                                      {field_data},
+                                                      cm);
+            }
+        }
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "field {} missing from generated test data",
+                  field_id.get());
+        return LoadFieldDataInfo{};
+    };
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(make_load_info(second));
+    auto published = segment->GetStructElementOffsets(second);
+    ASSERT_NE(published, nullptr);
+    EXPECT_EQ(published->GetTotalElementCount(), row_count * 2);
+
+    segment->LoadFieldData(make_load_info(first));
+    auto shared = segment->GetStructElementOffsets(first);
+    ASSERT_NE(shared, nullptr);
+    EXPECT_EQ(shared.get(), published.get());
+    EXPECT_EQ(segment->GetStructElementOffsets(second).get(), published.get());
+}
+
+TEST(test_chunk_segment, ReopenRebuildsOffsetsAfterProviderDrop) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto first =
+        schema->AddDebugArrayField("items[first]", DataType::INT32, false);
+    auto second =
+        schema->AddDebugArrayField("items[second]", DataType::INT32, false);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto before = segment->GetStructElementOffsets(first);
+    ASSERT_NE(before, nullptr);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[second]"),
+                   second,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   false);
+    segment->Reopen(next);
+    EXPECT_EQ(segment->GetStructElementOffsets(first), nullptr);
+    auto after = segment->GetStructElementOffsets(second);
+    ASSERT_NE(after, nullptr);
+    EXPECT_NE(after.get(), before.get());
+    EXPECT_EQ(after->GetTotalElementCount(), before->GetTotalElementCount());
+}
+
+TEST(test_chunk_segment, ReopenBackfillsNonnullableStructChildElements) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, false);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[source]"),
+                   source,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   false);
+    FieldId added(source.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   false,
+                   true);
+    segment->Reopen(next);
+    auto offsets = segment->GetStructElementOffsets(added);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets.get(), segment->GetStructElementOffsets(source).get());
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        const auto length = offsets->ElementIDRangeOfRow(i).second -
+                            offsets->ElementIDRangeOfRow(i).first;
+        const auto& row = result->scalars().array_data().data(i);
+        EXPECT_EQ(row.valid_data_size(), length);
+        for (bool valid : row.valid_data()) {
+            EXPECT_FALSE(valid);
+        }
+    }
+}
+
+TEST(test_chunk_segment, ReopenBackfillsNullableStructRows) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == source.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldName("items[source]"),
+                   source,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   false);
+    FieldId added(source.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   true);
+    segment->Reopen(next);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
+}
+
+// The backfill of an added element-nullable sub-field takes the parent row
+// validity from the struct offsets, which were built from the scalar child.
+// It must not read the validity of a VectorArray sibling that comes first in
+// the schema, because reading it pins the vector payload of a cold column.
+TEST(test_chunk_segment,
+     ReopenBackfillReadsRowValidityFromOffsetsNotVectorSibling) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto vec = schema->AddDebugVectorArrayField(
+        "items[vec]", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2, true);
+    auto ints =
+        schema->AddDebugArrayField("items[ints]", DataType::INT32, true);
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == ints.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto probe = std::make_shared<OffsetsPreparationProbe>();
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(
+        (*schema)[vec],
+        2,
+        {{{true, {1, 2, 3, 4}}, {false, {}}, {true, {5, 6, 7, 8}}}},
+        buffers,
+        probe);
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->fields[vec] = column;
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldMeta(FieldName("items[vec]"),
+                             vec,
+                             DataType::VECTOR_ARRAY,
+                             DataType::VECTOR_FLOAT,
+                             2,
+                             knowhere::metric::L2,
+                             true,
+                             false));
+    next->AddField(FieldName("items[ints]"),
+                   ints,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   false);
+    FieldId added(ints.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   true);
+    segment->Reopen(next);
+
+    EXPECT_EQ(probe->bulk_is_valid_calls, 0);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
+}
+
+namespace {
+
+// A collection schema with an INT64 primary key (field 100) and, when
+// struct_children is not empty, a nullable struct "items" (field 101) with
+// nullable INT32 Array sub-fields; element_nullable marks sub-fields added
+// after the struct was created. with_late_field adds a nullable INT64 field
+// "late" (field 104), added after the struct.
+SchemaPtr
+ParseStructProviderSchema(
+    int32_t version,
+    const std::vector<std::pair<int64_t, bool>>& struct_children,
+    bool with_late_field = false) {
+    proto::schema::CollectionSchema proto;
+    proto.set_name("struct_provider");
+    proto.set_version(version);
+    auto* pk = proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    if (!struct_children.empty()) {
+        auto* items = proto.add_struct_array_fields();
+        items->set_fieldid(101);
+        items->set_name("items");
+        items->set_nullable(true);
+        for (const auto& [field_id, element_nullable] : struct_children) {
+            auto* child = items->add_fields();
+            child->set_fieldid(field_id);
+            child->set_name(field_id == 102 ? "items[old]" : "items[added]");
+            child->set_data_type(proto::schema::DataType::Array);
+            child->set_element_type(proto::schema::DataType::Int32);
+            child->set_nullable(true);
+            child->set_element_nullable(element_nullable);
+            auto* capacity = child->add_type_params();
+            capacity->set_key("max_capacity");
+            capacity->set_value("16");
+        }
+    }
+    if (with_late_field) {
+        auto* late = proto.add_fields();
+        late->set_fieldid(104);
+        late->set_name("late");
+        late->set_data_type(proto::schema::DataType::Int64);
+        late->set_nullable(true);
+    }
+    // Schema::ParseFrom ignores proto.version(); Reopen compares schema
+    // versions, so set it the way segment_c.cpp does.
+    auto schema = Schema::ParseFrom(proto);
+    schema->set_schema_version(version);
+    return schema;
+}
+
+// Binlogs for stored_fields, plus an STL_SORT index (which has raw data) for
+// each of indexed_fields, built without a binlog of that field.
+proto::segcore::SegmentLoadInfo
+StructProviderLoadInfo(const std::vector<int64_t>& stored_fields,
+                       int64_t rows,
+                       const std::vector<int64_t>& indexed_fields = {}) {
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(kSegmentID);
+    info.set_num_of_rows(rows);
+    for (auto field_id : stored_fields) {
+        auto* binlog = info.add_binlog_paths();
+        binlog->set_fieldid(field_id);
+        auto* log = binlog->add_binlogs();
+        log->set_entries_num(rows);
+        log->set_log_path(fmt::format("struct_provider/{}/0", field_id));
+    }
+    for (auto field_id : indexed_fields) {
+        auto* index = info.add_index_infos();
+        index->set_fieldid(field_id);
+        index->set_indexid(field_id * 10);
+        index->set_buildid(field_id * 10);
+        index->set_num_rows(rows);
+        index->add_index_file_paths(
+            fmt::format("struct_provider/index/{}", field_id));
+        auto* index_type = index->add_index_params();
+        index_type->set_key("index_type");
+        index_type->set_value("STL_SORT");
+    }
+    return info;
+}
+
+}  // namespace
+
+// The field-id rule of the struct offsets fallback: a segment that stores a
+// field written after the struct appeared but none of the struct's current
+// sub-fields lost its offsets provider; a segment that stores only older
+// fields predates the struct.
+TEST(test_chunk_segment,
+     StructProviderCheckTellsDroppedProviderFromOlderSegment) {
+    auto schema = ParseStructProviderSchema(3, {{103, true}});
+    auto check = [&](const std::vector<int64_t>& stored) {
+        segcore::SegmentLoadInfo info(StructProviderLoadInfo(stored, 3),
+                                      schema);
+        segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
+            *schema, info, "items");
+    };
+    try {
+        check({100, 102});
+        FAIL() << "a segment whose struct sub-fields were all dropped must "
+                  "not get all-zero offsets";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_NO_THROW(check({100}));       // predates the struct
+    EXPECT_NO_THROW(check({100, 103}));  // provider stored, not loaded yet
+}
+
+// An index built after the struct appeared, for a field the segment has no
+// binlog of (built from the field's default), does not show when the
+// segment's rows were written: a segment whose row columns all predate the
+// struct still gets null struct rows.
+TEST(test_chunk_segment, StructProviderCheckIgnoresIndexOnlyFields) {
+    auto schema = ParseStructProviderSchema(3, {{103, true}}, true);
+    auto check = [&](const std::vector<int64_t>& stored,
+                     const std::vector<int64_t>& indexed) {
+        segcore::SegmentLoadInfo info(
+            StructProviderLoadInfo(stored, 3, indexed), schema);
+        // Fixture guard: the index must count as raw data for the load, or
+        // this test would not cover the index-only field.
+        ASSERT_TRUE(info.FieldIndexHasRawData(FieldId(104)));
+        segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
+            *schema, info, "items");
+    };
+    EXPECT_NO_THROW(check({100}, {104}));
+    // A row column of a dropped sub-field still fails, index or not.
+    EXPECT_THROW(check({100, 102}, {104}), SegcoreError);
+}
+
+// Sealed load and Reopen: a struct added after the segment was written gives
+// its old rows null struct rows.
+TEST(test_chunk_segment, ReopenWholeStructAddedLaterStaysNull) {
+    auto schema = ParseStructProviderSchema(1, {});
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100}, rows));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{103, true}}));
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, FieldId(103), row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
+    for (int i = 0; i < rows; ++i) {
+        EXPECT_FALSE(validity[i]);
+    }
+}
+
+// The same on Reopen when the segment's only field newer than the struct
+// comes from an index with raw data built from the field's default: the
+// segment has no row column of it, so its rows still predate the struct.
+TEST(test_chunk_segment, ReopenWholeStructAddedLaterIgnoresIndexOnlyField) {
+    auto schema = ParseStructProviderSchema(1, {}, true);
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100}, rows, {104}));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{103, true}}, true));
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, FieldId(103), row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
+    for (int i = 0; i < rows; ++i) {
+        EXPECT_FALSE(validity[i]);
+    }
+}
+
+// After a sub-field was added and the only stored one dropped, the segment's
+// struct offsets would come from the backfilled sub-field. In this process it
+// still holds the counts of the dropped one, but a cold load of the same
+// segment has nothing to derive them from, so Reopen fails in both cases.
+TEST(test_chunk_segment, ReopenAfterProviderDropFailsEvenWithBackfillInMemory) {
+    auto schema = ParseStructProviderSchema(1, {{102, false}});
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100, 102}, rows));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{102, false}, {103, true}}));
+    try {
+        segment->Reopen(ParseStructProviderSchema(3, {{103, true}}));
+        FAIL() << "dropping the only stored struct sub-field must fail the "
+                  "reopen";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+}
+
+TEST(test_chunk_segment, ReopenKeepsOffsetsAfterDroppingOnlyRealChild) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto source =
+        schema->AddDebugArrayField("items[source]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 3, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == source.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    auto make_schema = [&](int64_t version, bool keep_source, bool add_later) {
+        auto next = std::make_shared<Schema>();
+        next->set_schema_version(version);
+        next->AddField(
+            FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+        next->set_primary_field_id(pk);
+        if (keep_source) {
+            next->AddField(FieldName("items[source]"),
+                           source,
+                           DataType::ARRAY,
+                           DataType::INT32,
+                           true,
+                           false);
+        }
+        FieldId backfilled(source.get() + 1);
+        next->AddField(FieldName("items[backfilled]"),
+                       backfilled,
+                       DataType::ARRAY,
+                       DataType::INT32,
+                       true,
+                       true);
+        if (add_later) {
+            next->AddField(FieldName("items[later]"),
+                           FieldId(backfilled.get() + 1),
+                           DataType::ARRAY,
+                           DataType::INT32,
+                           true,
+                           true);
+        }
+        return next;
+    };
+
+    FieldId backfilled(source.get() + 1);
+    FieldId later(backfilled.get() + 1);
+    segment->Reopen(make_schema(2, true, false));
+    segment->Reopen(make_schema(3, false, false));
+    EXPECT_EQ(segment->GetStructElementOffsets(source), nullptr);
+    auto offsets = segment->GetStructElementOffsets(backfilled);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+
+    segment->Reopen(make_schema(4, false, true));
+    offsets = segment->GetStructElementOffsets(later);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, later, row_ids, 3);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 3);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
 }
 
 // #52877: lazy reopen may skip the drop-only schema and see the old and new
@@ -2135,4 +2686,199 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
     }
 
     EXPECT_EQ(expired_count, test_data_count / 4);
+}
+
+namespace {
+
+// Writes one Arrow list<int64> column per Vortex file. A nullopt row is a NULL
+// row, a nullopt element a NULL element.
+using VortexInt64ListRow = std::optional<std::vector<std::optional<int64_t>>>;
+
+std::shared_ptr<arrow::Array>
+BuildVortexInt64ListArray(const std::vector<VortexInt64ListRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), values);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(builder.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(builder.Append().ok());
+        for (const auto& value : *row) {
+            if (value.has_value()) {
+                EXPECT_TRUE(values->Append(*value).ok());
+            } else {
+                EXPECT_TRUE(values->AppendNull().ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(builder.Finish(&array).ok());
+    return array;
+}
+
+VortexColumn::FileInfo
+WriteInt64ListVortexFile(const std::filesystem::path& path,
+                         FieldId field_id,
+                         const std::vector<VortexInt64ListRow>& rows,
+                         int64_t start_index,
+                         const milvus_storage::api::Properties& properties) {
+    auto array = BuildVortexInt64ListArray(rows);
+    auto schema = arrow::schema(
+        {arrow::field(std::to_string(field_id.get()), array->type(), true)});
+    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
+    auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
+    auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
+        fs, schema, path.string(), properties);
+    EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    if (!writer_result.ok()) {
+        return {};
+    }
+    auto writer = std::move(writer_result).ValueOrDie();
+    EXPECT_TRUE(writer->Write(batch).ok());
+    EXPECT_TRUE(writer->Flush().ok());
+    auto close_result = writer->Close();
+    EXPECT_TRUE(close_result.ok());
+    if (!close_result.ok()) {
+        return {};
+    }
+    auto cg_file = close_result.ValueOrDie();
+    VortexColumn::FileInfo info;
+    info.path = path.string();
+    info.start_index = start_index;
+    info.end_index = start_index + array->length();
+    info.file_size =
+        cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFileSize, 0);
+    info.footer_size =
+        cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFooterSize, 0);
+    return info;
+}
+
+}  // namespace
+
+// A nullable struct with a single-level element-nullable Array<Int64>
+// sub-field, loaded as Vortex. Output of the sub-field must read the rows as
+// ArrayValueView (native list), including NULL rows and NULL elements.
+//   0 [10, NULL, 30]   1 [NULL]   2 NULL row
+//   3 [50, NULL]       4 []       5 [60]
+TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto field = schema->AddDebugArrayField("s[arr]",
+                                            DataType::INT64,
+                                            /*nullable=*/true,
+                                            /*element_nullable=*/true);
+    const auto& field_meta = (*schema)[field];
+    ASSERT_TRUE(field_meta.is_native_list_array());
+    ASSERT_TRUE(field_meta.is_nullable());
+
+    constexpr int64_t rows = 6;
+    auto data = segcore::DataGen(schema, rows);
+    auto segment =
+        CreateSealedWithFieldDataLoaded(schema, data, false, {field.get()});
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    (*properties)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*properties)[PROPERTY_FS_ROOT_PATH] = std::string("/");
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_segment_vortex_element_nullable_" +
+                std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto dir_guard =
+        folly::makeGuard([&dir] { std::filesystem::remove_all(dir); });
+    auto first = WriteInt64ListVortexFile(
+        dir / "first.vx",
+        field,
+        {std::vector<std::optional<int64_t>>{10, std::nullopt, 30},
+         std::vector<std::optional<int64_t>>{std::nullopt},
+         std::nullopt},
+        0,
+        *properties);
+    auto second = WriteInt64ListVortexFile(
+        dir / "second.vx",
+        field,
+        {std::vector<std::optional<int64_t>>{50, std::nullopt},
+         std::vector<std::optional<int64_t>>{},
+         std::vector<std::optional<int64_t>>{60}},
+        3,
+        *properties);
+    std::vector<std::string> field_names{std::to_string(field.get())};
+    auto column_group = std::make_shared<VortexColumnGroup>(
+        std::vector<VortexColumn::FileInfo>{first, second},
+        properties,
+        field_names,
+        field_names.size(),
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+        nullptr);
+    auto column = std::make_shared<VortexColumn>(field,
+                                                 field_meta,
+                                                 std::to_string(field.get()),
+                                                 properties,
+                                                 column_group);
+    ASSERT_EQ(column->GetLocalFormat(),
+              ChunkedColumnInterface::LocalFormat::Vortex);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+    initial.schema = schema;
+    initial.load_info = current->load_info;
+    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial);
+    segcore::ChunkedSegmentSealedImpl::StateDelta final;
+    final.schema = schema;
+    final.load_info = current->load_info;
+    final.commit_ts = current->commit_ts;
+    sealed->TestStageLoadFieldDataThenPublish(field,
+                                              column,
+                                              rows,
+                                              DataType::ARRAY,
+                                              schema,
+                                              runtime,
+                                              staged.get(),
+                                              current,
+                                              final,
+                                              [] {});
+
+    const std::vector<int64_t> offsets{5, 0, 2, 3, 1, 4, 0};
+    auto result = segment->bulk_subscript(
+        nullptr, field, offsets.data(), static_cast<int64_t>(offsets.size()));
+    ASSERT_NE(result, nullptr);
+    const auto& row_valid = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(row_valid.size(), offsets.size());
+    const auto& array_data = result->scalars().array_data();
+    EXPECT_EQ(array_data.element_type(), proto::schema::DataType::Int64);
+    ASSERT_EQ(array_data.data_size(), offsets.size());
+
+    const std::map<int64_t, std::vector<std::optional<int64_t>>> expected{
+        {0, {10, std::nullopt, 30}},
+        {1, {std::nullopt}},
+        {3, {50, std::nullopt}},
+        {4, {}},
+        {5, {60}},
+    };
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto row = offsets[i];
+        SCOPED_TRACE(row);
+        EXPECT_EQ(row_valid[i], row != 2);
+        if (row == 2) {
+            continue;
+        }
+        const auto& cell = array_data.data(i);
+        const auto& want = expected.at(row);
+        ASSERT_EQ(cell.long_data().data_size(), want.size());
+        ASSERT_EQ(cell.valid_data_size(), want.size());
+        for (size_t j = 0; j < want.size(); ++j) {
+            EXPECT_EQ(cell.valid_data(j), want[j].has_value());
+            if (want[j].has_value()) {
+                EXPECT_EQ(cell.long_data().data(j), *want[j]);
+            }
+        }
+    }
 }

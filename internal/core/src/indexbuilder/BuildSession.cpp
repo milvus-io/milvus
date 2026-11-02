@@ -817,12 +817,14 @@ BuildSession::RunToArtifact() {
             const auto add = [&](FieldDataPtr batch) {
                 materializer->Add(batch);
             };
-            if (std::holds_alternative<V1BinlogBuildSource>(req_.source)) {
-                // Binlogs reveal their row count only when decoded. Stream
-                // them assuming no prefix; when the field turns out short,
-                // start over with the prefix and stream the binlogs again.
-                // Only binlogs lacking leading rows pay the second read; a
-                // field without binlogs has nothing to read again.
+            if (std::holds_alternative<V1BinlogBuildSource>(req_.source) ||
+                req_.family == index::families::kVectorDisk) {
+                // Stream first so disk-vector input never retains the whole
+                // decoded column in memory. Only successful exhaustion can
+                // establish a missing leading prefix: read/decode failures
+                // propagate and never become synthesized rows. If complete
+                // source files hold fewer rows than expected, rebuild the
+                // materializer with the schema prefix before replaying them.
                 const auto decoded_rows =
                     visit_primary(storage::kStreamingInflightBytes,
                                   label,
@@ -844,15 +846,6 @@ BuildSession::RunToArtifact() {
                               replayed_rows,
                               decoded_rows);
                 }
-                return;
-            }
-            if (req_.family == index::families::kVectorDisk) {
-                // Column-group and manifest disk-vector sources fill no
-                // prefix; FinishPrimary rejects a short source.
-                visit_primary(storage::kStreamingInflightBytes,
-                              label,
-                              req_.expected_rows,
-                              add);
                 return;
             }
             // Column-group and manifest sources: retain the decoded batches so

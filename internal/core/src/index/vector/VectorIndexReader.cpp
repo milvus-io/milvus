@@ -276,6 +276,10 @@ VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
         return reject_sparse();
     }
     ValidateGenerationIds(dataset, "get vector");
+    const auto request = detail::ValidateIdRequest(dataset, "get vector");
+    if (request.rows_size == 0) {
+        return {};
+    }
     if (IsAllNullNullable(engine_.native_index)) {
         ThrowInfo(UnexpectedError,
                   "failed to get vector, this nullable vector index contains "
@@ -310,17 +314,16 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
     }
 
     ValidateGenerationIds(dataset, "get sparse vector");
-    if (IsAllNullNullable(engine_.native_index)) {
-        ThrowInfo(UnexpectedError,
-                  "failed to get vector, this nullable vector index contains "
-                  "no valid vectors");
-    }
     const auto request =
         detail::ValidateIdRequest(dataset, "get sparse vector");
     if (request.rows_size == 0) {
         return nullptr;
     }
-
+    if (IsAllNullNullable(engine_.native_index)) {
+        ThrowInfo(UnexpectedError,
+                  "failed to get vector, this nullable vector index contains "
+                  "no valid vectors");
+    }
     auto retrieved = engine_.native_index.GetVectorByIds(dataset);
     if (!retrieved.has_value()) {
         detail::ThrowRetrievalError("get sparse vector", retrieved);

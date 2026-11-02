@@ -475,7 +475,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
             requirement.json_path = json_path.value();
         }
 
-        const auto capabilities = segment_.IndexCapability(field_id_);
+        const auto capabilities =
+            segment_.ResolveIndexCapability(op_ctx_, field_id_);
         const auto decision = DetermineExecPath(requirement, capabilities);
         if (!decision.key.has_value()) {
             return false;

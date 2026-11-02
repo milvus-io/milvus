@@ -2672,22 +2672,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err != nil {
 		rsp.Status = merr.Status(err)
 	}
-	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, nil
-}
-
-func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
-	resultData := result.GetResults()
-	if resultData == nil {
-		return
-	}
-	for _, field := range resultData.GetFieldsData() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
-	for _, field := range resultData.GetGroupByFieldValues() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
-	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
 // countFeatures is true only for the first task built for a user request. The
@@ -2852,6 +2837,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	).Observe(float64(searchDur))
 
 	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
+	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -2935,7 +2921,6 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
-	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, err
 }
 
@@ -3074,6 +3059,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	).Observe(float64(searchDur))
 
 	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
+	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3719,9 +3705,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	method := "Query"
 
 	res, storageCost, err := node.query(ctx, qt, sp)
-	for _, field := range res.GetFieldsData() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -6625,7 +6608,10 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 	}
 
 	request := &streamingpb.StreamingNodeRunAnalyzerRequest{
-		Placeholder: req.GetPlaceholder(), WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash(),
+		Placeholder: req.GetPlaceholder(),
+		Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{
+			Tokenize: &streamingpb.TokenizeOptions{WithDetail: req.GetWithDetail(), WithHash: req.GetWithHash()},
+		},
 	}
 	if req.GetCollectionName() == "" {
 		request.Source = &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{
@@ -6659,19 +6645,25 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 
 	response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, request)
 	if err != nil {
-		// Translate streaming failures only; analyzer Status is forwarded below.
-		switch {
-		case status.IsCanceled(err):
-		case status.AsStreamingError(err).IsInvalidArgument():
-			err = merr.WrapErrParameterInvalidErr(err, "run analyzer")
-		case grpcstatus.Code(err) == codes.Unimplemented:
-			err = merr.Wrap(merr.ErrServiceUnimplemented, err.Error())
-		default:
-			err = merr.WrapErrServiceUnavailableErr(err, "run analyzer")
-		}
+		err = analyzerTransportError(err)
 		return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
-	return &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetResults()}, nil
+	return &milvuspb.RunAnalyzerResponse{Status: response.GetStatus(), Results: response.GetTokenize().GetResults()}, nil
+}
+
+// analyzerTransportError translates transport failures at the public API boundary.
+// Analyzer business Status is forwarded without entering the readiness retry loop.
+func analyzerTransportError(err error) error {
+	switch {
+	case status.IsCanceled(err):
+		return err
+	case status.AsStreamingError(err).IsInvalidArgument():
+		return merr.WrapErrParameterInvalidErr(err, "run analyzer")
+	case grpcstatus.Code(err) == codes.Unimplemented:
+		return merr.Wrap(merr.ErrServiceUnimplemented, err.Error())
+	default:
+		return merr.WrapErrServiceUnavailableErr(err, "run analyzer")
+	}
 }
 
 func authorizeRunAnalyzerCollection(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (context.Context, error) {
@@ -7272,14 +7264,18 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 
 	mlog.Debug(ctx, rpcReceived(method))
 
-	resp, err := node.mixCoord.ComputePhraseMatchSlop(ctx, &querypb.ComputePhraseMatchSlopRequest{
-		AnalyzerParams: req.GetAnalyzerParams(),
-		QueryText:      req.GetQueryText(),
-		DataTexts:      req.GetDataTexts(),
+	texts := make([][]byte, len(req.GetDataTexts()))
+	for i, text := range req.GetDataTexts() {
+		texts[i] = []byte(text)
+	}
+	resp, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
+		Placeholder: texts,
+		Source:      &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: req.GetAnalyzerParams()}},
+		Operation:   &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: req.GetQueryText()}},
 	})
 	if err != nil {
 		return &milvuspb.ComputePhraseMatchSlopResponse{
-			Status: merr.Status(err),
+			Status: merr.Status(analyzerTransportError(err)),
 		}, nil
 	}
 
@@ -7289,8 +7285,8 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 
 	return &milvuspb.ComputePhraseMatchSlopResponse{
 		Status:  resp.GetStatus(),
-		IsMatch: resp.GetIsMatch(),
-		Slops:   resp.GetSlops(),
+		IsMatch: resp.GetPhraseMatch().GetIsMatch(),
+		Slops:   resp.GetPhraseMatch().GetSlops(),
 	}, nil
 }
 

@@ -174,8 +174,12 @@ func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 func (opt *createCollectionOption) Indexes() []CreateIndexOption {
 	// fast create
 	if opt.isFast && opt.indexOptions == nil {
+		params := map[string]string{}
+		if opt.metricType != "" {
+			params[index.MetricTypeKey] = string(opt.metricType)
+		}
 		return []CreateIndexOption{
-			NewCreateIndexOption(opt.name, opt.vectorFieldName, index.NewGenericIndex("", map[string]string{})),
+			NewCreateIndexOption(opt.name, opt.vectorFieldName, index.NewGenericIndex("", params)),
 		}
 	}
 	return opt.indexOptions

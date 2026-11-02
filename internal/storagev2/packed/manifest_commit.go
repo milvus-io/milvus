@@ -72,6 +72,14 @@ type ManifestUpdates struct {
 	// register. Each entry's Files / Metadata replace any existing entry
 	// with the same Key (loon overwrite semantics).
 	Stats []StatEntry
+	// DropColumns removes whole columns (identified by column name / Milvus
+	// field ID) from the manifest. milvus-storage drops the column from every
+	// column group that contains it, deletes any group that becomes empty, and
+	// auto-drops all indexes attached to the column; a column that is absent is
+	// a no-op. Used by backfill "replace" to overwrite a column atomically:
+	// the drop and the re-add travel in one transaction, and drops are staged
+	// before column-group adds to match milvus-storage's apply order.
+	DropColumns []string
 	// Indexes registers completed index artifacts. milvus-storage replaces
 	// any existing entry carrying the same index_id, so republishing a
 	// rebuilt index supersedes its predecessor instead of duplicating it.
@@ -95,7 +103,7 @@ func (u *ManifestUpdates) isEmpty() bool {
 		return false
 	}
 	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0 &&
-		len(u.Indexes) == 0 && len(u.DropIndexes) == 0
+		len(u.Indexes) == 0 && len(u.DropIndexes) == 0 && len(u.DropColumns) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at the revision named by
@@ -113,7 +121,7 @@ func CommitManifestUpdates(baseManifestPath string,
 	if updates.isEmpty() {
 		return baseManifestPath, nil
 	}
-	basePath, baseVersion, err := UnmarshalManifestPath(baseManifestPath)
+	baseManifest, err := ParseManifestPath(baseManifestPath)
 	if err != nil {
 		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
@@ -126,7 +134,8 @@ func CommitManifestUpdates(baseManifestPath string,
 		return "", err
 	}
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 {
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 &&
+		len(updates.DropColumns) == 0 {
 		return baseManifestPath, nil
 	}
 
@@ -136,21 +145,14 @@ func CommitManifestUpdates(baseManifestPath string,
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
 	// Use OVERWRITE for the whole bundle: stats updates rely on
 	// overwrite-on-key semantics (loon_transaction_update_stat replaces
 	// existing entries with the same key), while column-group appends and
 	// delta-log adds don't collide on a key in the first place. A single
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
-	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_open(cBasePath, cProperties,
-		C.int64_t(baseVersion), C.int64_t(-1),
-		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
-		getRetryLimit(), &handle)
-	if err := HandleLoonFFIResult(res); err != nil {
+	handle, err := openTransaction(baseManifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.
 		return "", merr.WrapErrStorage(err, "commit manifest begin")
@@ -161,18 +163,31 @@ func CommitManifestUpdates(baseManifestPath string,
 		return "", err
 	}
 
-	var commitVersion C.int64_t
-	res = C.loon_transaction_commit(handle, &commitVersion, nil)
-	if err := HandleLoonFFIResult(res); err != nil {
+	manifestPath, err := commitTransaction(handle, baseManifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}
-	return MarshalManifestPath(basePath, int64(commitVersion)), nil
+	return manifestPath, nil
 }
 
 // applyManifestUpdates stages every operation in updates onto the loon
 // transaction handle. dropIndexIDs is the drop set already resolved against
 // the transaction's base revision by resolveDropIndexes.
 func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates, dropIndexIDs []int64) error {
+	// Column drops are staged before every add: a backfill "replace" bundles a
+	// drop with the re-add of the same column, and milvus-storage applies
+	// dropped columns before add-column-group validation (a re-add of a column
+	// that still exists would be rejected). Staging them first keeps the Go
+	// layer aligned with that contract regardless of the C++ apply order.
+	for _, column := range updates.DropColumns {
+		cPath := C.CString(column)
+		err := HandleLoonFFIResult(C.loon_transaction_drop_column(handle, cPath))
+		C.free(unsafe.Pointer(cPath))
+		if err != nil {
+			return merr.WrapErrStorage(err, "commit manifest drop_column")
+		}
+	}
+
 	if updates.NewFiles != nil {
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err

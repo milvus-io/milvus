@@ -121,6 +121,59 @@ func (s *CollectionSuite) TestCreateCollection() {
 	})
 }
 
+func (s *CollectionSuite) TestCreateCollectionQuickMetricType() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cases := []struct {
+		tag          string
+		opt          *createCollectionOption
+		expectMetric string
+	}{
+		{tag: "default", opt: SimpleCreateCollectionOptions("test_collection", 128), expectMetric: string(entity.COSINE)},
+		{tag: "with_l2", opt: SimpleCreateCollectionOptions("test_collection", 128).WithMetricType(entity.L2), expectMetric: string(entity.L2)},
+		{tag: "empty_metric", opt: SimpleCreateCollectionOptions("test_collection", 128).WithMetricType(""), expectMetric: ""},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.resetMock()
+			defer s.resetMock()
+
+			var createIndexReq *milvuspb.CreateIndexRequest
+			s.mock.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+			s.mock.EXPECT().CreateIndex(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cir *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+				createIndexReq = cir
+				return merr.Success(), nil
+			}).Once()
+			s.mock.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
+				Status: merr.Success(),
+				IndexDescriptions: []*milvuspb.IndexDescription{
+					{FieldName: "vector", State: commonpb.IndexState_Finished},
+				},
+			}, nil).Once()
+			s.mock.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil).Once()
+			s.mock.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
+				Status:   merr.Success(),
+				Progress: 100,
+			}, nil).Once()
+
+			err := s.client.CreateCollection(ctx, tc.opt)
+			s.Require().NoError(err)
+			s.Require().NotNil(createIndexReq)
+
+			params := entity.KvPairsMap(createIndexReq.GetExtraParams())
+			metricType, ok := params[index.MetricTypeKey]
+			if tc.expectMetric == "" {
+				s.False(ok, "metric_type should not be set, got %q", metricType)
+			} else {
+				s.True(ok)
+				s.Equal(tc.expectMetric, metricType)
+			}
+		})
+	}
+}
+
 func (s *CollectionSuite) TestCreateCollectionOptions() {
 	collectionName := fmt.Sprintf("test_collection_%s", s.randString(6))
 	opt := SimpleCreateCollectionOptions(collectionName, 128)

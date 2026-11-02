@@ -578,6 +578,9 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 CRetrieveResult*
 CreateLeakedCRetrieveResultFromProto(
     std::unique_ptr<milvus::proto::segcore::RetrieveResults> retrieve_result) {
+    for (auto& field_data : *retrieve_result->mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
     auto size = retrieve_result->ByteSizeLong();
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
     retrieve_result->SerializePartialToArray(buffer.get(), size);
@@ -971,9 +974,10 @@ BuildRetrieveUserColumnBatch(const std::shared_ptr<RetrieveUserColumns>& holder,
         // already has Arrow's value-buffer layout is aliased rather than
         // copied. See FieldDataToArrow's contract: the holder is kept alive by
         // the returned arrays, and its storage must not be mutated after this.
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              milvus::segcore::FieldDataToArrow(
-                                  name, field_data, total_rows, false, holder));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            milvus::segcore::FieldDataToArrow(
+                name, field_data, total_rows, false, holder, &field_meta));
         auto array = converted.second;
         // Plain arrow::field, NOT MilvusField: no per-field metadata.
         //
@@ -2030,7 +2034,8 @@ BuildVectorArrayForChunk(const FieldInfo& field_info,
         }
 
         const auto physical_offset = physical_offsets[next_physical++];
-        const auto& vector_array = (*vector_array_vec)[physical_offset];
+        const auto vector_array =
+            vector_array_vec->view_physical_element(physical_offset);
         if (vector_array.get_element_type() != field_info.element_type) {
             return arrow::Status::Invalid("VECTOR_ARRAY element type mismatch");
         }
@@ -2525,6 +2530,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
         result->manifest_path = nullptr;
         result->committed_version = 0;
+        result->manifest_size = -1;
         result->num_rows = 0;
         result->timestamp_from = 0;
         result->timestamp_to = 0;
@@ -3075,7 +3081,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                 fs,
                 writer_config.segment_path,
                 read_version,
-                -1,
+                config->read_manifest_size,
                 milvus_storage::api::transaction::OverwriteResolver,
                 retry_limit);
         if (!transaction_result.ok()) {
@@ -3234,7 +3240,7 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         }
 
         // commit
-        auto commit_result = transaction->Commit();
+        auto commit_result = transaction->Commit(&result->manifest_size);
         if (!commit_result.ok()) {
             auto error = milvus_storage::ToSegcoreError(commit_result.status());
             return milvus::FailureCStatus(&error);

@@ -204,6 +204,11 @@ func TestEquiv_UpsertRequest(t *testing.T) {
 		},
 		RlsPrincipal: "principal", // field 12 (bytes)  → folded to official merge
 		SkipRls:      true,        // field 13 (varint) → folded to official merge
+		WriteCondition: &milvuspb.WriteCondition{ // field 14 (message) → folded
+			Field:     "version",
+			Op:        milvuspb.WriteCondition_GTE,
+			OnMissing: milvuspb.WriteCondition_SKIP_IF_MISSING,
+		},
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -231,14 +236,22 @@ func TestEquiv_UpsertRequest(t *testing.T) {
 // UpsertRequest is untrusted ingress too: fastpb must agree with official proto on
 // whether invalid UTF-8 in a string field is rejected.
 func TestUpsertRequest_UTF8MatchesOfficial(t *testing.T) {
-	// field 3 (collection_name), wire type 2, len 2, bytes 0xFF 0xFE (invalid UTF-8)
-	wire := []byte{0x1A, 0x02, 0xFF, 0xFE}
-	var official milvuspb.UpsertRequest
-	officialErr := proto.Unmarshal(wire, &official)
-	var got milvuspb.UpsertRequest
-	gotErr := UnmarshalUpsertRequest(wire, &got)
-	if (officialErr == nil) != (gotErr == nil) {
-		t.Fatalf("UTF-8 accept/reject diverges: official err=%v, fastpb err=%v", officialErr, gotErr)
+	for _, tc := range []struct {
+		name string
+		wire []byte
+	}{
+		{"collection_name", []byte{0x1A, 0x02, 0xFF, 0xFE}},
+		{"write_condition.field", []byte{0x72, 0x04, 0x0A, 0x02, 0xFF, 0xFE}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var official milvuspb.UpsertRequest
+			officialErr := proto.Unmarshal(tc.wire, &official)
+			var got milvuspb.UpsertRequest
+			gotErr := UnmarshalUpsertRequest(tc.wire, &got)
+			if (officialErr == nil) != (gotErr == nil) {
+				t.Fatalf("UTF-8 accept/reject diverges: official err=%v, fastpb err=%v", officialErr, gotErr)
+			}
+		})
 	}
 }
 
@@ -252,6 +265,13 @@ func randUpsertRequest(r *rand.Rand) *milvuspb.UpsertRequest {
 		PartialUpdate:  r.Intn(2) == 0, // exercise the field-9 fold path
 		RlsPrincipal:   randString(r),
 		SkipRls:        r.Intn(2) == 0,
+	}
+	if r.Intn(2) == 0 { // exercise the field-14 (write_condition) fold path
+		ur.WriteCondition = &milvuspb.WriteCondition{
+			Field:     randString(r),
+			Op:        milvuspb.WriteCondition_Op(r.Intn(3)),
+			OnMissing: milvuspb.WriteCondition_MissingRowPolicy(r.Intn(3)),
+		}
 	}
 	for i := 0; i < r.Intn(3); i++ {
 		ur.FieldsData = append(ur.FieldsData, randFieldData(r, rows))

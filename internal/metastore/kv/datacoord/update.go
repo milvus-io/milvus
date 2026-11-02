@@ -71,13 +71,12 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				return unsupportedAction(action)
 			}
 		case metastore.ChannelEntry:
-			if action.Type != metastore.ActionUpdate {
+			if action.Type != metastore.ActionDelete {
 				return unsupportedAction(action)
 			}
-			// CommitSave marks the tombstone as the visibility point, so any
-			// earlier ops in this composite write land before it on the
-			// ordered fallback path.
-			b.CommitSave(buildChannelRemovePath(e.Channel), RemoveFlagTomestone)
+			// CommitRemove keeps the flag delete last, so any earlier ops in
+			// this composite write land before it on the ordered fallback path.
+			b.CommitRemove(buildChannelRemovePath(e.Channel))
 		case metastore.RefreshTaskEntry:
 			switch action.Type {
 			case metastore.ActionAdd:

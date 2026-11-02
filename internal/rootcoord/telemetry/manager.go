@@ -333,8 +333,9 @@ type TelemetryManager struct {
 	config        *TelemetryConfig
 
 	// Background cleanup
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // NewTelemetryManager creates a new TelemetryManager with default config
@@ -387,9 +388,11 @@ func (m *TelemetryManager) Start() {
 	go m.cleanupLoop()
 }
 
-// Stop stops the background cleanup goroutine
+// Stop stops the background cleanup goroutine. It is safe to call more than once.
 func (m *TelemetryManager) Stop() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 	m.wg.Wait()
 }
 

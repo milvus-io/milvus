@@ -29,6 +29,7 @@
 #include "index/scalar/fmindex/FmIndexArtifact.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
+#include "segcore/SegcoreConfig.h"
 
 namespace milvus::index::test {
 namespace {
@@ -118,6 +119,45 @@ TEST_P(FmIndexV3OwnershipTest, ReaderOwnsPersistedState) {
     if (backend.MmapRequested()) {
         EXPECT_GT(reader->CellByteSize().file_bytes, 0);
     }
+}
+
+TEST(FmIndexArtifactTest, LoaderSnapshotsConfiguredCostRatio) {
+    auto& config = segcore::SegcoreConfig::default_config();
+    struct RestoreCostRatio {
+        segcore::SegcoreConfig& config;
+        float value;
+        ~RestoreCostRatio() {
+            config.set_fmindex_cost_ratio(value);
+        }
+    } restore{config, config.get_fmindex_cost_ratio()};
+
+    // The rare literal occurs twice in about 128,000 tokens. With sample rate
+    // 32, its locate cost falls strictly between the two configured bounds.
+    ScalarTestData<std::string_view> data(
+        std::vector<std::string>(1000, std::string(128, 'q')));
+    data.values[0] = "NEEDLE" + std::string(100, 'q') + "SUFFIX";
+    data.values[1] = "SUFFIX" + std::string(100, 'q') + "NEEDLE";
+    data.validity.reset(999);
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("FmIndexVarchar");
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View());
+    const auto persisted = SerializeV3(*artifact);
+
+    config.set_fmindex_cost_ratio(0.0001f);
+    auto low = OpenV3(backend, persisted, {.row_count = data.values.size()});
+    config.set_fmindex_cost_ratio(0.01f);
+    auto high = OpenV3(backend, persisted, {.row_count = data.values.size()});
+    // Loading snapshots the setting. Existing readers do not refresh it.
+    config.set_fmindex_cost_ratio(0.0001f);
+    const auto* low_pattern =
+        dynamic_cast<const IPatternMatchReader*>(low.get());
+    const auto* high_pattern =
+        dynamic_cast<const IPatternMatchReader*>(high.get());
+    ASSERT_NE(low_pattern, nullptr);
+    ASSERT_NE(high_pattern, nullptr);
+    EXPECT_FALSE(low_pattern->ShouldUseForOp(PatternOp::PrefixMatch, "NEEDLE"));
+    EXPECT_TRUE(high_pattern->ShouldUseForOp(PatternOp::PrefixMatch, "NEEDLE"));
 }
 
 INSTANTIATE_TEST_SUITE_P(HeapAndMmap,
