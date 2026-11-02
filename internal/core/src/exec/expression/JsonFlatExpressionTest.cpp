@@ -581,7 +581,8 @@ TEST_F(JsonFlatExpressionTest, RawFallbackPreservesLargeInt64LiteralPrecision) {
                                            .is_json_field = true,
                                            .json_path = "/a",
                                            .requires_flat_json_index = true};
-    const auto capabilities = segment_->IndexCapability(json_fid_);
+    const auto capabilities =
+        segment_->ResolveIndexCapability(nullptr, json_fid_);
     const auto decision = exec::DetermineExecPath(requirement, capabilities);
     ASSERT_EQ(decision.path, exec::ExprExecPath::ScalarIndex);
     ASSERT_TRUE(decision.key.has_value());

@@ -198,8 +198,9 @@ Raw remains the compatibility and default path:
 - variable-width access returns views whose lifetime is protected by the
   corresponding pin;
 - Raw Scan stops at a chunk boundary so it can return a zero-copy batch;
-- Raw Take resolves input offsets lazily and reuses the current chunk pin while
-  consecutive accesses remain in that chunk;
+- Raw Take defaults to lazy offset resolution and reuses the current chunk pin
+  while consecutive accesses remain in that chunk. Batch-pin callers instead
+  resolve the request once and pin its required Cells together;
 - statistics that require loaded Raw payload remain an execution-time filter.
   They may skip comparison/value construction, but are not used to avoid the
   preceding load or pin.
@@ -333,8 +334,33 @@ A caller that needs both values and validity obtains both from the same
 `TakeResult`; it must not issue a separate validity read. `BulkIsValid` remains
 for paths that need validity alone.
 
-Raw keeps at most the currently accessed Cell pinned and copies only when owned
-output is requested. Vortex may sort, group, and deduplicate offsets internally
+`TakeOptions.candidate_mask` optionally borrows the executor's existing
+per-input-position selection. Only selected offsets participate in Cell
+planning, pinning, and decoding. Result indexing still matches the original
+offsets, but unselected positions must not be read, including in `GetOwn()`
+output. The immutable offsets and mask must outlive the result. This selection
+is independent of the Cell data filter: a selected nullable row skipped by that
+filter still requires its real validity. Raw retains the input references;
+Vortex applies selection while building its internal sorted decode groups.
+
+`TakeOptions.pin_policy` selects the source pin strategy for either backend:
+
+- `CurrentCell` (default): Raw lazily pins the currently accessed Cell, reuses
+  it while accesses stay in that Cell, and releases it before accessing another.
+  Vortex pins, decodes, and releases the required Cells one file at a time.
+- `Batch` resolves the requested offsets and pins all required source Cells
+  before reading. Raw reads directly from that pinned set and retains its pins
+  until `TakeResult` destruction, including across `GetOwn()`. Vortex decodes
+  the selected offsets and releases all source pins when Take completes.
+  Neither backend pins unrelated Cells. JSON bulk output selects this mode to
+  preserve its previous batch-pin behavior on Raw.
+
+Both modes preserve input order, duplicates, and filter/validity semantics.
+Preloaded filters can omit non-nullable skipped Cells from a batch pin;
+nullable Cells remain pinned for authoritative validity. Raw copies payload
+only when owned output is requested. Vortex owns its decoded Take output under
+either policy, so subsequent `Get`/`GetOwn` calls do not pin source Cells again.
+Vortex may sort, group, and deduplicate offsets internally
 to reduce decode work, then restores input order in its already-owned result.
 Neither backend exposes Cell ids, chunk ids, or file-local offsets to callers.
 

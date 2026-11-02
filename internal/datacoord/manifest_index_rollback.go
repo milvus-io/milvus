@@ -50,6 +50,8 @@ func isSegmentIndexRollbackRetained(segment *SegmentInfo) bool {
 // segment lock protects the source manifest through publication; BuildID locks
 // in the commit revalidate the records before changing their durable placement.
 func (m *meta) rollbackSegmentIndexes(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, selectedBuilds ...int64) (int, error) {
+	var manifestUpdates []*SegmentInfo
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	locks := m.getSegmentManifestLocks()
 	lockStart := time.Now()
 	locks.Lock(segmentID)
@@ -124,7 +126,7 @@ func (m *meta) rollbackSegmentIndexes(ctx context.Context, io *packed.ManifestIO
 		// manifest. Publish their PUTs against the unchanged, locked pointer.
 		mutation = ManifestMutation{Type: ManifestMutationNoop, ManifestPath: segment.GetManifestPath()}
 	}
-	err = m.commitSegmentManifestLocked(ctx, SegmentManifestCommit{
+	manifestUpdates, err = m.commitSegmentManifestLocked(ctx, SegmentManifestCommit{
 		SegmentID: segmentID, StorageConfig: cfg,
 		Mutation:        mutation,
 		CatalogMutation: SegmentCatalogMutation{SegmentIndexes: mutations, manifestHasIndex: proto.Bool(len(entries) > 0)},

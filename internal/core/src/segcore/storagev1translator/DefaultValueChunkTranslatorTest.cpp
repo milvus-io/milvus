@@ -25,8 +25,10 @@
 
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/StructElementOffsets.h"
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Json.h"
 #include "common/Span.h"
 #include "common/Types.h"
@@ -42,11 +44,13 @@ using namespace milvus;
 using namespace milvus::segcore::storagev1translator;
 
 std::unique_ptr<DefaultValueChunkTranslator>
-MakeDefaultValueChunkTranslatorForTest(int64_t segment_id,
-                                       FieldMeta field_meta,
-                                       FieldDataInfo field_data_info,
-                                       bool use_mmap,
-                                       bool mmap_populate) {
+MakeDefaultValueChunkTranslatorForTest(
+    int64_t segment_id,
+    FieldMeta field_meta,
+    FieldDataInfo field_data_info,
+    bool use_mmap,
+    bool mmap_populate,
+    std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr) {
     return std::make_unique<DefaultValueChunkTranslator>(
         segment_id,
         std::move(field_meta),
@@ -54,7 +58,8 @@ MakeDefaultValueChunkTranslatorForTest(int64_t segment_id,
         use_mmap,
         mmap_populate,
         /*warmup_policy=*/"",
-        MmapChunkWritebackMode::Disabled);
+        MmapChunkWritebackMode::Disabled,
+        std::move(struct_offsets));
 }
 
 class DefaultValueChunkTranslatorTest : public ::testing::TestWithParam<bool> {
@@ -173,6 +178,226 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
     // All values should be marked as invalid (null)
     for (size_t i = 0; i < span.row_count(); ++i) {
         EXPECT_FALSE(fixed_chunk->isValid(i));
+    }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, NativeListNullBackfill) {
+    FieldMeta field_meta(FieldName("struct_array[values]"),
+                         FieldId(103),
+                         DataType::ARRAY,
+                         DataType::INT16,
+                         true,
+                         true,
+                         std::nullopt);
+    FieldDataInfo info(103, 5, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, field_meta, info, GetParam(), true);
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), 5);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(chunk->is_valid(i));
+        EXPECT_EQ(chunk->offsets()[i], chunk->offsets()[i + 1]);
+        EXPECT_EQ(chunk->output_data(i).data_case(),
+                  ScalarFieldProto::DATA_NOT_SET);
+    }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
+    auto offsets = std::make_shared<StructElementOffsetsGrowing>();
+    const int32_t lengths[] = {2, 0, 3};
+    offsets->Insert(0, lengths, 3);
+
+    FieldMeta scalar(FieldName("items[scalar]"),
+                     FieldId(1401),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     false,
+                     true,
+                     std::nullopt);
+    proto::schema::TypeSchema nested_type;
+    nested_type.set_nullable(false);
+    auto* inner = nested_type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int32);
+    FieldMeta nested(FieldName("items[nested]"),
+                     FieldId(1402),
+                     DataType::ARRAY,
+                     DataType::ARRAY,
+                     false,
+                     true,
+                     std::nullopt,
+                     "",
+                     LOCAL_FORMAT_RAW,
+                     nested_type);
+    for (const auto& meta : {scalar, nested}) {
+        FieldDataInfo info(meta.get_id().get(), 3, getMmapDirPath());
+        auto translator = MakeDefaultValueChunkTranslatorForTest(
+            segment_id_, meta, info, GetParam(), true, offsets);
+        auto cells = translator->get_cells(nullptr, {0});
+        ASSERT_EQ(cells.size(), 1);
+        auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+        ASSERT_NE(chunk, nullptr);
+        for (int i = 0; i < 3; ++i) {
+            EXPECT_TRUE(chunk->is_valid(i));
+            EXPECT_EQ(chunk->offsets()[i + 1] - chunk->offsets()[i],
+                      lengths[i]);
+            auto row = chunk->output_data(i);
+            EXPECT_EQ(row.valid_data_size(), lengths[i]);
+            for (bool valid : row.valid_data()) {
+                EXPECT_FALSE(valid);
+            }
+        }
+    }
+
+    FieldMeta vectors(FieldName("items[vectors]"),
+                      FieldId(1403),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      4,
+                      std::nullopt,
+                      false,
+                      true);
+    FieldDataInfo info(1403, 3, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, vectors, info, GetParam(), true, offsets);
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    auto [views, validity] = chunk->Views();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(views[i].length(), lengths[i]);
+        EXPECT_EQ(chunk->Offsets()[i + 1] - chunk->Offsets()[i], 0);
+        EXPECT_TRUE(chunk->isValid(i));
+    }
+
+    auto zero_offsets = std::make_shared<StructElementOffsetsGrowing>();
+    const int32_t zero_lengths[] = {0, 0, 0};
+    zero_offsets->Insert(0, zero_lengths, 3);
+    FieldMeta nullable_scalar(FieldName("items[nullable_scalar]"),
+                              FieldId(1404),
+                              DataType::ARRAY,
+                              DataType::INT64,
+                              true,
+                              true,
+                              std::nullopt);
+    auto nullable_nested_type = nested_type;
+    nullable_nested_type.set_nullable(true);
+    FieldMeta nullable_nested(FieldName("items[nullable_nested]"),
+                              FieldId(1405),
+                              DataType::ARRAY,
+                              DataType::ARRAY,
+                              true,
+                              true,
+                              std::nullopt,
+                              "",
+                              LOCAL_FORMAT_RAW,
+                              nullable_nested_type);
+    for (const auto& meta : {nullable_scalar, nullable_nested}) {
+        FieldDataInfo null_info(meta.get_id().get(), 3, getMmapDirPath());
+        auto null_translator = MakeDefaultValueChunkTranslatorForTest(
+            segment_id_, meta, null_info, GetParam(), true, zero_offsets);
+        auto null_cells = null_translator->get_cells(nullptr, {0});
+        ASSERT_EQ(null_cells.size(), 1);
+        auto* null_chunk =
+            dynamic_cast<ColumnarArrayChunk*>(null_cells[0].second.get());
+        ASSERT_NE(null_chunk, nullptr);
+        for (int i = 0; i < 3; ++i) {
+            EXPECT_FALSE(null_chunk->is_valid(i));
+            EXPECT_EQ(null_chunk->offsets()[i + 1], null_chunk->offsets()[i]);
+        }
+    }
+    FieldMeta nullable_vectors(FieldName("items[nullable_vectors]"),
+                               FieldId(1406),
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               4,
+                               std::nullopt,
+                               true,
+                               true);
+    FieldDataInfo null_info(1406, 3, getMmapDirPath());
+    auto null_translator =
+        MakeDefaultValueChunkTranslatorForTest(segment_id_,
+                                               nullable_vectors,
+                                               null_info,
+                                               GetParam(),
+                                               true,
+                                               zero_offsets);
+    auto null_cells = null_translator->get_cells(nullptr, {0});
+    ASSERT_EQ(null_cells.size(), 1);
+    auto* null_chunk =
+        dynamic_cast<VectorArrayChunk*>(null_cells[0].second.get());
+    ASSERT_NE(null_chunk, nullptr);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FALSE(null_chunk->isValid(i));
+        EXPECT_EQ(null_chunk->Offsets()[i + 1], null_chunk->Offsets()[i]);
+    }
+}
+
+// Sealed struct offsets carry the parent row validity of the struct. The
+// backfill of an added element-nullable sub-field must take it from them:
+// a null struct row stays null, a valid row gets N null elements. No sibling
+// column is read for it.
+TEST_P(DefaultValueChunkTranslatorTest, SealedStructOffsetsSupplyRowValidity) {
+    TargetBitmap row_validity(3, true);
+    row_validity[1] = false;
+    auto offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::vector<int32_t>{0, 2, 2, 5}, std::move(row_validity));
+
+    FieldMeta scalar(FieldName("items[added]"),
+                     FieldId(1501),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     true,
+                     true,
+                     std::nullopt);
+    FieldDataInfo info(scalar.get_id().get(), 3, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, scalar, info, GetParam(), true, offsets);
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    const bool expected_valid[] = {true, false, true};
+    const int32_t expected_lengths[] = {2, 0, 3};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(chunk->is_valid(i), expected_valid[i]) << "row " << i;
+        EXPECT_EQ(chunk->offsets()[i + 1] - chunk->offsets()[i],
+                  expected_lengths[i]);
+        if (expected_valid[i]) {
+            auto row = chunk->output_data(i);
+            EXPECT_EQ(row.valid_data_size(), expected_lengths[i]);
+            for (bool valid : row.valid_data()) {
+                EXPECT_FALSE(valid);
+            }
+        }
+    }
+
+    FieldMeta vectors(FieldName("items[added_vectors]"),
+                      FieldId(1502),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      4,
+                      std::nullopt,
+                      true,
+                      true);
+    FieldDataInfo vector_info(1502, 3, getMmapDirPath());
+    auto vector_translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, vectors, vector_info, GetParam(), true, offsets);
+    auto vector_cells = vector_translator->get_cells(nullptr, {0});
+    ASSERT_EQ(vector_cells.size(), 1);
+    auto* vector_chunk =
+        dynamic_cast<VectorArrayChunk*>(vector_cells[0].second.get());
+    ASSERT_NE(vector_chunk, nullptr);
+    auto [views, validity] = vector_chunk->Views();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(vector_chunk->isValid(i), expected_valid[i]) << "row " << i;
+        EXPECT_EQ(views[i].length(), expected_lengths[i]);
     }
 }
 
@@ -1150,6 +1375,39 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableVectorArray) {
     }
 
     EXPECT_EQ(total_rows, row_count);
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, TestElementNullableVectorArray) {
+    constexpr int64_t row_count = 5;
+    FieldMeta field_meta(FieldName("struct_array[embeddings]"),
+                         FieldId(1303),
+                         DataType::VECTOR_ARRAY,
+                         DataType::VECTOR_FLOAT,
+                         4,
+                         std::nullopt,
+                         true,
+                         true);
+    FieldDataInfo info(1303, row_count, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, field_meta, info, GetParam(), true);
+    ASSERT_EQ(translator->num_cells(), 1);
+
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), row_count);
+    EXPECT_TRUE(chunk->IsElementNullable());
+    auto [views, validity] = chunk->Views();
+    ASSERT_EQ(views.size(), row_count);
+    ASSERT_TRUE(validity);
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_FALSE(chunk->isValid(i));
+        EXPECT_FALSE(validity[i]);
+        EXPECT_EQ(views[i].length(), 0);
+        EXPECT_EQ(chunk->Offsets()[i], 0);
+    }
+    EXPECT_EQ(chunk->Offsets()[row_count], 0);
 }
 
 // Test nullable VECTOR_SPARSE_U32_F32 with all-null default values

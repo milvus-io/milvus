@@ -10,12 +10,16 @@ import (
 
 // TaskProvider converts a QueryView version into ready concrete segment tasks.
 type TaskProvider interface {
+	// Statistics waits for visibility and counts the resources retained by this View.
+	Statistics(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error)
+
 	AcquireSearchSegmentTasks(
 		ctx context.Context,
 		shardID qviews.ShardID,
 		version qviews.QueryViewVersion,
 		mvcc *viewpb.QueryPlanMVCC,
 		req *internalpb.SearchRequest,
+		selection *viewpb.SegmentSelection,
 	) (SearchSegmentTasks, error)
 
 	AcquireQuerySegmentTasks(
@@ -24,5 +28,6 @@ type TaskProvider interface {
 		version qviews.QueryViewVersion,
 		mvcc *viewpb.QueryPlanMVCC,
 		req *internalpb.RetrieveRequest,
+		selection *viewpb.SegmentSelection,
 	) (QuerySegmentTasks, error)
 }

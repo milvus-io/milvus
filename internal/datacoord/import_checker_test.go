@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -100,7 +102,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, nil, nil, importCheckerHooks{}).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -594,6 +596,137 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
+func (s *ImportCheckerSuite) TestCheckGCPreImportWorkerCleanup() {
+	s.checkGCWorkerCleanup(PreImportTaskType)
+}
+
+func (s *ImportCheckerSuite) TestCheckGCImportWorkerCleanup() {
+	s.checkGCWorkerCleanup(ImportTaskType)
+}
+
+func (s *ImportCheckerSuite) checkGCWorkerCleanup(taskType TaskType) {
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Failed)))
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) { job.(*importJob).CleanupTs = 1 })
+
+	const taskID, nodeID = int64(1), int64(17)
+	var gcTask ImportTask
+	if taskType == PreImportTaskType {
+		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().DropPreImportTask(mock.Anything, taskID).Return(nil).Once()
+		preImport := &preImportTask{importMeta: s.importMeta}
+		preImport.task.Store(&datapb.PreImportTask{
+			JobID: s.jobID, TaskID: taskID, NodeID: nodeID, State: datapb.ImportTaskStateV2_Failed,
+		})
+		gcTask = preImport
+	} else {
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().DropImportTask(mock.Anything, taskID).Return(nil).Once()
+		importing := &importTask{importMeta: s.importMeta}
+		importing.task.Store(&datapb.ImportTaskV2{
+			JobID: s.jobID, TaskID: taskID, NodeID: nodeID, State: datapb.ImportTaskStateV2_Failed,
+		})
+		gcTask = importing
+	}
+	s.NoError(s.importMeta.AddTask(context.TODO(), gcTask))
+	cluster := session.NewMockCluster(s.T())
+	s.checker.cluster = cluster
+	s.checker.scheduler = task.NewGlobalTaskScheduler(context.TODO(), cluster)
+
+	// Simulate a failed task restored from metadata: the scheduler no longer
+	// owns it, but its previous worker assignment still needs cleanup.
+	cluster.EXPECT().DropImport(nodeID, taskID).Return(errors.New("worker unavailable")).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.NotNil(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(nodeID, s.importMeta.GetTask(context.TODO(), taskID).GetNodeID())
+
+	cluster.EXPECT().DropImport(nodeID, taskID).Return(nil).Once()
+	catalog.EXPECT().DropImportJob(mock.Anything, s.jobID).Return(nil).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Nil(s.importMeta.GetTask(context.TODO(), taskID))
+	s.Nil(s.importMeta.GetJob(context.TODO(), s.jobID))
+}
+
+func (s *ImportCheckerSuite) TestCheckGCWorkerNotFound() {
+	s.setupGCReadyFailedJob()
+	s.NoError(s.importMeta.UpdateTask(context.TODO(), 1, UpdateNodeID(17)))
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	cluster := session.NewMockCluster(s.T())
+	s.checker.cluster = cluster
+	s.checker.scheduler = task.NewGlobalTaskScheduler(context.TODO(), cluster)
+	cluster.EXPECT().DropImport(int64(17), int64(1)).Return(merr.ErrNodeNotFound).Once()
+	catalog.EXPECT().DropImportTask(mock.Anything, int64(1)).Return(nil).Once()
+	catalog.EXPECT().DropImportJob(mock.Anything, s.jobID).Return(nil).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Nil(s.importMeta.GetTask(context.TODO(), 1))
+	s.Nil(s.importMeta.GetJob(context.TODO(), s.jobID))
+}
+
+func (s *ImportCheckerSuite) TestCheckGCWorkerCleanupPersistenceFailure() {
+	s.setupGCReadyFailedJob()
+	s.NoError(s.importMeta.UpdateTask(context.TODO(), 1, UpdateNodeID(17)))
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.ExpectedCalls = nil
+	cluster := session.NewMockCluster(s.T())
+	s.checker.cluster = cluster
+	s.checker.scheduler = task.NewGlobalTaskScheduler(context.TODO(), cluster)
+	cluster.EXPECT().DropImport(int64(17), int64(1)).Return(nil).Twice()
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("catalog unavailable")).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.NotNil(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(int64(17), s.importMeta.GetTask(context.TODO(), 1).GetNodeID())
+
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().DropImportTask(mock.Anything, int64(1)).Return(nil).Once()
+	catalog.EXPECT().DropImportJob(mock.Anything, s.jobID).Return(nil).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Nil(s.importMeta.GetTask(context.TODO(), 1))
+	s.Nil(s.importMeta.GetJob(context.TODO(), s.jobID))
+}
+
+func (s *ImportCheckerSuite) TestCheckGCReloadsAssignmentAfterFinalize() {
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	cluster := session.NewMockCluster(s.T())
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	s.checker.cluster = cluster
+	s.checker.scheduler = scheduler
+
+	// The task is unassigned in the checker's snapshot, but an in-flight
+	// Create finishes before Finalize invokes cleanup.
+	scheduler.EXPECT().Finalize(int64(1), mock.Anything).RunAndReturn(func(taskID int64, cleanup func()) {
+		s.NoError(s.importMeta.UpdateTask(context.TODO(), taskID,
+			UpdateState(datapb.ImportTaskStateV2_InProgress), UpdateNodeID(17)))
+		cleanup()
+	}).Once()
+	cluster.EXPECT().DropImport(int64(17), int64(1)).Return(nil).Once()
+	catalog.EXPECT().DropImportTask(mock.Anything, int64(1)).Return(nil).Once()
+	catalog.EXPECT().DropImportJob(mock.Anything, s.jobID).Return(nil).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Nil(s.importMeta.GetTask(context.TODO(), 1))
+	s.Nil(s.importMeta.GetJob(context.TODO(), s.jobID))
+}
+
+func (s *ImportCheckerSuite) TestCheckGCWaitsForFailedStatePersistence() {
+	s.setupGCReadyFailedJob()
+	s.NoError(s.importMeta.UpdateTask(context.TODO(), 1, UpdateState(datapb.ImportTaskStateV2_Pending)))
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.ExpectedCalls = nil
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("catalog unavailable")).Once()
+	s.checker.scheduler = task.NewGlobalTaskScheduler(context.TODO(), nil)
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.NotNil(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Equal(datapb.ImportTaskStateV2_Pending, s.importMeta.GetTask(context.TODO(), 1).GetState())
+
+	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().DropImportTask(mock.Anything, int64(1)).Return(nil).Once()
+	catalog.EXPECT().DropImportJob(mock.Anything, s.jobID).Return(nil).Once()
+	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.Nil(s.importMeta.GetTask(context.TODO(), 1))
+	s.Nil(s.importMeta.GetJob(context.TODO(), s.jobID))
+}
+
 // setupGCReadyFailedJob puts the suite's job into a Failed, past-cleanup-ts state with
 // a single import task that has no live segments and is unassigned, so checkGC is one
 // step away from removing the job (the only remaining gate is the replicate rollback).
@@ -989,7 +1122,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	cim := NewMockCompactionInspector(t)
 	handler := NewNMockHandler(t)
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, importCheckerHooks{
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, nil, nil, importCheckerHooks{
 		getReplicationRole: func(context.Context) (replicateutil.Role, bool, error) {
 			return replicateutil.RolePrimary, false, nil
 		},

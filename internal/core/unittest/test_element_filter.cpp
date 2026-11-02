@@ -2326,11 +2326,7 @@ TEST(ElementFilter, RecursiveArrayJsonContainsPlanValidation) {
     array_of_array_of_varchar.mutable_array_element()
         ->mutable_array_element()
         ->set_leaf_type(proto::schema::DataType::VarChar);
-    auto [deeper_schema, deeper_field_id] =
-        make_schema(std::move(array_of_array_of_varchar));
-    auto deeper_contains =
-        make_contains_expr(deeper_field_id, DataType::VARCHAR);
-    ASSERT_ANY_THROW(ProtoParser(deeper_schema).ParseExprs(deeper_contains));
+    ASSERT_ANY_THROW(make_schema(std::move(array_of_array_of_varchar)));
 
     proto::plan::Expr range_expr;
     auto* range = range_expr.mutable_unary_range_expr();

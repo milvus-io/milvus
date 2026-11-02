@@ -36,6 +36,7 @@ var (
 
 type handlerClientImpl struct {
 	queryViewSyncClient        QueryViewSyncClient
+	queryViewClient            QueryViewClient
 	newTransformLogEventStream func(context.Context, *transformlogclient.EventStreamOptions, streamingpb.StreamingNodeHandlerServiceClient) (*transformlogclient.EventStream, error)
 	lifetime                   *typeutil.Lifetime
 	service                    lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
@@ -386,6 +387,7 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
 	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
+	// Owners close resumable clients before joining physical stream acquisition.
 	hc.lifetime.Wait()
 
 	hc.watcher.Close()

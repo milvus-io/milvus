@@ -1,11 +1,14 @@
 use super::fetch;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
+#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ko-dic"))]
+use crate::error::TantivyBindingError;
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::ko_dic::KoDicBuilder;
 
 #[cfg(feature = "lindera-ko-dic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(not(feature = "lindera-ko-dic"))]
+#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-ko-dic")))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, KoDicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -13,6 +16,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
             e.to_string()
         ))
     })
+}
+
+// Online download is compiled out; only a dictionary already built under
+// `build_dir` can be used.
+#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-ko-dic")))]
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::ensure_prebuilt(params, "ko-dic")
 }
 
 #[cfg(not(feature = "lindera-ko-dic"))]
@@ -53,7 +63,7 @@ pub fn load_ko_dic(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "lindera-ko-dic", feature = "analyzer-remote-tls")))]
 mod tests {
     use super::load_ko_dic;
     use env_logger;

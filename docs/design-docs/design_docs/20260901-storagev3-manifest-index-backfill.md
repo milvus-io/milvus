@@ -672,11 +672,13 @@ publications, with one distinct index entry per record; mixed mutations and
 Noop adoption are rejected. Existing multi-record GC removals retain their
 merged contract.
 
-This migration concerns historical **index metadata**. Spark/add-field backfill
-and external refresh can adopt independently generated data manifests through
-`UpdateManifestVersion`; their stale-base adoption races remain separate work
-([#53328](https://github.com/milvus-io/milvus/issues/53328),
-[#53329](https://github.com/milvus-io/milvus/issues/53329)). Operators must not
-overlap those jobs with index publication or this migration on the same segment.
-A structured backfill commit detects a pointer changed during its own I/O and
-retries from the new base; it does not fence a later external adoption.
+This migration concerns historical **index metadata**. Spark/add-field delta
+backfill now uses the same segment commit framework; replacing a column also
+retracts its index records and stats under the manifest and BuildID locks.
+Legacy backfill results with `SourceVersion` fence adoption against that source.
+See the [data-backfill commit design](20260915-backfill-delta-manifest-commit.md).
+Legacy results without that fence and external adoption through
+`UpdateManifestVersion` still require operational exclusion from index publication
+and migration on the same segment. A structured index migration detects a pointer
+changed during its own I/O and retries from the new base; it does not fence a
+later external adoption.

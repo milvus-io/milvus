@@ -55,7 +55,7 @@ func (cm *MVCCManager) GetConfirmedTimeTick() uint64 {
 
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
-	cm.query.UpdateMVCC(msg)
+	cm.query.ObserveAppend(msg)
 	if !msg.IsPersisted() {
 		// Volatile confirmations do not change durable MVCC. Scoped query
 		// progress is handled separately by QueryMVCCManager.
@@ -118,8 +118,8 @@ type VChannelMVCC struct {
 	Confirmed bool   // the mvcc is confirmed by the timeticksync operation.
 }
 
-func (cm *MVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC {
-	return cm.query.GetQueryMVCCOfVChannel(vchannel)
+func (cm *MVCCManager) QueryMVCC() *QueryMVCCManager {
+	return cm.query
 }
 
 // ApplyRecoveryBarrier registers live shards before WAL append admission opens.

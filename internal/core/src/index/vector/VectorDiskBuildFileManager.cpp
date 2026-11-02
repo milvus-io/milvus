@@ -471,7 +471,8 @@ VectorDiskBuildFileManager::OpenInputStream(const std::string& filename) {
 }
 
 std::shared_ptr<milvus::OutputStream>
-VectorDiskBuildFileManager::OpenOutputStream(const std::string& filename) {
+VectorDiskBuildFileManager::OpenOutputStream(
+    const std::string& filename, milvus::OutputStreamOptions /*options*/) {
     try {
         if (!local_files_->Owns(filename)) {
             ThrowInfo(FileWriteFailed,

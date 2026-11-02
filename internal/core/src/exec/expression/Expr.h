@@ -458,7 +458,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     // SetSnapshot; the recorder is owned by the plan and outlives the task.
     // Default no-op for expressions that do not choose an execution path.
     virtual void
-    SetFeatureRecorder(FeatureRecorder* recorder) {
+    SetFeatureRecorder(FeatureRecorder* recorder, const Schema& schema) {
     }
 
  protected:
@@ -515,13 +515,12 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto field_meta = segment_->get_field_meta(field_id_);
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
+        has_nullable_array_element_ = field_meta.has_nullable_array_element();
 
-        if (schema->get_primary_field_id().has_value() &&
-            schema->get_primary_field_id().value() == field_id_ &&
+        if (segment_->is_primary_field(field_id_) &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -583,12 +582,12 @@ class SegmentExpr : public Expr {
     // predicate the plan parser merges in (MergeExprWithNamespace) are not
     // user filters, so an expression on either field records nothing.
     void
-    SetFeatureRecorder(FeatureRecorder* recorder) override {
+    SetFeatureRecorder(FeatureRecorder* recorder,
+                       const Schema& schema) override {
         if (recorder == nullptr) {
             feature_recorder_ = nullptr;
             return;
         }
-        const auto& schema = *segment_->get_schema_snapshot();
         auto ttl_field = schema.get_ttl_field_id();
         auto namespace_field = schema.get_namespace_field_id();
         const bool internal =
@@ -1942,23 +1941,7 @@ class SegmentExpr : public Expr {
             "candidate mask size {} does not match Take input {}",
             candidate_mask == nullptr ? 0 : candidate_mask->size(),
             input->size());
-        EnsureDataTakeResources(skip_func);
-        if (data_take_column_ == nullptr) {
-            return -1;
-        }
-        const auto nullable = data_take_column_->IsNullable();
-        OffsetVector selected_offsets;
-        const OffsetVector* take_offsets = input;
-        if (has_candidate_mask) {
-            selected_offsets.reserve(input->size());
-            for (size_t i = 0; i < input->size(); ++i) {
-                if ((*candidate_mask)[i]) {
-                    selected_offsets.push_back((*input)[i]);
-                }
-            }
-            take_offsets = &selected_offsets;
-        }
-        if (take_offsets->empty()) {
+        if (has_candidate_mask && candidate_mask->none()) {
             for (size_t i = 0; i < input->size(); ++i) {
                 func.template operator()<FilterType::random>(nullptr,
                                                              ValidityView{},
@@ -1970,12 +1953,21 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         }
+        EnsureDataTakeResources(skip_func);
+        if (data_take_column_ == nullptr) {
+            return -1;
+        }
+        const auto nullable = data_take_column_->IsNullable();
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
+            input->data(), static_cast<int64_t>(input->size()));
         auto take = data_take_column_->Take(
             op_ctx_,
             ChunkedColumnInterface::TakeOptions{
-                input_view, DataTargetType<T>(), data_take_filter_});
+                input_view,
+                DataTargetType<T>(),
+                data_take_filter_,
+                TakePinPolicy::CurrentCell,
+                has_candidate_mask ? candidate_mask : nullptr});
         if (take == nullptr) {
             return -1;
         }
@@ -2007,7 +1999,6 @@ class SegmentExpr : public Expr {
                    items.Size(),
                    input_view.size);
         const T invalid_value{};
-        int64_t take_pos = 0;
         for (int64_t logical_pos = 0;
              logical_pos < static_cast<int64_t>(input->size());
              ++logical_pos) {
@@ -2024,7 +2015,7 @@ class SegmentExpr : public Expr {
                     values...);
                 continue;
             }
-            auto item = items[take_pos++];
+            auto item = items[logical_pos];
             const auto valid = item.is_valid;
             if (item.data_skipped) {
                 const auto validity = nullable
@@ -2074,10 +2065,6 @@ class SegmentExpr : public Expr {
                 valid_res + logical_pos,
                 values...);
         }
-        AssertInfo(take_pos == items.Size(),
-                   "consumed {} Take rows, expected {}",
-                   take_pos,
-                   items.Size());
         return input->size();
     }
 
@@ -3192,8 +3179,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -3260,8 +3247,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -3914,6 +3901,12 @@ class SegmentExpr : public Expr {
             // an exception escape can leave pthread_once active on this runtime,
             // so cleanup's second call would wait forever after prefetch fails.
             try {
+                if (IsElementLevelExpression() && has_nullable_array_element_) {
+                    ThrowInfo(ErrorCode::NotImplemented,
+                              "element-level expressions on element-nullable "
+                              "array field {} are not supported yet",
+                              field_id_.get());
+                }
                 auto self = const_cast<SegmentExpr*>(this);
                 self->DetermineExecPath();
                 self->RecordExecPath();
@@ -4291,6 +4284,7 @@ class SegmentExpr : public Expr {
     // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
     // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
     bool is_nullable_{false};
+    bool has_nullable_array_element_{false};
     // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.

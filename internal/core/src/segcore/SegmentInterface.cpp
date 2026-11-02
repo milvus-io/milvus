@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <ratio>
 #include <unordered_set>
 
@@ -68,7 +69,8 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto schema = get_schema_snapshot();
+    auto schema =
+        type() == SegmentType::Growing ? get_schema_snapshot() : plan->schema_;
     auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
@@ -129,7 +131,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                         size,
                                         target_dynamic_fields);
         } else if (!is_field_exist(field_id)) {
-            field_data = bulk_subscript_not_exist_field(field_meta, size);
+            field_data = bulk_subscript_not_exist_field(
+                field_meta, results.seg_offsets_.data(), size);
         } else {
             field_data = bulk_subscript(
                 &local_ctx, field_id, results.seg_offsets_.data(), size);
@@ -166,6 +169,7 @@ SegmentInternalInterface::Search(
                                        collection_ttl,
                                        entity_ttl_physical_time_us,
                                        std::move(trace_span));
+    visitor.SetReadSchema(plan->schema_);
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
     auto results = std::make_unique<SearchResult>();
@@ -226,6 +230,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetReadSchema(plan->schema_);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;
@@ -417,7 +422,8 @@ SegmentInternalInterface::FillOrderByResult(
             } else if (!is_field_exist(field_id)) {
                 // Field absent in this segment (schema evolution).
                 auto& field_meta = plan->schema_->operator[](field_id);
-                col = bulk_subscript_not_exist_field(field_meta, topk_count);
+                col = bulk_subscript_not_exist_field(
+                    field_meta, offset_data.data(), topk_count);
             } else {
                 col = bulk_subscript(
                     &op_ctx, field_id, offset_data.data(), topk_count);
@@ -749,8 +755,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     auto data_type = field_meta.get_data_type();
 
     // Retrieve already holds mutex_; acquiring it again may deadlock
@@ -773,8 +778,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     set_field_avg_size(field_meta, num_rows, field_size);
 }
 
@@ -809,6 +813,82 @@ SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
         return sealed->GetFieldSkipMetrics(field_id);
     }
     return {};
+}
+
+std::unique_ptr<DataArray>
+SegmentInternalInterface::bulk_subscript_not_exist_field(
+    const milvus::FieldMeta& field_meta,
+    int64_t row_begin,
+    int64_t count,
+    const IStructElementOffsets& offsets) const {
+    std::vector<int64_t> row_ids(count);
+    std::iota(row_ids.begin(), row_ids.end(), row_begin);
+    auto schema = get_schema_snapshot();
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    AssertInfo(struct_name.has_value() && field_meta.is_element_nullable(),
+               "field {} is not an element-nullable struct sub-field",
+               field_meta.get_id().get());
+    std::vector<int32_t> starts(count + 1);
+    offsets.CopyRowElementStarts(row_begin, count, starts.data());
+    std::vector<int32_t> lengths(count);
+    for (int64_t i = 0; i < count; ++i) {
+        lengths[i] = starts[i + 1] - starts[i];
+    }
+    for (auto sibling_id : schema->get_field_ids()) {
+        if (sibling_id == field_meta.get_id() ||
+            GetStructNameForArrayField((*schema)[sibling_id]) != struct_name ||
+            !is_field_exist(sibling_id)) {
+            continue;
+        }
+        milvus::OpContext op_ctx;
+        auto sibling =
+            bulk_subscript(&op_ctx, sibling_id, row_ids.data(), count);
+        const auto& validity = GetFieldDataRowValidData(*sibling);
+        return CreateNullStructSubFieldDataArray(
+            field_meta, lengths.data(), count, [&](int64_t i) {
+                return validity.empty() || validity.Get(i);
+            });
+    }
+    return CreateNullStructSubFieldDataArray(
+        field_meta, lengths.data(), count, [&](int64_t) {
+            return !field_meta.is_nullable();
+        });
+}
+
+std::unique_ptr<DataArray>
+SegmentInternalInterface::bulk_subscript_not_exist_field(
+    const milvus::FieldMeta& field_meta,
+    const int64_t* row_ids,
+    int64_t count) const {
+    auto schema = get_schema_snapshot();
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value() || !field_meta.is_element_nullable()) {
+        return bulk_subscript_not_exist_field(field_meta, count);
+    }
+    for (auto sibling_id : schema->get_field_ids()) {
+        if (sibling_id == field_meta.get_id() ||
+            GetStructNameForArrayField((*schema)[sibling_id]) != struct_name ||
+            !is_field_exist(sibling_id)) {
+            continue;
+        }
+        auto offsets = GetStructElementOffsets(sibling_id);
+        if (!offsets) {
+            continue;
+        }
+        std::vector<int32_t> lengths(count);
+        for (int64_t i = 0; i < count; ++i) {
+            auto range = offsets->ElementIDRangeOfRow(row_ids[i]);
+            lengths[i] = range.second - range.first;
+        }
+        milvus::OpContext op_ctx;
+        auto sibling = bulk_subscript(&op_ctx, sibling_id, row_ids, count);
+        const auto& validity = GetFieldDataRowValidData(*sibling);
+        return CreateNullStructSubFieldDataArray(
+            field_meta, lengths.data(), count, [&](int64_t i) {
+                return validity.empty() || validity.Get(i);
+            });
+    }
+    return bulk_subscript_not_exist_field(field_meta, count);
 }
 
 std::unique_ptr<DataArray>

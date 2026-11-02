@@ -722,6 +722,42 @@ func (suite *ResourceManagerSuite) TestUnassignRetriesTransientEtcdError() {
 	suite.Empty(suite.manager.GetResourceGroupByNodeID(1))
 }
 
+func (suite *ResourceManagerSuite) TestUnassignSurvivesCallerCancel() {
+	mockKV := mocks.NewMetaKv(suite.T())
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+
+	store := querycoord.NewCatalog(mockKV)
+	suite.manager = NewResourceManager(store, session.NewNodeManager())
+
+	suite.manager.AlterResourceGroups(suite.ctx, map[string]*rgpb.ResourceGroupConfig{
+		"rg1": newResourceGroupConfig(20, 30),
+	})
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.manager.HandleNodeUp(suite.ctx, 1)
+	suite.Equal("rg1", suite.manager.GetResourceGroupByNodeID(1))
+
+	// A SuspendNode client goes away while the save hits a transient etcd
+	// error, wrapped the way etcdKV returns it.
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, map[string]string) error {
+		cancel()
+		return merr.WrapErrIoFailedErr(rpctypes.ErrLeaderChanged, "execute etcd txn failed")
+	}).Once()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Once()
+
+	suite.NotPanics(func() {
+		suite.manager.HandleNodeDown(ctx, 1)
+	})
+	suite.Empty(suite.manager.GetResourceGroupByNodeID(1))
+}
+
 func TestGetResourceGroupsJSON(t *testing.T) {
 	ctx := context.Background()
 	nodeManager := session.NewNodeManager()

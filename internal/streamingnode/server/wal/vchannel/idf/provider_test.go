@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -26,7 +27,7 @@ import (
 )
 
 func TestRuntimeInitializationFailures(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
+	schema := fieldTestSchema(1, 102)
 	view := walview.VChannelWALView{Schema: schema}
 	for _, tc := range []struct {
 		name    string
@@ -37,9 +38,12 @@ func TestRuntimeInitializationFailures(t *testing.T) {
 		{"missing client", &Runtime{provider: NewProvider(nil)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Error(t, tc.runtime.Prepare(context.Background(), view))
-			_, _, err := tc.runtime.BuildIDF(context.Background(), qviews.DataVersion{}, 102, nil)
+			binding, err := prepareTestView(t, tc.runtime, view)
 			require.Error(t, err)
+			if binding != nil {
+				binding.Release()
+			}
+			tc.runtime.Close()
 		})
 	}
 	pending := NewFutureProvider(syncutil.NewFuture[types.MixCoordClient]())
@@ -76,7 +80,7 @@ func TestResourceResponseMustMatchRequestedView(t *testing.T) {
 
 func TestRuntimeCloseDuringResourceFetch(t *testing.T) {
 	client := &mocks.MockMixCoordClient{}
-	schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
+	schema := fieldTestSchema(1, 102)
 	view := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema}
 	runtime := &Runtime{provider: NewProvider(client)}
 	patch := mockey.Mock((*mocks.MockMixCoordClient).GetStreamingNodeQueryViewResources).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest, _ ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
@@ -84,13 +88,15 @@ func TestRuntimeCloseDuringResourceFetch(t *testing.T) {
 		return &datapb.GetStreamingNodeQueryViewResourcesResponse{Status: merr.Success(), CollectionId: req.CollectionId, Vchannel: req.Vchannel, DataVersion: req.DataVersion}, nil
 	}).Build()
 	defer patch.UnPatch()
-	require.ErrorIs(t, runtime.Prepare(context.Background(), view), context.Canceled)
-	require.Nil(t, runtime.currentOracle())
+	binding, err := prepareTestView(t, runtime, view)
+	require.ErrorIs(t, err, context.Canceled)
+	binding.Release()
+	require.Empty(t, runtime.fields)
 }
 
 func TestRuntimeResourceFetchFailureIsNotReady(t *testing.T) {
 	client := &mocks.MockMixCoordClient{}
-	schema := &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
+	schema := fieldTestSchema(1, 102)
 	view := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema}
 	for _, tc := range []struct {
 		name     string
@@ -104,8 +110,11 @@ func TestRuntimeResourceFetchFailureIsNotReady(t *testing.T) {
 			patch := mockey.Mock((*mocks.MockMixCoordClient).GetStreamingNodeQueryViewResources).Return(tc.response, tc.err).Build()
 			defer patch.UnPatch()
 			runtime := &Runtime{provider: NewProvider(client)}
-			require.Error(t, runtime.Prepare(context.Background(), view))
-			require.Nil(t, runtime.currentOracle())
+			binding, err := prepareTestView(t, runtime, view)
+			require.Error(t, err)
+			binding.Release()
+			require.Empty(t, runtime.fields)
+			runtime.Close()
 		})
 	}
 }
@@ -131,21 +140,13 @@ func TestOracleRefreshRejectsUnrequestedCoordinatorVersion(t *testing.T) {
 }
 
 func TestProviderCreatesNoopRuntimeWhenBM25IsNotLoaded(t *testing.T) {
-	provider := NewProvider(nil)
-	runtime, err := provider.NewRuntime()
+	runtime, err := NewProvider(nil).NewRuntime()
 	require.NoError(t, err)
-	require.NotNil(t, runtime)
-	require.NoError(t, runtime.Prepare(context.Background(), walview.VChannelWALView{
-		CollectionID: 1,
-		VChannel:     "ch",
-		SegmentSnapshot: walview.VisibleSegmentSnapshot{
-			DataVersion: qviews.DataVersion{StreamingVersion: 10},
-		},
-	}))
-	versioned := runtime.(interface {
-		PrepareDataVersion(context.Context, qviews.DataVersion) error
-	})
-	require.NoError(t, versioned.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
+	binding, err := prepareTestView(t, runtime.(*Runtime), walview.VChannelWALView{CollectionID: 1, VChannel: "ch", Schema: &schemapb.CollectionSchema{}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}})
+	require.NoError(t, err)
+	require.Empty(t, binding.fields)
+	require.NoError(t, binding.advance(t.Context(), qviews.DataVersion{StreamingVersion: 11}))
+	binding.Release()
 	runtime.Close()
 }
 
@@ -217,13 +218,15 @@ func TestRuntimePrepareHonorsLazyConfiguration(t *testing.T) {
 			defer patch.UnPatch()
 			runtime := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
 			defer runtime.Close()
-			require.NoError(t, runtime.Prepare(context.Background(), walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}}))
+			binding, err := prepareTestView(t, runtime, walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: fieldTestSchema(1, 102)})
+			require.NoError(t, err)
+			defer binding.Release()
 			if lazy {
 				require.Zero(t, calls.Load())
 			} else {
 				require.Equal(t, int32(1), calls.Load())
 			}
-			_, _, err := runtime.BuildIDF(context.Background(), qviews.DataVersion{}, 102, nil)
+			_, err = binding.BuildIDFBatch(t.Context(), []queryresource.IDFRequest{{FieldID: 102}})
 			require.NoError(t, err)
 			require.Equal(t, int32(1), calls.Load())
 		})

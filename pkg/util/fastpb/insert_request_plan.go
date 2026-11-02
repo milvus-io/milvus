@@ -1399,10 +1399,9 @@ func classifyVectorArrayCell(cell *schemapb.VectorField) (vectorArrayCellPlan, b
 	if isNilProto(cell) {
 		return vectorArrayCellPlan{}, true, nil
 	}
-	// ValidData (field 9) has no producer anywhere in this repo yet, but proto
-	// reflection recognizes it now, so GetUnknown() no longer catches it: a cell
-	// carrying it would silently lose that data through the arithmetic path.
-	// Fall back to the protobuf path until this one earns explicit handling.
+	// ValidData (field 9) carries element validity of an element-nullable
+	// ArrayOfVector row. The arithmetic path would drop it, so fall back to the
+	// protobuf path.
 	if len(cell.GetValidData()) != 0 {
 		return vectorArrayCellPlan{}, false, nil
 	}

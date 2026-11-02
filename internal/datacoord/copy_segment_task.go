@@ -1263,6 +1263,8 @@ func copySegmentResultInstalled(segment *SegmentInfo) bool {
 func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentResult, task CopySegmentTask,
 	copyMeta CopySegmentMeta, meta *meta, publishedBuilds map[int64]int64,
 ) error {
+	var manifestUpdates []*SegmentInfo
+	defer func() { meta.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	locks := meta.getSegmentManifestLocks()
 	locks.Lock(result.GetSegmentId())
 	defer locks.Unlock(result.GetSegmentId())
@@ -1333,7 +1335,9 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	// Publish the manifest and release import protection only after every
 	// index is installed. This durable transition is the per-target replay
 	// fence, even if persisting the task's Completed state later fails.
-	if err := meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+	var err error
+	manifestUpdates, err = meta.updateSegmentsInfo(ctx, operators...)
+	if err != nil {
 		return failCopySegmentSync(ctx, task, copyMeta, err)
 	}
 	// An inspector may have skipped these records while import protection
@@ -1344,12 +1348,6 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 				meta.indexMeta.notifyManifestIndexMigration(record)
 			}
 		}
-	}
-	// The SegmentMeta mutation is committed; schedule an asynchronous
-	// DataView snapshot reconciliation instead of a synchronous event
-	// publish (materialized-view model).
-	if meta.dataViewManager != nil {
-		meta.recomputeDataView(ctx, task.GetCollectionId())
 	}
 
 	// The segment is Flushed and carries every index the snapshot had.

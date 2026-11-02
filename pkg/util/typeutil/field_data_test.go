@@ -39,6 +39,11 @@ func TestFieldDataValidData(t *testing.T) {
 		field := &schemapb.ScalarField{ValidData: scalarValid}
 		assert.Equal(t, scalarValid, GetArrayElementValidData(field))
 		assert.Nil(t, GetArrayElementValidData((*schemapb.ScalarField)(nil)))
+
+		written := &schemapb.ScalarField{}
+		SetArrayElementValidData(written, scalarValid)
+		assert.Equal(t, scalarValid, GetArrayElementValidData(written))
+		SetArrayElementValidData(nil, scalarValid)
 	})
 
 	t.Run("nested vector field", func(t *testing.T) {
@@ -217,7 +222,7 @@ func TestFieldDataValidData(t *testing.T) {
 		assert.Empty(t, field.GetScalars().GetValidData())
 	})
 
-	t.Run("set does not write struct validity", func(t *testing.T) {
+	t.Run("set writes only legacy struct validity", func(t *testing.T) {
 		field := &schemapb.FieldData{
 			Type:      schemapb.DataType_ArrayOfStruct,
 			ValidData: legacy,
@@ -226,8 +231,19 @@ func TestFieldDataValidData(t *testing.T) {
 			},
 		}
 		SetFieldDataValidData(field, scalarValid)
-		assert.Equal(t, legacy, field.GetValidData())
-		assert.Equal(t, legacy, GetFieldDataValidData(field))
+		assert.Equal(t, scalarValid, field.GetValidData())
+		assert.Equal(t, scalarValid, GetFieldDataValidData(field))
+	})
+
+	t.Run("set writes legacy without a field wrapper", func(t *testing.T) {
+		// A released 3.0.x QueryNode leaves an all-null nullable vector column
+		// without a VectorField, so its validity lives only in the legacy
+		// location.
+		field := &schemapb.FieldData{Type: schemapb.DataType_FloatVector}
+		SetFieldDataValidData(field, vectorValid)
+		assert.Equal(t, vectorValid, field.GetValidData())
+		assert.Equal(t, vectorValid, GetFieldDataValidData(field))
+		assert.Nil(t, field.Field)
 	})
 
 	t.Run("set does not initialize missing scalar field", func(t *testing.T) {
@@ -236,7 +252,7 @@ func TestFieldDataValidData(t *testing.T) {
 			Field:     &schemapb.FieldData_Scalars{},
 		}
 		SetFieldDataValidData(field, scalarValid)
-		assert.Equal(t, legacy, field.GetValidData())
+		assert.Equal(t, scalarValid, field.GetValidData())
 		assert.Nil(t, field.GetScalars())
 	})
 
@@ -246,7 +262,7 @@ func TestFieldDataValidData(t *testing.T) {
 			Field:     &schemapb.FieldData_Vectors{},
 		}
 		SetFieldDataValidData(field, vectorValid)
-		assert.Equal(t, legacy, field.GetValidData())
+		assert.Equal(t, vectorValid, field.GetValidData())
 		assert.Nil(t, field.GetVectors())
 	})
 }

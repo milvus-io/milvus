@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -25,33 +26,22 @@ type idfOracle interface {
 }
 
 type globalOptimizer struct {
+	resources         *viewResources
+	schema            *schemapb.CollectionSchema
+	partitionStats    map[int64]*storage.PartitionStatsSnapshot
 	idf               idfOracle
 	functionRunnerKey string
 }
 
-func NewGlobalOptimizer(runtime *QueryRuntime, functionRunnerKey string) optimizer.GlobalOptimizer {
-	return globalOptimizer{
-		idf:               findIDFOracle(runtime),
-		functionRunnerKey: functionRunnerKey,
-	}
-}
-
-func findIDFOracle(runtime *QueryRuntime) idfOracle {
-	if runtime == nil {
-		return nil
-	}
-	var oracle idfOracle
-	runtime.RangeModules(func(module QueryRuntimeModule) bool {
-		if idf, ok := module.(idfOracle); ok {
-			oracle = idf
-			return false
-		}
-		return true
-	})
-	return oracle
-}
-
 func (o globalOptimizer) OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
+	if o.resources != nil {
+		workCtx, end, err := o.resources.begin(ctx)
+		if err != nil {
+			return optimizer.SearchOptimization{}, err
+		}
+		defer end()
+		ctx = workCtx
+	}
 	if req == nil {
 		return optimizer.SearchOptimization{}, merr.WrapErrParameterInvalid("search request", "nil")
 	}
@@ -97,6 +87,17 @@ func (o globalOptimizer) optimizeRequests(ctx context.Context, requests []*inter
 	for _, req := range requests {
 		optimized := false
 		_, err := function.GetManager().RunWithRunner(ctx, req.GetCollectionID(), o.functionRunnerKey, req.GetFieldId(), func(runner function.FunctionRunner) error {
+			if runner.GetSchema().GetType() == schemapb.FunctionType_MinHash {
+				if req.GetMetricType() != metric.MHJACCARD && req.GetMetricType() != metric.EMPTY {
+					return merr.WrapErrParameterInvalid("MHJACCARD", req.GetMetricType(), "must use MHJACCARD metric type when searching against MinHash Function output field")
+				}
+				placeholder, err := function.MinHashSearchPlaceholder(req.GetPlaceholderGroup(), runner)
+				if err != nil {
+					return err
+				}
+				req.PlaceholderGroup = placeholder
+				return nil
+			}
 			if runner.GetSchema().GetType() != schemapb.FunctionType_BM25 {
 				return nil
 			}

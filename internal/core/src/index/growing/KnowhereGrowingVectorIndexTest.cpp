@@ -109,8 +109,9 @@ class ControlledVectorNode final : public knowhere::IndexNode {
     knowhere::Status
     Build(const knowhere::DataSetPtr dataset,
           std::shared_ptr<knowhere::Config> cfg,
-          bool use_pool) override {
-        return inner_.Node()->Build(dataset, std::move(cfg), use_pool);
+          bool use_pool,
+          milvus::OpContext* ctx) override {
+        return inner_.Node()->Build(dataset, std::move(cfg), use_pool, ctx);
     }
 
     knowhere::Status

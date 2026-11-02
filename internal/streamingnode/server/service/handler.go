@@ -87,3 +87,7 @@ func (hs *handlerServiceImpl) SubscribeTransform(streamServer streamingpb.Stream
 	}
 	return s.Execute()
 }
+
+func (hs *handlerServiceImpl) SubscribeReplicas(stream streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer) error {
+	return serveReplicaWatch(hs.walManager, stream)
+}

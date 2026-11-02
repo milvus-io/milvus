@@ -5647,6 +5647,34 @@ func assertProtoSlicesEqual[T proto.Message](t *testing.T, want, got []T) {
 	}
 }
 
+func TestValidateWholeStructFieldDataForPartialUpdateOmittedNullableChild(t *testing.T) {
+	structSchema := &schemapb.StructArrayFieldSchema{
+		FieldID: 200, Name: "profile", Nullable: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true},
+			{FieldID: 202, Name: "profile[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true, ElementNullable: true},
+		},
+	}
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	ref := structElementCountTestScalarArray("age", []int32{1, 2})
+	fieldData := &schemapb.FieldData{
+		FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{ref}}},
+	}
+	require.NoError(t, fillOmittedStructSubFields(structSchema, fieldData.GetStructArrays(), 1))
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(schemaHelper, structSchema, fieldData, 1))
+	require.Len(t, fieldData.GetStructArrays().GetFields(), 2)
+	assert.Equal(t, int64(202), fieldData.GetStructArrays().GetFields()[1].GetFieldId())
+	assert.Equal(t, []bool{false, false}, fieldData.GetStructArrays().GetFields()[1].GetScalars().GetArrayData().GetData()[0].GetValidData())
+
+	merged := &schemapb.FieldData{FieldName: "profile", FieldId: 200, Type: schemapb.DataType_ArrayOfStruct}
+	typeutil.AppendFieldDataByColumn(merged, fieldData, []int64{0})
+	require.Len(t, merged.GetStructArrays().GetFields(), 2)
+	assert.Equal(t, int64(202), merged.GetStructArrays().GetFields()[1].GetFieldId())
+}
+
 func TestValidateWholeStructFieldDataForPartialUpdateNestedArray(t *testing.T) {
 	typeSchema := &schemapb.TypeSchema{
 		Kind: &schemapb.TypeSchema_ArrayElement{

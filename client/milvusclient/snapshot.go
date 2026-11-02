@@ -72,6 +72,34 @@ func (c *Client) ListSnapshots(ctx context.Context, opt ListSnapshotsOption, cal
 	return snapshots, err
 }
 
+// ListSnapshotSummaries returns lightweight metadata in the server-provided order.
+// Servers returning only names are rejected as unsupported.
+// CreateTs is the original Milvus hybrid timestamp; CreateUtcTs is its physical
+// Unix time in milliseconds, not snapshot completion time. Zero means unknown
+// or that the server does not provide the UTC field.
+func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOption, callOptions ...grpc.CallOption) ([]*milvuspb.SnapshotSummary, error) {
+	if opt == nil {
+		return nil, merr.WrapErrParameterInvalid("ListSnapshotsOption", "nil", "option cannot be nil")
+	}
+	req := opt.Request()
+	var summaries []*milvuspb.SnapshotSummary
+	err := c.callService(func(service milvuspb.MilvusServiceClient) error {
+		resp, err := service.ListSnapshots(ctx, req, callOptions...)
+		if err = merr.CheckRPCCall(resp, err); err != nil {
+			return err
+		}
+		summaries = resp.GetSnapshotSummaries()
+		if len(summaries) == 0 && len(resp.GetSnapshots()) > 0 {
+			return merr.WrapErrServiceUnimplemented("server does not support snapshot summaries; upgrade the server or use ListSnapshots")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return summaries, nil
+}
+
 // DescribeSnapshot describes a snapshot by name
 func (c *Client) DescribeSnapshot(ctx context.Context, opt DescribeSnapshotOption, callOptions ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
 	if opt == nil {

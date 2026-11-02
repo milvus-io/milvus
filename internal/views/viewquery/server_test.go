@@ -145,15 +145,6 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-func TestServerRequeryOnViewIsUnimplemented(t *testing.T) {
-	server := NewServer(&fakeTaskProvider{}, &fakeScheduler{})
-
-	_, err := server.RequeryOnView(context.Background(), &viewpb.RequeryOnViewRequest{})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
-
 func validSearchRequest() *viewpb.SearchOnViewRequest {
 	return &viewpb.SearchOnViewRequest{
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},
@@ -184,6 +175,7 @@ func testVersion() qviews.QueryViewVersion {
 }
 
 type fakeTaskProvider struct {
+	TaskProvider
 	searchTasks   *fakeSearchSegmentTasks
 	searchErr     error
 	searchShardID qviews.ShardID
@@ -205,6 +197,7 @@ func (p *fakeTaskProvider) AcquireSearchSegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	p.searchShardID = shardID
 	p.searchVersion = version
@@ -222,6 +215,7 @@ func (p *fakeTaskProvider) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	_ *viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	p.queryShardID = shardID
 	p.queryVersion = version
@@ -277,4 +271,15 @@ func (t *fakeQuerySegmentTasks) Tasks() []QuerySegmentTask {
 
 func (t *fakeQuerySegmentTasks) Release() {
 	t.releaseCount++
+}
+
+func TestServerSearchPassesExecutionOptionsAndReleasesOwner(t *testing.T) {
+	provider := &fakeTaskProvider{searchTasks: &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}}}
+	scheduler := &fakeScheduler{searchResult: &internalpb.SearchResults{}}
+	req := validSearchRequest()
+	req.ExecutionOptions = &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}
+	_, err := NewServer(provider, scheduler).SearchOnView(t.Context(), req)
+	require.NoError(t, err)
+	require.Same(t, req.ExecutionOptions, SearchOptions(scheduler.searchTasks))
+	require.Equal(t, 1, provider.searchTasks.releaseCount)
 }

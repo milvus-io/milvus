@@ -120,6 +120,13 @@ func TestValidateSchemaBumpIntegrity(t *testing.T) {
 		{name: "valid", existingFields: map[int64]struct{}{201: {}, 202: {}}},
 		{name: "whole struct absent", existingFields: map[int64]struct{}{}},
 		{
+			name: "new element-nullable child absent",
+			mutate: func(schema *schemapb.CollectionSchema) {
+				schema.StructArrayFields[0].Fields[1].ElementNullable = true
+			},
+			existingFields: map[int64]struct{}{201: {}},
+		},
+		{
 			name: "output declared by multiple functions",
 			mutate: func(schema *schemapb.CollectionSchema) {
 				schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{

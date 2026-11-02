@@ -219,9 +219,9 @@ func TestServingLeaseCancellationReleasesMVCCWait(t *testing.T) {
 			version := newPreparingSNView(1).QueryViewKey().QueryViewVersion
 			var err error
 			if search {
-				_, err = h.AcquireSearchSegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.SearchRequest{})
+				_, err = h.AcquireSearchSegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.SearchRequest{}, nil)
 			} else {
-				_, err = h.AcquireQuerySegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.RetrieveRequest{})
+				_, err = h.AcquireQuerySegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.RetrieveRequest{}, nil)
 			}
 			require.ErrorIs(t, err, context.Canceled)
 			require.Zero(t, entry.queryRefs)

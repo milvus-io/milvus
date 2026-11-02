@@ -273,6 +273,13 @@ func TestPageMaterializationIndependentPayloadOracle(t *testing.T) {
 					want.FieldsData[5].GetVectors().Dim = sparseDim
 					want.FieldsData[5].GetVectors().GetSparseFloatVector().Dim = sparseDim
 				}
+				// Merged output carries row validity in both FieldData.valid_data
+				// and the field-specific location.
+				for _, field := range want.GetFieldsData() {
+					if validData := typeutil.GetFieldDataValidData(field); len(validData) > 0 {
+						typeutil.SetFieldDataValidData(field, validData)
+					}
+				}
 				require.True(t, proto.Equal(want.GetIds(), got.GetIds()))
 				require.Len(t, got.GetFieldsData(), len(want.GetFieldsData()))
 				for i, field := range want.GetFieldsData() {

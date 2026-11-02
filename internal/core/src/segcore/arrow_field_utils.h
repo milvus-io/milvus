@@ -108,6 +108,7 @@ FieldDataToArrow(const std::string& field_name,
                  const milvus::DataArray& field_data,
                  size_t total_valid,
                  bool preserve_integer_width = false,
-                 const ProtoOwner& owner = nullptr);
+                 const ProtoOwner& owner = nullptr,
+                 const milvus::FieldMeta* field_meta = nullptr);
 
 }  // namespace milvus::segcore

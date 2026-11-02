@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -501,6 +502,48 @@ func TestComponentParam_IDFSealedStatsLoadConcurrencyRatio(t *testing.T) {
 	assert.Equal(t, 2.5, item.GetAsFloat())
 	assert.NoError(t, params.Save(item.Key, "0"))
 	assert.Equal(t, 1.0, item.GetAsFloat())
+}
+
+func TestComponentParam_QueryViewConcurrency(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	for _, test := range []struct {
+		name string
+		key  string
+		item *ParamItem
+	}{
+		{name: "transform log drain", key: "queryNode.queryView.transformLogDrainConcurrencyRatio", item: &params.QueryNodeCfg.QueryViewTransformLogDrainConcurrency},
+		{name: "transform log stream catch-up", key: "streaming.transformLog.catchupConcurrencyRatioPerPChannel", item: &params.StreamingCfg.TransformLogCatchupConcurrencyPerPChannel},
+		{name: "live event dispatch", key: "streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel", item: &params.StreamingCfg.QueryViewLiveEventDispatchConcurrencyPerPChannel},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.key, test.item.Key)
+			require.Equal(t, "0.25", test.item.DefaultValue)
+			require.Equal(t, "3.1.0", test.item.Version)
+			for _, cpuCount := range []int{1, 3, 4, 8, 10} {
+				t.Run(fmt.Sprint(cpuCount), func(t *testing.T) {
+					patch := mockey.Mock(hardware.GetCPUNum).Return(cpuCount).Build()
+					defer patch.UnPatch()
+					require.NoError(t, params.Reset(test.key))
+					require.Equal(t, max(1, cpuCount/4), test.item.GetAsInt())
+					for _, ratio := range []struct {
+						value string
+						want  int
+					}{
+						{value: "0.5", want: max(1, cpuCount/2)},
+						{value: "2", want: cpuCount * 2},
+						{value: "0", want: 1},
+						{value: "-1", want: 1},
+					} {
+						require.NoError(t, params.Save(test.key, ratio.value))
+						require.Equal(t, ratio.want, test.item.GetAsInt())
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestComponentParam(t *testing.T) {
@@ -1154,7 +1197,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
-		assert.Equal(t, "10s", Params.StandaloneMigrateDataTimeout.DefaultValue)
+		assert.Equal(t, "10s", Params.MigrateDataTimeout.DefaultValue)
+		assert.Equal(t, 10*time.Second, Params.MigrateDataTimeout.GetAsDurationByParse())
+		// The old key still works for configs written before the rename.
+		assert.NoError(t, params.Save("queryNode.standaloneMigrateDataTimeout", "3m"))
+		assert.Equal(t, 3*time.Minute, Params.MigrateDataTimeout.GetAsDurationByParse())
+		params.Reset("queryNode.standaloneMigrateDataTimeout")
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
@@ -1959,4 +2007,21 @@ func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
 	assert.Equal(t, time.Duration(0), item.GetAsDurationByParse())
 	assert.NoError(t, params.Reset(item.Key))
 	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
+}
+
+func TestSnapshotDescriptionLengthConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	limit := &params.ProxyCfg.MaxSnapshotDescriptionLength
+	assert.Equal(t, "proxy.maxSnapshotDescriptionLength", limit.Key)
+	assert.Equal(t, "3.0.5", limit.Version)
+	assert.False(t, limit.Export)
+	assert.Equal(t, 1024, limit.GetAsInt())
+	require.NoError(t, params.Save(limit.Key, "2048"))
+	assert.Equal(t, 2048, limit.GetAsInt())
+	require.NoError(t, params.Reset(limit.Key))
+	assert.Equal(t, 1024, limit.GetAsInt())
+	field, ok := reflect.TypeOf(&params.ProxyCfg).Elem().FieldByName("MaxSnapshotDescriptionLength")
+	require.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
