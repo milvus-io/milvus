@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -121,7 +120,7 @@ func TestConnectionWaiterCancellationAndClose(t *testing.T) {
 	// Close must not wait for the dial's state lock.
 	require.NoError(t, base.Close())
 	close(release)
-	require.True(t, errors.Is(<-done, ErrConnect))
+	require.True(t, IsConnectionClosingErr(<-done))
 	_, err = base.GetGrpcClient(context.Background())
 	require.True(t, IsConnectionClosingErr(err))
 }
@@ -147,6 +146,81 @@ func TestCloseDuringSuccessfulDial(t *testing.T) {
 	close(release)
 	require.True(t, IsConnectionClosingErr(<-done))
 	require.Nil(t, base.grpcClient)
+}
+
+func TestCanceledInitiatorDoesNotCancelSharedDial(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	started := make(chan struct{})
+	base := &ClientBase[*mockClient]{DialTimeout: time.Second}
+	defer base.Close()
+	base.SetNewGrpcClientFunc(func(*grpc.ClientConn) *mockClient { return &mockClient{} })
+	base.SetGetAddrFunc(func() (string, error) {
+		close(started)
+		return listener.Addr().String(), nil
+	})
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	leaderDone := make(chan error, 1)
+	go func() { _, err := base.GetGrpcClient(leaderCtx); leaderDone <- err }()
+	<-started
+
+	waiterCtx := &connectionWaitContext{Context: context.Background(), entered: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() { _, err := base.GetGrpcClient(waiterCtx); waiterDone <- err }()
+	<-waiterCtx.entered
+	cancelLeader()
+	select {
+	case err := <-leaderDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("initiator did not return after cancellation")
+	}
+
+	server := grpc.NewServer()
+	go server.Serve(listener)
+	defer server.Stop()
+	select {
+	case err := <-waiterDone:
+		require.NoError(t, err, "live waiter must survive initiator cancellation")
+	case <-time.After(time.Second):
+		t.Fatal("live waiter did not receive the shared connection")
+	}
+}
+
+func TestCloseCancelsSharedDial(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	started := make(chan struct{})
+	base := &ClientBase[*mockClient]{DialTimeout: 10 * time.Second}
+	base.SetGetAddrFunc(func() (string, error) {
+		close(started)
+		return listener.Addr().String(), nil
+	})
+	done := make(chan error, 1)
+	go func() { _, err := base.GetGrpcClient(context.Background()); done <- err }()
+	<-started
+	base.grpcClientMtx.RLock()
+	pending := base.connecting
+	base.grpcClientMtx.RUnlock()
+	require.NotNil(t, pending)
+	require.NoError(t, base.Close())
+	select {
+	case err := <-done:
+		require.True(t, IsConnectionClosingErr(err))
+	case <-time.After(time.Second):
+		t.Fatal("Close did not release the caller")
+	}
+	select {
+	case <-pending.done:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel the shared dial")
+	}
 }
 
 func TestOneAttemptDoesNotBackOffOnRetriableStatus(t *testing.T) {
@@ -255,5 +329,5 @@ func TestCloseUnblocksConnectionWaiter(t *testing.T) {
 	require.NoError(t, base.Close())
 	require.True(t, IsConnectionClosingErr(<-waiterDone))
 	close(release)
-	require.ErrorIs(t, <-leaderDone, ErrConnect)
+	require.True(t, IsConnectionClosingErr(<-leaderDone))
 }
