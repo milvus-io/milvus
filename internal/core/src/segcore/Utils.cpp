@@ -1686,7 +1686,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     load_index_info->index_caps = translator->Caps();
 
     if ((translator->Family() == index::families::kMarisa ||
-         translator->Family() == index::families::kFmIndex) &&
+         translator->Family() == index::families::kFmIndex ||
+         translator->Family() == index::families::kRTree) &&
         !translator->Caps().json_paths) {
         load_index_info->index = translator->CreateIndex(op_ctx);
     } else {

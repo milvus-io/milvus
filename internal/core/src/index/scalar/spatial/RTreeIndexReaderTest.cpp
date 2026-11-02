@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "common/Geometry.h"
+#include "index/SingleCellIndexStorageTranslator.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
 #include "index/growing/RTreeGrowingSpatialIndex.h"
@@ -40,11 +41,72 @@ namespace milvus::index::test {
 
 namespace {
 
+TEST(RTreeIndexCacheTest, ValidityViewRetainsPinAndReloadUsesReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<RTreeIndexState>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        co_return RTreeIndexState::Create(
+            RTreeQueryEngine::Create({}),
+            std::make_shared<const std::vector<size_t>>(
+                std::initializer_list<size_t>{0, 1}),
+            2);
+    };
+    IndexCacheConfig cache{
+        "rtree-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        0};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<RTreeIndexState>>(
+        std::make_unique<SingleCellIndexStorageTranslator<RTreeIndexState>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = std::make_shared<RTreeIndex>(slot, 2);
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* spatial = dynamic_cast<const RTreeIndexReader*>(first.get());
+    ASSERT_NE(spatial, nullptr);
+    EXPECT_EQ(spatial->Candidates(SpatialOp::Intersects, Geometry{}).count(),
+              0);
+    auto validity = spatial->Validity();
+    EXPECT_EQ(validity->Count(), 2);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_FALSE(slot->ManualEvict(0));
+    validity.reset();
+    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    first.reset();
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 2);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
 TEST(RTreeIndexOwnershipTest, RetainsAuthoritativeCountForAllNullRows) {
     auto engine = RTreeQueryEngine::Create({});
     auto nulls = std::make_shared<const std::vector<size_t>>(
         std::initializer_list<size_t>{0, 1});
-    auto state =
+    std::shared_ptr<const RTreeIndexState> state =
         RTreeIndexState::Create(std::move(engine), std::move(nulls), 2);
     std::weak_ptr<const RTreeIndexState> lifetime = state;
     auto index = std::make_shared<RTreeIndex>(std::move(state));
@@ -118,9 +180,9 @@ TEST(RTreeGrowingSpatialIndexTest, PublicationsShareValidityAndFreezeTail) {
     const auto second = owner.PinSnapshot();
     const auto& before = dynamic_cast<const RTreeIndexReader&>(first.Reader());
     const auto& after = dynamic_cast<const RTreeIndexReader&>(second.Reader());
-    ASSERT_NE(before.Validity().FullWords().data(), nullptr);
-    EXPECT_EQ(before.Validity().FullWords().data(),
-              after.Validity().FullWords().data());
+    ASSERT_NE(before.Validity()->FullWords().data(), nullptr);
+    EXPECT_EQ(before.Validity()->FullWords().data(),
+              after.Validity()->FullWords().data());
     const auto old_nulls = before.IsNull();
     const auto new_nulls = after.IsNull();
     ASSERT_EQ(old_nulls.size(), 65);

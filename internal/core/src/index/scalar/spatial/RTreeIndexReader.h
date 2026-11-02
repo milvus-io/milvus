@@ -19,6 +19,9 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <variant>
+
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Geometry.h"
 #include "common/Types.h"
@@ -42,7 +45,7 @@ class RTreeGrowingSpatialIndex;
 // one-shard state; growing publication may compose several immutable shards.
 class RTreeIndexState final {
  public:
-    static std::shared_ptr<const RTreeIndexState>
+    static std::unique_ptr<RTreeIndexState>
     Create(std::shared_ptr<const RTreeQueryEngine> engine,
            std::shared_ptr<const std::vector<size_t>> null_offsets,
            int64_t total_num_rows);
@@ -68,7 +71,7 @@ class RTreeIndexState final {
     // Growing owns the only construction path for these shards and validates
     // each new contiguous batch before it can enter an immutable engine. Avoid
     // rescanning every historical shard on every publication.
-    static std::shared_ptr<const RTreeIndexState>
+    static std::unique_ptr<RTreeIndexState>
     CreateFromValidatedShards(
         std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
         SharedValidityBitmap::Snapshot validity,
@@ -94,6 +97,9 @@ class RTreeIndex final : public IIndex,
  public:
     explicit RTreeIndex(std::shared_ptr<const RTreeIndexState> state);
 
+    RTreeIndex(std::shared_ptr<cachinglayer::CacheSlot<RTreeIndexState>> slot,
+               int64_t count);
+
     IndexMetadata
     Metadata() const override;
 
@@ -101,12 +107,19 @@ class RTreeIndex final : public IIndex,
     CreateReader(milvus::OpContext* op_ctx) const override;
 
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class RTreeIndexReader;
-    std::shared_ptr<const RTreeIndexState> state_;
+    std::shared_ptr<const RTreeIndexState>
+    PinStorage(milvus::OpContext* op_ctx) const;
+
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<RTreeIndexState>> slot;
+        int64_t count;
+    };
+    std::variant<std::shared_ptr<const RTreeIndexState>, CachedStorage>
+        storage_;
 };
 
 class RTreeIndexReader final : public IIndexReaderBase,
@@ -146,7 +159,8 @@ class RTreeIndexReader final : public IIndexReaderBase,
     TargetBitmap
     Candidates(SpatialOp op, const Geometry& query_geom) const override;
 
-    const SharedValidityBitmap::Snapshot&
+    // The handle keeps the cache cell pinned while its bitmap is borrowed.
+    std::shared_ptr<const SharedValidityBitmap::Snapshot>
     Validity() const;
 
     // ---- INullReader -----------------------------------------------

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -30,10 +31,12 @@
 
 namespace milvus::index {
 
+class RTreeIndexState;
+
 /**
- * @brief Loads R-tree readers from legacy or packed V3 artifacts.
+ * @brief Loads R-tree indexes from legacy or packed V3 artifacts.
  *
- * Owns the opened source and fixed load options; each Load creates a new reader.
+ * Owns the opened source until resident loading or transfer into a cached Index.
  */
 class RTreeIndexLoader final : public IndexLoader {
  public:
@@ -61,13 +64,23 @@ class RTreeIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     RTreeIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    static folly::coro::Task<std::unique_ptr<RTreeIndexState>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<RTreeIndexState>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Materialize the archive and deserialize a heap-backed R-tree

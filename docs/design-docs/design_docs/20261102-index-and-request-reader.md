@@ -203,3 +203,5 @@ cell. Pattern operations retain one storage pin across engine calls and null
 filtering. Cost guards reject wildcard-only LIKE and unselective regex conditions
 before pinning, while count/type/capabilities come from validated packed metadata.
 The existing heap/mmap decoding and candidate semantics are unchanged.
+
+RTree 同样把整份 Boost 树和 validity 数据作为一个缓存 cell，由请求 Reader 在查询时 pin。Count 使用加载参数中已有的权威行数，不读取索引文件。向调用方返回 validity 时，使用共享句柄保留对应 cell 的 pin，直到调用方释放句柄；普通 Candidates 和空值查询只在本次调用期间持有 pin。Growing 的分片和 validity 共享方式保持不变。

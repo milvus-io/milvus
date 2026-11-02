@@ -21,6 +21,10 @@
 #include "index/scalar/spatial/RTreeIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/LegacyIndexLoad-inl.h"
+#include "index/PackedIndexLoad-inl.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -282,7 +286,7 @@ ReadNullOffsets(bool use_async,
 
 // Deserialize the staged archive to heap state and read null offsets using
 // runtime row count.
-folly::coro::Task<std::shared_ptr<const RTreeIndexState>>
+folly::coro::Task<std::unique_ptr<RTreeIndexState>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
@@ -366,7 +370,8 @@ RTreeIndexLoader::Create(OpenedIndexSource source,
         new RTreeIndexLoader(std::move(source), std::move(options)));
     (void)DeriveCaps(loader->options_.params);
     (void)ReadRequiredRowCount(loader->options_.params);
-    if (const auto* legacy = std::get_if<LegacyIndexSource>(&loader->source_)) {
+    if (const auto* legacy =
+            std::get_if<LegacyIndexSource>(&*loader->source_)) {
         (void)ReadPersistedEntries(*legacy->source);
     }
     co_return loader;
@@ -375,14 +380,54 @@ RTreeIndexLoader::Create(OpenedIndexSource source,
 folly::coro::Task<IndexPtr>
 RTreeIndexLoader::Load(milvus::OpContext* context,
                        const IndexCacheConfig* cache) {
-    AssertInfo(cache == nullptr,
-               "cached loading is not yet migrated for this family");
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
+    AssertInfo(source_.has_value(),
+               "cached R-Tree construction consumed this loader");
+    if (cache) {
+        const auto count = ReadRequiredRowCount(options_.params);
+        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+        const bool use_async =
+            legacy ? legacy->use_async
+                   : std::holds_alternative<
+                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                         std::get<PackedIndexSource>(*source_).reader);
+        auto source = std::move(*source_);
+        source_.reset();
+        auto load = [source = std::move(source),
+                     options = options_](OpContext* ctx) mutable {
+            return LoadStorage(source, options, ctx);
+        };
+        auto slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<RTreeIndexState>(
+                    std::make_unique<
+                        SingleCellIndexStorageTranslator<RTreeIndexState>>(
+                        *cache, use_async, std::move(load)),
+                    context);
+        co_return std::make_shared<RTreeIndex>(std::move(slot), count);
+    }
+    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+        co_return co_await RunPackedIndexLoad(
             *packed, options_, &PlanPacked, &FinishPacked, context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    co_return co_await RunLegacyLoad(
+        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+}
+
+folly::coro::Task<std::unique_ptr<RTreeIndexState>>
+RTreeIndexLoader::LoadStorage(OpenedIndexSource& source,
+                              const storage::LoadOptions& options,
+                              milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<RTreeIndexState>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
+    }
+    return RunLegacyLoad<std::unique_ptr<RTreeIndexState>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [](storage::FileSource& files,
+           const storage::LoadOptions& opts,
+           bool use_async) { return LoadState(use_async, files, opts); },
+        context);
 }
 
 ReaderCaps
@@ -441,6 +486,14 @@ folly::coro::Task<IndexPtr>
 RTreeIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                const storage::LoadOptions& opts,
                                bool use_async) {
+    co_return std::make_shared<RTreeIndex>(
+        co_await FinishPackedStorage(plan, opts, use_async));
+}
+
+folly::coro::Task<std::unique_ptr<RTreeIndexState>>
+RTreeIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                      const storage::LoadOptions& opts,
+                                      bool use_async) {
     const auto& state = std::any_cast<const std::shared_ptr<PackedRTreeState>&>(
         plan.load_context);
     AssertInfo(state != nullptr, "RTree packed load context is null");
@@ -460,8 +513,8 @@ RTreeIndexLoader::FinishPacked(IndexLoadPlan& plan,
     } else {
         local_io();
     }
-    co_return std::make_shared<RTreeIndex>(RTreeIndexState::Create(
-        std::move(engine), state->targets.null_offsets, state->total_rows));
+    co_return RTreeIndexState::Create(
+        std::move(engine), state->targets.null_offsets, state->total_rows);
 }
 
 namespace {
