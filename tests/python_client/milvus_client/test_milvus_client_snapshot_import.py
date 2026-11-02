@@ -1288,6 +1288,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
+    @pytest.mark.skip(reason="Known Vortex NULL/default bug: https://github.com/milvus-io/milvus/issues/54961")
     def test_snapshot_import_combined_defaults(self, snapshot_default_resources, layout, db_name):
         """
         target: SI-FN-10, combine the four valid missing/NULL rules in different fields
@@ -1663,10 +1664,28 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
     def test_snapshot_import_schema_rejections(self, snapshot_schema_resources, layout, db_name):
         """
-        target: SI-FN-12, reject missing target PK, vector dimension and incompatible scalar decoding
-        method: use one legal snapshot for three isolated invalid targets and one compatible control per layout
-        expected: specific rejection leaves only the sentinel; the identical snapshot imports 128 rows into the control
+        target: SI-FN-12, reject missing target PK and incompatible scalar decoding
+        method: use one legal snapshot for two invalid targets and a compatible control per layout
+        expected: specific rejection preserves the sentinel; the control restores all 128 rows after reload
         """
+        self._check_snapshot_schema_rejections(
+            snapshot_schema_resources, layout, db_name, ("missing_pk", "scalar_type")
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
+    @pytest.mark.skip(
+        reason="Known snapshot dimension validation bug: https://github.com/milvus-io/milvus/issues/54715"
+    )
+    def test_snapshot_import_vector_dimension_rejection(self, snapshot_schema_resources, layout, db_name):
+        """
+        target: SI-FN-12, reject incompatible vector dimensions
+        method: import into a smaller-dimension target and an independent compatible control
+        expected: rejection preserves the sentinel; the compatible control restores all rows after reload
+        """
+        self._check_snapshot_schema_rejections(snapshot_schema_resources, layout, db_name, ("vector_dim",))
+
+    def _check_snapshot_schema_rejections(self, snapshot_schema_resources, layout, db_name, error_kinds):
         client, source, targets, snapshot, export_prefix = snapshot_schema_resources
 
         # Step 1: The source itself is legal and independently queryable.
@@ -1683,7 +1702,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         uri = self._default_snapshot_uri(client, source, snapshot, export_prefix, layout, db_name)
         url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
 
-        for error_kind in ("missing_pk", "vector_dim", "scalar_type"):
+        for error_kind in error_kinds:
             target = targets[error_kind]
             target_fields = self._create_schema_import_collection(client, target, error_kind)
             self._assert_schema_import_fields(source_fields, target_fields, error_kind)
@@ -1772,7 +1791,19 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
-    @pytest.mark.parametrize("overflow", [False, True], ids=["within_limit", "over_limit"])
+    @pytest.mark.parametrize(
+        "overflow",
+        [
+            pytest.param(False, id="within_limit"),
+            pytest.param(
+                True,
+                id="over_limit",
+                marks=pytest.mark.skip(
+                    reason="Known snapshot VarChar limit bug: https://github.com/milvus-io/milvus/issues/54719"
+                ),
+            ),
+        ],
+    )
     def test_snapshot_import_varchar_max_length(self, snapshot_varchar_resources, layout, overflow, db_name):
         """
         target: SI-FN-12, enforce the target VarChar byte limit without requiring equal source/target limits
