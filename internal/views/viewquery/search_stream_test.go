@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
+	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -445,7 +446,7 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceServer) (viewpb.ViewQueryServiceClient, func()) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(grpc.StreamInterceptor(serviceinterceptor.NewServiceStreamServerInterceptor()))
 	viewpb.RegisterViewQueryServiceServer(grpcServer, service)
 	go func() {
 		_ = grpcServer.Serve(listener)
