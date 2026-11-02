@@ -113,6 +113,110 @@ ExpectPackedLoadError(milvus::ErrorCode expected, F&& load) {
 }
 }  // namespace
 
+namespace {
+struct TypedLoadState {
+    TypedLoadState(std::vector<std::string>* events,
+                   folly::CancellationSource* cancellation)
+        : events(events), cancellation(cancellation) {
+    }
+    ~TypedLoadState() {
+        events->push_back("plan");
+    }
+    std::vector<std::string>* events;
+    folly::CancellationSource* cancellation;
+};
+struct TypedStorage {
+    explicit TypedStorage(std::vector<std::string>* events) : events(events) {
+    }
+    ~TypedStorage() {
+        events->push_back("storage");
+    }
+    std::vector<std::string>* events;
+};
+std::unique_ptr<TypedStorage>
+FinishTypedStorage(IndexLoadPlan& plan, const storage::LoadOptions&) {
+    const auto& state = std::any_cast<const std::shared_ptr<TypedLoadState>&>(
+        plan.load_context);
+    auto result = std::make_unique<TypedStorage>(state->events);
+    if (state->cancellation) {
+        state->cancellation->requestCancellation();
+    }
+    return result;
+}
+folly::coro::Task<std::unique_ptr<TypedStorage>>
+FinishTypedStorageAsync(IndexLoadPlan& plan,
+                        const storage::LoadOptions& options,
+                        bool) {
+    co_return FinishTypedStorage(plan, options);
+}
+}  // namespace
+
+TEST(ScalarIndexV3LoadTest, TypedStorageCleanupPrecedesFailedPlanCleanup) {
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("BitmapInt64");
+    ScalarTestData<int64_t> data({10, 20, 10});
+    const ScalarTestInput<int64_t> rows(data);
+    auto artifact = backend.Build(rows.View(), {.row_count = 3});
+    const auto bytes = MakePackedArtifactBuffer(SerializeV3(*artifact));
+    for (const bool async_source : {false, true}) {
+        for (const bool async_finish : {false, true}) {
+            for (const bool cancel : {false, true}) {
+                SCOPED_TRACE(::testing::Message()
+                             << async_source << "/" << async_finish << "/"
+                             << cancel);
+                auto input = std::make_shared<storage::RemoteInputStream>(
+                    std::make_shared<arrow::io::BufferReader>(bytes));
+                auto run = [](auto task) {
+                    return folly::coro::blockingWait(
+                        folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH),
+                            std::move(task)));
+                };
+                PackedIndexSource source;
+                if (async_source) {
+                    source.reader =
+                        std::shared_ptr<storage::AsyncIndexEntryReader>(
+                            run(storage::AsyncIndexEntryReader::Open(
+                                input, 0, proto::common::LoadPriority::HIGH)));
+                } else {
+                    source.reader = std::shared_ptr<storage::IndexEntryReader>(
+                        storage::IndexEntryReader::Open(input, input->Size()));
+                }
+                std::vector<std::string> events;
+                folly::CancellationSource cancellation;
+                OpContext context(cancellation.getToken());
+                PackedPlanFn plan = [&](const auto&, const auto&, const auto&) {
+                    IndexLoadPlan result;
+                    result.load_context = std::make_shared<TypedLoadState>(
+                        &events, cancel ? &cancellation : nullptr);
+                    return result;
+                };
+                using Result = std::unique_ptr<TypedStorage>;
+                PackedFinish<Result> finish = &FinishTypedStorage;
+                if (async_finish) {
+                    finish = &FinishTypedStorageAsync;
+                }
+                auto load = [&] {
+                    return run(RunPackedIndexLoad<Result>(
+                        source, {}, plan, finish, &context));
+                };
+                if (cancel) {
+                    ExpectPackedLoadError(FollyCancel, load);
+                    EXPECT_EQ(events,
+                              (std::vector<std::string>{"storage", "plan"}));
+                } else {
+                    auto result = load();
+                    ASSERT_NE(result, nullptr);
+                    EXPECT_EQ(events, (std::vector<std::string>{"plan"}));
+                    result.reset();
+                    EXPECT_EQ(events,
+                              (std::vector<std::string>{"plan", "storage"}));
+                }
+            }
+        }
+    }
+}
+
 TEST(ScalarIndexV3AsyncTest, HeapAndMmapPreserveValuesAndNulls) {
     const auto previous_mode = storage::FileWriter::GetMode();
     auto restore_mode =

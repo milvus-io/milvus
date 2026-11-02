@@ -892,6 +892,48 @@ TEST_F(LegacyIndexLoadTest, SyncSizeReadsHeadersThroughRemoteFilesystem) {
     sink.ReleaseLocalStaging();
 }
 
+TEST_F(LegacyIndexLoadTest, ReturnsTypedStorageAfterCancellationChecks) {
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("BitmapInt64");
+    ScalarTestData<int64_t> data({10, 20, 10});
+    const ScalarTestInput<int64_t> rows(data);
+    const auto artifact =
+        SerializeV1V2(*backend.Build(rows.View(), {.row_count = 3}));
+    auto source = std::make_shared<TestArtifactSource>(
+        artifact, storage::Generation::V1V2);
+    for (const bool async : {false, true}) {
+        LegacyIndexSource input{source, async};
+        storage::LoadOptions options;
+        for (const bool cancel : {true, false}) {
+            folly::CancellationSource cancellation;
+            OpContext context(cancellation.getToken());
+            LegacyLoad<std::unique_ptr<int64_t>> load =
+                [&](storage::FileSource&,
+                    const storage::LoadOptions& opts,
+                    bool) -> folly::coro::Task<std::unique_ptr<int64_t>> {
+                EXPECT_EQ(opts.op_ctx, &context);
+                auto result = std::make_unique<int64_t>(3);
+                if (cancel) {
+                    cancellation.requestCancellation();
+                }
+                co_return result;
+            };
+            auto run = [&] {
+                auto task = RunLegacyLoad<std::unique_ptr<int64_t>>(
+                    input, options, load, &context);
+                return async ? Run(std::move(task))
+                             : folly::coro::blockingWait(std::move(task));
+            };
+            if (cancel) {
+                ExpectError(FollyCancel, run);
+            } else {
+                auto result = run();
+                ASSERT_NE(result, nullptr);
+                EXPECT_EQ(*result, 3);
+            }
+        }
+    }
+}
+
 TEST_F(LegacyIndexLoadTest, AsyncFamilyRunsOutsideLocalFilePool) {
     const auto& backend = ScalarReaderBackends().Get<int64_t>("BitmapInt64");
     ScalarTestData<int64_t> data({10, 20, 10});
