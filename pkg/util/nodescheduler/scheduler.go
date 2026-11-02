@@ -17,6 +17,7 @@
 package nodescheduler
 
 import (
+	"container/heap"
 	"container/list"
 	"context"
 	"math"
@@ -54,7 +55,8 @@ type scheduleErrorKind int
 const scheduleErrorKindDelay scheduleErrorKind = iota + 1
 
 type ScheduleError struct {
-	kind scheduleErrorKind
+	kind    scheduleErrorKind
+	nextRun time.Time
 }
 
 func (e *ScheduleError) Error() string {
@@ -71,14 +73,24 @@ func (e *ScheduleError) Is(target error) bool {
 
 var ErrDelay = &ScheduleError{kind: scheduleErrorKindDelay}
 
+// DelayUntil asks the scheduler to retry no earlier than nextRun. Wrapping this
+// error preserves both its deadline and errors.Is(err, ErrDelay). The bare
+// sentinel remains supported with the default retry interval.
+func DelayUntil(nextRun time.Time) *ScheduleError {
+	return &ScheduleError{kind: scheduleErrorKindDelay, nextRun: nextRun}
+}
+
 type nodeScheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu     sync.Mutex
-	cond   *sync.Cond
-	queue  *list.List
-	closed bool
+	mu       sync.Mutex
+	cond     *sync.Cond
+	queue    *list.List
+	delayed  delayedTasks
+	timer    *time.Timer
+	sequence uint64
+	closed   bool
 
 	concurrency int
 	workerCount int
@@ -86,15 +98,18 @@ type nodeScheduler struct {
 }
 
 type taskEntry struct {
-	task   Task
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
-	wakeup func()
+	task       Task
+	ctx        context.Context
+	cancel     context.CancelFunc
+	done       chan struct{}
+	once       sync.Once
+	cancelTask func()
 	// nextRun is the earliest time a delayed (ErrDelay) requeue may execute
 	// again. Zero means the entry may run immediately.
-	nextRun time.Time
+	nextRun   time.Time
+	heapIndex int
+	order     uint64
+	queued    *list.Element
 }
 
 func (e *taskEntry) finish() {
@@ -109,8 +124,7 @@ type taskHandle struct {
 }
 
 func (h *taskHandle) Cancel() {
-	h.entry.cancel()
-	h.entry.wakeup()
+	h.entry.cancelTask()
 }
 
 func (h *taskHandle) Wait(ctx context.Context) error {
@@ -174,12 +188,13 @@ func (s *nodeScheduler) resize(concurrency int) {
 func (s *nodeScheduler) Submit(task Task) TaskHandle {
 	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
 	entry := &taskEntry{
-		task:   task,
-		ctx:    ctx,
-		cancel: cancel,
-		done:   make(chan struct{}),
-		wakeup: s.wakeup,
+		task:      task,
+		ctx:       ctx,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		heapIndex: -1,
 	}
+	entry.cancelTask = func() { s.cancelTask(entry) }
 	handle := &taskHandle{entry: entry}
 
 	s.mu.Lock()
@@ -189,7 +204,7 @@ func (s *nodeScheduler) Submit(task Task) TaskHandle {
 		return handle
 	}
 	// The queue is intentionally unbounded: Submit must never wait for capacity.
-	s.queue.PushBack(entry)
+	entry.queued = s.queue.PushBack(entry)
 	s.cond.Signal()
 	s.mu.Unlock()
 	return handle
@@ -206,9 +221,16 @@ func (s *nodeScheduler) Close() {
 	s.closed = true
 	for element := s.queue.Front(); element != nil; element = element.Next() {
 		entry := element.Value.(*taskEntry)
+		entry.queued = nil
 		entry.finish()
 	}
 	s.queue.Init()
+	for len(s.delayed) > 0 {
+		heap.Pop(&s.delayed).(*taskEntry).finish()
+	}
+	if s.timer != nil {
+		s.timer.Stop()
+	}
 	s.cancel()
 	s.cond.Broadcast()
 	s.mu.Unlock()
@@ -216,10 +238,21 @@ func (s *nodeScheduler) Close() {
 	s.workers.Wait()
 }
 
-func (s *nodeScheduler) wakeup() {
+// cancelTask removes queued/delayed work immediately. A running task owns its
+// completion until Execute returns, even after cancellation.
+func (s *nodeScheduler) cancelTask(entry *taskEntry) {
 	s.mu.Lock()
-	s.cond.Signal()
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	entry.cancel()
+	if entry.queued != nil {
+		s.queue.Remove(entry.queued)
+		entry.queued = nil
+		entry.finish()
+	} else if entry.heapIndex >= 0 {
+		heap.Remove(&s.delayed, entry.heapIndex)
+		s.resetTimerLocked()
+		entry.finish()
+	}
 }
 
 func (s *nodeScheduler) runWorker() {
@@ -247,7 +280,12 @@ func (s *nodeScheduler) runWorker() {
 			continue
 		}
 		if errors.Is(err, ErrDelay) {
-			if s.requeue(entry) {
+			nextRun := time.Now().Add(delayOnRequeue)
+			var delay *ScheduleError
+			if errors.As(err, &delay) && !delay.nextRun.IsZero() {
+				nextRun = delay.nextRun
+			}
+			if s.requeue(entry, nextRun) {
 				continue
 			}
 			entry.finish()
@@ -271,50 +309,75 @@ func (s *nodeScheduler) dequeue() *taskEntry {
 			s.workerCount--
 			return nil
 		}
-		if s.queue.Len() > 0 {
-			now := time.Now()
-			for element := s.queue.Front(); element != nil; element = element.Next() {
-				entry := element.Value.(*taskEntry)
-				// A delayed requeue is not runnable yet: skip it so it cannot
-				// head-of-line block runnable entries behind it. Ordering among
-				// tasks is the caller's responsibility, not this FIFO's. If every
-				// entry is delayed, fall through to wait for the requeue's
-				// wake-up timer instead of spinning.
-				if !entry.nextRun.IsZero() && now.Before(entry.nextRun) {
-					continue
-				}
-				s.queue.Remove(element)
-				return entry
-			}
-			s.cond.Wait()
-			continue
+		if element := s.queue.Front(); element != nil {
+			entry := element.Value.(*taskEntry)
+			s.queue.Remove(element)
+			entry.queued = nil
+			return entry
 		}
 		s.cond.Wait()
 	}
 }
 
-func (s *nodeScheduler) requeue(entry *taskEntry) bool {
+func (s *nodeScheduler) requeue(entry *taskEntry, nextRun time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	if s.closed || entry.ctx.Err() != nil {
 		return false
 	}
-	// Back off a delayed retry: without the delay, a task whose Execute keeps
-	// failing (e.g. an object-storage outage surfaced as ErrDelay) is dequeued
-	// and re-executed in a tight loop, burning a worker at 100% CPU. The timer
-	// wakes the condition variable once the entry becomes runnable again.
-	entry.nextRun = time.Now().Add(delayOnRequeue)
-	s.queue.PushBack(entry)
-	s.cond.Signal()
-	time.AfterFunc(delayOnRequeue, s.wakeup)
+	if !nextRun.After(time.Now()) {
+		entry.queued = s.queue.PushBack(entry)
+		s.cond.Signal()
+		return true
+	}
+	entry.nextRun = nextRun
+	s.sequence++
+	entry.order = s.sequence
+	heap.Push(&s.delayed, entry)
+	if entry.heapIndex == 0 {
+		s.resetTimerLocked()
+	}
 	return true
 }
 
-// delayOnRequeue is the minimum pause between a failed (ErrDelay) execution
-// and its retry. It bounds the retry rate of every scheduler task without
-// blocking the queue: delayed entries are simply not runnable until the pause
-// elapses.
+// One timer services the heap minimum. Stale timer callbacks are harmless: they
+// recheck deadlines under mu and never execute a task before its requested time.
+func (s *nodeScheduler) resetTimerLocked() {
+	if s.closed || len(s.delayed) == 0 {
+		if s.timer != nil {
+			s.timer.Stop()
+		}
+		return
+	}
+	delay := max(0, time.Until(s.delayed[0].nextRun))
+	if s.timer == nil {
+		s.timer = time.AfterFunc(delay, s.promoteDelayed)
+	} else {
+		s.timer.Reset(delay)
+	}
+}
+
+func (s *nodeScheduler) promoteDelayed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	now := time.Now()
+	promoted := false
+	for len(s.delayed) > 0 && !s.delayed[0].nextRun.After(now) {
+		entry := heap.Pop(&s.delayed).(*taskEntry)
+		entry.queued = s.queue.PushBack(entry)
+		promoted = true
+	}
+	s.resetTimerLocked()
+	if promoted {
+		s.cond.Broadcast()
+	}
+}
+
+// delayOnRequeue preserves the retry interval for tasks returning bare ErrDelay.
+// Tasks with a specific deadline return DelayUntil instead.
 const delayOnRequeue = 100 * time.Millisecond
 
 var getGlobalScheduler = sync.OnceValue(func() *nodeScheduler {
