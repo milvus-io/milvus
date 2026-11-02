@@ -295,6 +295,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override;
 

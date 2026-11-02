@@ -1270,11 +1270,9 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index below serves this expression; see SegmentExpr::
+    // FallbackToJsonStatsIfEligible().
 
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {

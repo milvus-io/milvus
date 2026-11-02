@@ -382,9 +382,11 @@ class SegmentExpr : public Expr {
 
     // Pin the scalar index cell. Called by DetermineExecPath() only after the
     // expression has committed to ExprExecPath::ScalarIndex, so the pin's
-    // lifetime matches real usage: short-circuit paths
-    // (TextIndex/PkIndex/JsonStats) and the RawData path never call it and
-    // the scalar index cell stays cold in tiered storage. Idempotent.
+    // lifetime matches real usage: the short-circuit paths (TextIndex/PkIndex)
+    // and a RawData outcome decided before the pin never call it, and the
+    // scalar index cell stays cold in tiered storage. A JsonStats outcome is
+    // the fallback for RawData, so it can follow a pin that an expression then
+    // declined (see DeclinePinnedIndex()). Idempotent.
     void
     EnsurePinnedIndex() {
         if (pinned_index_initialized_) {
@@ -401,6 +403,16 @@ class SegmentExpr : public Expr {
                                  allow_any_json_cast_type_,
                                  is_json_contains_);
         num_index_chunk_ = pinned_index_.size();
+    }
+
+    // Undo a ScalarIndex decision taken by DetermineExecPath(): release the
+    // pin so nothing downstream sees an index, and fall back to RawData
+    // (which EnsureExecPathDetermined() upgrades to JsonStats when eligible).
+    void
+    DeclinePinnedIndex() {
+        pinned_index_.clear();
+        num_index_chunk_ = 0;
+        exec_path_ = ExprExecPath::RawData;
     }
 
     virtual bool
@@ -2965,6 +2977,29 @@ class SegmentExpr : public Expr {
                !nested_path_.empty() && !PathContainsInteger(nested_path_);
     }
 
+    // Whether Eval() implements ExprExecPath::JsonStats for this expression.
+    // Only the expressions that override this may be switched to JsonStats by
+    // FallbackToJsonStatsIfEligible().
+    virtual bool
+    SupportsJsonStatsExecPath() const {
+        return false;
+    }
+
+    // JSON shredding is a typed column scan, not an index lookup: it still
+    // visits every row of the segment on every query. A JSON path index that
+    // serves this expression is preferred; the shredded columns are the
+    // fallback for JSON paths without a usable index. Subclasses therefore
+    // decide index paths in DetermineExecPath() and leave RawData for the
+    // paths they could not serve; this hook upgrades that RawData to
+    // JsonStats when the segment has stats for the field.
+    void
+    FallbackToJsonStatsIfEligible() {
+        if (exec_path_ == ExprExecPath::RawData &&
+            SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+        }
+    }
+
     virtual bool
     CanUseNgramIndex() const {
         return false;
@@ -2995,7 +3030,9 @@ class SegmentExpr : public Expr {
     void
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
-            const_cast<SegmentExpr*>(this)->DetermineExecPath();
+            auto self = const_cast<SegmentExpr*>(this);
+            self->DetermineExecPath();
+            self->FallbackToJsonStatsIfEligible();
         });
     }
 
@@ -3007,8 +3044,9 @@ class SegmentExpr : public Expr {
     // path. JSON path compatibility is checked via segment-level metadata
     // (GetJsonFlatIndexNestedPath) before any pin, so an incompatible
     // nested path falls back to RawData without ever touching the cache
-    // slot. Short-circuit subclass paths (TextIndex/PkIndex/JsonStats)
-    // bypass this method entirely and never pin either.
+    // slot. The short-circuit subclass paths (TextIndex/PkIndex) bypass this
+    // method entirely and never pin either; JsonStats is applied afterwards,
+    // by FallbackToJsonStatsIfEligible(), to a RawData outcome.
     virtual void
     DetermineExecPath() {
         if (!HasCompatibleScalarIndex() || !IsJsonPathCompatible()) {

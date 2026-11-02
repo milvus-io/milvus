@@ -496,12 +496,16 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override {
-        if (CanUseJsonStatsAtInit()) {
-            exec_path_ = ExprExecPath::JsonStats;
-            return;
-        }
+        // JsonStats is the fallback applied by EnsureExecPathDetermined()
+        // when no index below serves this expression; see SegmentExpr::
+        // FallbackToJsonStatsIfEligible().
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -521,7 +525,19 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         SegmentExpr::DetermineExecPath();
         if (exec_path_ != ExprExecPath::ScalarIndex ||
             expr_->column_.data_type_ != DataType::JSON ||
-            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+            PinnedJsonIndexIsFlat()) {
+            return;
+        }
+        // Typed ARRAY_* JSON path indexes (INVERTED on this branch) record a
+        // missing, null or non-array target as a valid empty array, so
+        // CONTAINS answers a known FALSE where raw data and JSON stats answer
+        // UNKNOWN, and NOT CONTAINS then returns those rows. Keep the exact
+        // shredded ARRAY kernel instead.
+        if (CanUseJsonStatsAtInit()) {
+            DeclinePinnedIndex();
+            return;
+        }
+        if (value_type_ != DataType::INT64) {
             return;
         }
         const auto has_unsafe_int_literal = std::any_of(
@@ -531,7 +547,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                 return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
             });
         if (has_unsafe_int_literal) {
-            exec_path_ = ExprExecPath::RawData;
+            DeclinePinnedIndex();
         }
     }
 
