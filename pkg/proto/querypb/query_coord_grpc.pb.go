@@ -1664,6 +1664,7 @@ const (
 	QueryNode_DeleteBatch_FullMethodName            = "/milvus.proto.query.QueryNode/DeleteBatch"
 	QueryNode_UpdateSchema_FullMethodName           = "/milvus.proto.query.QueryNode/UpdateSchema"
 	QueryNode_UpdateIndex_FullMethodName            = "/milvus.proto.query.QueryNode/UpdateIndex"
+	QueryNode_SyncIndexMeta_FullMethodName          = "/milvus.proto.query.QueryNode/SyncIndexMeta"
 	QueryNode_RunAnalyzer_FullMethodName            = "/milvus.proto.query.QueryNode/RunAnalyzer"
 	QueryNode_GetHighlight_FullMethodName           = "/milvus.proto.query.QueryNode/GetHighlight"
 	QueryNode_ValidateAnalyzer_FullMethodName       = "/milvus.proto.query.QueryNode/ValidateAnalyzer"
@@ -1707,6 +1708,7 @@ type QueryNodeClient interface {
 	DeleteBatch(ctx context.Context, in *DeleteBatchRequest, opts ...grpc.CallOption) (*DeleteBatchResponse, error)
 	UpdateSchema(ctx context.Context, in *UpdateSchemaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	UpdateIndex(ctx context.Context, in *UpdateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	SyncIndexMeta(ctx context.Context, in *SyncIndexMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(ctx context.Context, in *GetHighlightRequest, opts ...grpc.CallOption) (*GetHighlightResponse, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
@@ -2022,6 +2024,15 @@ func (c *queryNodeClient) UpdateIndex(ctx context.Context, in *UpdateIndexReques
 	return out, nil
 }
 
+func (c *queryNodeClient) SyncIndexMeta(ctx context.Context, in *SyncIndexMetaRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryNode_SyncIndexMeta_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
 	out := new(milvuspb.RunAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryNode_RunAnalyzer_FullMethodName, in, out, opts...)
@@ -2111,6 +2122,7 @@ type QueryNodeServer interface {
 	DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error)
 	UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error)
 	UpdateIndex(context.Context, *UpdateIndexRequest) (*commonpb.Status, error)
+	SyncIndexMeta(context.Context, *SyncIndexMetaRequest) (*commonpb.Status, error)
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	GetHighlight(context.Context, *GetHighlightRequest) (*GetHighlightResponse, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
@@ -2207,6 +2219,9 @@ func (UnimplementedQueryNodeServer) UpdateSchema(context.Context, *UpdateSchemaR
 }
 func (UnimplementedQueryNodeServer) UpdateIndex(context.Context, *UpdateIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateIndex not implemented")
+}
+func (UnimplementedQueryNodeServer) SyncIndexMeta(context.Context, *SyncIndexMetaRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncIndexMeta not implemented")
 }
 func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
@@ -2748,6 +2763,24 @@ func _QueryNode_UpdateIndex_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_SyncIndexMeta_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SyncIndexMetaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).SyncIndexMeta(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_SyncIndexMeta_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).SyncIndexMeta(ctx, req.(*SyncIndexMetaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RunAnalyzerRequest)
 	if err := dec(in); err != nil {
@@ -2966,6 +2999,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateIndex",
 			Handler:    _QueryNode_UpdateIndex_Handler,
+		},
+		{
+			MethodName: "SyncIndexMeta",
+			Handler:    _QueryNode_SyncIndexMeta_Handler,
 		},
 		{
 			MethodName: "RunAnalyzer",

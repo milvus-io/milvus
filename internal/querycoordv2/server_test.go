@@ -789,6 +789,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.proxyClientManager,
 	)
 
+	suite.broker.EXPECT().AllocTimestamp(mock.Anything).Return(1, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil).Maybe()
 	for _, collection := range suite.collections {

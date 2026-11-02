@@ -1653,6 +1653,65 @@ func (_c *MockQueryNodeServer_SyncFileResource_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// SyncIndexMeta provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) SyncIndexMeta(_a0 context.Context, _a1 *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncIndexMeta")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncIndexMetaRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncIndexMetaRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SyncIndexMetaRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_SyncIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncIndexMeta'
+type MockQueryNodeServer_SyncIndexMeta_Call struct {
+	*mock.Call
+}
+
+// SyncIndexMeta is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.SyncIndexMetaRequest
+func (_e *MockQueryNodeServer_Expecter) SyncIndexMeta(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_SyncIndexMeta_Call {
+	return &MockQueryNodeServer_SyncIndexMeta_Call{Call: _e.mock.On("SyncIndexMeta", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_SyncIndexMeta_Call) Run(run func(_a0 context.Context, _a1 *querypb.SyncIndexMetaRequest)) *MockQueryNodeServer_SyncIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SyncIndexMetaRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_SyncIndexMeta_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeServer_SyncIndexMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryNodeServer_SyncIndexMeta_Call) RunAndReturn(run func(context.Context, *querypb.SyncIndexMetaRequest) (*commonpb.Status, error)) *MockQueryNodeServer_SyncIndexMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncReplicaSegments provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) SyncReplicaSegments(_a0 context.Context, _a1 *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
