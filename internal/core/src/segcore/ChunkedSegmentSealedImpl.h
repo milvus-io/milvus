@@ -479,7 +479,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_primary_field(FieldId id) const override {
-        return CaptureFieldLayout()->get_primary_field_id() == id;
+        const auto primary = CaptureFieldLayout()->get_primary_field_id();
+        return primary.has_value() && primary->get() == id.get();
     }
 
     SchemaPtr
