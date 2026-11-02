@@ -606,7 +606,20 @@ MarisaIndexLoader::LoadStorage(OpenedIndexSource& source,
         options,
         [](storage::FileSource& source,
            const storage::LoadOptions& opts,
-           bool use_async) { return LoadState(use_async, source, opts); },
+           bool use_async)
+            -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+            auto storage = co_await LoadState(use_async, source, opts);
+            const auto rows =
+                GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
+            if (rows && *rows > 0 && *rows != storage->str_ids_size) {
+                ThrowInfo(
+                    DataFormatBroken,
+                    "marisa index count {} disagrees with metadata count {}",
+                    storage->str_ids_size,
+                    *rows);
+            }
+            co_return storage;
+        },
         context);
 }
 
