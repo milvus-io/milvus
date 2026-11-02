@@ -42,7 +42,7 @@ func (qvc *queryViewClient) SearchOnView(ctx context.Context, nodeID int64, req 
 }
 
 func (qvc *queryViewClient) SearchOnViewStream(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.SearchOnViewStream", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (searchutil.ReduceStream, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (searchutil.ReduceStream, error) {
 		return searchutil.NewGRPCReduceStream(ctx, client, req)
 	})
 }
@@ -54,7 +54,7 @@ func (qvc *queryViewClient) QueryOnView(ctx context.Context, nodeID int64, req *
 }
 
 func (qvc *queryViewClient) QueryOnViewStream(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
-	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.QueryOnViewStream", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryutil.ReduceStream, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (queryutil.ReduceStream, error) {
 		return queryutil.NewGRPCReduceStream(ctx, client, req)
 	})
 }

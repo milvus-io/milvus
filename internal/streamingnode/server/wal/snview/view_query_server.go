@@ -54,7 +54,7 @@ func (s *PChannelViewQueryServer) SearchOnViewStream(stream viewpb.ViewQueryServ
 	}
 	provider, err := s.taskProviderForVChannel(stream.Context(), request.GetShardId().GetVchannel())
 	if err != nil {
-		return asViewQueryGRPCError(err)
+		return err
 	}
 	return viewquery.NewServer(provider, s.scheduler).SearchOnViewStream(prefetched)
 }
@@ -85,7 +85,7 @@ func (s *PChannelViewQueryServer) QueryOnViewStream(stream viewpb.ViewQueryServi
 	}
 	provider, err := s.taskProviderForVChannel(stream.Context(), request.GetShardId().GetVchannel())
 	if err != nil {
-		return asViewQueryGRPCError(err)
+		return err
 	}
 	return viewquery.NewServer(provider, s.scheduler).QueryOnViewStream(prefetched)
 }
