@@ -83,7 +83,7 @@ BuildTantivyStringReader(const std::vector<std::string>& data) {
     return loader.Load(
         {OpenedIndexSource{PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         std::move(options)});
+         std::move(options)})->CreateReader(nullptr);
 }
 
 std::vector<std::string>

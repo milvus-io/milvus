@@ -414,8 +414,8 @@ LoadState(bool use_async,
 
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
-std::unique_ptr<IIndexReaderBase>
-MakeReader(const InvertedLoadState& state) {
+IndexPtr
+MakeIndex(const InvertedLoadState& state) {
     AssertInfo(state.directory != nullptr,
                "inverted load state requires a directory owner");
     AssertInfo(state.engine != nullptr,
@@ -423,8 +423,8 @@ MakeReader(const InvertedLoadState& state) {
     AssertInfo(state.null_offsets != nullptr,
                "inverted load state requires immutable null offsets");
     const auto engine_path_bytes = state.directory->PathHeapBytes();
-    const auto make = [&]<typename T>() -> std::unique_ptr<IIndexReaderBase> {
-        return std::make_unique<InvertedIndexReader<T>>(
+    const auto make = [&]<typename T>() -> IndexPtr {
+        return std::make_shared<InvertedIndex<T>>(
             state.mmap ? state.directory : nullptr,
             state.engine,
             state.null_offsets,
@@ -485,7 +485,7 @@ InvertedIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 InvertedIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -509,7 +509,7 @@ InvertedIndexLoader::DeriveCaps(const Config& index_meta) {
         });
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 InvertedIndexLoader::LoadLegacy(storage::FileSource& source,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
@@ -517,7 +517,7 @@ InvertedIndexLoader::LoadLegacy(storage::FileSource& source,
         PrepareJsonProjectedOpen(families::kInverted, source, opts);
     auto state = (co_await LoadState(
         use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = MakeReader(state);
+    auto reader = MakeIndex(state);
     co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
@@ -547,7 +547,7 @@ InvertedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 InvertedIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                   const storage::LoadOptions& opts,
                                   bool use_async) {
@@ -590,7 +590,7 @@ InvertedIndexLoader::FinishPacked(IndexLoadPlan& plan,
     loaded.mmap = state->effective.mmap;
     loaded.engine_bytes = materialized_bytes;
     co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            MakeReader(loaded));
+                                            MakeIndex(loaded));
 }
 
 namespace {

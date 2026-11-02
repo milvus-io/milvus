@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "common/JsonCastType.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 
 namespace milvus::index {
@@ -39,7 +39,7 @@ IsJsonSortCast(JsonCastType cast_type);
 
 // Immutable routing metadata for one typed JSON-path index. ARRAY casts are
 // row-domain indexes whose erased ValueType is the element type. Because that
-// provenance cannot be recovered from IIndexReaderBase, callers constructing an
+// provenance cannot be recovered from IndexMetadata, callers constructing an
 // ARRAY spec must have created/opened `inner` through the ArrayView route.
 class JsonProjectedIndexSpec final {
  public:
@@ -60,7 +60,7 @@ class JsonProjectedIndexSpec final {
     Matches(std::string_view json_path, JsonCastType cast_type) const;
 
     void
-    ValidateInner(const IIndexReaderBase& inner) const;
+    ValidateInner(const IndexMetadata& inner) const;
 
     void
     ValidateNonExistOffsets(const std::vector<size_t>& offsets) const;
@@ -71,6 +71,31 @@ class JsonProjectedIndexSpec final {
     int64_t row_count_{0};
 };
 
+/** @brief Owns a typed child index and immutable JSON path/existence metadata. */
+class JsonPathIndex final : public IIndex,
+                            public std::enable_shared_from_this<JsonPathIndex> {
+ public:
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  const std::vector<size_t>& non_exist_offsets);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class JsonPathIndexReader;
+    IndexPtr inner_;
+    JsonProjectedIndexSpec spec_;
+    TargetBitmap exists_;
+    int64_t heap_bytes_{0};
+};
+
 // Path router for one ordinary typed reader. Predicate/pattern/ngram
 // capabilities reported by Caps() are exposed only through Resolve(); callers
 // must not sibling-cast this outer object to those interfaces. The cold route
@@ -78,10 +103,6 @@ class JsonProjectedIndexSpec final {
 class JsonPathIndexReader final : public IIndexReaderBase,
                                   public IJsonIndexReader {
  public:
-    JsonPathIndexReader(std::unique_ptr<IIndexReaderBase> inner,
-                        JsonProjectedIndexSpec spec,
-                        const std::vector<size_t>& non_exist_offsets);
-
     ~JsonPathIndexReader() override;
 
     ReaderCaps
@@ -115,14 +136,12 @@ class JsonPathIndexReader final : public IIndexReaderBase,
     CastTypesOf(std::string_view path) const override;
 
  private:
-    std::unique_ptr<IIndexReaderBase> inner_;
-    JsonProjectedIndexSpec spec_;
-    TargetBitmap exists_;
-    ReaderCaps caps_;
-    DataType value_type_{DataType::NONE};
-    int64_t heap_bytes_{0};
-    int64_t cell_memory_bytes_{0};
-    int64_t file_bytes_{0};
+    friend class JsonPathIndex;
+    JsonPathIndexReader(std::shared_ptr<const JsonPathIndex> index,
+                        milvus::OpContext* op_ctx);
+
+    std::shared_ptr<const JsonPathIndex> index_;
+    IIndexReaderBasePtr inner_;
 };
 
 }  // namespace milvus::index

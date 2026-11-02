@@ -129,7 +129,7 @@ class ScalarBuildSessionTest : public ::testing::Test {
         return index::LoaderRegistry::Instance()
             .Lookup(resolved_family)
             .Load({index::OpenedIndexSource{std::move(source)},
-                   std::move(options)});
+                   std::move(options)})->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> root_;

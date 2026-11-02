@@ -24,17 +24,17 @@
 #include "index/IndexLoadInput.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
 
 /**
- * @brief Loads bitmap readers from legacy or packed V3 artifacts.
+ * @brief Loads bitmap indexes from legacy or packed V3 artifacts.
  *
  * Owns the opened source and fixed load options; each Load creates a new
- * reader. Create retains parsed family metadata without allocating payload
+ * index. Create retains parsed family metadata without allocating payload
  * targets.
  */
 class BitmapIndexLoader final : public IndexLoader {
@@ -58,7 +58,7 @@ class BitmapIndexLoader final : public IndexLoader {
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
+    folly::coro::Task<IndexPtr>
     Load(milvus::OpContext* context = nullptr) override;
 
  private:
@@ -79,7 +79,7 @@ class BitmapIndexLoader final : public IndexLoader {
      * projection state.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O and batch scheduling.
      */
-    folly::coro::Task<IIndexReaderBasePtr>
+    folly::coro::Task<IndexPtr>
     LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
@@ -103,12 +103,12 @@ class BitmapIndexLoader final : public IndexLoader {
                const PreparedState* cached = nullptr);
 
     /**
-     * @brief Initialize a reader from populated targets without committing them.
+     * @brief Initialize an index from populated targets without committing them.
      * @pre All planned reads and local writes have finished successfully.
      * @note Async offloads blocking file operations and resumes CPU work on
      * the loading executor. Sync executes inline on the caller thread.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
+    static folly::coro::Task<IndexPtr>
     FinishPacked(IndexLoadPlan& plan,
                  const storage::LoadOptions& opts,
                  bool use_async);

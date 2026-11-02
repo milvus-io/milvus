@@ -489,7 +489,7 @@ RebuildNumericAux(const IndexStructure<T>* data,
 // Load heap or mmap numeric data and rebuild the auxiliary state omitted by
 // legacy artifacts.
 template <typename T>
-folly::coro::Task<typename SortedIndexReader<T>::OpenArgs>
+folly::coro::Task<typename SortedIndexStorage<T>::OpenArgs>
 LoadNumericState(bool use_async,
                  storage::FileSource& source,
                  const storage::LoadOptions& opts,
@@ -507,7 +507,7 @@ LoadNumericState(bool use_async,
     const auto data_bytes = CheckedMultiply(
         meta.index_length, sizeof(IndexStructure<T>), "numeric data");
 
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     args.storage.size = meta.index_length;
     if (opts.enable_mmap && data_bytes != 0) {
         auto owner = (co_await MapEntry(use_async,
@@ -703,12 +703,12 @@ MapSortedTarget(const storage::IndexFileTarget& file) {
 // Attach persisted auxiliary arrays directly; only missing arrays need a
 // payload scan to rebuild them before publication.
 template <typename T>
-IIndexReaderBasePtr
+IndexPtr
 FinishPackedSortedState(PackedSortedState& state,
                         std::shared_ptr<SortedMmapOwner> data_mapping,
                         std::shared_ptr<SortedMmapOwner> offsets_mapping) {
     constexpr bool string = std::is_same_v<T, std::string_view>;
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     if constexpr (string) {
         if (state.data_file) {
             args.storage.layout =
@@ -773,7 +773,7 @@ FinishPackedSortedState(PackedSortedState& state,
     args.state.value_type = state.params.value_type;
     args.state.nested = state.meta.nested;
     args.state.value_lookup = state.params.value_lookup;
-    return std::make_unique<SortedIndexReader<T>>(std::move(args));
+    return std::make_shared<SortedIndex<T>>(std::move(args));
 }
 
 }  // namespace
@@ -849,7 +849,7 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 SortedIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -891,7 +891,7 @@ SortedIndexLoader::DeriveCaps(const Config& index_meta) {
                    .exact = !params.nested});
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 SortedIndexLoader::LoadLegacy(storage::FileSource& source,
                               const storage::LoadOptions& opts,
                               bool use_async) {
@@ -906,48 +906,48 @@ SortedIndexLoader::LoadLegacy(storage::FileSource& source,
         const auto& meta = state_->meta;
         auto state =
             co_await LoadStringState(use_async, source, opts, meta, params);
-        auto inner = std::make_unique<SortedIndexReader<std::string_view>>(
+        auto inner = std::make_shared<SortedIndex<std::string_view>>(
             std::move(state));
         co_return co_await FinishJsonProjectedOpenAsync(
             use_async, std::move(projection), source, std::move(inner));
     }
 
     const auto& meta = state_->meta;
-    std::unique_ptr<IIndexReaderBase> inner;
+    IndexPtr inner;
     switch (params.value_type) {
         case DataType::BOOL:
-            inner = std::make_unique<SortedIndexReader<bool>>(
+            inner = std::make_shared<SortedIndex<bool>>(
                 (co_await LoadNumericState<bool>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::INT8:
-            inner = std::make_unique<SortedIndexReader<int8_t>>(
+            inner = std::make_shared<SortedIndex<int8_t>>(
                 (co_await LoadNumericState<int8_t>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::INT16:
-            inner = std::make_unique<SortedIndexReader<int16_t>>(
+            inner = std::make_shared<SortedIndex<int16_t>>(
                 (co_await LoadNumericState<int16_t>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::INT32:
-            inner = std::make_unique<SortedIndexReader<int32_t>>(
+            inner = std::make_shared<SortedIndex<int32_t>>(
                 (co_await LoadNumericState<int32_t>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            inner = std::make_unique<SortedIndexReader<int64_t>>(
+            inner = std::make_shared<SortedIndex<int64_t>>(
                 (co_await LoadNumericState<int64_t>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::FLOAT:
-            inner = std::make_unique<SortedIndexReader<float>>(
+            inner = std::make_shared<SortedIndex<float>>(
                 (co_await LoadNumericState<float>(
                     use_async, source, opts, meta, params)));
             break;
         case DataType::DOUBLE:
-            inner = std::make_unique<SortedIndexReader<double>>(
+            inner = std::make_shared<SortedIndex<double>>(
                 (co_await LoadNumericState<double>(
                     use_async, source, opts, meta, params)));
             break;
@@ -1065,7 +1065,7 @@ SortedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
@@ -1090,7 +1090,7 @@ SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
             local_io();
         }
     }
-    IIndexReaderBasePtr inner;
+    IndexPtr inner;
     if (IsStringDataType(state->params.value_type)) {
         if (state->meta.count % 8 != 0) {
             auto* bytes = reinterpret_cast<uint8_t*>(state->validity->data());

@@ -438,14 +438,14 @@ LoadState(bool use_async,
 
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
-std::unique_ptr<IIndexReaderBase>
-MakeReader(const NgramLoadState& state) {
+IndexPtr
+MakeIndex(const NgramLoadState& state) {
     AssertInfo(state.directory != nullptr,
                "NGRAM load state requires a directory owner");
     AssertInfo(state.engine != nullptr, "NGRAM load state requires an engine");
     AssertInfo(state.null_offsets != nullptr,
                "NGRAM load state requires immutable null offsets");
-    return std::make_unique<NgramIndexReader>(
+    return std::make_shared<NgramIndex>(
         state.mmap ? state.directory : nullptr,
         state.engine,
         state.null_offsets,
@@ -482,7 +482,7 @@ NgramIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 NgramIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -501,14 +501,14 @@ NgramIndexLoader::DeriveCaps(const Config& index_meta) {
         ReaderCaps{.ngram_candidates = true, .exact = false});
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 NgramIndexLoader::LoadLegacy(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
     auto projection = PrepareJsonProjectedOpen(families::kNgram, source, opts);
     auto state = (co_await LoadState(
         use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = MakeReader(state);
+    auto reader = MakeIndex(state);
     co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
@@ -550,7 +550,7 @@ NgramIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                const storage::LoadOptions& opts,
                                bool use_async) {
@@ -591,7 +591,7 @@ NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
     loaded.engine_bytes = materialized_bytes;
     loaded.avg_row_size = *state->avg_row_size;
     co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            MakeReader(loaded));
+                                            MakeIndex(loaded));
 }
 
 namespace {

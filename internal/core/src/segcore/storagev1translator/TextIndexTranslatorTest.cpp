@@ -420,7 +420,7 @@ TEST_F(TextIndexTranslatorTest,
                                        index::PackedIndexStorageConfig{
                                            storage::ArtifactStorageNamespace::
                                                TextLog}},
-                                   options});
+                                   options})->CreateReader(nullptr);
                     CheckTextReader(*reader);
                     const bool expected_async =
                         pinned ? planned_async : current_async;

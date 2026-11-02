@@ -22,7 +22,7 @@
 #include "index/Families.h"
 #include "index/IndexLoader.h"
 #include "index/IndexLoadInput.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
@@ -55,7 +55,7 @@ class VectorDiskLoader final : public IndexLoader {
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
+    folly::coro::Task<IndexPtr>
     Load(milvus::OpContext* context = nullptr) override;
 
     /**
@@ -82,7 +82,7 @@ class VectorDiskLoader final : public IndexLoader {
      * sidecars.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
+    static folly::coro::Task<IndexPtr>
     LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);

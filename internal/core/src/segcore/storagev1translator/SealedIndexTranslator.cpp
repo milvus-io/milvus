@@ -422,12 +422,12 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                {index_load_info_.index_files.front()},
                                index::PackedIndexStorageConfig{
                                    storage::ArtifactStorageNamespace::Index}},
-             options});
+             options})->CreateReader(nullptr);
     } else if (prepared_source) {
         reader = loader_entry.Load(
             {index::OpenedIndexSource{
                  index::LegacyIndexSource{std::move(prepared_source), true}},
-             options});
+             options})->CreateReader(nullptr);
     } else {
         const auto layout = UsesV1DiskLayout(source_family_)
                                 ? storage::V1SourceLayout::DiskFiles
@@ -438,7 +438,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                  index_load_info_.index_files,
                  index::LegacyIndexStorageConfig{
                      layout, storage::ArtifactStorageNamespace::Index}},
-             options});
+             options})->CreateReader(nullptr);
     }
     AssertInfo(reader != nullptr,
                "index loader for family {} returned a null reader",

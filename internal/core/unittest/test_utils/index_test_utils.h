@@ -84,7 +84,7 @@ LoadPublished(const std::string& family,
             {index::IndexFiles{std::move(context),
                                std::move(paths),
                                index::PackedIndexStorageConfig{}},
-             std::move(options)});
+             std::move(options)})->CreateReader(nullptr);
     }
     return loader.Load(
         {index::IndexFiles{std::move(context),
@@ -97,7 +97,7 @@ LoadPublished(const std::string& family,
                                        family == index::families::kJsonFlat
                                    ? storage::V1SourceLayout::DiskFiles
                                    : storage::V1SourceLayout::MemoryEntries}},
-         std::move(options)});
+         std::move(options)})->CreateReader(nullptr);
 }
 
 // Consumer fixtures open persisted artifacts through the same loader boundary

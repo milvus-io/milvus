@@ -324,7 +324,7 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
                                {stats.Files()[0].file_name},
                                index::PackedIndexStorageConfig{
                                    storage::ArtifactStorageNamespace::TextLog}},
-             options});
+             options})->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);
         EXPECT_EQ(reader->Count(), texts.size());

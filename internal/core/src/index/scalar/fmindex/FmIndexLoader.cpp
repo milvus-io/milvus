@@ -302,7 +302,7 @@ FmIndexLoader::Create(OpenedIndexSource source, storage::LoadOptions options) {
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 FmIndexLoader::Load(milvus::OpContext* context) {
     return RunPackedIndexLoad(
         source_, options_, &PlanPacked, &FinishPacked, context);
@@ -354,7 +354,7 @@ FmIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
                             const storage::LoadOptions& opts,
                             bool use_async) {
@@ -436,7 +436,7 @@ FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                           state->runtime.value_type,
                                           state->nullable,
                                           FmIndexStateOrigin::Persisted);
-    co_return std::make_unique<FmIndexReader>(
+    co_return std::make_shared<FmIndex>(
         std::move(storage),
         segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }

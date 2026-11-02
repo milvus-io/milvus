@@ -411,15 +411,15 @@ LoadState(bool use_async,
 
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
-std::unique_ptr<IIndexReaderBase>
-MakeReader(const TextLoadState& state) {
+IndexPtr
+MakeIndex(const TextLoadState& state) {
     AssertInfo(state.directory != nullptr,
                "text load state requires a staging directory");
     AssertInfo(state.engine != nullptr,
                "text load state requires a reader engine");
     AssertInfo(state.null_offsets != nullptr,
                "text load state requires null offsets");
-    return std::make_unique<TextIndexReader>(
+    return std::make_shared<TextIndex>(
         state.reader_file_backed ? state.directory : nullptr,
         state.engine,
         state.null_offsets,
@@ -452,7 +452,7 @@ TextIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 TextIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -468,15 +468,15 @@ TextIndexLoader::DeriveCaps(const Config& index_meta) {
     return ReaderCaps{.text_match = true};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 TextIndexLoader::LoadLegacy(storage::FileSource& source,
                             const storage::LoadOptions& opts,
                             bool use_async) {
     TextLoadState state;
-    auto load = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
+    auto load = [&]() -> folly::coro::Task<IndexPtr> {
         co_await LoadState(
             use_async, source, opts, ParseRuntimeParams(opts.params), state);
-        co_return MakeReader(state);
+        co_return MakeIndex(state);
     };
     auto result = co_await folly::coro::co_awaitTry(load());
     const auto priority =
@@ -516,7 +516,7 @@ TextIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 TextIndexLoader::FinishPacked(IndexLoadPlan& plan,
                               const storage::LoadOptions& opts,
                               bool use_async) {
@@ -565,7 +565,7 @@ TextIndexLoader::FinishPacked(IndexLoadPlan& plan,
     loaded.payload_bytes = state->effective.file_backed
                                ? file_bytes
                                : TextIndexRamPayloadBytes(*engine);
-    co_return MakeReader(loaded);
+    co_return MakeIndex(loaded);
 }
 
 namespace {

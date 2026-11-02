@@ -245,7 +245,7 @@ TEST(MarisaIndexArtifactTest, AsyncCancellationRemovesPlannedFiles) {
             {OpenedIndexSource{PackedIndexSource{
                  std::shared_ptr<storage::AsyncIndexEntryReader>(
                      std::move(source))}},
-             options}));
+             options})->CreateReader(nullptr));
     });
     EXPECT_TRUE(cancellation.isCancellationRequested());
     EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));

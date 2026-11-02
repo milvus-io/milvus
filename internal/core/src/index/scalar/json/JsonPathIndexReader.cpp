@@ -203,20 +203,20 @@ JsonProjectedIndexSpec::Matches(std::string_view json_path,
 }
 
 void
-JsonProjectedIndexSpec::ValidateInner(const IIndexReaderBase& inner) const {
-    AssertInfo(inner.CoordDomain() == Domain::Row,
+JsonProjectedIndexSpec::ValidateInner(const IndexMetadata& inner) const {
+    AssertInfo(inner.domain == Domain::Row,
                "typed JSON projection inner reader must use row coordinates");
-    AssertInfo(inner.Count() == row_count_,
+    AssertInfo(inner.count == row_count_,
                "typed JSON projection inner count {} disagrees with row count "
                "{}",
-               inner.Count(),
+               inner.count.value_or(-1),
                row_count_);
-    AssertInfo(ValueTypeMatchesCast(inner.ValueType(), cast_type_),
+    AssertInfo(ValueTypeMatchesCast(inner.value_type, cast_type_),
                "typed JSON projection inner value type {} disagrees with cast "
                "{}",
-               static_cast<int>(inner.ValueType()),
+               static_cast<int>(inner.value_type),
                cast_type_);
-    const auto caps = inner.Caps();
+    const auto caps = inner.caps;
     AssertInfo(!caps.json_paths,
                "typed JSON projection cannot wrap another JSON router");
     if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
@@ -245,50 +245,52 @@ JsonProjectedIndexSpec::ValidateNonExistOffsets(
     }
 }
 
-JsonPathIndexReader::JsonPathIndexReader(
-    std::unique_ptr<IIndexReaderBase> inner,
+JsonPathIndex::JsonPathIndex(
+    IndexPtr inner,
     JsonProjectedIndexSpec spec,
     const std::vector<size_t>& non_exist_offsets)
     : inner_(std::move(inner)), spec_(std::move(spec)) {
     AssertInfo(inner_ != nullptr,
                "typed JSON projection reader requires an inner reader");
-    spec_.ValidateInner(*inner_);
+    spec_.ValidateInner(inner_->Metadata());
     spec_.ValidateNonExistOffsets(non_exist_offsets);
     exists_ = TargetBitmap(static_cast<size_t>(spec_.RowCount()), true);
     for (const auto offset : non_exist_offsets) {
         exists_.reset(offset);
     }
+    size_t own_heap = sizeof(JsonPathIndex);
+    AddSize(own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
+    AddSize(own_heap, exists_.size_in_bytes(), "typed JSON projection");
+    heap_bytes_ = ToUsageBytes(own_heap, "typed JSON projection");
+}
 
-    caps_ = inner_->Caps();
-    caps_.json_paths = true;
-    value_type_ = inner_->ValueType();
+IndexMetadata
+JsonPathIndex::Metadata() const {
+    auto metadata = inner_->Metadata();
+    metadata.caps.json_paths = true;
+    return metadata;
+}
 
-    const auto inner_heap = inner_->MemoryUsage();
-    const auto inner_usage = inner_->CellByteSize();
-    AssertInfo(inner_heap >= 0 && inner_usage.memory_bytes >= 0 &&
-                   inner_usage.file_bytes >= 0,
-               "typed JSON projection inner reader reported negative resource "
-               "usage");
+IIndexReaderBasePtr
+JsonPathIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(new JsonPathIndexReader(shared_from_this(), op_ctx));
+}
 
-    size_t own_heap = sizeof(JsonPathIndexReader);
-    AddSize(own_heap,
-            StringHeapBytes(spec_.JsonPath()),
-            "typed JSON projection reader");
-    AddSize(own_heap, exists_.size_in_bytes(), "typed JSON projection reader");
-    const auto own_usage =
-        ToUsageBytes(own_heap, "typed JSON projection reader");
-    heap_bytes_ =
-        AddUsageBytes(inner_heap, own_usage, "typed JSON projection reader");
-    cell_memory_bytes_ = AddUsageBytes(
-        inner_usage.memory_bytes, own_usage, "typed JSON projection reader");
-    file_bytes_ = inner_usage.file_bytes;
+void
+JsonPathIndex::CancelWarmup() const {
+    inner_->CancelWarmup();
+}
+
+JsonPathIndexReader::JsonPathIndexReader(
+    std::shared_ptr<const JsonPathIndex> index, milvus::OpContext* op_ctx)
+    : index_(std::move(index)), inner_(index_->inner_->CreateReader(op_ctx)) {
 }
 
 JsonPathIndexReader::~JsonPathIndexReader() = default;
 
 ReaderCaps
 JsonPathIndexReader::Caps() const {
-    return caps_;
+    return index_->Metadata().caps;
 }
 
 Domain
@@ -298,45 +300,53 @@ JsonPathIndexReader::CoordDomain() const {
 
 int64_t
 JsonPathIndexReader::Count() const {
-    return spec_.RowCount();
+    return index_->spec_.RowCount();
 }
 
 DataType
 JsonPathIndexReader::ValueType() const {
-    return value_type_;
+    return inner_->ValueType();
 }
 
 int64_t
 JsonPathIndexReader::MemoryUsage() const {
-    return heap_bytes_;
+    const auto inner_heap = inner_->MemoryUsage();
+    AssertInfo(inner_heap >= 0,
+               "typed JSON projection inner reader reported negative resource usage");
+    return AddUsageBytes(inner_heap, index_->heap_bytes_, "typed JSON projection");
 }
 
 cachinglayer::ResourceUsage
 JsonPathIndexReader::CellByteSize() const {
-    return {cell_memory_bytes_, file_bytes_};
+    const auto usage = inner_->CellByteSize();
+    AssertInfo(usage.memory_bytes >= 0 && usage.file_bytes >= 0,
+               "typed JSON projection inner reader reported negative resource usage");
+    return {AddUsageBytes(usage.memory_bytes, index_->heap_bytes_,
+                          "typed JSON projection"),
+            usage.file_bytes};
 }
 
 JsonResolvedReader
 JsonPathIndexReader::Resolve(std::string_view path,
                              JsonCastType cast_type) const {
-    return spec_.Matches(path, cast_type)
+    return index_->spec_.Matches(path, cast_type)
                ? JsonResolvedReader::Borrowed(inner_.get())
                : JsonResolvedReader{};
 }
 
 TargetBitmap
 JsonPathIndexReader::Exists(std::string_view path) const {
-    AssertInfo(path == spec_.JsonPath(),
+    AssertInfo(path == index_->spec_.JsonPath(),
                "typed JSON Exists called for an unregistered path");
-    return exists_.clone();
+    return index_->exists_.clone();
 }
 
 std::vector<JsonCastType>
 JsonPathIndexReader::CastTypesOf(std::string_view path) const {
-    if (path != spec_.JsonPath()) {
+    if (path != index_->spec_.JsonPath()) {
         return {};
     }
-    return {spec_.CastType()};
+    return {index_->spec_.CastType()};
 }
 
 }  // namespace milvus::index

@@ -75,7 +75,7 @@ class ScalarArtifactTransportTest : public ::testing::Test {
             .Lookup(index::families::kMarisa)
             .Load({index::IndexFiles{
                        context_, {path}, index::PackedIndexStorageConfig{}},
-                   options});
+                   options})->CreateReader(nullptr);
     }
 
     ArtifactPtr

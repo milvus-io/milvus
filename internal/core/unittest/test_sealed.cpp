@@ -313,7 +313,7 @@ BuildSourceBackedVectorIndex(Config params,
                        adapted.family == index::families::kVectorDisk
                            ? storage::V1SourceLayout::DiskFiles
                            : storage::V1SourceLayout::MemoryEntries}},
-               std::move(options)});
+               std::move(options)})->CreateReader(nullptr);
 }
 
 std::vector<IndexCapabilityEntry>

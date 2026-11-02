@@ -24,7 +24,7 @@
 #include "index/IndexLoadInput.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
@@ -56,7 +56,7 @@ class JsonFlatIndexLoader final : public IndexLoader {
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
+    folly::coro::Task<IndexPtr>
     Load(milvus::OpContext* context = nullptr) override;
 
  private:
@@ -74,7 +74,7 @@ class JsonFlatIndexLoader final : public IndexLoader {
      * @brief Materialize flat-JSON Tantivy files and construct the JSON reader.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
+    static folly::coro::Task<IndexPtr>
     LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
@@ -89,12 +89,12 @@ class JsonFlatIndexLoader final : public IndexLoader {
                const storage::LoadOptions& opts);
 
     /**
-     * @brief Initialize a reader from populated targets without committing them.
+     * @brief Initialize an index from populated targets without committing them.
      * @pre All planned reads and local writes have finished successfully.
      * @note Async offloads blocking file operations and resumes CPU work on
      * the loading executor. Sync executes inline on the caller thread.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
+    static folly::coro::Task<IndexPtr>
     FinishPacked(IndexLoadPlan& plan,
                  const storage::LoadOptions& opts,
                  bool use_async);

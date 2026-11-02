@@ -329,7 +329,7 @@ MakeEngine(const RuntimeParams& params,
 
 // Select streaming or materialized engine input, restore sidecars and
 // deserialize one reader.
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 OpenIndex(bool use_async,
           storage::FileSource& source,
           const RuntimeParams& params,
@@ -498,7 +498,7 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
+    co_return std::make_shared<VectorIndex>(open_options.beamwidth,
                                                   std::move(engine));
 }
 
@@ -519,7 +519,7 @@ VectorDiskLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 VectorDiskLoader::Load(milvus::OpContext* context) {
     return RunLegacyLoad(source_, options_, &LoadLegacy, context);
 }
@@ -532,7 +532,7 @@ VectorDiskLoader::DeriveCaps(const Config& index_meta) {
     return {};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {

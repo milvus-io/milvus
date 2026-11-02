@@ -149,7 +149,8 @@ any other IO. A caller that needs both persistence and direct queries must finis
 consuming the Artifact.
 
 `LoaderEntry::Load` opens the persisted source, then calls `LoaderEntry::create` to create the
-internal `IndexLoader` and completes `Load`. The loader does not depend on the builder or the
+internal `IndexLoader` and completes `Load`, returning an `IndexPtr`. Callers create a
+request reader with `index->CreateReader(op_ctx)`. The loader does not depend on the builder or the
 original Artifact. `FileSource` resolves a logical entry into a buffer, a local file, or a
 file-backed handle.
 `PutMeta`/`GetMeta` preserve JSON types; `LoadOptions::params` are per-load parameters that storage

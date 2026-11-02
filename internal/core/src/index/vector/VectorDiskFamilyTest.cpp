@@ -375,7 +375,7 @@ BuildDisk(const std::string& raw_path,
                               std::move(paths),
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::DiskFiles}},
-                   options});
+                   options})->CreateReader(nullptr);
 }
 
 template <typename T>

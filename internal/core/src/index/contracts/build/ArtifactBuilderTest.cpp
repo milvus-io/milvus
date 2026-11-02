@@ -475,7 +475,7 @@ RunVectorArtifactLifecycle(const VectorLifecycleProfile& profile,
         {OpenedIndexSource{LegacyIndexSource{
              std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
              false}},
-         options});
+         options})->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->CoordDomain(), Domain::Row);
     EXPECT_EQ(reader->ValueType(), physical_type);
@@ -732,7 +732,7 @@ TEST_F(VectorSideInputFixture,
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
             .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_HNSW);
 }
@@ -835,7 +835,7 @@ TEST_F(VectorSideInputFixture,
                               std::move(paths),
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::DiskFiles}},
-                   options});
+                   options})->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_DISKANN);
 #endif

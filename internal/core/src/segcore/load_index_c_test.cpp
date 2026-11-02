@@ -302,7 +302,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto reader =
         loader.Load({index::OpenedIndexSource{index::LegacyIndexSource{
                          std::make_shared<BinarySetSource>(binary_set), false}},
-                     options});
+                     options})->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), N);
     auto* vectors = dynamic_cast<const index::IVectorReader*>(reader.get());

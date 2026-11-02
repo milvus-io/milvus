@@ -565,19 +565,19 @@ PrepareJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-std::unique_ptr<IIndexReaderBase>
+IndexPtr
 FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
                         storage::FileSource& source,
-                        std::unique_ptr<IIndexReaderBase> inner) {
+                        IndexPtr inner) {
     return folly::coro::blockingWait(FinishJsonProjectedOpenAsync(
         false, std::move(plan), source, std::move(inner)));
 }
 
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 FinishJsonProjectedOpenAsync(bool use_async,
                              JsonProjectedOpenPlan plan,
                              storage::FileSource& source,
-                             std::unique_ptr<IIndexReaderBase> inner) {
+                             IndexPtr inner) {
     AssertInfo(inner != nullptr,
                "typed JSON load requires a non-null inner reader");
     if (plan.completeness != JsonProjectionCompleteness::Complete) {
@@ -588,10 +588,10 @@ FinishJsonProjectedOpenAsync(bool use_async,
     std::vector<size_t> offsets;
     if (plan.has_non_exist_entry) {
         offsets = (co_await ReadNonExistOffsets(
-            use_async, plan, source, inner->Count()));
+            use_async, plan, source, inner->Metadata().count.value()));
     }
-    const auto row_count = inner->Count();
-    co_return std::make_unique<JsonPathIndexReader>(
+    const auto row_count = inner->Metadata().count.value();
+    co_return std::make_shared<JsonPathIndex>(
         std::move(inner),
         JsonProjectedIndexSpec(
             std::move(plan.json_path), *plan.cast_type, row_count),
@@ -678,9 +678,9 @@ PreparePackedJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-IIndexReaderBasePtr
+IndexPtr
 FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IIndexReaderBasePtr inner) {
+                              IndexPtr inner) {
     AssertInfo(inner != nullptr,
                "typed JSON requires an initialized inner reader");
     if (plan.completeness != JsonProjectionCompleteness::Complete) {
@@ -688,7 +688,7 @@ FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
     }
     AssertInfo(plan.cast_type.has_value(),
                "typed JSON projection lacks cast type");
-    const auto rows = inner->Count();
+    const auto rows = inner->Metadata().count.value();
     AssertInfo(rows >= 0, "typed JSON inner reader reported negative count");
     std::vector<size_t> staged_offsets;
     if (plan.packed_non_exist_file) {
@@ -718,7 +718,7 @@ FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
         ThrowInfo(DataFormatBroken,
                   "typed JSON non-exist offsets exceed row count");
     }
-    return std::make_unique<JsonPathIndexReader>(
+    return std::make_shared<JsonPathIndex>(
         std::move(inner),
         JsonProjectedIndexSpec(
             std::move(plan.json_path), *plan.cast_type, rows),

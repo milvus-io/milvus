@@ -34,7 +34,7 @@ namespace milvus::index {
 // A separate resolution handle is required because implementations produce two
 // different lifetimes behind the same path-routing contract. A flat JSON index
 // creates a temporary path-bound reader, which this handle must own. A typed
-// path index already owns its child reader, so this handle only borrows it.
+// path reader already owns its request-specific child reader, so this handle only borrows it.
 // Neither form extends the lifetime of the field-level reader, parent engine,
 // or cache cell; the caller must keep the parent cache pin alive while using
 // the result.

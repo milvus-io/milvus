@@ -31,6 +31,8 @@
 #include "index/Families.h"
 #include "index/Utils.h"
 #include "index/scalar/json/JsonFlatIndexReader.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
+#include "index/scalar/bitmap/BitmapIndexReader.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "tantivy-wrapper.h"
 #include "test_utils/Constants.h"
@@ -74,6 +76,45 @@ TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
     EXPECT_TRUE(exists[1]);
     second.reset();
     EXPECT_TRUE(lifetime.expired());
+}
+
+TEST(JsonPathIndexOwnershipTest, RequestsShareMetadataAndRetainTypedIndex) {
+    for (const auto* cast_name : {"BOOL", "ARRAY_BOOL"}) {
+        BitmapRoaringPostingMap<bool> postings;
+        postings[true].add(0);
+        BitmapReaderOptions options;
+        options.total_num_rows = 3;
+        options.valid_bitset = TargetBitmap(3);
+        options.valid_bitset.set(0);
+        options.value_type = DataType::BOOL;
+        auto child = CreateBitmapIndex<bool>(std::move(postings), std::move(options));
+        std::weak_ptr<IIndex> child_lifetime = child;
+        const auto cast = JsonCastType::FromString(cast_name);
+        auto index = std::make_shared<JsonPathIndex>(
+            std::move(child), JsonProjectedIndexSpec("/flag", cast, 3),
+            std::vector<size_t>{1});
+        auto first = index->CreateReader(nullptr);
+        auto second = index->CreateReader(nullptr);
+        const auto* json = dynamic_cast<const IJsonIndexReader*>(second.get());
+        ASSERT_NE(json, nullptr);
+        index.reset();
+        first.reset();
+        EXPECT_FALSE(child_lifetime.expired());
+        const auto exists = json->Exists("/flag");
+        EXPECT_TRUE(exists[0]);
+        EXPECT_FALSE(exists[1]);
+        EXPECT_TRUE(exists[2]);
+        EXPECT_EQ(second->Count(), 3);
+        const auto* nulls = dynamic_cast<const INullReader*>(
+            json->Resolve("/flag", cast).get());
+        ASSERT_NE(nulls, nullptr);
+        const auto missing_or_null = nulls->IsNull();
+        EXPECT_FALSE(missing_or_null[0]);
+        EXPECT_TRUE(missing_or_null[1]);
+        EXPECT_TRUE(missing_or_null[2]);
+        second.reset();
+        EXPECT_TRUE(child_lifetime.expired());
+    }
 }
 
 namespace {

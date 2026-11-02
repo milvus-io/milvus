@@ -484,7 +484,7 @@ VectorMemLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 VectorMemLoader::Load(milvus::OpContext* context) {
     return RunLegacyLoad(source_, options_, &LoadLegacy, context);
 }
@@ -497,7 +497,7 @@ VectorMemLoader::DeriveCaps(const Config& index_meta) {
     return {};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 VectorMemLoader::LoadLegacy(storage::FileSource& source,
                             const storage::LoadOptions& opts,
                             bool use_async) {
@@ -514,7 +514,7 @@ VectorMemLoader::LoadLegacy(storage::FileSource& source,
     }
     OpenedMemState state(params);
     co_await PopulateState(use_async, state, source, opts, params, plan);
-    co_return std::make_unique<VectorIndexReader>(std::move(state.engine));
+    co_return std::make_shared<VectorIndex>(std::move(state.engine));
 }
 
 }  // namespace milvus::index

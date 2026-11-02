@@ -24,7 +24,7 @@
 namespace milvus::index {
 
 /** @brief Family payload decoding invoked within a legacy loading operation. */
-using LegacyLoadFn = std::function<folly::coro::Task<IIndexReaderBasePtr>(
+using LegacyLoadFn = std::function<folly::coro::Task<IndexPtr>(
     storage::FileSource&, const storage::LoadOptions&, bool)>;
 
 /**
@@ -40,7 +40,7 @@ using LegacyLoadFn = std::function<folly::coro::Task<IIndexReaderBasePtr>(
  * caller; async orchestration uses the loading executor. Families offload
  * blocking file phases to the local-file executor.
  */
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RunLegacyLoad(LegacyIndexSource& source,
               const storage::LoadOptions& options,
               LegacyLoadFn load,

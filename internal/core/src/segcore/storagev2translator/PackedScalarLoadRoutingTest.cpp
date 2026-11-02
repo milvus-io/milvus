@@ -149,7 +149,7 @@ class PackedScalarLoadRoutingTest : public ::testing::Test {
             .Lookup(index::families::kSort)
             .Load({index::IndexFiles{
                        context_, {path}, index::PackedIndexStorageConfig{}},
-                   options});
+                   options})->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> root_;
@@ -240,35 +240,20 @@ struct LoadContext {
     std::shared_ptr<LoadObservation> observation;
 };
 
-class PayloadReader final : public index::IIndexReaderBase {
+class PayloadIndex final : public index::IIndex {
  public:
-    index::ReaderCaps
-    Caps() const override {
-        return {};
+    index::IndexMetadata
+    Metadata() const override {
+        return {{}, index::Domain::Row, DataType::INT32, 1};
     }
-    index::Domain
-    CoordDomain() const override {
-        return index::Domain::Row;
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext*) const override {
+        return nullptr;
     }
-    int64_t
-    Count() const override {
-        return 1;
-    }
-    DataType
-    ValueType() const override {
-        return DataType::INT32;
-    }
-    int64_t
-    MemoryUsage() const override {
-        return sizeof(int32_t);
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {sizeof(int32_t), 0};
-    }
+    void CancelWarmup() const override {}
 };
 
-folly::coro::Task<index::IIndexReaderBasePtr>
+folly::coro::Task<index::IndexPtr>
 FinishPayload(index::IndexLoadPlan& plan, const storage::LoadOptions&, bool) {
     auto state = std::any_cast<std::shared_ptr<LoadContext>>(plan.load_context)
                      ->observation;
@@ -291,7 +276,7 @@ FinishPayload(index::IndexLoadPlan& plan, const storage::LoadOptions&, bool) {
     if (state->cancel_on_finish) {
         state->cancel_on_finish->requestCancellation();
     }
-    co_return std::make_unique<PayloadReader>();
+    co_return std::make_shared<PayloadIndex>();
 }
 
 TEST_F(PackedScalarLoadRoutingTest,

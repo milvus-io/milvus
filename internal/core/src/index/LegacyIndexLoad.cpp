@@ -46,7 +46,7 @@ SetLegacyContext(storage::FileSource& source,
 
 }  // namespace
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RunLegacyLoad(LegacyIndexSource& source,
               const storage::LoadOptions& fixed_options,
               LegacyLoadFn load,
@@ -58,7 +58,7 @@ RunLegacyLoad(LegacyIndexSource& source,
         context ? context->cancellation_token : folly::CancellationToken{};
     const auto token = folly::cancellation_token_merge(
         operation_token, co_await folly::coro::co_current_cancellation_token);
-    auto run = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
+    auto run = [&]() -> folly::coro::Task<IndexPtr> {
         storage::ThrowIfCancelled(token, "load legacy index");
         SetLegacyContext(*source.source, priority, token);
         // Detach this call's token on both success and failure so a cancelled

@@ -164,7 +164,7 @@ BuildVectorReader(DataType field_type,
         loader.Load({index::IndexFiles{std::move(context),
                                        std::move(files),
                                        index::LegacyIndexStorageConfig{}},
-                     std::move(options)});
+                     std::move(options)})->CreateReader(nullptr);
     sink.ReleaseLocalStaging();
     return {std::move(reader), adapted.family, std::move(adapted.params), caps};
 }

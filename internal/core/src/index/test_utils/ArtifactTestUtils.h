@@ -109,7 +109,7 @@ OpenFromSource(const ReaderBackend& backend,
         {OpenedIndexSource{LegacyIndexSource{
              std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
              false}},
-         options});
+         options})->CreateReader(nullptr);
     CheckReaderBackend(reader, backend, expected_caps);
     return reader;
 }
@@ -172,13 +172,13 @@ OpenV3(const ReaderBackend& backend,
             {OpenedIndexSource{PackedIndexSource{
                  std::shared_ptr<storage::AsyncIndexEntryReader>(
                      std::move(async_source))}},
-             options});
+             options})->CreateReader(nullptr);
     } else {
         reader =
             loader_entry.Load({OpenedIndexSource{PackedIndexSource{
                                    std::shared_ptr<storage::IndexEntryReader>(
                                        std::move(source))}},
-                               options});
+                               options})->CreateReader(nullptr);
     }
     CheckReaderBackend(reader, backend, expected_caps);
     return reader;

@@ -135,7 +135,7 @@ TEST_P(ScalarArtifactRoundTripTest,
         {index::OpenedIndexSource{index::LegacyIndexSource{
              std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
              false}},
-         options});
+         options})->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
 
     EXPECT_EQ(reader->Count(), 8);

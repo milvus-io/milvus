@@ -702,7 +702,7 @@ RebuildValidity(const BitmapRoaringPostingMap<T>& postings,
 }
 
 BitmapReaderOptions
-MakeReaderOptions(TargetBitmap validity,
+MakeIndexOptions(TargetBitmap validity,
                   const BitmapMeta& meta,
                   const RuntimeParams& params) {
     return BitmapReaderOptions{.valid_bitset = std::move(validity),
@@ -716,7 +716,7 @@ MakeReaderOptions(TargetBitmap validity,
 // Validate decoded postings, rebuild missing validity and create the selected
 // heap layout.
 template <typename T>
-std::unique_ptr<IIndexReaderBase>
+IndexPtr
 OpenDecodedState(const uint8_t* data,
                  size_t size,
                  const BitmapMeta& meta,
@@ -730,9 +730,9 @@ OpenDecodedState(const uint8_t* data,
     if (rebuild_validity) {
         RebuildValidity(postings, validity);
     }
-    auto options = MakeReaderOptions(std::move(validity), meta, params);
+    auto options = MakeIndexOptions(std::move(validity), meta, params);
     if (layout == BitmapLayout::Roaring) {
-        return CreateBitmapIndexReader<T>(std::move(postings),
+        return CreateBitmapIndex<T>(std::move(postings),
                                           std::move(options));
     }
 
@@ -740,13 +740,13 @@ OpenDecodedState(const uint8_t* data,
     for (const auto& [key, posting] : postings) {
         bitset_postings.emplace(key, ToBitset(posting, meta.count));
     }
-    return CreateBitmapIndexReader<T>(std::move(bitset_postings),
+    return CreateBitmapIndex<T>(std::move(bitset_postings),
                                       std::move(options));
 }
 
 // Build a reader whose frozen posting views retain the mapped-file owner.
 template <typename T>
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 OpenDecodedMmapState(const uint8_t* data,
                      size_t size,
                      const BitmapMeta& meta,
@@ -766,8 +766,8 @@ OpenDecodedMmapState(const uint8_t* data,
                                                    token,
                                                    use_async);
     ValidateCoordinateOwnership(frozen.postings, params.value_lookup);
-    auto options = MakeReaderOptions(std::move(validity), meta, params);
-    co_return CreateBitmapIndexReader<T>(std::move(frozen.postings),
+    auto options = MakeIndexOptions(std::move(validity), meta, params);
+    co_return CreateBitmapIndex<T>(std::move(frozen.postings),
                                          std::move(options),
                                          std::move(frozen.owner));
 }
@@ -802,7 +802,7 @@ DispatchBitmapType(DataType value_type, F&& fn) {
     }
 }
 
-std::unique_ptr<IIndexReaderBase>
+IndexPtr
 DispatchOpen(DataType value_type,
              const uint8_t* data,
              size_t size,
@@ -811,7 +811,7 @@ DispatchOpen(DataType value_type,
              TargetBitmap validity,
              bool rebuild_validity,
              BitmapLayout layout) {
-    return DispatchBitmapType<std::unique_ptr<IIndexReaderBase>>(
+    return DispatchBitmapType<IndexPtr>(
         value_type, [&]<typename T>() {
             return OpenDecodedState<T>(data,
                                        size,
@@ -823,7 +823,7 @@ DispatchOpen(DataType value_type,
         });
 }
 
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 DispatchMmapOpen(DataType value_type,
                  const uint8_t* data,
                  size_t size,
@@ -835,7 +835,7 @@ DispatchMmapOpen(DataType value_type,
                  const folly::CancellationToken& token,
                  bool use_async) {
     return DispatchBitmapType<
-        folly::coro::Task<std::unique_ptr<IIndexReaderBase>>>(
+        folly::coro::Task<IndexPtr>>(
         value_type, [&]<typename T>() {
             return OpenDecodedMmapState<T>(data,
                                            size,
@@ -851,7 +851,7 @@ DispatchMmapOpen(DataType value_type,
 
 // Load legacy payloads; mmap mode stages portable bytes before producing
 // frozen views.
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 LoadBitmapPayload(bool use_async,
                   storage::FileSource& source,
                   const storage::LoadOptions& opts,
@@ -876,7 +876,7 @@ LoadBitmapPayload(bool use_async,
         size_t size = 0;
         int fd = -1;
         char* mapped = nullptr;
-        IIndexReaderBasePtr reader;
+        IndexPtr reader;
         std::exception_ptr failure;
         try {
             {
@@ -1093,7 +1093,7 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 BitmapIndexLoader::Load(milvus::OpContext* context) {
     const auto operation_token =
         context ? context->cancellation_token : folly::CancellationToken{};
@@ -1140,7 +1140,7 @@ BitmapIndexLoader::DeriveCaps(const Config& index_meta) {
             .exact = !params.nested});
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 BitmapIndexLoader::LoadLegacy(storage::FileSource& source,
                               const storage::LoadOptions& opts,
                               bool use_async) {
@@ -1218,7 +1218,7 @@ BitmapIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
@@ -1230,7 +1230,7 @@ BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
         bytes[state->meta.count / 8] &=
             static_cast<uint8_t>((1u << (state->meta.count % 8)) - 1u);
     }
-    IIndexReaderBasePtr inner;
+    IndexPtr inner;
     if (state->file) {
         const auto priority =
             opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0

@@ -39,10 +39,10 @@ using PackedPlanFn =
  * @brief Construct a reader from populated destinations, without committing
  * them.
  */
-using PackedSyncFinishFn = IIndexReaderBasePtr (*)(IndexLoadPlan&,
+using PackedSyncFinishFn = IndexPtr (*)(IndexLoadPlan&,
                                                    const storage::LoadOptions&);
 // Async families offload blocking file phases themselves; false executes inline.
-using PackedAsyncFinishFn = folly::coro::Task<IIndexReaderBasePtr> (*)(
+using PackedAsyncFinishFn = folly::coro::Task<IndexPtr> (*)(
     IndexLoadPlan&, const storage::LoadOptions&, bool);
 using PackedFinishFn = std::variant<PackedSyncFinishFn, PackedAsyncFinishFn>;
 
@@ -60,7 +60,7 @@ using PackedFinishFn = std::variant<PackedSyncFinishFn, PackedAsyncFinishFn>;
  * @note Sync executes inline. Async uses the existing read and local-file
  * pools.
  */
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RunPackedIndexLoad(PackedIndexSource& source,
                    storage::LoadOptions options,
                    PackedPlanFn plan,

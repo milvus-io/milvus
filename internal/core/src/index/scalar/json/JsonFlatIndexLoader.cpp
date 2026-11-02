@@ -443,7 +443,7 @@ JsonFlatIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 JsonFlatIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -459,11 +459,11 @@ JsonFlatIndexLoader::DeriveCaps(const Config& index_meta) {
     return ReaderCaps{.json_paths = true, .exact = true};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 JsonFlatIndexLoader::LoadLegacy(storage::FileSource& source,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
-    co_return std::make_unique<JsonFlatIndexReader>(
+    co_return std::make_shared<JsonFlatIndex>(
         (co_await LoadState(use_async, source, opts)));
 }
 
@@ -489,7 +489,7 @@ JsonFlatIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                   const storage::LoadOptions& opts,
                                   bool use_async) {
@@ -525,7 +525,7 @@ JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
         state->targets, static_cast<size_t>(engine->count()));
     const auto bytes =
         state->effective.mmap ? materialized_bytes : RamPayloadBytes(*engine);
-    co_return std::make_unique<JsonFlatIndexReader>(
+    co_return std::make_shared<JsonFlatIndex>(
         JsonFlatIndexReaderState::Create(
             state->effective.mmap ? directory : nullptr,
             engine,

@@ -171,3 +171,9 @@ Verification must cover shared-resource lifetimes, owned/borrowed results,
 three-valued null behavior, old snapshots surviving replacement, lazy-load
 retry, query cancellation and warmup cancellation. Passing direct Bitmap tests
 alone does not verify the later cache and publication changes.
+
+Loader migration status: family loaders and `LoaderEntry::Load` now return
+`IndexPtr`. JSON path indexes own the child Index and share path/existence
+metadata across request readers. Segment translators still create a reader at
+their existing cache boundary as a transitional adapter; the segment inventory
+and concrete storage caches have not switched yet.

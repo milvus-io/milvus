@@ -159,7 +159,7 @@ struct PublishedConsumerIndex {
                 {index::IndexFiles{std::move(context),
                                    Files(),
                                    index::PackedIndexStorageConfig{}},
-                 std::move(options)});
+                 std::move(options)})->CreateReader(nullptr);
         }
         return loader.Load(
             {index::IndexFiles{
@@ -169,7 +169,7 @@ struct PublishedConsumerIndex {
                      type.family == index::families::kVectorDisk
                          ? storage::V1SourceLayout::DiskFiles
                          : storage::V1SourceLayout::MemoryEntries}},
-             std::move(options)});
+             std::move(options)})->CreateReader(nullptr);
     }
 };
 

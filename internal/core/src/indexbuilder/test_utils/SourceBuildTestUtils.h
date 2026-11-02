@@ -161,7 +161,7 @@ class SourceBuildTest : public ::testing::Test {
                      std::move(paths),
                      index::PackedIndexStorageConfig{
                          prepared.request.output.storage_namespace}},
-                 std::move(options)});
+                 std::move(options)})->CreateReader(nullptr);
         }
         // Same V1 layout choice as the sealed index translator.
         const auto& family = prepared.request.family;
@@ -179,7 +179,7 @@ class SourceBuildTest : public ::testing::Test {
                      disk_layout ? storage::V1SourceLayout::DiskFiles
                                  : storage::V1SourceLayout::MemoryEntries,
                      prepared.request.output.storage_namespace}},
-             std::move(options)});
+             std::move(options)})->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> directory_;

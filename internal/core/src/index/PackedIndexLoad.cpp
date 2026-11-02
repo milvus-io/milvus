@@ -38,7 +38,7 @@ namespace milvus::index {
 namespace {
 
 // Families own executor switches within finalization; synchronous callbacks stay inline.
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 FinishPackedLoad(PackedFinishFn finish,
                  IndexLoadPlan& plan,
                  const storage::LoadOptions& options,
@@ -121,7 +121,7 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
                      : folly::coro::blockingWait(std::move(task));
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RunPackedIndexLoad(PackedIndexSource& source,
                    storage::LoadOptions options,
                    PackedPlanFn make_plan,
@@ -266,7 +266,7 @@ RunPackedIndexLoad(PackedIndexSource& source,
             source.reader);
     storage::ThrowIfCancelled(token, "plan packed index");
     std::optional<IndexLoadPlan> plan;
-    IIndexReaderBasePtr reader;
+    IndexPtr reader;
     std::exception_ptr failure;
     try {
         // Planning can create directories. Await the complete local phase even

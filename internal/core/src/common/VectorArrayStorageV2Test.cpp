@@ -379,7 +379,7 @@ class TestVectorArrayStorageV2 : public testing::Test {
                                    std::move(paths),
                                    index::LegacyIndexStorageConfig{
                                        storage::V1SourceLayout::MemoryEntries}},
-                 std::move(options)});
+                 std::move(options)})->CreateReader(nullptr);
     }
 
     SchemaPtr schema_;

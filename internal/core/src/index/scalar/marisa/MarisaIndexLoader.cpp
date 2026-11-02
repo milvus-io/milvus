@@ -533,7 +533,7 @@ MarisaIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 MarisaIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -557,13 +557,13 @@ MarisaIndexLoader::DeriveCaps(const Config& index_meta) {
                                               .cheap_value_lookup = true});
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 MarisaIndexLoader::LoadLegacy(storage::FileSource& source,
                               const storage::LoadOptions& opts,
                               bool use_async) {
     auto projection = PrepareJsonProjectedOpen(families::kMarisa, source, opts);
     auto storage = (co_await LoadState(use_async, source, opts));
-    auto reader = std::make_unique<MarisaIndexReader>(std::move(storage));
+    auto reader = std::make_shared<MarisaIndex>(std::move(storage));
     co_return (co_await FinishJsonProjectedOpenAsync(
         use_async, std::move(projection), source, std::move(reader)));
 }
@@ -695,7 +695,7 @@ MarisaIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
@@ -790,7 +790,7 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
     }
     co_return FinishPackedJsonProjectedOpen(
         std::move(state->projection),
-        std::make_unique<MarisaIndexReader>(std::move(result)));
+        std::make_shared<MarisaIndex>(std::move(result)));
 }
 
 namespace {

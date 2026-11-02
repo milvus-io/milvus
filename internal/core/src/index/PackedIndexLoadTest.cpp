@@ -322,7 +322,7 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
                 LoaderRegistry::Instance()
                     .Lookup(backend.Family())
                     .Load({OpenedIndexSource{PackedIndexSource{source}},
-                           options});
+                           options})->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), 4);
             EXPECT_FALSE(remote->DirectReadCalls().empty());
@@ -391,7 +391,7 @@ TEST(ScalarIndexV3AsyncTest, BitmapUsesBufferedPlannedReads) {
         auto reader =
             LoaderRegistry::Instance()
                 .Lookup(backend.Family())
-                .Load({OpenedIndexSource{PackedIndexSource{source}}, options});
+                .Load({OpenedIndexSource{PackedIndexSource{source}}, options})->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_GT(remote->AsyncReadCalls(), 0);
         EXPECT_EQ(remote->ReadAtCalls(), previous_read_at);
@@ -446,7 +446,7 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         folly::CancellationSource cancellation;
         OpContext context(cancellation.getToken());
         auto loading = std::async(std::launch::async,
-                                  [&] { return run(loader->Load(&context)); });
+                                  [&] { return run(loader->Load(&context))->CreateReader(nullptr); });
         auto drain = folly::makeGuard([&] {
             cancellation.requestCancellation();
             remote->SetAutoComplete(true);
@@ -465,7 +465,7 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         drain.dismiss();
         EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
         OpContext retry;
-        auto reader = run(loader->Load(&retry));
+        auto reader = run(loader->Load(&retry))->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* pattern =
             dynamic_cast<const IPatternMatchReader*>(reader.get());
@@ -586,7 +586,7 @@ CheckControlledPackedLoad(bool cancel_first) {
         folly::CancellationSource cancel;
         OpContext context(cancel.getToken());
         auto loading = std::async(std::launch::async,
-                                  [&] { return run(loader->Load(&context)); });
+                                  [&] { return run(loader->Load(&context))->CreateReader(nullptr); });
         auto drain = folly::makeGuard([&] {
             cancel.requestCancellation();
             remote->SetAutoComplete(true);
@@ -616,7 +616,7 @@ CheckControlledPackedLoad(bool cancel_first) {
             EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
             remote->SetAutoComplete(true);
             OpContext retry_context;
-            reader = run(loader->Load(&retry_context));
+            reader = run(loader->Load(&retry_context))->CreateReader(nullptr);
         } else {
             reader = loading.get();
         }
@@ -715,9 +715,9 @@ TEST(ScalarIndexV3LoadTest, BitmapCreateDefersTargetsAndSupportsFreshLoads) {
             OpContext first_context(first.getToken());
             // Low priority uses direct I/O; the second load defaults to buffered.
             first_context.runtime_load_priority = 1;
-            auto reader1 = run(loader->Load(&first_context));
+            auto reader1 = run(loader->Load(&first_context))->CreateReader(nullptr);
             first.requestCancellation();
-            auto reader2 = run(loader->Load());
+            auto reader2 = run(loader->Load())->CreateReader(nullptr);
             loader.reset();
             for (const auto* reader : {reader1.get(), reader2.get()}) {
                 EXPECT_EQ(reader->Count(), 1000);
@@ -753,7 +753,7 @@ TEST(ScalarIndexV3LoadTest, FileTargetsDoNotMoveFamilyFinalizationToFilePool) {
     options.mmap_dir_path = staging->Path();
     options.params["test_loading_thread"] =
         std::hash<std::thread::id>{}(std::this_thread::get_id());
-    auto load = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
+    auto load = [&]() -> folly::coro::Task<IndexPtr> {
         auto opened = co_await storage::AsyncIndexEntryReader::Open(
             input, 0, proto::common::LoadPriority::HIGH);
         PackedIndexSource source{
@@ -761,7 +761,7 @@ TEST(ScalarIndexV3LoadTest, FileTargetsDoNotMoveFamilyFinalizationToFilePool) {
         PackedAsyncFinishFn finish =
             [](IndexLoadPlan& plan,
                const storage::LoadOptions& opts,
-               bool use_async) -> folly::coro::Task<IIndexReaderBasePtr> {
+               bool use_async) -> folly::coro::Task<IndexPtr> {
             EXPECT_EQ(std::hash<std::thread::id>{}(std::this_thread::get_id()),
                       opts.params.at("test_loading_thread").get<size_t>());
             auto reader = co_await LoaderTestAccess::Finish<BitmapIndexLoader>(
@@ -780,7 +780,7 @@ TEST(ScalarIndexV3LoadTest, FileTargetsDoNotMoveFamilyFinalizationToFilePool) {
     folly::ManualExecutor executor;
     auto future = folly::coro::co_withExecutor(&executor, load()).start();
     while (!future.isReady()) executor.drive();
-    auto reader = std::move(future).get();
+    auto reader = std::move(future).get()->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 3);
     reader.reset();
@@ -853,10 +853,10 @@ TEST(ScalarIndexV3LoadTest, BitmapFrozenConversionYieldsBetweenBatches) {
                     }
                 }
                 EXPECT_TRUE(observed_batch);
-                reader = std::move(future).get();
+                reader = std::move(future).get()->CreateReader(nullptr);
             } else {
                 // No executor: sync conversion must not acquire a scheduling dependency.
-                reader = folly::coro::blockingWait(std::move(task));
+                reader = folly::coro::blockingWait(std::move(task))->CreateReader(nullptr);
             }
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), count);
@@ -896,7 +896,7 @@ TEST(ScalarIndexV3LoadTest, FailedCreateDetachesBorrowedSourceContext) {
     const auto loader_entry =
         LoaderRegistry::Instance().Lookup(backend.Family());
     ExpectPackedLoadError(DataTypeInvalid, [&] {
-        static_cast<void>(loader_entry.Load(std::move(request)));
+        static_cast<void>(loader_entry.Load(std::move(request))->CreateReader(nullptr));
     });
     opening.requestCancellation();
     // Direct reuse detects a token retained after metadata construction failed.
@@ -928,7 +928,7 @@ TEST(ScalarIndexV3LoadTest, LoaderEntryLoadPreservesOperationCancellation) {
             {OpenedIndexSource{PackedIndexSource{
                  std::shared_ptr<storage::AsyncIndexEntryReader>(
                      std::move(source))}},
-             options}));
+             options})->CreateReader(nullptr));
     });
 }
 
@@ -969,13 +969,13 @@ TEST(ScalarIndexV3ErrorCodeTest, CorruptPayloadCleansSyncAndAsyncTargets) {
                     {OpenedIndexSource{PackedIndexSource{
                          std::shared_ptr<storage::AsyncIndexEntryReader>(
                              std::move(async_source))}},
-                     options}));
+                     options})->CreateReader(nullptr));
             } else {
                 static_cast<void>(loader_entry.Load(
                     {OpenedIndexSource{PackedIndexSource{
                          std::shared_ptr<storage::IndexEntryReader>(
                              std::move(source))}},
-                     options}));
+                     options})->CreateReader(nullptr));
             }
         });
         EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));

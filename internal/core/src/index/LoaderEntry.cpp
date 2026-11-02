@@ -202,7 +202,7 @@ CreateIndexLoader(const LoaderEntry& loader_entry, IndexLoadRequest request) {
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 LoadIndexAsync(const LoaderEntry& loader_entry, IndexLoadRequest request) {
     AssertInfo(loader_entry.create != nullptr,
                "Index family has no loader factory");
@@ -213,7 +213,7 @@ LoadIndexAsync(const LoaderEntry& loader_entry, IndexLoadRequest request) {
         operation_token, co_await folly::coro::co_current_cancellation_token);
     // Await Load inside the loader's scope; returning its lazy task would
     // destroy the loader before that task can use its retained source.
-    auto run = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
+    auto run = [&]() -> folly::coro::Task<IndexPtr> {
         storage::ThrowIfCancelled(token, "create index loader");
         auto loader =
             co_await CreateIndexLoader(loader_entry, std::move(request));
@@ -226,7 +226,7 @@ LoadIndexAsync(const LoaderEntry& loader_entry, IndexLoadRequest request) {
 
 }  // namespace
 
-IIndexReaderBasePtr
+IndexPtr
 LoaderEntry::Load(IndexLoadRequest request) const {
     bool use_async;
     if (auto* files = std::get_if<IndexFiles>(&request.source)) {

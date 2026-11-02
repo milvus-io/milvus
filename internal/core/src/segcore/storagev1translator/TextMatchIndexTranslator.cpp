@@ -282,12 +282,12 @@ TextMatchIndexTranslator::get_cells(
                      {files->front()},
                      index::PackedIndexStorageConfig{
                          storage::ArtifactStorageNamespace::TextLog}},
-                 options});
+                 options})->CreateReader(nullptr);
         } else if (prepared_source) {
             reader = loader_entry.Load(
                 {index::OpenedIndexSource{index::LegacyIndexSource{
                      std::move(prepared_source), true}},
-                 options});
+                 options})->CreateReader(nullptr);
         } else {
             reader = loader_entry.Load(
                 {index::IndexFiles{
@@ -296,7 +296,7 @@ TextMatchIndexTranslator::get_cells(
                      index::LegacyIndexStorageConfig{
                          storage::V1SourceLayout::DiskFiles,
                          storage::ArtifactStorageNamespace::TextLog}},
-                 options});
+                 options})->CreateReader(nullptr);
         }
     }
     AssertInfo(reader != nullptr, "text loader returned a null reader");

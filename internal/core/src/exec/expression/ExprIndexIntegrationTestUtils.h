@@ -220,7 +220,7 @@ BuildIndex(FieldId field_id,
     auto reader = loader.Load(
         {index::OpenedIndexSource{index::PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options});
+         options})->CreateReader(nullptr);
     AssertInfo(reader != nullptr, "consumer fixture loader returned no reader");
     return {std::move(reader), family, std::move(load_params), caps};
 }

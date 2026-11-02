@@ -372,7 +372,7 @@ RTreeIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RTreeIndexLoader::Load(milvus::OpContext* context) {
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
@@ -388,13 +388,13 @@ RTreeIndexLoader::DeriveCaps(const Config& index_meta) {
     return ReaderCaps{.spatial = true, .exact = false};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RTreeIndexLoader::LoadLegacy(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
     // Boost's R-tree archive has no mmap view. `enable_mmap` is a preference;
     // load into the heap and report the resulting heap bytes.
-    co_return std::make_unique<RTreeIndexReader>(
+    co_return std::make_shared<RTreeIndex>(
         (co_await LoadState(use_async, source, opts)));
 }
 
@@ -434,7 +434,7 @@ RTreeIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
+folly::coro::Task<IndexPtr>
 RTreeIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                const storage::LoadOptions& opts,
                                bool use_async) {
@@ -457,7 +457,7 @@ RTreeIndexLoader::FinishPacked(IndexLoadPlan& plan,
     } else {
         local_io();
     }
-    co_return std::make_unique<RTreeIndexReader>(RTreeIndexState::Create(
+    co_return std::make_shared<RTreeIndex>(RTreeIndexState::Create(
         std::move(engine), state->targets.null_offsets, state->total_rows));
 }
 

@@ -24,7 +24,7 @@
 
 #include "common/JsonCastType.h"
 #include "common/Types.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/artifact/FileSource.h"
@@ -43,7 +43,7 @@ enum class JsonProjectionCompleteness {
  * @brief Per-load JSON projection metadata and optional non-exist sidecar
  * targets.
  * @note Owns values and staging resources, never a source or OpContext. This is
- * reader-decoration state prepared during Load, not reusable IndexLoader state.
+ * index-decoration state prepared during Load, not reusable IndexLoader state.
  */
 struct JsonProjectedOpenPlan {
     JsonProjectionCompleteness completeness{
@@ -91,13 +91,13 @@ PreparePackedJsonProjectedOpen(std::string_view family,
                                std::optional<size_t> row_count = std::nullopt);
 
 /**
- * @brief Decorate the reader using populated non-exist targets and its row
+ * @brief Decorate the index using populated non-exist targets and its row
  * bound.
  * @pre Planned reads/writes are complete; this may read local staging files.
  */
-IIndexReaderBasePtr
+IndexPtr
 FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IIndexReaderBasePtr inner);
+                              IndexPtr inner);
 
 /**
  * @brief Whether a JSON path projects multiple values per parent row.
@@ -127,26 +127,26 @@ PrepareJsonProjectedOpen(std::string_view family,
                          const storage::LoadOptions& opts);
 
 /**
- * @brief Blocking adapter that decorates a legacy reader with JSON projection.
+ * @brief Blocking adapter that decorates a legacy index with JSON projection.
  * @note Incomplete legacy metadata leaves inner unchanged. Complete artifacts
  * stage any native-size_t sidecar locally, validate its size against the
- * reader's row count, then read offsets and construct a JsonPathIndexReader.
+ * index's row count, then read offsets and construct a JsonPathIndex.
  */
-std::unique_ptr<IIndexReaderBase>
+IndexPtr
 FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
                         storage::FileSource& source,
-                        std::unique_ptr<IIndexReaderBase> inner);
+                        IndexPtr inner);
 
 /**
  * @brief Complete legacy JSON decoration with selectable source transport.
  * @pre source outlives the task; the caller provides the local I/O executor.
- * @note Only source I/O suspends. Local sidecar reads and reader construction
+ * @note Only source I/O suspends. Local sidecar reads and index construction
  * remain synchronous; use_async=false also keeps source reads synchronous.
  */
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+folly::coro::Task<IndexPtr>
 FinishJsonProjectedOpenAsync(bool use_async,
                              JsonProjectedOpenPlan plan,
                              storage::FileSource& source,
-                             std::unique_ptr<IIndexReaderBase> inner);
+                             IndexPtr inner);
 
 }  // namespace milvus::index

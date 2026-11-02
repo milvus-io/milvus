@@ -274,7 +274,7 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
     auto reader = loader_entry.Load(
         {OpenedIndexSource{PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options});
+         options})->CreateReader(nullptr);
     ValidateReader(Name(), *this, expected_caps, reader);
     return reader;
 }
