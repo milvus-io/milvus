@@ -35,7 +35,7 @@ This document will help to set up your Milvus development environment and to run
 For a clean machine, you can build Milvus with just 2 commands:
 
 ```bash
-# Step 1: Install Go (>= 1.21) first, then install all dependencies
+# Step 1: Install the Go version specified in go.mod, then install all dependencies
 ./scripts/install_deps.sh
 
 # Step 2: Build Milvus
@@ -86,7 +86,7 @@ The following specification (either physical or virtual machine resources) is re
 
 | Tool | Minimum Version | Notes |
 |------|----------------|-------|
-| Go | 1.21 | Required. Install from https://go.dev/dl/ |
+| Go | See [go.mod](go.mod) | Required. Install from https://go.dev/dl/ |
 | CMake | 3.26 | Auto-installed by install_deps.sh |
 | Conan | 2.25.1 | Auto-installed by install_deps.sh |
 | Rust | 1.94 | Auto-installed by install_deps.sh |
@@ -217,7 +217,12 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 go version
 ```
 
-Note: Go >= 1.21 is required to build Milvus.
+The `go` directive in [go.mod](go.mod) sets the minimum Go version for this
+branch. Install the version specified there before building Milvus.
+
+With `GOTOOLCHAIN=auto`, Go can download and switch to a newer toolchain when
+required. For offline builds or `GOTOOLCHAIN=local`, install a toolchain that
+meets the requirement yourself. See [Go toolchain selection](https://go.dev/doc/toolchain#select).
 
 #### Docker & Docker Compose
 
