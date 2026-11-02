@@ -95,6 +95,9 @@ cpp_coverage/
 venv/
 .venv/
 
+# Conan local cache (CONAN_HOME)
+.conan2/
+
 # Python egg-info
 *.egg-info/
 
@@ -138,3 +141,4 @@ docs/plans/
 
 # Local run artifacts of internal/querynodev2/segments TestFlushData* (SegmentBasePath under suite.rootPath)
 internal/querynodev2/segments/TestSegmentLoader/
+scripts/conan_env.sh

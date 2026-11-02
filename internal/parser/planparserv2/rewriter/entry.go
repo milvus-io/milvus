@@ -1,6 +1,12 @@
 package rewriter
 
 import (
+	"math"
+	"sort"
+	"strconv"
+
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -94,6 +100,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 				parts[i] = res
 			}
 		}
+		parts = v.deduplicateIdenticalExprs(parts)
 		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
 		parts = v.combineOrEqualsToIn(parts)
 		parts = v.combineOrTextMatchToMerged(parts)
@@ -102,6 +109,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		parts = v.combineOrInWithIn(parts)
 		parts = v.combineOrInWithNotEqual(parts)
 		parts = v.combineOrInWithEqual(parts)
+		parts = v.deduplicateIdenticalExprs(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
 		parts := flattenLogicalExpr(expr)
@@ -129,6 +137,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 // mergeAndParts applies the same AND rules to visited operands and to the
 // already-normalized operands supplied by RLS, without visiting them again.
 func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
+	parts = v.deduplicateIdenticalExprs(parts)
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 	parts = v.combineAndRangePredicates(parts)
 	parts = v.combineAndBinaryRanges(parts)
@@ -137,7 +146,191 @@ func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithRange(parts)
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
+	parts = v.deduplicateIdenticalExprs(parts)
+	parts = sortAndPartsBySelectivity(parts)
 	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
+}
+
+func andExprSelectivityScore(e *planpb.Expr) int {
+	if e == nil {
+		return 999
+	}
+	if IsAlwaysFalseExpr(e) {
+		return 0 // False first so short-circuit happens immediately
+	}
+	if IsAlwaysTrueExpr(e) {
+		return 998
+	}
+	switch real := e.GetExpr().(type) {
+	case *planpb.Expr_UnaryRangeExpr:
+		switch real.UnaryRangeExpr.GetOp() {
+		case planpb.OpType_Equal:
+			return 10 // Point equality is highest selectivity
+		case planpb.OpType_GreaterThan, planpb.OpType_GreaterEqual,
+			planpb.OpType_LessThan, planpb.OpType_LessEqual:
+			return 30 // Bounded on one side
+		case planpb.OpType_NotEqual:
+			return 70 // Negation matches almost everything
+		case planpb.OpType_PrefixMatch:
+			return 40
+		default:
+			return 50
+		}
+	case *planpb.Expr_TermExpr:
+		vals := real.TermExpr.GetValues()
+		n := len(vals)
+		if n == 1 {
+			return 10 // Single-value IN is effectively equality
+		}
+		if n <= 10 {
+			return 15 + n // Small IN list: still quite selective
+		}
+		return 35 // Larger IN list
+	case *planpb.Expr_BinaryRangeExpr:
+		return 25 // Bounded range [a, b] is more selective than semi-bounded range
+	case *planpb.Expr_JsonContainsExpr:
+		return 60
+	case *planpb.Expr_UnaryExpr:
+		return 65
+	case *planpb.Expr_BinaryExpr:
+		return 50
+	default:
+		return 80
+	}
+}
+
+func sortAndPartsBySelectivity(parts []*planpb.Expr) []*planpb.Expr {
+	if len(parts) <= 1 {
+		return parts
+	}
+	sorted := make([]*planpb.Expr, len(parts))
+	copy(sorted, parts)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return andExprSelectivityScore(sorted[i]) < andExprSelectivityScore(sorted[j])
+	})
+	return sorted
+}
+
+func genericValueHasNaN(v *planpb.GenericValue) bool {
+	if v == nil {
+		return false
+	}
+	if f, ok := v.GetVal().(*planpb.GenericValue_FloatVal); ok {
+		return math.IsNaN(f.FloatVal)
+	}
+	if arr, ok := v.GetVal().(*planpb.GenericValue_ArrayVal); ok && arr.ArrayVal != nil {
+		for _, item := range arr.ArrayVal.GetArray() {
+			if genericValueHasNaN(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprHasNaN(e *planpb.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch real := e.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		for _, v := range real.TermExpr.GetValues() {
+			if genericValueHasNaN(v) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryRangeExpr:
+		return genericValueHasNaN(real.UnaryRangeExpr.GetValue())
+	case *planpb.Expr_BinaryRangeExpr:
+		return genericValueHasNaN(real.BinaryRangeExpr.GetLowerValue()) || genericValueHasNaN(real.BinaryRangeExpr.GetUpperValue())
+	case *planpb.Expr_ValueExpr:
+		return genericValueHasNaN(real.ValueExpr.GetValue())
+	case *planpb.Expr_JsonContainsExpr:
+		for _, v := range real.JsonContainsExpr.GetElements() {
+			if genericValueHasNaN(v) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryExpr:
+		return exprHasNaN(real.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		return exprHasNaN(real.BinaryExpr.GetLeft()) || exprHasNaN(real.BinaryExpr.GetRight())
+	}
+	return false
+}
+
+func canDeduplicate(e *planpb.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch e.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr, *planpb.Expr_ElementFilterExpr:
+		return false
+	}
+	return !exprHasNaN(e)
+}
+
+func exprBucketKey(e *planpb.Expr) string {
+	if e == nil {
+		return ""
+	}
+	if IsAlwaysTrueExpr(e) {
+		return "always_true"
+	}
+	if IsAlwaysFalseExpr(e) {
+		return "always_false"
+	}
+	switch real := e.GetExpr().(type) {
+	case *planpb.Expr_UnaryRangeExpr:
+		return "ur|" + columnKey(real.UnaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_BinaryRangeExpr:
+		return "br|" + columnKey(real.BinaryRangeExpr.GetColumnInfo())
+	case *planpb.Expr_TermExpr:
+		return "te|" + columnKey(real.TermExpr.GetColumnInfo())
+	case *planpb.Expr_NullExpr:
+		return "ne|" + columnKey(real.NullExpr.GetColumnInfo())
+	case *planpb.Expr_CompareExpr:
+		return "ce|" + columnKey(real.CompareExpr.GetLeftColumnInfo())
+	case *planpb.Expr_JsonContainsExpr:
+		return "jc|" + columnKey(real.JsonContainsExpr.GetColumnInfo())
+	case *planpb.Expr_ValueExpr:
+		return "val|" + valueCaseWithNil(real.ValueExpr.GetValue())
+	case *planpb.Expr_UnaryExpr:
+		return "un|" + strconv.Itoa(int(real.UnaryExpr.GetOp()))
+	case *planpb.Expr_BinaryExpr:
+		return "be|" + strconv.Itoa(int(real.BinaryExpr.GetOp()))
+	default:
+		return "other"
+	}
+}
+
+func (v *visitor) deduplicateIdenticalExprs(parts []*planpb.Expr) []*planpb.Expr {
+	if len(parts) <= 1 {
+		return parts
+	}
+	buckets := make(map[string][]*planpb.Expr)
+	out := make([]*planpb.Expr, 0, len(parts))
+
+	for _, e := range parts {
+		if !canDeduplicate(e) {
+			out = append(out, e)
+			continue
+		}
+		key := exprBucketKey(e)
+		existing := buckets[key]
+		found := false
+		for _, ex := range existing {
+			if proto.Equal(ex, e) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			buckets[key] = append(existing, e)
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // BalanceLogicalExpr balances the same-op AND/OR chain rooted at expr, leaving
