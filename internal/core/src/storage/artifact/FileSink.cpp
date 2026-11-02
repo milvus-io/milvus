@@ -28,6 +28,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -438,8 +439,8 @@ V1DiskSink::WriteEntryFromLocalFile(std::string_view name,
                    name);
 
         // DiskFileManager removes its generation-specific local prefix in its
-        // destructor. Always upload a sink-owned copy from that prefix so the
-        // caller's borrowed source can never be swept by manager cleanup.
+        // destructor. Stage a sink-owned link in that prefix so cleanup unlinks
+        // only our path and leaves the caller's borrowed source in place.
         const auto directory =
             std::filesystem::path(impl_->StagingDirectory()) / "artifact_sink";
         std::error_code error;
@@ -451,17 +452,32 @@ V1DiskSink::WriteEntryFromLocalFile(std::string_view name,
                       error.message());
         }
         const auto upload_path = (directory / entry_name).string();
-        std::filesystem::copy_file(local_path,
-                                   upload_path,
-                                   std::filesystem::copy_options::none,
-                                   error);
-        if (error) {
+        std::filesystem::create_hard_link(local_path, upload_path, error);
+        if (error == std::errc::file_exists) {
             ThrowInfo(FileWriteFailed,
-                      "failed to copy borrowed artifact entry {} to staging "
+                      "failed to stage borrowed artifact entry {} at "
                       "{}: {}",
                       local_path,
                       upload_path,
                       error.message());
+        }
+        if (error) {
+            const auto link_error = error;
+            // Filesystems and permission policies may reject hard links while
+            // still allowing a copy. Preserve the borrowed source either way.
+            std::filesystem::copy_file(local_path,
+                                       upload_path,
+                                       std::filesystem::copy_options::none,
+                                       error);
+            if (error) {
+                ThrowInfo(FileWriteFailed,
+                          "failed to stage borrowed artifact entry {} at "
+                          "{}; hard link: {}; copy: {}",
+                          local_path,
+                          upload_path,
+                          link_error.message(),
+                          error.message());
+            }
         }
         const auto staged_size = std::filesystem::file_size(upload_path, error);
         if (error) {

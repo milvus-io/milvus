@@ -972,6 +972,15 @@ func UpdateStatusOperator(segmentID int64, status commonpb.SegmentState) UpdateO
 			return false
 		}
 
+		// Dropped is terminal. A late writer (an import result, a flush
+		// completion) that still holds the segment ID must not revive a
+		// segment that DropVirtualChannel, compaction or GC already retired.
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			mlog.Warn(modPack.meta.ctx, "meta update: segment is dropped, refuse to change its state",
+				mlog.Int64("segmentID", segmentID), mlog.String("status", status.String()))
+			return false
+		}
+
 		updateSegState(segment, status)
 		return true
 	}
@@ -2281,11 +2290,12 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 	return clonedSegment
 }
 
-// batchSaveDropSegments saves drop segments info together with the channel
-// removal flag as a single composite catalog.Update call, so the dropped
-// segments and the channel tombstone commit atomically (or, when the op
-// count exceeds the txn size limit, via the caller-ordered chunked
-// fallback - see kv/txn.Commit for the exact atomicity contract).
+// batchSaveDropSegments saves the dropped segments of a channel and deletes the
+// channel's removal flag as a single composite catalog.Update call (or, when
+// the op count exceeds the txn size limit, via the caller-ordered chunked
+// fallback - see kv/txn.Commit for the exact atomicity contract). A missing
+// flag reads as a dropped channel, so the flag is deleted instead of being
+// rewritten to "removed" and leaking forever.
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
@@ -2302,9 +2312,9 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 		}
 		actions = append(actions, metastore.UpdateSegment(seg.SegmentInfo))
 	}
-	// The channel tombstone is the visibility marker; it commits last (see
-	// MarkChannelDropped -> CommitSave), after the dropped segments.
-	actions = append(actions, metastore.MarkChannelDropped(channel))
+	// The flag delete is the visibility marker; it commits last (see
+	// DropChannelFlag -> CommitRemove), after the dropped segments.
+	actions = append(actions, metastore.DropChannelFlag(channel))
 	if err := m.catalog.Update(ctx, actions...); err != nil {
 		return err
 	}
@@ -3205,25 +3215,34 @@ func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
 	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
 }
 
-// GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.
-// This is consumed exclusively by the L0 compaction policy, which only acts on L0 segments.
-// Snapshot compaction protection targets L1/L2 segments referenced by snapshots, so it must
-// NOT filter segments here: doing so would prevent L0 delete-log compaction and cause
-// delta log accumulation, query latency spikes, and write stalls on collections with
-// active snapshots.
+// GetCompactableSegmentGroupByCollection returns eligible L0 segments grouped by collection.
+// Collections with eligible L1/L2 segments retain an empty entry for the L0
+// policy's active/idle bookkeeping, without allocating wrappers for those segments.
+// Snapshot protection applies to referenced L1/L2 segments and must not block
+// L0 delete-log compaction, which would cause delta log accumulation and write stalls.
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
-	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			isFlushed(segment) && // sealed segment
-			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
-	}))
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 
 	ret := make(map[int64][]*SegmentInfo)
-	for _, seg := range allSegs {
-		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
-	}
+	segment := &SegmentInfo{}
+	for id, segProto := range m.segments.store.GetAllSegments() {
+		dc := m.segments.dcState[id]
+		segment.SegmentInfo = segProto
+		segment.isCompacting = dc != nil && dc.isCompacting
+		if !isSegmentHealthy(segment) || !isFlushed(segment) ||
+			segment.isCompacting || segment.GetIsImporting() {
+			continue
+		}
 
+		collectionID := segment.GetCollectionID()
+		if _, ok := ret[collectionID]; !ok {
+			ret[collectionID] = nil
+		}
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			ret[collectionID] = append(ret[collectionID], m.segments.assemble(segProto, dc))
+		}
+	}
 	return ret
 }
 

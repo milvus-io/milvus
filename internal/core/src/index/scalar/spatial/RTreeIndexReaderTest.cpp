@@ -16,9 +16,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,12 +29,84 @@
 #include <vector>
 
 #include "common/Geometry.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
+#include "index/growing/RTreeGrowingSpatialIndex.h"
+#include "index/scalar/spatial/RTreeIndexReader.h"
 #include "index/test_utils/AssertHelpers.h"
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
+
 namespace {
+
+TEST(SharedValidityBitmapTest, FirstNullUses16KiBDefaultCapacity) {
+    SharedValidityBitmap writer;
+    writer.PrepareAppend(18, true);
+    EXPECT_EQ(writer.Freeze().Count(), 0);
+    EXPECT_EQ(writer.Freeze().BufferBytes(), 16 * 1024);
+    writer.AppendNull(17);
+    writer.FinishAppend(18);
+    EXPECT_EQ(writer.Freeze().ToBitmap().count(), 17);
+}
+
+TEST(SharedValidityBitmapTest, FrozenTailSurvivesAppendAndGrowth) {
+    SharedValidityBitmap writer(128);
+    writer.PrepareAppend(65, true);
+    writer.AppendNull(64);
+    writer.FinishAppend(65);
+    const auto first = writer.Freeze();
+    writer.PrepareAppend(128, true);
+    writer.AppendNull(65);
+    writer.FinishAppend(128);
+    const auto second = writer.Freeze();
+    EXPECT_EQ(first.FullWords().data(), second.FullWords().data());
+    writer.PrepareAppend(129, true);
+    writer.AppendNull(128);
+    writer.FinishAppend(129);
+    const auto grown = writer.Freeze();
+    EXPECT_NE(second.FullWords().data(), grown.FullWords().data());
+    EXPECT_EQ(grown.BufferBytes(), 2 * second.BufferBytes());
+    const auto frozen = first.ToBitmap();
+    EXPECT_EQ(frozen.size(), 65);
+    EXPECT_EQ(frozen.count(), 64);
+    EXPECT_FALSE(frozen[64]);
+    EXPECT_EQ(frozen.data()[1], ~uint64_t{1});
+    const auto latest = grown.ToBitmap();
+    EXPECT_EQ(latest.count(), 126);
+    EXPECT_FALSE(latest[64]);
+    EXPECT_FALSE(latest[65]);
+    EXPECT_FALSE(latest[128]);
+}
+
+TEST(RTreeGrowingSpatialIndexTest, PublicationsShareValidityAndFreezeTail) {
+    RTreeGrowingSpatialIndex owner(65);
+    const std::vector<std::string_view> values(65);
+    const auto valid = std::make_unique<bool[]>(65);
+    std::fill_n(valid.get(), 65, true);
+    valid[64] = false;
+    owner.Append(0, {values.size(), values.data(), valid.get()});
+    const auto first = owner.PinSnapshot();
+    const std::string_view empty;
+    const bool null = false;
+    owner.Append(65, {1, &empty, &null});
+    owner.Flush();
+    const auto second = owner.PinSnapshot();
+    const auto& before = dynamic_cast<const RTreeIndexReader&>(first.Reader());
+    const auto& after = dynamic_cast<const RTreeIndexReader&>(second.Reader());
+    ASSERT_NE(before.Validity().FullWords().data(), nullptr);
+    EXPECT_EQ(before.Validity().FullWords().data(),
+              after.Validity().FullWords().data());
+    const auto old_nulls = before.IsNull();
+    const auto new_nulls = after.IsNull();
+    ASSERT_EQ(old_nulls.size(), 65);
+    ASSERT_EQ(new_nulls.size(), 66);
+    EXPECT_EQ(old_nulls.count(), 1);
+    EXPECT_TRUE(old_nulls[64]);
+    EXPECT_EQ(new_nulls.count(), 2);
+    EXPECT_TRUE(new_nulls[64]);
+    EXPECT_TRUE(new_nulls[65]);
+}
 
 constexpr auto kBackend = "SpatialRTreeHeap";
 constexpr auto kDataset = "SpatialWkbNullable";

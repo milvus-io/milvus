@@ -810,7 +810,9 @@ func (kv *etcdKV) executeTxn(txn clientv3.Txn, ops ...clientv3.Op) (*clientv3.Tx
 	}
 
 	if err != nil {
-		err = merr.WrapErrIoFailedReason("execute etcd txn failed", err.Error())
+		// Keep the existing IO classification at this boundary, but retain the
+		// driver cause so callers can distinguish transient etcd errors.
+		err = merr.WrapErrIoFailedErr(err, "execute etcd txn failed")
 	}
 	return resp, err
 }

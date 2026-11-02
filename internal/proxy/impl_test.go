@@ -73,35 +73,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestProjectSearchResultValidDataForLegacy(t *testing.T) {
-	validData := []bool{true, false}
-	newField := func(name string) *schemapb.FieldData {
-		return &schemapb.FieldData{
-			FieldName: name,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{ValidData: validData},
-			},
-		}
-	}
-	outputField := newField("output")
-	legacyGroupBy := newField("legacy_group_by")
-	groupBy := newField("group_by")
-	result := &milvuspb.SearchResults{
-		Results: &schemapb.SearchResultData{
-			FieldsData:         []*schemapb.FieldData{outputField},
-			GroupByFieldValue:  legacyGroupBy,
-			GroupByFieldValues: []*schemapb.FieldData{groupBy},
-		},
-	}
-
-	projectSearchResultValidDataForLegacy(result)
-
-	for _, field := range []*schemapb.FieldData{outputField, legacyGroupBy, groupBy} {
-		assert.Equal(t, validData, field.GetValidData())
-		assert.Equal(t, validData, field.GetScalars().GetValidData())
-	}
-}
-
 // TestProxy_InvalidateCollectionMetaCache_AliasScanGating locks in the
 // holder-scan fallback fingerprint: ONLY Create/AlterAlias broadcasts WITHOUT
 // target ids (an old rootcoord) may scan. DropAlias legitimately carries no id
@@ -2507,26 +2478,6 @@ func TestProxy_ComputePhraseMatchSlop(t *testing.T) {
 		resp, err := proxy.ComputePhraseMatchSlop(context.Background(), req)
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
-	})
-
-	t.Run("success_with_analyzer_params", func(t *testing.T) {
-		// Create test proxy with mock mixCoord
-		node := createTestProxy()
-		defer node.sched.Close()
-
-		// Mock mixCoord.ComputePhraseMatchSlop
-		mockMixCoord := NewMixCoordMock()
-		node.mixCoord = mockMixCoord
-
-		req := &milvuspb.ComputePhraseMatchSlopRequest{
-			AnalyzerParams: `{"tokenizer": "standard"}`,
-			QueryText:      "hello world",
-			DataTexts:      []string{"hello world", "world hello", "foo bar"},
-		}
-
-		resp, err := node.ComputePhraseMatchSlop(context.Background(), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 

@@ -31,6 +31,13 @@ type GColumn[T any] interface {
 	AppendValue(v T)
 }
 
+// Row validity has two wire locations: the legacy FieldData.valid_data and the
+// field-specific ScalarField/VectorField.valid_data. Servers released before the
+// field-specific location existed read and update only the legacy one, so the
+// client writes both and treats the legacy location as authoritative when it is
+// set.
+
+// getFieldDataValidData returns row validity, preferring the legacy location.
 func getFieldDataValidData(fd *schemapb.FieldData) []bool {
 	if legacy := fd.GetValidData(); len(legacy) > 0 {
 		return legacy
@@ -44,6 +51,8 @@ func getFieldDataValidData(fd *schemapb.FieldData) []bool {
 	return current
 }
 
+// setFieldDataValidData writes row validity to both the legacy and the
+// field-specific location.
 func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
 	if fd == nil {
 		return
@@ -57,60 +66,7 @@ func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
 		return
 	}
 
-	fd.ValidData = nil
-}
-
-func validateAndNormalizeFieldDataValidData(fd *schemapb.FieldData) bool {
-	if !fieldDataValidDataConsistent(fd) {
-		return false
-	}
-	normalizeFieldDataValidData(fd)
-	return true
-}
-
-func fieldDataValidDataConsistent(fd *schemapb.FieldData) bool {
-	if fd == nil {
-		return true
-	}
-
-	legacy := fd.GetValidData()
-	var current []bool
-	if scalars := fd.GetScalars(); scalars != nil {
-		current = scalars.GetValidData()
-	} else {
-		current = fd.GetVectors().GetValidData()
-	}
-	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
-		return false
-	}
-
-	for _, subField := range fd.GetStructArrays().GetFields() {
-		if !fieldDataValidDataConsistent(subField) {
-			return false
-		}
-	}
-	return true
-}
-
-func normalizeFieldDataValidData(fd *schemapb.FieldData) {
-	if fd == nil {
-		return
-	}
-	switch fd.Field.(type) {
-	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
-		if validData := getFieldDataValidData(fd); len(validData) > 0 {
-			setFieldDataValidData(fd, validData)
-		} else {
-			fd.ValidData = nil
-		}
-	case *schemapb.FieldData_StructArrays:
-		fd.ValidData = nil
-		for _, subField := range fd.GetStructArrays().GetFields() {
-			normalizeFieldDataValidData(subField)
-		}
-	default:
-		fd.ValidData = nil
-	}
+	fd.ValidData = validData
 }
 
 var _ Column = (*genericColumnBase[any])(nil)

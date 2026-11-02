@@ -69,14 +69,19 @@
 #include "index/LoadResource.h"
 #include "index/contracts/Registry.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "indexbuilder/BuildSession.h"
+#include "indexbuilder/test_utils/SourceBuildTestUtils.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
+#include "knowhere/index/index_factory.h"
+#include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
 #include "milvus-storage/common/extend_status.h"
 #include "mmap/ChunkedColumnGroup.h"
@@ -92,6 +97,8 @@
 #include "segcore/SegmentLoadInfo.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/Utils.h"
+#include "segcore/default_fs.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
@@ -104,6 +111,8 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/test_utils/TextPublicationTestUtils.h"
+#include "segcore/load_index_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -118,6 +127,133 @@ using namespace milvus::segcore;
 using milvus::segcore::LoadIndexInfo;
 
 namespace {
+
+class LazyIndexSourceFixture final
+    : public indexbuilder::test::SourceBuildTest {
+ public:
+    using indexbuilder::test::SourceBuildTest::Publish;
+    using indexbuilder::test::SourceBuildTest::WriteInsert;
+
+    void
+    Initialize() {
+        SetUp();
+    }
+
+    indexbuilder::PreparedBuild
+    Prepare(int64_t build_id,
+            DataType field_type,
+            DataType element_type,
+            bool nullable,
+            const std::string& index_type,
+            int64_t row_count,
+            int64_t dim,
+            const Config& params = Config::object()) const {
+        auto prepared =
+            indexbuilder::test::SourceBuildTest::Prepare(field_type,
+                                                         element_type,
+                                                         nullable,
+                                                         index_type,
+                                                         row_count,
+                                                         dim,
+                                                         params);
+        // Publish into the same namespace that sealed loading resolves from
+        // LoadIndexInfo, while retaining private source and staging files.
+        auto& context = prepared.file_manager_context;
+        context.indexMeta.build_id = build_id;
+        context.chunkManagerPtr =
+            storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
+        context.fs = GetDefaultArrowFileSystem();
+        return prepared;
+    }
+
+ private:
+    void
+    TestBody() override {
+    }
+};
+
+class LazyIndexSlotConfigGuard {
+ public:
+    explicit LazyIndexSlotConfigGuard(bool enabled)
+        : previous_(
+              SegcoreConfig::default_config().get_lazy_index_slot_enabled()) {
+        SegcoreConfig::default_config().set_lazy_index_slot_enabled(enabled);
+    }
+
+    ~LazyIndexSlotConfigGuard() {
+        SegcoreConfig::default_config().set_lazy_index_slot_enabled(previous_);
+    }
+
+ private:
+    bool previous_;
+};
+
+std::pair<SchemaPtr, FieldId>
+MakeLazyScalarSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto scalar = schema->AddDebugField("value", DataType::INT64);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    return {schema, scalar};
+}
+
+std::pair<SchemaPtr, FieldId>
+MakeLazyVectorSchema(int64_t dim) {
+    auto schema = std::make_shared<Schema>();
+    auto vector = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    return {schema, vector};
+}
+
+LoadIndexInfo
+MakeLazyLoadInfo(const SchemaPtr& schema,
+                 FieldId field_id,
+                 int64_t build_id,
+                 const std::string& index_type,
+                 const storage::ArtifactStats& stats,
+                 int64_t row_count,
+                 int64_t dim = 1,
+                 MetricType metric_type = knowhere::metric::L2) {
+    LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 2;
+    info.segment_id = 3;
+    info.field_id = field_id.get();
+    info.field_type = schema->operator[](field_id).get_data_type();
+    info.element_type = schema->operator[](field_id).get_element_type();
+    info.enable_mmap = false;
+    info.index_id = build_id;
+    info.index_build_id = build_id;
+    info.index_version = 1;
+    info.index_params[index::INDEX_TYPE] = index_type;
+    info.index_params[milvus::LOAD_PRIORITY] = "HIGH";
+    if (IsVectorDataType(info.field_type)) {
+        info.index_params[knowhere::meta::METRIC_TYPE] = metric_type;
+    } else {
+        info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+    }
+    for (const auto& file : stats.Files()) {
+        info.index_files.push_back(file.file_name);
+    }
+    info.index_engine_version = static_cast<IndexVersion>(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    info.schema = schema->operator[](field_id).ToProto();
+    info.index_size = stats.MemSize();
+    info.num_rows = row_count;
+    info.dim = dim;
+    info.warmup_policy = "disable";
+    return info;
+}
+
+IndexKey
+OnlyIndexKey(const SegmentInterface& segment, FieldId field_id) {
+    const auto registrations = segment.IndexRegistrations(field_id);
+    EXPECT_EQ(registrations.size(), 1);
+    return registrations.at(0).key;
+}
 
 // Source-backed consumer fixtures publish a finished artifact before opening a
 // reader. The loader never borrows the BuildSession or its materialized input.
@@ -184,7 +320,7 @@ TestIndexEntries(const IndexInventory& inventory,
                  FieldId field,
                  std::string_view family = {}) {
     std::vector<IndexCapabilityEntry> entries;
-    const auto capability = inventory.Capability(field);
+    const auto capability = inventory.ResolveCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if (family.empty() || entry.family == family) {
             entries.push_back(entry);
@@ -198,7 +334,7 @@ TestIndexSlot(const IndexInventory& inventory,
               FieldId field,
               std::string_view family = {},
               std::string_view path = {}) {
-    const auto capability = inventory.Capability(field);
+    const auto capability = inventory.ResolveCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if ((family.empty() || entry.family == family) &&
             (path.empty() || entry.json_path == path)) {
@@ -213,7 +349,7 @@ TestIndexSlot(const IndexInventory& inventory,
 
 IndexPin
 PinTestTextIndex(const SegmentInterface& segment, FieldId field) {
-    const auto capability = segment.IndexCapability(field);
+    const auto capability = segment.ResolveIndexCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if (entry.family == index::families::kText) {
             return segment.PinIndex(nullptr, entry.key);
@@ -591,6 +727,916 @@ CreateCancellationObservingCacheIndex(
 }
 
 }  // namespace
+
+TEST(SealedLazyIndexSlot, EligibilityRequiresDisabledWarmup) {
+    LoadIndexInfo info{};
+    info.field_id = START_USER_FIELDID + 1;
+    info.field_type = DataType::INT64;
+    info.warmup_policy = "disable";
+    info.index_params[index::INDEX_TYPE] = index::ASCENDING_SORT;
+
+    {
+        LazyIndexSlotConfigGuard disabled(false);
+        EXPECT_FALSE(CanLazyCreateSealedIndexSlot(info));
+    }
+
+    LazyIndexSlotConfigGuard enabled(true);
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+
+    for (const auto* warmup : {"sync", "async"}) {
+        info.warmup_policy = warmup;
+        EXPECT_FALSE(CanLazyCreateSealedIndexSlot(info)) << warmup;
+    }
+    info.warmup_policy = "disable";
+
+    info.index_params[index::INDEX_TYPE] = index::INVERTED_INDEX_TYPE;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+    info.index_params[index::INDEX_TYPE] = index::BITMAP_INDEX_TYPE;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+    info.index_params[index::INDEX_TYPE] = index::HYBRID_INDEX_TYPE;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+
+    info.field_type = DataType::JSON;
+    info.index_params[index::INDEX_TYPE] = index::INVERTED_INDEX_TYPE;
+    info.index_params[JSON_PATH] = "/value";
+    for (const auto* cast : {"BOOL",
+                             "DOUBLE",
+                             "VARCHAR",
+                             "ARRAY_BOOL",
+                             "ARRAY_DOUBLE",
+                             "ARRAY_VARCHAR",
+                             "JSON"}) {
+        info.index_params[JSON_CAST_TYPE] = cast;
+        EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info)) << cast;
+    }
+
+    info.field_type = DataType::VECTOR_FLOAT;
+    info.index_params[index::INDEX_TYPE] = knowhere::IndexEnum::INDEX_HNSW;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+    info.field_type = DataType::VECTOR_SPARSE_U32_F32;
+    info.index_params[index::INDEX_TYPE] =
+        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+    info.field_type = DataType::VECTOR_FLOAT;
+    info.index_params[index::INDEX_TYPE] =
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    EXPECT_TRUE(CanLazyCreateSealedIndexSlot(info));
+}
+
+TEST(SealedLazyIndexSlot,
+     JsonRegistrationUsesRuntimeKindWithoutOpeningArtifact) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto schema = std::make_shared<Schema>();
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    struct Case {
+        std::string index_type;
+        std::string persisted_cast;
+        IndexKind kind;
+        std::string runtime_cast;
+    };
+    const std::array<Case, 9> cases{{
+        {index::NGRAM_INDEX_TYPE, "VARCHAR", IndexKind::Ngram, "VARCHAR"},
+        {index::NGRAM_INDEX_TYPE, "ARRAY_VARCHAR", IndexKind::Ngram, "VARCHAR"},
+        {index::NGRAM_INDEX_TYPE, "BOOL", IndexKind::Scalar, "BOOL"},
+        {index::NGRAM_INDEX_TYPE, "DOUBLE", IndexKind::Scalar, "DOUBLE"},
+        {index::NGRAM_INDEX_TYPE, "JSON", IndexKind::Scalar, "JSON"},
+        {index::INVERTED_INDEX_TYPE, "DOUBLE", IndexKind::Scalar, "DOUBLE"},
+        {index::BITMAP_INDEX_TYPE, "BOOL", IndexKind::Scalar, "BOOL"},
+        {index::ASCENDING_SORT, "DOUBLE", IndexKind::Scalar, "DOUBLE"},
+        {index::HYBRID_INDEX_TYPE,
+         "ARRAY_VARCHAR",
+         IndexKind::Scalar,
+         "ARRAY_VARCHAR"},
+    }};
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.index_type + "/" + test.persisted_cast);
+        auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+
+        LoadIndexInfo info{};
+        info.field_id = json.get();
+        info.field_type = DataType::JSON;
+        info.index_id = 7010;
+        info.schema = schema->operator[](json).ToProto();
+        info.num_rows = 3;
+        info.warmup_policy = "disable";
+        info.index_params = {
+            {index::INDEX_TYPE, test.index_type},
+            {JSON_PATH, "/value"},
+            {JSON_CAST_TYPE, test.persisted_cast},
+            {LOAD_PRIORITY, "HIGH"},
+            {index::MIN_GRAM, "2"},
+            {index::MAX_GRAM, "3"},
+        };
+        // No artifact is supplied: load and registration must remain cold.
+        ASSERT_TRUE(CanLazyCreateSealedIndexSlot(info));
+        ASSERT_NO_THROW(PrepareLazySealedIndexSlot(info));
+        ASSERT_NO_THROW(sealed->LoadIndex(info));
+        EXPECT_TRUE(info.index_family.empty());
+        EXPECT_EQ(info.index_value_type, DataType::NONE);
+        EXPECT_EQ(info.cache_index, nullptr);
+
+        const auto registrations = sealed->IndexRegistrations(json);
+        ASSERT_EQ(registrations.size(), 1);
+        const auto& registration = registrations.front();
+        EXPECT_EQ(
+            registration.key,
+            (IndexKey{json, IndexIdentity::PreBuiltIndex(info.index_id)}));
+        EXPECT_EQ(registration.kind, test.kind);
+        EXPECT_EQ(registration.json_path, "/value");
+        EXPECT_EQ(registration.json_cast_type.ToString(), test.runtime_cast);
+
+        const auto snapshot = sealed->TestGetPublishedStateSnapshot();
+        ASSERT_NE(snapshot, nullptr);
+        EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+        EXPECT_EQ(GetFieldBit(snapshot->index_ready_bitset, json),
+                  test.kind == IndexKind::Ngram);
+    }
+}
+
+TEST(SealedLazyIndexSlot, CleanLoadedIndexClearsLazyFactory) {
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    LoadIndexInfo info{};
+    info.field_id = scalar.get();
+    info.field_type = DataType::INT64;
+    info.index_params[index::INDEX_TYPE] = index::ASCENDING_SORT;
+    info.index_params[milvus::LOAD_PRIORITY] = "HIGH";
+    info.schema = schema->operator[](scalar).ToProto();
+    info.warmup_policy = "disable";
+
+    PrepareLazySealedIndexSlot(info);
+    ASSERT_TRUE(info.lazy_index_factory);
+    const auto status = CleanLoadedIndex(static_cast<CLoadIndexInfo>(&info));
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(info.cache_index, nullptr);
+    EXPECT_FALSE(info.lazy_index_factory);
+}
+
+TEST(SealedLazyIndexSlot, SortedPrimaryKeyDoesNotRegisterLazyIndex) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(
+        schema, empty_index_meta, 3, SegcoreConfig::default_config(), true);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<int64_t> values{1, 2, 3};
+    auto prepared = fixture.Prepare(7003,
+                                    DataType::INT64,
+                                    DataType::NONE,
+                                    false,
+                                    index::ASCENDING_SORT,
+                                    values.size(),
+                                    1);
+    auto data = storage::CreateFieldData(
+        DataType::INT64, DataType::NONE, false, 1, values.size());
+    data->FillFieldData(values.data(), values.size());
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 pk,
+                                 7003,
+                                 index::ASCENDING_SORT,
+                                 fixture.Publish(prepared),
+                                 values.size());
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[pk].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    EXPECT_FALSE(sealed->HasIndex(pk));
+    EXPECT_TRUE(sealed->IndexRegistrations(pk).empty());
+    EXPECT_TRUE(sealed->TestGetPublishedStateSnapshot()
+                    ->runtime->indexes.Slots()
+                    .empty());
+}
+
+TEST(SealedLazyIndexSlot, ScalarArtifactStaysColdUntilPinAndRetriesCancel) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<int64_t> values{11, 22, 33};
+    auto prepared = fixture.Prepare(7001,
+                                    DataType::INT64,
+                                    DataType::NONE,
+                                    false,
+                                    index::ASCENDING_SORT,
+                                    values.size(),
+                                    1);
+    auto data = storage::CreateFieldData(
+        DataType::INT64, DataType::NONE, false, 1, values.size());
+    data->FillFieldData(values.data(), values.size());
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 scalar,
+                                 7001,
+                                 index::ASCENDING_SORT,
+                                 fixture.Publish(prepared),
+                                 values.size());
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();  // The factory owns its load metadata.
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_NE(snapshot->runtime, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    const auto key = OnlyIndexKey(*sealed, scalar);
+
+    folly::CancellationSource cancelled_source;
+    cancelled_source.requestCancellation();
+    OpContext cancelled(cancelled_source.getToken());
+    EXPECT_THROW(sealed->PinIndex(&cancelled, key), std::exception);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+
+    // Existing entries keep their factory when the configuration changes.
+    SegcoreConfig::default_config().set_lazy_index_slot_enabled(false);
+    auto pin = sealed->PinIndex(nullptr, key);
+    ASSERT_TRUE(pin);
+    const auto* reader =
+        dynamic_cast<const index::IScalarValueReader<int64_t>*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Lookup(1), std::optional<int64_t>(22));
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+}
+
+TEST(SealedLazyIndexSlot, DisabledFlagOrSyncWarmupCreatesSlotBeforePin) {
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<int64_t> values{11, 22, 33};
+    auto prepared = fixture.Prepare(7007,
+                                    DataType::INT64,
+                                    DataType::NONE,
+                                    false,
+                                    index::ASCENDING_SORT,
+                                    values.size(),
+                                    1);
+    auto data = storage::CreateFieldData(
+        DataType::INT64, DataType::NONE, false, 1, values.size());
+    data->FillFieldData(values.data(), values.size());
+    fixture.WriteInsert(prepared, data);
+    const auto artifact = MakeLazyLoadInfo(schema,
+                                           scalar,
+                                           7007,
+                                           index::ASCENDING_SORT,
+                                           fixture.Publish(prepared),
+                                           values.size());
+
+    for (const auto& [flag_enabled, warmup] :
+         std::array<std::pair<bool, std::string>, 2>{
+             {{false, "disable"}, {true, "sync"}}}) {
+        SCOPED_TRACE(::testing::Message() << "flag_enabled=" << flag_enabled
+                                          << ", warmup=" << warmup);
+        LazyIndexSlotConfigGuard guard(flag_enabled);
+        auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto info = artifact;
+        info.warmup_policy = warmup;
+        std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+        indexes[scalar].push_back(std::move(info));
+        sealed->TestLoadBatchIndexes(indexes);
+
+        auto snapshot = sealed->TestGetPublishedStateSnapshot();
+        ASSERT_NE(snapshot, nullptr);
+        ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+        EXPECT_EQ(snapshot->runtime->indexes.Slots().front()->IsCached(0),
+                  warmup == "sync");
+        auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, scalar));
+        ASSERT_TRUE(pin);
+        const auto* reader =
+            dynamic_cast<const index::IScalarValueReader<int64_t>*>(pin.get());
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Lookup(2), std::optional<int64_t>(33));
+    }
+}
+
+TEST(SealedLazyIndexSlot, ReplacementKeepsOldSnapshotArtifactUsable) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    auto build_info = [&](LazyIndexSourceFixture& fixture,
+                          const std::vector<int64_t>& values,
+                          int64_t build_id) {
+        fixture.Initialize();
+        auto prepared = fixture.Prepare(build_id,
+                                        DataType::INT64,
+                                        DataType::NONE,
+                                        false,
+                                        index::ASCENDING_SORT,
+                                        values.size(),
+                                        1);
+        auto data = storage::CreateFieldData(
+            DataType::INT64, DataType::NONE, false, 1, values.size());
+        data->FillFieldData(values.data(), values.size());
+        fixture.WriteInsert(prepared, data);
+        return MakeLazyLoadInfo(schema,
+                                scalar,
+                                build_id,
+                                index::ASCENDING_SORT,
+                                fixture.Publish(prepared),
+                                values.size());
+    };
+
+    LazyIndexSourceFixture first_fixture;
+    LazyIndexSourceFixture replacement_fixture;
+    auto first = build_info(first_fixture, {10, 20, 30}, 7004);
+    auto replacement = build_info(replacement_fixture, {40, 50, 60}, 7005);
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar].push_back(std::move(first));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+    auto old_snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(old_snapshot, nullptr);
+    const auto old_key = OnlyIndexKey(*sealed, scalar);
+
+    indexes[scalar].push_back(std::move(replacement));
+    sealed->TestLoadBatchIndexes(indexes, nullptr, true);
+    indexes.clear();
+    auto new_snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(new_snapshot, nullptr);
+    const auto new_key = OnlyIndexKey(*sealed, scalar);
+    EXPECT_NE(old_key, new_key);
+    EXPECT_TRUE(old_snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(new_snapshot->runtime->indexes.Slots().empty());
+    // Readers can open either generation after the owning segment is gone.
+    segment.reset();
+
+    auto old_pin = old_snapshot->runtime->indexes.PinIndex(nullptr, old_key);
+    auto new_pin = new_snapshot->runtime->indexes.PinIndex(nullptr, new_key);
+    ASSERT_TRUE(old_pin);
+    ASSERT_TRUE(new_pin);
+    const auto* old_reader =
+        dynamic_cast<const index::IScalarValueReader<int64_t>*>(old_pin.get());
+    const auto* new_reader =
+        dynamic_cast<const index::IScalarValueReader<int64_t>*>(new_pin.get());
+    ASSERT_NE(old_reader, nullptr);
+    ASSERT_NE(new_reader, nullptr);
+    EXPECT_EQ(old_reader->Lookup(0), std::optional<int64_t>(10));
+    EXPECT_EQ(new_reader->Lookup(0), std::optional<int64_t>(40));
+}
+
+TEST(SealedLazyIndexSlot, InvertedArtifactStaysColdUntilPin) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<int64_t> values{4, 9, 4};
+    auto prepared = fixture.Prepare(7006,
+                                    DataType::INT64,
+                                    DataType::NONE,
+                                    false,
+                                    index::INVERTED_INDEX_TYPE,
+                                    values.size(),
+                                    1);
+    auto data = storage::CreateFieldData(
+        DataType::INT64, DataType::NONE, false, 1, values.size());
+    data->FillFieldData(values.data(), values.size());
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 scalar,
+                                 7006,
+                                 index::INVERTED_INDEX_TYPE,
+                                 fixture.Publish(prepared),
+                                 values.size());
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, scalar));
+    ASSERT_TRUE(pin);
+    const auto* reader =
+        dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    const auto matches = reader->Range(4, index::CompareOp::Equal);
+    ASSERT_EQ(matches.size(), values.size());
+    EXPECT_TRUE(matches[0]);
+    EXPECT_FALSE(matches[1]);
+    EXPECT_TRUE(matches[2]);
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+}
+
+TEST(SealedLazyIndexSlot,
+     HybridArtifactResolvesFamilyAndCapsOnCapabilityLookup) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<int64_t> values{4, 9, 4};
+    const Config hybrid_params{{index::BITMAP_INDEX_CARDINALITY_LIMIT, "4"}};
+    auto prepared = fixture.Prepare(7009,
+                                    DataType::INT64,
+                                    DataType::NONE,
+                                    false,
+                                    index::HYBRID_INDEX_TYPE,
+                                    values.size(),
+                                    1,
+                                    hybrid_params);
+    auto data = storage::CreateFieldData(
+        DataType::INT64, DataType::NONE, false, 1, values.size());
+    data->FillFieldData(values.data(), values.size());
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 scalar,
+                                 7009,
+                                 index::HYBRID_INDEX_TYPE,
+                                 fixture.Publish(prepared),
+                                 values.size());
+    info.index_params[index::BITMAP_INDEX_CARDINALITY_LIMIT] = "4";
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    const auto registrations = sealed->IndexRegistrations(scalar);
+    ASSERT_EQ(registrations.size(), 1);
+    EXPECT_EQ(registrations.front().kind, IndexKind::Scalar);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+
+    const auto capability = sealed->ResolveIndexCapability(nullptr, scalar);
+    ASSERT_EQ(capability.entries().size(), 1);
+    const auto& resolved = capability.entries().front();
+    EXPECT_EQ(resolved.family, index::families::kBitmap);
+    EXPECT_TRUE(resolved.caps.predicate);
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    EXPECT_FALSE(snapshot->runtime->indexes.Slots().front()->IsCached(0));
+
+    auto pin = sealed->PinIndex(nullptr, resolved.key);
+    ASSERT_TRUE(pin);
+    const auto* reader =
+        dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    const auto matches = reader->Range(4, index::CompareOp::Equal);
+    ASSERT_EQ(matches.size(), values.size());
+    EXPECT_TRUE(matches[0]);
+    EXPECT_FALSE(matches[1]);
+    EXPECT_TRUE(matches[2]);
+}
+
+TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
+    LazyIndexSlotConfigGuard enabled(true);
+    constexpr int64_t dim = 4;
+    auto [schema, vector] = MakeLazyVectorSchema(dim);
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<float> values{
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        2.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+    };
+    const auto row_count = static_cast<int64_t>(values.size() / dim);
+    const Config build_params{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::M, "8"},
+        {knowhere::indexparam::EFCONSTRUCTION, "32"}};
+    auto prepared = fixture.Prepare(7002,
+                                    DataType::VECTOR_FLOAT,
+                                    DataType::NONE,
+                                    false,
+                                    knowhere::IndexEnum::INDEX_HNSW,
+                                    row_count,
+                                    dim,
+                                    build_params);
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim, row_count);
+    data->FillFieldData(values.data(), row_count);
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 vector,
+                                 7002,
+                                 knowhere::IndexEnum::INDEX_HNSW,
+                                 fixture.Publish(prepared),
+                                 row_count,
+                                 dim);
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[vector].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    const auto key = OnlyIndexKey(*sealed, vector);
+    auto pin = sealed->PinIndex(nullptr, key);
+    ASSERT_TRUE(pin);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(pin->Count(), row_count);
+
+    auto query = knowhere::GenDataSet(1, dim, values.data());
+    index::VectorSearchParams search_params{
+        knowhere::Json{{knowhere::indexparam::EF, 16}},
+        knowhere::metric::L2,
+        1,
+        {}};
+    SearchResult result;
+    reader->Search(query, search_params, nullptr, nullptr, result);
+    ASSERT_EQ(result.distances_.size(), 1);
+    EXPECT_FLOAT_EQ(result.distances_.front(), 0.0F);
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+}
+
+class SealedCardinalWarmupTest
+    : public ::testing::TestWithParam<std::tuple<bool, std::string>> {};
+
+TEST_P(SealedCardinalWarmupTest, WarmupAndFirstSearch) {
+    const auto index_type = knowhere::IndexEnum::INDEX_CARDINAL_TIERED;
+    if (!knowhere::IndexFactory::Instance().FeatureCheck(
+            index_type, knowhere::feature::LAZY_LOAD)) {
+        GTEST_SKIP() << "Cardinal tiered engine is not linked";
+    }
+    const auto& [lazy_enabled, warmup] = GetParam();
+    const auto expected_policy =
+        warmup == "disable" ? CacheWarmupPolicy::CacheWarmupPolicy_Disable
+        : warmup == "sync"  ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
+                            : CacheWarmupPolicy::CacheWarmupPolicy_Async;
+    LazyIndexSlotConfigGuard guard(lazy_enabled);
+    constexpr int64_t dim = 32;
+    constexpr int64_t row_count = 1024;
+    auto [schema, vector] = MakeLazyVectorSchema(dim);
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    std::vector<float> values(row_count * dim);
+    for (int64_t row = 1; row < row_count; ++row) {
+        for (int64_t col = 0; col < dim; ++col) {
+            values[row * dim + col] = static_cast<float>(row) / row_count +
+                                      static_cast<float>(col) / dim;
+        }
+    }
+    const Config build_params{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::M, "16"},
+        {knowhere::indexparam::EFCONSTRUCTION, "64"},
+        {"index_algo", "GRAPH"}};
+    auto prepared = fixture.Prepare(7020,
+                                    DataType::VECTOR_FLOAT,
+                                    DataType::NONE,
+                                    false,
+                                    index_type,
+                                    row_count,
+                                    dim,
+                                    build_params);
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim, row_count);
+    data->FillFieldData(values.data(), row_count);
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 vector,
+                                 7020,
+                                 index_type,
+                                 fixture.Publish(prepared),
+                                 row_count,
+                                 dim);
+    // Mirror the C load adapter: both layers receive the index warmup setting.
+    info.index_params["warmup"] = warmup;
+    info.warmup_policy = warmup;
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[vector].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    auto slots = snapshot->runtime->indexes.Slots();
+    const bool lazy_creation = lazy_enabled && warmup == "disable";
+    ASSERT_EQ(slots.size(), lazy_creation ? 0 : 1);
+    if (!slots.empty()) {
+        EXPECT_FALSE(slots.front()->meta()->support_eviction);
+        EXPECT_EQ(slots.front()->meta()->cache_warmup_policy, expected_policy);
+        if (warmup == "disable") {
+            EXPECT_FALSE(slots.front()->IsCached(0));
+        } else if (warmup == "sync") {
+            EXPECT_TRUE(slots.front()->IsCached(0));
+        } else {
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (!slots.front()->IsCached(0) &&
+                   std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            ASSERT_TRUE(slots.front()->IsCached(0));
+        }
+    }
+
+    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, vector));
+    ASSERT_TRUE(pin);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(pin->Count(), row_count);
+    auto query = knowhere::GenDataSet(1, dim, values.data());
+    index::VectorSearchParams search_params{
+        knowhere::Json{{knowhere::indexparam::EF, 64}, {"index_algo", "GRAPH"}},
+        knowhere::metric::L2,
+        1,
+        {}};
+    SearchResult result;
+    reader->Search(query, search_params, nullptr, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_.front(), 0);
+    ASSERT_EQ(result.distances_.size(), 1);
+    // Cardinal returns quantized distances; compare cold and warm searches.
+    SearchResult warmed_result;
+    reader->Search(query, search_params, nullptr, nullptr, warmed_result);
+    EXPECT_EQ(warmed_result.seg_offsets_, result.seg_offsets_);
+    ASSERT_EQ(warmed_result.distances_.size(), 1);
+    EXPECT_FLOAT_EQ(warmed_result.distances_.front(),
+                    result.distances_.front());
+    slots = snapshot->runtime->indexes.Slots();
+    ASSERT_EQ(slots.size(), 1);
+    EXPECT_TRUE(slots.front()->IsCached(0));
+    EXPECT_FALSE(slots.front()->meta()->support_eviction);
+    EXPECT_EQ(slots.front()->meta()->cache_warmup_policy, expected_policy);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    WarmupPolicies,
+    SealedCardinalWarmupTest,
+    ::testing::Combine(::testing::Bool(),
+                       ::testing::Values(std::string("disable"),
+                                         std::string("sync"),
+                                         std::string("async"))),
+    [](const ::testing::TestParamInfo<SealedCardinalWarmupTest::ParamType>&
+           info) {
+        return std::string(std::get<0>(info.param) ? "LazyOn_" : "LazyOff_") +
+               std::get<1>(info.param);
+    });
+
+TEST(SealedLazyIndexSlot, CardinalMissingArtifactRetriesAtFirstPin) {
+    const auto index_type = knowhere::IndexEnum::INDEX_CARDINAL_TIERED;
+    if (!knowhere::IndexFactory::Instance().FeatureCheck(
+            index_type, knowhere::feature::LAZY_LOAD)) {
+        GTEST_SKIP() << "Cardinal tiered engine is not linked";
+    }
+    LazyIndexSlotConfigGuard guard(true);
+    constexpr int64_t dim = 32;
+    constexpr int64_t row_count = 1024;
+    auto [schema, vector] = MakeLazyVectorSchema(dim);
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    std::vector<float> values(row_count * dim);
+    for (size_t i = 0; i < values.size(); ++i) {
+        values[i] = static_cast<float>(i) / values.size();
+    }
+    const Config build_params{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::indexparam::M, "16"},
+        {knowhere::indexparam::EFCONSTRUCTION, "64"},
+        {"index_algo", "GRAPH"}};
+    auto prepared = fixture.Prepare(7021,
+                                    DataType::VECTOR_FLOAT,
+                                    DataType::NONE,
+                                    false,
+                                    index_type,
+                                    row_count,
+                                    dim,
+                                    build_params);
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim, row_count);
+    data->FillFieldData(values.data(), row_count);
+    fixture.WriteInsert(prepared, data);
+    auto info = MakeLazyLoadInfo(schema,
+                                 vector,
+                                 7021,
+                                 index_type,
+                                 fixture.Publish(prepared),
+                                 row_count,
+                                 dim);
+    info.index_params["warmup"] = "disable";
+    ASSERT_FALSE(info.index_files.empty());
+    const auto path = info.index_files.front();
+    auto chunk_manager = prepared.file_manager_context.chunkManagerPtr;
+    std::vector<uint8_t> saved(chunk_manager->Size(path));
+    ASSERT_EQ(chunk_manager->Read(path, saved.data(), saved.size()),
+              saved.size());
+    chunk_manager->Remove(path);
+    auto restore_artifact = folly::makeGuard(
+        [&] { chunk_manager->Write(path, saved.data(), saved.size()); });
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[vector].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    const auto key = OnlyIndexKey(*sealed, vector);
+    EXPECT_THROW(sealed->PinIndex(nullptr, key), std::exception);
+    const auto slots = snapshot->runtime->indexes.Slots();
+    ASSERT_EQ(slots.size(), 1);
+    EXPECT_FALSE(slots.front()->IsCached(0));
+
+    chunk_manager->Write(path, saved.data(), saved.size());
+    restore_artifact.dismiss();
+    auto pin = sealed->PinIndex(nullptr, key);
+    ASSERT_TRUE(pin);
+    EXPECT_EQ(pin->Count(), row_count);
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    EXPECT_EQ(snapshot->runtime->indexes.Slots().front(), slots.front());
+    EXPECT_TRUE(slots.front()->IsCached(0));
+    EXPECT_FALSE(slots.front()->meta()->support_eviction);
+}
+
+TEST(SealedLazyIndexSlot, SparseInvertedArtifactStaysColdUntilFirstSearch) {
+    LazyIndexSlotConfigGuard enabled(true);
+    constexpr int64_t dim = 32;
+    auto schema = std::make_shared<Schema>();
+    auto sparse = schema->AddDebugField(
+        "sparse", DataType::VECTOR_SPARSE_U32_F32, dim, knowhere::metric::IP);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    std::array<knowhere::sparse::SparseRow<SparseValueType>, 3> values{
+        knowhere::sparse::SparseRow<SparseValueType>(2),
+        knowhere::sparse::SparseRow<SparseValueType>(1),
+        knowhere::sparse::SparseRow<SparseValueType>(1)};
+    values[0].set_at(0, 1, 1.0F);
+    values[0].set_at(1, 10, 0.1F);
+    values[1].set_at(0, 2, 3.0F);
+    values[2].set_at(0, 1, 2.0F);
+
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const Config build_params{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::IP},
+        {knowhere::indexparam::DROP_RATIO_BUILD, 0.0}};
+    const auto row_count = static_cast<int64_t>(values.size());
+    auto prepared =
+        fixture.Prepare(7008,
+                        DataType::VECTOR_SPARSE_U32_F32,
+                        DataType::NONE,
+                        false,
+                        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                        row_count,
+                        dim,
+                        build_params);
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_SPARSE_U32_F32, DataType::NONE, false, dim);
+    data->FillFieldData(values.data(), row_count);
+    fixture.WriteInsert(prepared, data);
+    auto info =
+        MakeLazyLoadInfo(schema,
+                         sparse,
+                         7008,
+                         knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                         fixture.Publish(prepared),
+                         row_count,
+                         dim,
+                         knowhere::metric::IP);
+    info.index_params[knowhere::indexparam::DROP_RATIO_BUILD] = "0.0";
+
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[sparse].push_back(std::move(info));
+    sealed->TestLoadBatchIndexes(indexes);
+    indexes.clear();
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+
+    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, sparse));
+    ASSERT_TRUE(pin);
+    const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(pin->Count(), row_count);
+
+    auto query = knowhere::GenDataSet(1, dim, values.data() + 2);
+    query->SetIsSparse(true);
+    index::VectorSearchParams search_params{
+        {{knowhere::indexparam::DROP_RATIO_SEARCH, 0.0}},
+        knowhere::metric::IP,
+        1,
+        {}};
+    SearchResult result;
+    reader->Search(query, search_params, nullptr, nullptr, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ASSERT_EQ(result.distances_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_.front(), 2);
+    EXPECT_FLOAT_EQ(result.distances_.front(), 4.0F);
+    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+}
+
+TEST(SealedLazyIndexSlot, TextArtifactSupportsEagerAndLazySlots) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    std::map<std::string, std::string> analyzer_params;
+    auto text = schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             64,
+                                             true,
+                                             true,
+                                             true,
+                                             analyzer_params,
+                                             std::nullopt);
+    schema->set_primary_field_id(pk);
+
+    storage::text_test::TextPublicationFixture fixture;
+    const auto stats = fixture.Publish(false);
+    auto load_config = fixture.LoadConfig(stats, false);
+    for (const bool lazy_enabled : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "lazy=" << lazy_enabled);
+        LazyIndexSlotConfigGuard guard(lazy_enabled);
+        auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+        info->set_collectionid(1);
+        info->set_partitionid(2);
+        info->set_fieldid(text.get());
+        info->set_buildid(1000);
+        info->set_version(1);
+        info->set_index_size(stats.MemSize());
+        info->set_enable_mmap(false);
+        info->set_warmup_policy("disable");
+        info->set_load_priority(proto::common::LoadPriority::HIGH);
+        info->set_base_path(
+            load_config.at(STATS_BASE_PATH_KEY).get<std::string>());
+        *info->mutable_schema() = schema->operator[](text).ToProto();
+        for (const auto& file : stats.Files()) {
+            info->add_files(file.file_name);
+        }
+
+        auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(3);
+        load_info.set_num_of_rows(3);
+        sealed->SetLoadInfo(load_info);
+        sealed->TestLoadTextIndexFromFiles(info);
+        info.reset();  // A lazy factory must own its load metadata.
+
+        auto snapshot = sealed->TestGetPublishedStateSnapshot();
+        ASSERT_NE(snapshot, nullptr);
+        const auto registrations = sealed->IndexRegistrations(text);
+        ASSERT_EQ(registrations.size(), 1);
+        EXPECT_EQ(registrations.front().kind, IndexKind::Text);
+        const auto slots = snapshot->runtime->indexes.Slots();
+        ASSERT_EQ(slots.size(), lazy_enabled ? 0 : 1);
+        if (!lazy_enabled) {
+            EXPECT_FALSE(slots.front()->IsCached(0));
+        }
+        auto pin = sealed->PinIndex(nullptr, registrations.front().key);
+        ASSERT_TRUE(pin);
+        const auto* reader =
+            dynamic_cast<const index::ITextMatchReader*>(pin.get());
+        ASSERT_NE(reader, nullptr);
+        const auto matches = reader->MatchQuery("alpha", 1);
+        ASSERT_EQ(matches.size(), 3);
+        EXPECT_TRUE(matches[0]);
+        EXPECT_FALSE(matches[1]);
+        EXPECT_FALSE(matches[2]);
+        ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    }
+}
 
 const int64_t ROW_COUNT = 2 * 1000;
 const int64_t BIAS = 1000;
@@ -1251,8 +2297,8 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
-    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
+    ASSERT_TRUE(segment->IndexRegistrations(double_id).empty());
+    ASSERT_TRUE(segment->IndexRegistrations(str_id).empty());
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
@@ -1394,8 +2440,8 @@ TEST(Sealed, ClearData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
-    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
+    ASSERT_TRUE(segment->IndexRegistrations(double_id).empty());
+    ASSERT_TRUE(segment->IndexRegistrations(str_id).empty());
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =
@@ -1482,8 +2528,8 @@ TEST(Sealed, LoadFieldDataMmap) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->IndexCapability(double_id).entries().size(), 0);
-    ASSERT_EQ(segment->IndexCapability(str_id).entries().size(), 0);
+    ASSERT_TRUE(segment->IndexRegistrations(double_id).empty());
+    ASSERT_TRUE(segment->IndexRegistrations(str_id).empty());
     auto chunk_span1 = segment->chunk_data<int64_t>(nullptr, counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(nullptr, double_id, 0);
     auto chunk_span3 =

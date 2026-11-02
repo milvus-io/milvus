@@ -62,12 +62,13 @@ class SortedIndexArtifact final : public storage::Artifact {
 
 class SortedStringIndexArtifact final : public storage::Artifact {
  public:
-    SortedStringIndexArtifact(std::vector<std::string> unique_values,
-                              std::vector<std::vector<uint32_t>> posting_lists,
-                              TargetBitmap valid_bitset,
-                              std::vector<int32_t> idx_to_offsets,
-                              size_t total_num_rows,
-                              bool nested);
+    SortedStringIndexArtifact(
+        std::vector<std::string> unique_values,
+        std::vector<SortedStringPostingList> posting_lists,
+        TargetBitmap valid_bitset,
+        std::vector<int32_t> idx_to_offsets,
+        size_t total_num_rows,
+        bool nested);
 
     ~SortedStringIndexArtifact() override;
 

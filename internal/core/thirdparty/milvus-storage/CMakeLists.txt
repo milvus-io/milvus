@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION df1c494)
+set( milvus-storage_VERSION 4795f8b)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -31,12 +31,12 @@ endif ()
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 
-# milvus-storage's Rust bridge now depends on crates that require Rust 1.92.
+# milvus-storage's Rust bridge now depends on crates that require Rust 1.94.1.
 # The top-level CMake cache may have been initialized by other Rust components
 # that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
-# before adding milvus-storage. Use rustup's channel name so Corrosion can
+# before adding milvus-storage. Use rustup's toolchain name so Corrosion can
 # append the current host triple on Linux and macOS.
-set(Rust_TOOLCHAIN "1.92" CACHE STRING "" FORCE)
+set(Rust_TOOLCHAIN "1.94.1" CACHE STRING "" FORCE)
 unset(Rust_COMPILER_CACHED CACHE)
 unset(Rust_CARGO_CACHED CACHE)
 unset(_CORROSION_RUSTC CACHE)
@@ -73,6 +73,21 @@ if ( NOT milvus-storage_POPULATED )
 
     # Enable S3 filesystem support on all platforms
     target_compile_definitions(milvus-storage PRIVATE MILVUS_S3_FS)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        # GNU ld 2.38 groups AArch64 input sections before adding veneers.
+        # Large Rust archives plus ASAN can exhaust its default 1 MiB margin,
+        # especially with 4 KiB stub padding for the Cortex-A53 843419 workaround.
+        # Use 64 MiB groups to keep veneers in range while retaining ASAN and
+        # the erratum workaround. Probe support for other linkers.
+        include(CheckLinkerFlag)
+        check_linker_flag(CXX "LINKER:--stub-group-size=67108864"
+                         MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
+        if(MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
+            target_link_options(milvus-storage PRIVATE "LINKER:--stub-group-size=67108864")
+        endif()
+    endif()
 
     # milvus-storage uses Aws::S3::S3Client and Aws::S3::Model::* directly but only
     # links AWS::aws-sdk-cpp-identity-management in its own CMakeLists.txt. The S3

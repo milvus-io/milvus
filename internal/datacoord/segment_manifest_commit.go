@@ -20,6 +20,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -74,6 +75,10 @@ type ManifestMutation struct {
 // SegmentCatalogMutation contains the segment fields that become visible with
 // the manifest pointer. Each addition here is a reviewable catalog contract.
 type SegmentCatalogMutation struct {
+	// TextStats / JSONKeyStats install the supplied per-field stats (keyed by
+	// field ID) atomically with the manifest pointer. A nil entry value retires
+	// that field's stats instead, so a commit dropping a column can invalidate
+	// text-index / json-key stats built from the dropped data.
 	TextStats    map[int64]*datapb.TextIndexStats
 	JSONKeyStats map[int64]*datapb.JsonKeyStats
 	State        *commonpb.SegmentState
@@ -144,17 +149,35 @@ type SegmentManifestCommit struct {
 	StorageConfig    *indexpb.StorageConfig
 	Mutation         ManifestMutation
 	CatalogMutation  SegmentCatalogMutation
+
+	// InspectedManifest is the manifest pointer a caller's pre-check (e.g. the
+	// backfill already-applied classification) read OUTSIDE the manifest lock.
+	// If non-empty, the commit re-validates under the segment manifest lock that
+	// the in-lock pointer still equals it; a mismatch means the pre-check's
+	// content assumptions are stale (manifests are immutable per version, so an
+	// equal pointer implies identical column groups) and the caller must
+	// re-classify rather than publish a revision built from a decision that no
+	// longer holds. Only a structured (CommitUpdates) mutation may set it: Noop
+	// mutations pin their base with ExpectedManifest instead.
+	InspectedManifest string
 }
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
 // StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
-// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
-// caller may enter this protocol while holding segMu. Manifest I/O runs outside
-// segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
-// catalog + memory publication stays in one segMu critical section. No lock is
-// ever acquired inside that section: the fieldIndexLock-guarded index gauge
-// update a staged SegmentIndex mutation defers runs only after segMu is
-// released (still under keyLock).
+// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock ->
+// indexMeta.fieldIndexLock (read) -> segMu: a backfill replace holds the
+// fieldIndexLock read side from its index-removal re-resolution through the
+// publication section, so the retraction check and the pointer advance are
+// atomic with index creation. No caller may enter this protocol while holding
+// segMu, and code holding segMu must NEVER take fieldIndexLock: a commit that
+// already holds its read side while waiting for segMu would deadlock against
+// the segMu holder (and RWMutex writer-preference can pin that read behind a
+// pending CreateIndex/DropIndex). Manifest I/O runs outside segMu; the final
+// catalog mutation is rebased onto the latest SegmentInfo and catalog + memory
+// publication stays in one segMu critical section. No lock is ever acquired
+// inside that section: the fieldIndexLock-guarded index gauge update a staged
+// SegmentIndex mutation defers runs only after segMu is released (still under
+// keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
@@ -173,6 +196,34 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	defer locks.Unlock(commit.SegmentID)
 	lockWait := time.Since(lockStart)
 	holdStart := time.Now()
+
+	// Snapshot the manifest input, then release segMu before object-storage I/O.
+	m.segMu.RLock()
+	segment := m.segments.GetSegment(commit.SegmentID)
+	if segment != nil {
+		segment = segment.Clone()
+	}
+	m.segMu.RUnlock()
+
+	// Backfill replace: resolve the index IDs whose field the commit drops from
+	// the CURRENT index definitions under the manifest lock, then expand them
+	// into explicit SegmentIndexRemove mutations for every live record on those
+	// indexes. CreateIndex does not participate in the manifest lock and does
+	// not bump the schema version, so an index created during the commit window
+	// is enumerated here rather than missed by a classify-time snapshot; a
+	// record that appears mid-commit is caught by verifyNoUnexpectedIndexRecords
+	// at publication. The staging below then takes each build's keyLock, which
+	// blocks a concurrent FinishTask from resurrecting the record.
+	var removalIndexIDs []int64
+	if segment != nil {
+		removalIndexIDs = m.resolveDroppedColumnIndexIDs(segment.GetCollectionID(), commit)
+		// A drop also leaves the segment's text/json-key stats entries pointing
+		// at the removed column's data: retract them atomically with the pointer
+		// so the next stats pass rebuilds from the replacement values.
+		commit.CatalogMutation.TextStats, commit.CatalogMutation.JSONKeyStats = clearedStatsForDroppedColumns(segment, commit, commit.CatalogMutation.TextStats, commit.CatalogMutation.JSONKeyStats)
+	}
+	commit.CatalogMutation.SegmentIndexes = m.retractReplacedColumnIndexRecords(commit, removalIndexIDs)
+
 	indexBuildIDs, err := validateSegmentIndexMutations(commit)
 	if err != nil {
 		return err
@@ -193,14 +244,6 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		lock.LockManyOrdered(m.indexMeta.keyLock, indexBuildIDs)
 		defer m.indexMeta.keyLock.UnlockMany(indexBuildIDs)
 	}
-
-	// Snapshot the manifest input, then release segMu before object-storage I/O.
-	m.segMu.RLock()
-	segment := m.segments.GetSegment(commit.SegmentID)
-	if segment != nil {
-		segment = segment.Clone()
-	}
-	m.segMu.RUnlock()
 
 	isNewSegment := segment == nil
 	if isNewSegment {
@@ -235,12 +278,32 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	if !matchesExpectedManifest(commit.ExpectedManifest, segment.GetManifestPath()) {
 		return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, segment.GetManifestPath())
 	}
+	if commit.InspectedManifest != "" && commit.InspectedManifest != segment.GetManifestPath() {
+		// A structured mutation whose caller pre-checked the manifest content
+		// (e.g. the backfill already-applied classification) against a pointer
+		// that has since moved: the pre-check decision is stale (manifests are
+		// immutable per version, so an equal pointer would imply identical column
+		// groups) and the caller must re-classify rather than publish a revision
+		// built from a decision that no longer holds.
+		return staleSegmentManifestError(commit.SegmentID, commit.InspectedManifest, segment.GetManifestPath())
+	}
 
+	var removedBuildIDs map[int64]struct{}
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
+		if indexMutation.Type == SegmentIndexRemove {
+			if removedBuildIDs == nil {
+				removedBuildIDs = make(map[int64]struct{})
+			}
+			removedBuildIDs[indexMutation.BuildID] = struct{}{}
+		}
 		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, errSegmentIndexRecordGone) {
+				// Only an upsert whose task row vanished mid-commit produces
+				// this error (a removal of a gone record is a no-op staged, nil).
+				// Publishing would strand a manifest index entry no record can
+				// drive GC for, so discard the whole commit.
 				mlog.Warn(ctx, "index task no longer exists, discarding manifest commit",
 					mlog.Int64("buildID", indexMutation.BuildID),
 					mlog.Int64("segmentID", commit.SegmentID))
@@ -254,7 +317,8 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				indexMutation.BuildID, staged.record.SegmentID, commit.SegmentID)
 		}
 		if indexMutation.Type == SegmentIndexRemove && staged.record != nil &&
-			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) {
+			!commitRetractsIndexIdentity(commit, staged.record.IndexID, indexMutation.BuildID) &&
+			!commitDropsColumnOfIndex(m, staged.record, commit) {
 			return merr.WrapErrServiceInternalMsg(
 				"segment index removal does not match the manifest retraction, segmentID=%d indexID=%d buildID=%d",
 				commit.SegmentID, staged.record.IndexID, indexMutation.BuildID)
@@ -291,6 +355,33 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	// Release the executor before publication, which may enter other meta paths.
 	releaseIO()
+
+	// Re-resolve the backfill index-removal set from the CURRENT index
+	// definitions AFTER manifest I/O but BEFORE taking segMu: an index created
+	// during the commit window (including while the manifest transaction was in
+	// flight) is enumerated here. The result feeds verifyNoUnexpectedIndexRecords
+	// inside segMu.
+	//
+	// fieldIndexLock's read side is held from this re-resolution THROUGH the
+	// publication section, so the final check and the pointer advance are atomic
+	// with index creation: a CreateIndex for a dropped column either completed
+	// before this re-resolution (its index ID lands in verifyIndexIDs and its
+	// records are caught by verifyNoUnexpectedIndexRecords) or is blocked until
+	// after the replace publishes (its build then reads the new manifest, so no
+	// index built from the pre-replace column values can be accepted). Index DDL
+	// holds the write side across an etcd round trip and sync.RWMutex is
+	// writer-preferring, so the read side is acquired HERE — before segMu — and
+	// released after the publication section, before the deferred gauge closures
+	// that re-enter it; it is never acquired inside segMu.
+	var (
+		verifyIndexIDs   map[int64]struct{}
+		releaseIndexLock func()
+	)
+	if segment != nil && commitDropsColumns(commit) {
+		m.indexMeta.fieldIndexLock.RLock()
+		releaseIndexLock = m.indexMeta.fieldIndexLock.RUnlock
+		verifyIndexIDs = m.indexIDsByDroppedColumnsLocked(segment.GetCollectionID(), commit)
+	}
 
 	// Re-enter segMu only for the final full-record publication. Ordinary
 	// segment writers may have changed unrelated fields during manifest I/O, so
@@ -381,6 +472,17 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			}
 		}
 
+		// Backfill replace completeness: AddSegmentIndex does not participate in
+		// the manifest lock, so a build can be created while this commit holds
+		// the lock but after the removal set was enumerated above. Such a record
+		// would survive publication with an index built from the pre-replace
+		// column data. Re-check under segMu (still holding the manifest lock)
+		// that no live record on a replaced index escaped the staged removals,
+		// and abort as stale so the caller retries and re-enumerates it.
+		if err := m.verifyNoUnexpectedIndexRecords(verifyIndexIDs, commit, removedBuildIDs); err != nil {
+			return err
+		}
+
 		if err := m.catalog.Update(ctx, actions...); err != nil {
 			return merr.Wrap(err, "publish segment manifest")
 		}
@@ -392,13 +494,21 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 		return nil
 	}(); err != nil {
+		if releaseIndexLock != nil {
+			releaseIndexLock()
+		}
 		return err
 	}
-	// segMu is released; the segment manifest lock and keyLock(buildID) are
-	// still held, so the deferred gauge update stays serialized against
-	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next
-	// writer of the same build, without ever awaiting fieldIndexLock inside
-	// segMu.
+	// segMu is released. The fieldIndexLock read side held since the verify-set
+	// re-resolution is released before the deferred gauge closures, which
+	// re-enter that lock after segMu is released; the segment manifest lock and
+	// keyLock(buildID) are still held, so the deferred gauge update stays
+	// serialized against MarkIndexAsDeleted (via fieldIndexLock) and ordered
+	// before the next writer of the same build, without ever awaiting
+	// fieldIndexLock inside segMu.
+	if releaseIndexLock != nil {
+		releaseIndexLock()
+	}
 	for _, deferredIndexMetric := range deferredIndexMetrics {
 		deferredIndexMetric()
 	}
@@ -466,6 +576,30 @@ func commitRetractsIndexEntry(commit SegmentManifestCommit, buildID int64) bool 
 			return true
 		}
 	}
+	// DropColumns retracts every index attached to the dropped column inside
+	// milvus-storage; the per-record match is verified precisely in
+	// CommitSegmentManifest via commitDropsColumnOfIndex.
+	return len(commit.Mutation.Updates.DropColumns) > 0
+}
+
+// commitDropsColumnOfIndex reports whether the commit's DropColumns retracts
+// the index a SegmentIndex record describes: the record's index maps to a
+// field (via indexMeta), and a dropped column named by that field ID makes
+// milvus-storage auto-drop the index's manifest entry. This is the manifest
+// half of the backfill-replace index retraction; the record half is the paired
+// SegmentIndexRemove.
+func commitDropsColumnOfIndex(m *meta, record *model.SegmentIndex, commit SegmentManifestCommit) bool {
+	if record == nil || commit.Mutation.Type != ManifestMutationCommitUpdates ||
+		commit.Mutation.Updates == nil || len(commit.Mutation.Updates.DropColumns) == 0 {
+		return false
+	}
+	fid := m.indexMeta.GetFieldIDByIndexID(record.CollectionID, record.IndexID)
+	column := strconv.FormatInt(fid, 10)
+	for _, dropped := range commit.Mutation.Updates.DropColumns {
+		if dropped == column {
+			return true
+		}
+	}
 	return false
 }
 
@@ -479,6 +613,201 @@ func commitRetractsIndexIdentity(commit SegmentManifestCommit, indexID, buildID 
 		}
 	}
 	return false
+}
+
+// resolveDroppedColumnIndexIDs returns the index IDs whose field a backfill
+// replace commit drops, resolved from the CURRENT index definitions. Called
+// while the segment manifest lock is held: an index definition created during
+// the commit window (CreateIndex does not bump the schema version and does not
+// participate in the manifest lock) is enumerated here, so a build created
+// against that definition is still routed to a SegmentIndexRemove. Records that
+// appear mid-commit are caught by verifyNoUnexpectedIndexRecords at
+// publication.
+func (m *meta) resolveDroppedColumnIndexIDs(collectionID int64, commit SegmentManifestCommit) []int64 {
+	ids := m.indexIDsByDroppedColumns(collectionID, commit)
+	out := make([]int64, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	return out
+}
+
+// droppedColumnFieldIDs parses a commit's DropColumns (field IDs expressed as
+// strings) into int64 IDs. Non-decimal entries are skipped; they cannot name a
+// live field, so no stats entry can exist under them.
+func droppedColumnFieldIDs(columns []string) []int64 {
+	out := make([]int64, 0, len(columns))
+	for _, col := range columns {
+		fid, err := strconv.ParseInt(col, 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, fid)
+	}
+	return out
+}
+
+// clearedStatsForDroppedColumns returns text-index and json-key stats removals
+// (field ID -> nil, the SegmentCatalogMutation retire convention) for every
+// column the commit drops that currently has a stats entry in the segment.
+// milvus-storage's DropColumns leaves TextStatsLogs / JsonKeyStats untouched,
+// so without this a replace on a VARCHAR field with full-text enabled (or a
+// JSON field with key statistics) would keep serving text-match / JSON filters
+// from the OLD column values: needDoTextIndex / needDoJSONKeyIndex only check
+// entry existence and would never rebuild. Resolving here, under the manifest
+// lock, retires the stale entries atomically with the new manifest pointer so
+// the next stats pass rebuilds from the replaced data. Caller-supplied entries
+// are preserved (the caller's explicit value wins over a removal).
+func clearedStatsForDroppedColumns(segment *SegmentInfo, commit SegmentManifestCommit, textStats map[int64]*datapb.TextIndexStats, jsonKeyStats map[int64]*datapb.JsonKeyStats) (map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats) {
+	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+		return textStats, jsonKeyStats
+	}
+	dropped := droppedColumnFieldIDs(commit.Mutation.Updates.DropColumns)
+	if len(dropped) == 0 {
+		return textStats, jsonKeyStats
+	}
+	for _, fid := range dropped {
+		if segment.GetTextStatsLogs()[fid] != nil {
+			if textStats == nil {
+				textStats = make(map[int64]*datapb.TextIndexStats)
+			}
+			if _, ok := textStats[fid]; !ok {
+				textStats[fid] = nil
+			}
+		}
+		if segment.GetJsonKeyStats()[fid] != nil {
+			if jsonKeyStats == nil {
+				jsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
+			if _, ok := jsonKeyStats[fid]; !ok {
+				jsonKeyStats[fid] = nil
+			}
+		}
+	}
+	return textStats, jsonKeyStats
+}
+
+// commitDropsColumns reports whether the commit's structured mutation carries a
+// DropColumns payload. Only a backfill "replace" commit does today; it is the
+// shape that must hold fieldIndexLock's read side across publication so the
+// index-retraction check is atomic with index creation.
+func commitDropsColumns(commit SegmentManifestCommit) bool {
+	return commit.Mutation.Type == ManifestMutationCommitUpdates &&
+		commit.Mutation.Updates != nil && len(commit.Mutation.Updates.DropColumns) > 0
+}
+
+// indexIDsByDroppedColumns returns the set of index IDs whose field the commit
+// drops, resolved from the CURRENT index definitions. It takes fieldIndexLock's
+// read side for its own lookup; a caller that must hold that read side across a
+// larger critical section (the commit's re-resolution before publication) uses
+// indexIDsByDroppedColumnsLocked instead, which assumes it is already held.
+// Called outside segMu. Returns nil when the commit drops no columns.
+func (m *meta) indexIDsByDroppedColumns(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
+	if !commitDropsColumns(commit) {
+		return nil
+	}
+	m.indexMeta.fieldIndexLock.RLock()
+	defer m.indexMeta.fieldIndexLock.RUnlock()
+	return m.indexIDsByDroppedColumnsLocked(collectionID, commit)
+}
+
+// indexIDsByDroppedColumnsLocked is indexIDsByDroppedColumns without its own
+// lock acquisition: the caller must already hold indexMeta.fieldIndexLock's
+// read side. It lets the backfill replace commit hold that read side from the
+// re-resolution through the publication section so the final check and the
+// pointer advance are atomic with index creation, without re-entering the
+// mutex (Go's RWMutex would block a reentrant read behind a pending writer).
+// Returns nil when the commit drops no columns.
+func (m *meta) indexIDsByDroppedColumnsLocked(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
+	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
+		return nil
+	}
+	dropped := make(map[string]struct{}, len(commit.Mutation.Updates.DropColumns))
+	for _, col := range commit.Mutation.Updates.DropColumns {
+		dropped[col] = struct{}{}
+	}
+	if len(dropped) == 0 {
+		return nil
+	}
+	indexIDs := make(map[int64]struct{})
+	for _, index := range m.indexMeta.indexes[collectionID] {
+		if index.IsDeleted {
+			continue
+		}
+		if _, ok := dropped[strconv.FormatInt(index.FieldID, 10)]; ok {
+			indexIDs[index.IndexID] = struct{}{}
+		}
+	}
+	return indexIDs
+}
+
+// retractReplacedColumnIndexRecords expands the index IDs a backfill replace
+// drops (resolved from DropColumns against the CURRENT index definitions by the
+// caller, under the manifest lock) into explicit SegmentIndexRemove mutations
+// for every live record on those indexes, merged with the caller-supplied
+// mutations (dedup by build ID). AddSegmentIndex does not participate in the
+// manifest lock, so verifyNoUnexpectedIndexRecords at publication still catches
+// records that appear mid-commit.
+func (m *meta) retractReplacedColumnIndexRecords(commit SegmentManifestCommit, removalIndexIDs []int64) []SegmentIndexMutation {
+	if len(removalIndexIDs) == 0 {
+		return commit.CatalogMutation.SegmentIndexes
+	}
+	indexIDs := make(map[int64]struct{}, len(removalIndexIDs))
+	for _, id := range removalIndexIDs {
+		indexIDs[id] = struct{}{}
+	}
+	byBuild := make(map[int64]SegmentIndexMutation, len(commit.CatalogMutation.SegmentIndexes)+1)
+	for _, mut := range commit.CatalogMutation.SegmentIndexes {
+		byBuild[mut.BuildID] = mut
+	}
+	for _, segIdx := range m.indexMeta.GetAllSegmentIndexes(commit.SegmentID) {
+		if segIdx.IsDeleted {
+			continue
+		}
+		if _, ok := indexIDs[segIdx.IndexID]; !ok {
+			continue
+		}
+		if _, dup := byBuild[segIdx.BuildID]; dup {
+			continue
+		}
+		byBuild[segIdx.BuildID] = SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: segIdx.BuildID}
+	}
+	out := make([]SegmentIndexMutation, 0, len(byBuild))
+	for _, mut := range byBuild {
+		out = append(out, mut)
+	}
+	return out
+}
+
+// verifyNoUnexpectedIndexRecords fails the commit if any live SegmentIndex
+// record on an index that the commit's DropColumns retracts is not covered by
+// the staged removals. Called under the manifest lock + segMu at publication.
+// indexIDs is the removal set resolved from the CURRENT index definitions just
+// before segMu is taken, so an index created during the commit window is still
+// enumerated without taking fieldIndexLock inside segMu; the scan here only
+// reads the segment's records, converting the
+// AddSegmentIndex-does-not-participate-in-the-manifest-lock race into a
+// fail-and-retry: a record created while the commit held the lock aborts the
+// commit instead of surviving with an index built from the pre-replace data.
+func (m *meta) verifyNoUnexpectedIndexRecords(indexIDs map[int64]struct{}, commit SegmentManifestCommit, removedBuildIDs map[int64]struct{}) error {
+	if len(indexIDs) == 0 {
+		return nil
+	}
+	for _, segIdx := range m.indexMeta.GetAllSegmentIndexes(commit.SegmentID) {
+		if segIdx.IsDeleted {
+			continue
+		}
+		if _, ok := indexIDs[segIdx.IndexID]; !ok {
+			continue
+		}
+		if _, removed := removedBuildIDs[segIdx.BuildID]; removed {
+			continue
+		}
+		return merr.WrapErrServiceUnavailableErr(errSegmentManifestStale,
+			"segment index buildID=%d appeared on a replaced index during commit, segmentID=%d; retry to re-enumerate the invalidation set",
+			segIdx.BuildID, commit.SegmentID)
+	}
+	return nil
 }
 
 func manifestMutationAddsIndexEntry(mutation ManifestMutation) bool {
@@ -665,6 +994,13 @@ func validateExpectedManifestUsage(commit SegmentManifestCommit) error {
 		return merr.WrapErrServiceInternalMsg(
 			"segment manifest commit with a structured mutation must not set ExpectedManifest, segmentID=%d", commit.SegmentID)
 	}
+	// InspectedManifest re-validates a caller's unlocked content pre-check against
+	// the in-lock pointer. A Noop mutation already pins its base with
+	// ExpectedManifest, so the field is meaningless there.
+	if commit.Mutation.Type == ManifestMutationNoop && commit.InspectedManifest != "" {
+		return merr.WrapErrServiceInternalMsg(
+			"segment manifest commit cannot pair a noop mutation with InspectedManifest, segmentID=%d", commit.SegmentID)
+	}
 	// A Noop publishes a revision this framework did not build, so it cannot
 	// prove that revision either carries an upserted artifact or excludes a
 	// removed one. Pairing it with either record mutation would reintroduce the
@@ -680,19 +1016,30 @@ func validateExpectedManifestUsage(commit SegmentManifestCommit) error {
 // onto a segment clone. It is shared by the single-segment applySegmentCatalogMutation
 // and the batch publish operator so both make the exact same field-level changes.
 func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalogMutation) {
-	if len(mutation.TextStats) > 0 {
-		if segment.TextStatsLogs == nil {
-			segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
-		}
+	// A nil entry value retires the field's stats instead of installing one,
+	// so a commit that drops a column can invalidate its text/json-key stats
+	// atomically with the manifest pointer (see CommitSegmentManifest).
+	if mutation.TextStats != nil {
 		for fieldID, stats := range mutation.TextStats {
+			if stats == nil {
+				delete(segment.TextStatsLogs, fieldID)
+				continue
+			}
+			if segment.TextStatsLogs == nil {
+				segment.TextStatsLogs = make(map[int64]*datapb.TextIndexStats)
+			}
 			segment.TextStatsLogs[fieldID] = proto.Clone(stats).(*datapb.TextIndexStats)
 		}
 	}
-	if len(mutation.JSONKeyStats) > 0 {
-		if segment.JsonKeyStats == nil {
-			segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
-		}
+	if mutation.JSONKeyStats != nil {
 		for fieldID, stats := range mutation.JSONKeyStats {
+			if stats == nil {
+				delete(segment.JsonKeyStats, fieldID)
+				continue
+			}
+			if segment.JsonKeyStats == nil {
+				segment.JsonKeyStats = make(map[int64]*datapb.JsonKeyStats)
+			}
 			segment.JsonKeyStats[fieldID] = proto.Clone(stats).(*datapb.JsonKeyStats)
 		}
 	}
@@ -797,13 +1144,18 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		if commit.CatalogMutation.NewSegment != nil {
 			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot create a new segment, segmentID=%d", commit.SegmentID)
 		}
-		if len(commit.CatalogMutation.SegmentIndexes) > 0 {
+		if len(commit.CatalogMutation.SegmentIndexes) > 0 ||
+			(commit.Mutation.Type == ManifestMutationCommitUpdates && commit.Mutation.Updates != nil &&
+				len(commit.Mutation.Updates.DropColumns) > 0) {
 			// The batch publishes through UpdateSegmentsInfo, which writes only
 			// segment records; it cannot stage the SegmentIndex action into the
 			// same catalog transaction the way CommitSegmentManifest does.
 			// Accepting the field here would advance the manifest pointer while
 			// silently dropping the index record change, stranding the artifact
-			// or leaving a record claiming a retracted one.
+			// or leaving a record claiming a retracted one. DropColumns is in
+			// the same class: it auto-drops the column's index entries inside
+			// milvus-storage, and the batch path cannot retract the matching
+			// SegmentIndex records atomically.
 			return merr.WrapErrServiceInternalMsg("batch segment manifest commit cannot mutate a segment index, segmentID=%d", commit.SegmentID)
 		}
 		if manifestMutationAddsIndexEntry(commit.Mutation) {
@@ -1017,6 +1369,12 @@ func (m *meta) submitSegmentManifest(ctx context.Context, io *packed.ManifestIOC
 	}
 	if !matchesExpectedManifest(commit.ExpectedManifest, snapshot.GetManifestPath()) {
 		return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, snapshot.GetManifestPath())
+	}
+	if commit.InspectedManifest != "" && commit.InspectedManifest != snapshot.GetManifestPath() {
+		// The caller's unlocked content pre-check (e.g. the backfill
+		// already-applied classification) inspected a pointer that has since
+		// moved; the decision is stale and the caller must re-classify.
+		return staleSegmentManifestError(commit.SegmentID, commit.InspectedManifest, snapshot.GetManifestPath())
 	}
 	return m.submitManifestMutation(ctx, io, snapshot.GetManifestPath(), commit, func(result packed.ManifestUpdateResult, err error) {
 		commit.CatalogMutation.manifestHasIndex = result.HasIndexes

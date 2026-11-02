@@ -68,8 +68,8 @@ func TestFieldAnalyzerRouting(t *testing.T) {
 			mockey.Mock((*analyzerTestClient).RunAnalyzer).To(func(_ *analyzerTestClient, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 				calls++
 				require.Equal(t, request.GetPlaceholder(), req.GetPlaceholder())
-				require.True(t, req.GetWithDetail())
-				require.True(t, req.GetWithHash())
+				require.True(t, req.GetTokenize().GetWithDetail())
+				require.True(t, req.GetTokenize().GetWithHash())
 				require.Equal(t, request.GetAnalyzerNames(), req.GetFieldAnalyzer().GetAnalyzerNames())
 				require.Equal(t, int64(7), req.GetFieldAnalyzer().GetCollectionId())
 				require.Equal(t, "test_7v0", req.GetFieldAnalyzer().GetVchannel())
@@ -80,7 +80,7 @@ func TestFieldAnalyzerRouting(t *testing.T) {
 				if scenario == "analyzer failure" {
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrServiceInternal)}, nil
 				}
-				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: []*milvuspb.AnalyzerResult{{}}}, nil
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: []*milvuspb.AnalyzerResult{{}}}}}, nil
 			}).Build()
 			ctx := context.Background()
 			if scenario == "resource group" {
@@ -123,6 +123,52 @@ func (*analyzerTestWAL) AnalyzerClient() streaming.AnalyzerClient { panic("unpat
 func mockStreamingAnalyzerClient() {
 	mockey.Mock(streaming.WAL).Return(&analyzerTestWAL{}).Build()
 	mockey.Mock((*analyzerTestWAL).AnalyzerClient).Return(&analyzerTestClient{}).Build()
+}
+
+func TestComputePhraseMatchSlopStreaming(t *testing.T) {
+	paramtable.Init()
+	for _, scenario := range []string{"success", "business", "transport", "canceled", "unimplemented"} {
+		mockey.PatchConvey(scenario, t, func() {
+			node := &Proxy{} // No Coordinator, collection cache or query scheduler.
+			node.UpdateStateCode(commonpb.StateCode_Healthy)
+			mockStreamingAnalyzerClient()
+			call := mockey.Mock((*analyzerTestClient).RunAnalyzer).To(func(_ *analyzerTestClient, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				require.Equal(t, `{}`, req.GetInlineAnalyzer().GetAnalyzerParams())
+				require.Nil(t, req.GetTokenize())
+				require.Equal(t, "a b", req.GetPhraseMatch().GetQueryText())
+				require.Equal(t, [][]byte{[]byte("a b"), []byte("b a"), []byte("c")}, req.GetPlaceholder())
+				switch scenario {
+				case "business":
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrIoPermissionDenied)}, nil
+				case "transport":
+					return nil, status.NewOnShutdownError("closing")
+				case "canceled":
+					return nil, context.Canceled
+				case "unimplemented":
+					return nil, grpcstatus.Error(codes.Unimplemented, "unsupported")
+				default:
+					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchResult{IsMatch: []bool{true, true, false}, Slops: []int64{0, 2, -1}}}}, nil
+				}
+			}).Build()
+			resp, err := node.ComputePhraseMatchSlop(t.Context(), &milvuspb.ComputePhraseMatchSlopRequest{AnalyzerParams: `{}`, QueryText: "a b", DataTexts: []string{"a b", "b a", "c"}})
+			require.NoError(t, err)
+			require.Equal(t, 1, call.Times())
+			switch scenario {
+			case "success":
+				require.NoError(t, merr.Error(resp.GetStatus()))
+				require.Equal(t, []bool{true, true, false}, resp.GetIsMatch())
+				require.Equal(t, []int64{0, 2, -1}, resp.GetSlops())
+			case "business":
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrIoPermissionDenied)
+			case "transport":
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+			case "canceled":
+				require.Equal(t, merr.Code(context.Canceled), resp.GetStatus().GetCode())
+			case "unimplemented":
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceUnimplemented)
+			}
+		})
+	}
 }
 
 func TestRunAnalyzerStreamingErrors(t *testing.T) {

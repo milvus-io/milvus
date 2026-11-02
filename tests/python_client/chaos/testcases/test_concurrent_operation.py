@@ -133,8 +133,8 @@ class TestOperations(TestBase):
             Op.add_vector_field: AddVectorFieldChecker(collection_name=c_name),
         }
         configure_heavy_operation_schedules(checkers)
-        if collection_name is None:
-            checkers[Op.recovery_continuation] = RecoveryContinuationChecker()
+        # The single-request workload creates the recovery collection; creating
+        # one per concurrent worker would multiply the post-chaos workload.
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers
 

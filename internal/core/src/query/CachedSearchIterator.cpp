@@ -159,14 +159,23 @@ CachedSearchIterator::CachedSearchIterator(
     nq_ = query_ds.num_queries;
     Init(search_info);
 
-    // VECTOR_ARRAY element-level search: growing stores each row as a
-    // separate VectorArray with its own backing allocation, so we must
-    // flatten per-chunk into a contiguous buffer that knowhere can read.
+    // VECTOR_ARRAY element-level search: growing stores one VectorArray row
+    // (or mmap VectorArrayView) per chunk slot, so we must flatten each chunk
+    // into a contiguous buffer that Knowhere can read.
     // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
     const bool is_element_level =
         search_info.struct_element_offsets_ != nullptr;
+    const auto* vector_array_column =
+        is_element_level
+            ? dynamic_cast<const segcore::ConcurrentVector<VectorArray>*>(
+                  vec_data)
+            : nullptr;
+    AssertInfo(!is_element_level || vector_array_column != nullptr,
+               "element-level growing iterator requires VECTOR_ARRAY storage");
+    const bool mmap_vector_array =
+        vector_array_column != nullptr && vector_array_column->is_mmap();
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
@@ -212,25 +221,23 @@ CachedSearchIterator::CachedSearchIterator(
             if (!is_element_level) {
                 raw_data = {range_begin, query_ds.dim, chunk_size, range_data};
             } else {
-                auto va_ptr = reinterpret_cast<const VectorArray*>(range_data);
-                int64_t total_bytes = 0;
-                int64_t total_elements = 0;
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    total_bytes += va_ptr[i].byte_size();
-                    total_elements += va_ptr[i].physical_length();
-                }
-                auto buf = std::make_unique<uint8_t[]>(total_bytes);
-                auto* ptr = buf.get();
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    milvus::fastmem::FastMemcpy(
-                        ptr, va_ptr[i].data(), va_ptr[i].byte_size());
-                    ptr += va_ptr[i].byte_size();
-                }
-                const void* flat_data = buf.get();
-                chunk_buffers_.emplace_back(std::move(buf));
-                raw_data = {
-                    element_offset, query_ds.dim, total_elements, flat_data};
-                element_offset += total_elements;
+                auto flat =
+                    mmap_vector_array
+                        ? FlattenVectorArrayRows(
+                              static_cast<const VectorArrayView*>(range_data),
+                              chunk_size,
+                              false)
+                        : FlattenVectorArrayRows(
+                              static_cast<const VectorArray*>(range_data),
+                              chunk_size,
+                              false);
+                const void* flat_data = flat.payload.get();
+                raw_data = {element_offset,
+                            query_ds.dim,
+                            flat.element_count,
+                            flat_data};
+                element_offset += flat.element_count;
+                chunk_buffers_.emplace_back(std::move(flat.payload));
             }
             AppendChunkIterators(query_ds,
                                  search_info,

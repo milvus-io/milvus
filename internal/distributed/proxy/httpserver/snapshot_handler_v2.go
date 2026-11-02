@@ -77,7 +77,20 @@ func (h *HandlersV2) listSnapshots(ctx context.Context, c *gin.Context, anyReq a
 		return h.proxy.ListSnapshots(reqCtx, req.(*milvuspb.ListSnapshotsRequest))
 	})
 	if err == nil {
-		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListSnapshotsResponse).GetSnapshots()))
+		result := resp.(*milvuspb.ListSnapshotsResponse)
+		allowInt64, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+		summaries := make([]gin.H, 0, len(result.GetSnapshotSummaries()))
+		for _, info := range result.GetSnapshotSummaries() {
+			summaries = append(summaries, gin.H{
+				"name":        info.GetName(),
+				"createTs":    formatRESTInt64(info.GetCreateTs(), allowInt64),
+				"createUtcTs": formatRESTInt64(info.GetCreateUtcTs(), allowInt64),
+				"description": info.GetDescription(),
+			})
+		}
+		body := wrapperReturnList(result.GetSnapshots())
+		body["snapshotSummaries"] = summaries
+		HTTPReturn(c, http.StatusOK, body)
 	}
 	return resp, err
 }

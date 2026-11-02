@@ -34,23 +34,36 @@ func (h *SNQueryViewHandler) acquireUpView(ctx context.Context, shardID qviews.S
 }
 
 func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryViewVersion, withTopology bool) (*QueryViewLease, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		entry, exists := s.views[version]
+		if !exists {
+			s.mu.Unlock()
+			return nil, viewerror.NewViewNotFound("query view %s is not found", version.String())
+		}
+		s.advancePendingDownLocked(version, entry)
+		if entry.sm.IsRecovering() {
+			changed := s.recoveryChangedLocked()
+			s.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-changed:
+			}
+			continue
+		}
+		if entry.sm.State() != qviews.QueryViewStateUp {
+			state := entry.sm.State()
+			s.mu.Unlock()
+			return nil, viewerror.NewViewInvalidated("query view %s is not up, current state is %s", version.String(), state.String())
+		}
+		lease := s.newQueryViewLeaseLocked(version, entry, withTopology)
+		s.mu.Unlock()
+		return lease, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	entry, exists := s.views[version]
-	if !exists {
-		return nil, viewerror.NewViewNotFound("query view %s is not found", version.String())
-	}
-	s.advancePendingDownLocked(version, entry)
-	if entry.sm.State() != qviews.QueryViewStateUp {
-		return nil, viewerror.NewViewInvalidated("query view %s is not up, current state is %s", version.String(), entry.sm.State().String())
-	}
-	return s.newQueryViewLeaseLocked(version, entry, withTopology), nil
 }
 
 // Caller holds the shard mutex.

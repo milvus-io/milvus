@@ -588,3 +588,42 @@ func TestNewQueryPipeline_GroupByOrderBy_InvalidField(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestQueryPipelineFinalizesEmptyAggregates(t *testing.T) {
+	operators, err := agg.NewAggregate("count", 500, "count(*)", 0)
+	require.NoError(t, err)
+	aggregates := agg.AggregatesToPB(operators)
+	for _, grouped := range []bool{false, true} {
+		for _, ordered := range []bool{false, true} {
+			var groups []int64
+			var groupNames []string
+			names := []string{"count(*)"}
+			if grouped {
+				groups = []int64{101}
+				groupNames = []string{"val"}
+				names = []string{"val", "count(*)"}
+			}
+			outputMap, err := agg.NewAggregationFieldMap(names, groupNames, operators)
+			require.NoError(t, err)
+			var orderFields []*orderby.OrderByField
+			if ordered {
+				orderFields = []*orderby.OrderByField{orderby.NewOrderByField(500, "count(*)", schemapb.DataType_Int64)}
+			}
+			pipeline, err := NewQueryPipeline(testSchema(), 10, 0, reduce.IReduceNoOrder, orderFields, groups, aggregates, outputMap, nil)
+			require.NoError(t, err)
+			reducer := agg.NewGroupAggReducer(groups, aggregates, -1, testSchema())
+			empty, err := reducer.EncodePartial(&agg.PartialAggregationResult{})
+			require.NoError(t, err)
+			result, err := pipeline.Execute(t.Context(), []*internalpb.RetrieveResults{empty, {}})
+			require.NoError(t, err)
+			require.Len(t, result.FieldsData, len(names))
+			for _, field := range result.FieldsData {
+				if grouped {
+					require.Empty(t, field.GetScalars().GetLongData().GetData())
+				} else {
+					require.Equal(t, []int64{0}, field.GetScalars().GetLongData().GetData())
+				}
+			}
+		}
+	}
+}

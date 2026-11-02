@@ -23,6 +23,11 @@ func Run(ctx context.Context, params string, texts [][]byte, withDetail, withHas
 
 	defer tokenizer.Destroy()
 
+	return RunWithAnalyzer(ctx, tokenizer, texts, withDetail, withHash)
+}
+
+// RunWithAnalyzer leaves the caller-owned analyzer alive for subsequent batches.
+func RunWithAnalyzer(ctx context.Context, tokenizer Analyzer, texts [][]byte, withDetail, withHash bool) ([]*milvuspb.AnalyzerResult, error) {
 	results := make([]*milvuspb.AnalyzerResult, len(texts))
 	for i, text := range texts {
 		if err := ctx.Err(); err != nil {

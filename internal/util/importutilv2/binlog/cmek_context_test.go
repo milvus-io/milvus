@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -53,6 +54,10 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 	t.Cleanup(func() { plugin.UnPatch() })
 	list := mockey.Mock(listInsertLogs).Return(map[int64][]string{0: {genBinlogPath(0)}}, nil).Build()
 	t.Cleanup(func() { list.UnPatch() })
+	// Import binlogs have no ChildFields; the reader now discovers them from
+	// Parquet footers before opening the data. This fixture uses synthetic paths.
+	fields := mockey.Mock(packed.GetPackedFileFieldIDs).Return([][]int64{{100}}, nil).Build()
+	t.Cleanup(func() { fields.UnPatch() })
 	target := &schemapb.CollectionSchema{
 		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "37"}},
 		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},

@@ -1675,6 +1675,10 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				Field:     subField.Field,
 				IsDynamic: subField.IsDynamic,
 			}
+			// The copy shares Field, so this rewrites the same wrapper with the
+			// same value; it also sets the legacy location on the copy, which is
+			// what older components read from the WAL.
+			typeutil.SetFieldDataValidData(subFieldCopy, validData)
 
 			flattenedFields = append(flattenedFields, subFieldCopy)
 		}

@@ -63,8 +63,10 @@ func HookInterceptor(ctx context.Context, req any, userName, fullMethod string, 
 			GetRequestFieldWithoutSensitiveInfo(req), mlog.Err(err))
 		metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 		updateProxyFunctionCallMetric(fullMethod, err)
+		observeResourceGroupRequest(newCtx, fullMethod, req, nil, hookError(err))
 		return nil, hookError(err)
 	}
+	observeResourceGroupRequest(newCtx, fullMethod, req, realResp, realErr)
 	return realResp, realErr
 }
 

@@ -40,6 +40,7 @@
 #include "index/contracts/Registry.h"
 #include "index/fmindex/FMIndex.h"
 #include "index/scalar/fmindex/FmIndexReader.h"
+#include "segcore/SegcoreConfig.h"
 #include "nlohmann/json.hpp"
 
 namespace milvus::index {
@@ -435,7 +436,9 @@ FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                           state->runtime.value_type,
                                           state->nullable,
                                           FmIndexStateOrigin::Persisted);
-    co_return std::make_unique<FmIndexReader>(std::move(storage));
+    co_return std::make_unique<FmIndexReader>(
+        std::move(storage),
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }
 
 namespace {

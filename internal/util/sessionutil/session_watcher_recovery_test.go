@@ -64,6 +64,7 @@ func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 	rewatched := false
 	w := &sessionWatcher{
 		s:       &Session{ctx: ctx, etcdCli: cli},
+		ctx:     ctx,
 		prefix:  "test",
 		eventCh: make(chan *SessionEvent),
 		rewatch: func(sessions map[string]*Session) error {

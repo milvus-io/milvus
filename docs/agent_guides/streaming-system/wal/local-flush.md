@@ -7,6 +7,11 @@ completion; this operation does not promise source catch-up. A local ManualFlush
 overtaken by collection Drop becomes an empty best-effort WAL operation. It follows
 normal resource-key ACK ordering and adds no dependency on Drop completion.
 
+FlushAll returns per-PChannel `ImmutableMessage` copies without `_ur`, so Backup
+can explicitly replicate them to align positions on a secondary. Message IDs,
+TimeTicks and LastConfirmedMessageIDs are preserved. The persisted WAL broadcast
+still carries `_ur` and is skipped by ordinary CDC replication.
+
 CDC replays complete transactions. The persisted Commit `body_cnt` is checked against distinct successfully appended
 source body IDs, preventing stale Commit from accepting missing bodies. Zero skips
 validation for compatibility. Recovery
