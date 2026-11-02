@@ -32,8 +32,7 @@ import (
 )
 
 // authFailingServer accepts the client's initial authentication and then fails
-// every later Authenticate with err, the way a member does while it restarts or
-// the cluster elects a leader.
+// every later Authenticate with the configured error.
 type authFailingServer struct {
 	etcdserverpb.UnimplementedAuthServer
 	etcdserverpb.UnimplementedWatchServer
@@ -50,22 +49,25 @@ func (s *authFailingServer) Authenticate(context.Context, *etcdserverpb.Authenti
 
 // With auth enabled, clientv3 authenticates before opening a watch stream and
 // cancels the watch when that fails with a server error, instead of
-// reconnecting. Every transient server error must therefore be classified as
-// retriable, or the watch owner treats an etcd restart as fatal.
+// reconnecting. Transient errors, a learner's rejection included, must remain
+// retriable; other FailedPrecondition errors must remain permanent after passing
+// through the watch client.
 func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
+		want bool
 	}{
-		{"leader changed", rpctypes.ErrGRPCLeaderChanged},
-		{"no leader", rpctypes.ErrGRPCNoLeader},
-		{"server stopped", rpctypes.ErrGRPCStopped},
-		{"timeout", rpctypes.ErrGRPCTimeout},
-		{"timeout due to leader fail", rpctypes.ErrGRPCTimeoutDueToLeaderFail},
-		{"timeout due to connection lost", rpctypes.ErrGRPCTimeoutDueToConnectionLost},
-		{"unhealthy", rpctypes.ErrGRPCUnhealthy},
-		{"too many requests", rpctypes.ErrGRPCRequestTooManyRequests},
-		{"not supported for learner", rpctypes.ErrGRPCNotSupportedForLearner},
+		{"leader changed", rpctypes.ErrGRPCLeaderChanged, true},
+		{"no leader", rpctypes.ErrGRPCNoLeader, true},
+		{"server stopped", rpctypes.ErrGRPCStopped, true},
+		{"timeout", rpctypes.ErrGRPCTimeout, true},
+		{"timeout due to leader fail", rpctypes.ErrGRPCTimeoutDueToLeaderFail, true},
+		{"timeout due to connection lost", rpctypes.ErrGRPCTimeoutDueToConnectionLost, true},
+		{"not capable", rpctypes.ErrGRPCNotCapable, false},
+		{"unhealthy", rpctypes.ErrGRPCUnhealthy, true},
+		{"too many requests", rpctypes.ErrGRPCRequestTooManyRequests, true},
+		{"not supported for learner", rpctypes.ErrGRPCNotSupportedForLearner, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -98,7 +100,7 @@ func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 			}
 			require.True(t, resp.Canceled)
 			require.Error(t, resp.Err())
-			require.True(t, IsRetriableWatchErr(resp.Err()), "watch canceled with %v", resp.Err())
+			require.Equal(t, c.want, IsRetriableWatchErr(resp.Err()), "watch canceled with %v", resp.Err())
 		})
 	}
 }

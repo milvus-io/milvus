@@ -21,9 +21,11 @@
 #include <arrow/record_batch.h>
 #include <arrow/util/key_value_metadata.h>
 #include <parquet/properties.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <algorithm>
 #include <cstdint>
+#include <csignal>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -44,6 +46,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/common/config.h"
@@ -200,6 +203,87 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     };
     load_info.storage_version = 2;
     segment->LoadFieldData(load_info);
+}
+
+TEST_F(TestGrowingStorageV2, ProducerReadFailurePreservesErrorWithoutHanging) {
+    const auto directory = path_ + "/growing-producer-read-failure";
+    auto cleanup = folly::makeGuard([&] { (void)fs_->DeleteDir(directory); });
+    const auto check_failure = [&] {
+        ASSERT_TRUE(fs_->CreateDir(directory).ok());
+        const auto path = directory + "/1";
+        std::vector<std::string> paths{path};
+        milvus_storage::StorageConfig config{};
+        std::vector<std::vector<int>> column_groups{{0, 1, 2}};
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_, paths, schema_, config, column_groups, 16 * 1024 * 1024);
+        auto writer = result.ValueOrDie();
+        ASSERT_TRUE(writer->Write(record_batch_).ok());
+        ASSERT_TRUE(writer->Close().ok());
+
+        auto reader =
+            milvus_storage::FileRowGroupReader::Make(fs_, path).ValueOrDie();
+        auto metadata = reader->file_metadata()->GetParquetMetadata();
+        const auto column = metadata->RowGroup(0)->ColumnChunk(0);
+        const auto data_offset = column->data_page_offset();
+        const auto chunk_start = column->has_dictionary_page()
+                                     ? column->dictionary_page_offset()
+                                     : data_offset;
+        ASSERT_GE(data_offset, 4);
+        ASSERT_LE(data_offset + 16,
+                  chunk_start + column->total_compressed_size());
+        ASSERT_TRUE(reader->Close().ok());
+        auto input = fs_->OpenInputFile(path).ValueOrDie();
+        const auto size = input->GetSize().ValueOrDie();
+        auto damaged = input->ReadAt(0, size).ValueOrDie()->ToString();
+        ASSERT_LE(data_offset + 16, damaged.size());
+        ASSERT_TRUE(input->Close().ok());
+        std::fill_n(damaged.begin() + data_offset, 16, '\xff');
+        auto output = fs_->OpenOutputStream(path).ValueOrDie();
+        ASSERT_TRUE(output->Write(damaged.data(), damaged.size()).ok());
+        ASSERT_TRUE(output->Close().ok());
+
+        auto schema = std::make_shared<Schema>();
+        schema->AddDebugField("ts", DataType::INT64, true);
+        const auto pk = schema->AddDebugField("pk", DataType::INT64, false);
+        schema->AddDebugField("str", DataType::VARCHAR, true);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        const auto rows = record_batch_->num_rows();
+        LoadFieldDataInfo info;
+        info.storage_version = 2;
+        info.field_infos = {
+            {0, FieldBinlogInfo{0, rows, {rows}, {rows}, false, "", {path}}}};
+        try {
+            segment->LoadFieldData(info);
+            FAIL() << "expected producer read failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), StorageError);
+            const auto prefix =
+                "[StorageV2] Failed to read row group 0 from file " + path;
+            EXPECT_NE(std::string(error.what()).find(prefix),
+                      std::string::npos);
+        }
+    };
+
+    const auto previous_style = ::testing::FLAGS_gtest_death_test_style;
+    auto restore_style = folly::makeGuard(
+        [&] { ::testing::FLAGS_gtest_death_test_style = previous_style; });
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    ASSERT_EXIT(
+        {
+            sigset_t signals;
+            if (std::signal(SIGALRM, SIG_DFL) == SIG_ERR ||
+                ::sigemptyset(&signals) != 0 ||
+                ::sigaddset(&signals, SIGALRM) != 0 ||
+                ::sigprocmask(SIG_UNBLOCK, &signals, nullptr) != 0) {
+                std::_Exit(2);
+            }
+            ::alarm(15);
+            check_failure();
+            std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
 // Regression for add-field + legacy StorageV2 data: a growing segment written
