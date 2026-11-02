@@ -1985,6 +1985,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		return []*milvuspb.GrantEntity{}, err
 	}
 	var granteeOwnerKeys, granteeIDKeys map[string][]string
+	var granteesValidated, idsLoaded bool
 
 	for i, key := range keys {
 		grantInfos := typeutil.AfterN(key, granteeKey, "/")
@@ -1997,18 +1998,23 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 		}
 		// Validate only when a valid grantee is encountered, as in the per-ID
 		// loader. Empty or entirely malformed grantee lists need no privilege read.
-		if granteeOwnerKeys == nil {
+		if !granteesValidated {
 			if err := validateLoadedGrantees(keys, values); err != nil {
 				return []*milvuspb.GrantEntity{}, err
 			}
-			granteeOwnerKeys = make(map[string][]string)
-			for j, ownerKey := range keys {
-				granteeOwnerKeys[values[j]] = append(granteeOwnerKeys[values[j]], ownerKey)
-			}
+			granteesValidated = true
 		}
 		logicalGranteeKey := fmt.Sprintf("%s/%s/%s/%s", GranteePrefix, grantInfos[0], grantInfos[1], grantInfos[2])
 		idStr := values[i]
 		if isLegacyGranteeID(idStr) && idStr != crypto.GranteeID(logicalGranteeKey) {
+			// Modern IDs need no ownership index. Build it once when a legacy
+			// ID first requires a collision check, preserving the original order.
+			if granteeOwnerKeys == nil {
+				granteeOwnerKeys = make(map[string][]string)
+				for j, ownerKey := range keys {
+					granteeOwnerKeys[values[j]] = append(granteeOwnerKeys[values[j]], ownerKey)
+				}
+			}
 			legacyIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant, idStr)
 			otherGranteeKey, err := findOtherGranteeWithIDFromOwnerKeys(ctx, granteeKey, logicalGranteeKey, idStr, granteeOwnerKeys[idStr])
 			if err != nil {
@@ -2024,7 +2030,9 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 
 		// Load lazily after this grantee's ownership check. Moving the read
 		// before that check would change which error is returned first.
-		if granteeIDKeys == nil {
+		if !idsLoaded {
+			// A tenant-wide scan trades fewer requests for reading and indexing
+			// all privilege keys, including orphaned IDs left by migrations/deletions.
 			granteeIDPrefix := funcutil.HandleTenantForEtcdPrefix(GranteeIDPrefix, tenant)
 			allIDKeys, _, err := kc.Txn.LoadWithPrefix(ctx, granteeIDPrefix)
 			if err != nil {
@@ -2044,6 +2052,7 @@ func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]*milvuspb.G
 				}
 				granteeIDKeys[granteeIDInfos[0]] = append(granteeIDKeys[granteeIDInfos[0]], idKey)
 			}
+			idsLoaded = true
 		}
 
 		var idKeys []string
