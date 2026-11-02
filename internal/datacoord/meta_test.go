@@ -6143,3 +6143,28 @@ func TestUpdateBinlogsOperator_RefreshesStats(t *testing.T) {
 	assert.EqualValues(t, 100, stats.GetTimestampFrom())
 	assert.EqualValues(t, 200, stats.GetTimestampTo())
 }
+
+func TestUpdateStatusOperator_DroppedIsTerminal(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:        1,
+		State:     commonpb.SegmentState_Dropped,
+		DroppedAt: 42,
+	})))
+
+	for _, target := range []commonpb.SegmentState{
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Flushing,
+		commonpb.SegmentState_Flushed,
+		commonpb.SegmentState_Importing,
+	} {
+		t.Run(target.String(), func(t *testing.T) {
+			require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), UpdateStatusOperator(1, target)))
+			segment := meta.GetSegment(context.TODO(), 1)
+			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+			require.EqualValues(t, 42, segment.GetDroppedAt())
+		})
+	}
+}

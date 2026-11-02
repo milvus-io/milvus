@@ -1474,10 +1474,8 @@ func TestGarbageCollector_recycleUnusedIndexFilesV1(t *testing.T) {
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	catalog.On("ChannelExists",
-		mock.Anything,
-		mock.Anything,
-	).Return(true)
+	channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+	defer channelExists.UnPatch()
 	catalog.On("DropChannelCheckpoint",
 		mock.Anything,
 		mock.Anything,
@@ -2134,9 +2132,12 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
+		catalog:     catalog,
+		channelCPs:  newChannelCps(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
+	m.collections.Insert(123, &collectionInfo{ID: 123})
+	m.collections.Insert(124, &collectionInfo{ID: 124})
 
 	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
@@ -2161,7 +2162,7 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		"cluster-id-rootcoord-dm_1_123v0":                   nil,
 		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
 		"cluster-id-rootcoord-dm_0_124v0":                   nil,
-	}, nil).Times(3)
+	}, nil).Times(4)
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
@@ -2173,18 +2174,41 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(6)
+	t.Run("drop collection meta fail keeps channel cp", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(errors.New("mock error")).Once()
+		gc.recycleChannelCPMeta(context.TODO(), nil)
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		assert.True(t, m.collections.Contain(123))
+	})
+
 	t.Run("drop channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+		// Only the collection whose segments are all recycled leaves the cache.
+		assert.False(t, m.collections.Contain(123))
+		assert.True(t, m.collections.Contain(124))
 	})
+}
+
+func TestGarbageCollector_recycleDroppedChannelFlags(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := &meta{catalog: catalog}
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{checkInterval: time.Millisecond})
+
+	// A failed sweep is retried; the sweep stops after the first success.
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(0, errors.New("mock error")).Once()
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(2, nil).Once()
+	gc.recycleDroppedChannelFlags(context.TODO())
 }
 
 func TestGarbageCollector_removeObjectPool(t *testing.T) {
@@ -2606,7 +2630,8 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ChannelExists(mock.Anything, channelName).Return(false).Once()
+			channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(false, nil).Build()
+			defer channelExists.UnPatch()
 
 			meta := &meta{
 				catalog:    catalog,
@@ -2742,9 +2767,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotReference(t *testing.T)
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).To(func(c *datacoord.Catalog, ctx context.Context, channel string) bool {
-		return true
-	}).Build()
+	mock7 := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mock7.UnPatch()
 
 	dropSegmentCalled := false
@@ -3592,7 +3615,7 @@ func TestGarbageCollector_recycleDroppedSegments_SnapshotMetaNil(t *testing.T) {
 	mockListSegmentIndexes := mockey.Mock((*datacoord.Catalog).ListSegmentIndexes).Return([]*model.SegmentIndex{}, nil).Build()
 	defer mockListSegmentIndexes.UnPatch()
 
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mockChannelExists.UnPatch()
 
 	dropSegmentCalled := false
@@ -4549,7 +4572,7 @@ func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
 	defer mockIsSegBlocked.UnPatch()
 	mockListLoaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer mockListLoaded.UnPatch()
-	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true).Build()
+	mockChannelExists := mockey.Mock((*datacoord.Catalog).ChannelExists).Return(true, nil).Build()
 	defer mockChannelExists.UnPatch()
 	mockDropSegment := mockey.Mock((*datacoord.Catalog).DropSegment).To(func(c *datacoord.Catalog, ctx context.Context, segment *datapb.SegmentInfo) error {
 		droppedSegmentIDs = append(droppedSegmentIDs, segment.ID)
@@ -5269,7 +5292,8 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 	t.Run("import segment not GCed when commit_timestamp > cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:    catalog,
@@ -5294,7 +5318,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment GCed when commit_timestamp <= cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.On("ChannelExists", mock.Anything, mock.Anything).Return(true)
+		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
+		defer channelExists.UnPatch()
 
 		m := &meta{
 			catalog:    catalog,
