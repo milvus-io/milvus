@@ -65,6 +65,112 @@ ExpectLegacyRoundTrip(std::string_view backend_name,
     EXPECT_EQ(hits.count(), 2);
 }
 
+template <typename T>
+void
+CheckCachedSorted(std::string_view backend_name,
+                  ScalarTestData<T> data,
+                  T key) {
+    const auto& backend = ScalarReaderBackends().Get<T>(backend_name);
+    auto artifact = BuildSorted(backend, std::move(data));
+    for (const bool mmap : {false, true}) {
+        for (const bool packed : {false, true}) {
+            for (const bool async : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << packed << async << mmap);
+                auto staging = storage::LocalDirectory::CreateOwned(
+                    std::filesystem::temp_directory_path().string(),
+                    "sorted-cache-XXXXXX",
+                    "Sorted cache test");
+                const auto persisted =
+                    packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+                auto source = [&]() -> OpenedIndexSource {
+                    if (!packed) {
+                        return LegacyIndexSource{
+                            std::make_shared<TestArtifactSource>(
+                                persisted, storage::Generation::V1V2),
+                            async};
+                    }
+                    auto input = std::make_shared<storage::RemoteInputStream>(
+                        std::make_shared<arrow::io::BufferReader>(
+                            MakePackedArtifactBuffer(persisted)));
+                    if (async) {
+                        return PackedIndexSource{std::shared_ptr<
+                            storage::AsyncIndexEntryReader>(
+                            folly::coro::blockingWait(
+                                folly::coro::co_withExecutor(
+                                    storage::ResolveAsyncLoadExecutor(
+                                        {}, proto::common::LoadPriority::HIGH),
+                                    storage::AsyncIndexEntryReader::Open(
+                                        input,
+                                        0,
+                                        proto::common::LoadPriority::HIGH))))};
+                    }
+                    return PackedIndexSource{
+                        std::shared_ptr<storage::IndexEntryReader>(
+                            storage::IndexEntryReader::Open(input,
+                                                            input->Size()))};
+                }();
+                storage::LoadOptions options;
+                options.params = backend.LoadParams({.row_count = 4});
+                options.enable_mmap = mmap;
+                options.mmap_dir_path = staging->Path();
+                IndexCacheConfig cache{
+                    staging->Path(),
+                    cachinglayer::Meta{
+                        mmap ? cachinglayer::StorageType::DISK
+                             : cachinglayer::StorageType::MEMORY,
+                        cachinglayer::CellIdMappingMode::IDENTICAL,
+                        cachinglayer::CellDataType::OTHER,
+                        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                        true},
+                    {1024 * 1024, 1024 * 1024},
+                    {},
+                    4096};
+                auto index = LoaderRegistry::Instance()
+                                 .Lookup(backend.Family())
+                                 .Load({std::move(source), options, cache});
+                EXPECT_EQ(index->Metadata().count, 4);
+                folly::CancellationSource cancellation;
+                cancellation.requestCancellation();
+                OpContext cancelled(cancellation.getToken());
+                auto reader = index->CreateReader(&cancelled);
+                EXPECT_EQ(reader->Count(), 4);
+                EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                const auto* nulls =
+                    dynamic_cast<const INullReader*>(reader.get());
+                ASSERT_NE(nulls, nullptr);
+                ExpectSegcoreError(ErrorCode::FollyCancel,
+                                   [&] { (void)nulls->IsNull(); });
+                index->CancelWarmup();
+                OpContext retry;
+                reader = index->CreateReader(&retry);
+                index.reset();
+                nulls = dynamic_cast<const INullReader*>(reader.get());
+                ASSERT_NE(nulls, nullptr);
+                const auto result = nulls->IsNull();
+                EXPECT_EQ(result.count(), 1);
+                EXPECT_TRUE(result[3]);
+                const auto* predicate =
+                    dynamic_cast<const IScalarPredicateReader<T>*>(
+                        reader.get());
+                ASSERT_NE(predicate, nullptr);
+                EXPECT_EQ(predicate->In(1, &key).count(), 2);
+                EXPECT_EQ(predicate->NotIn(1, &key).count(), 1);
+                EXPECT_EQ(predicate->Range(key, CompareOp::Equal).count(), 2);
+            }
+        }
+    }
+}
+
+TEST(SortedIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    ScalarTestData<int64_t> numbers({1, 2, 2, 3});
+    numbers.validity.reset(3);
+    CheckCachedSorted<int64_t>("SortedInt64", std::move(numbers), 2);
+    ScalarTestData<std::string_view> strings({"a", "b", "b", "c"});
+    strings.validity.reset(3);
+    CheckCachedSorted<std::string_view>(
+        "SortedVarchar", std::move(strings), "b");
+}
+
 TEST(SortedIndexArtifactTest, LegacyNumericRoundTripRebuildsAuxiliaryState) {
     ScalarTestData<int64_t> data({1, 2, 2, 3});
     data.validity_present = false;

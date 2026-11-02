@@ -25,6 +25,8 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
@@ -281,6 +283,10 @@ class SortedIndex final : public IIndex,
                           public std::enable_shared_from_this<SortedIndex<T>> {
  public:
     explicit SortedIndex(typename SortedIndexStorage<T>::OpenArgs args);
+    explicit SortedIndex(std::shared_ptr<const SortedIndexStorage<T>> storage);
+    SortedIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<SortedIndexStorage<T>>> slot,
+        IndexMetadata metadata);
 
     IndexMetadata
     Metadata() const override;
@@ -289,12 +295,19 @@ class SortedIndex final : public IIndex,
     CreateReader(milvus::OpContext* op_ctx) const override;
 
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class SortedIndexReader<T>;
-    SortedIndexStorage<T> storage_;
+    std::shared_ptr<const SortedIndexStorage<T>>
+    PinStorage(milvus::OpContext* op_ctx) const;
+
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<SortedIndexStorage<T>>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const SortedIndexStorage<T>>, CachedStorage>
+        storage_;
 };
 
 template <typename T>
@@ -371,8 +384,9 @@ class SortedIndexReader final
               std::enable_if_t<std::is_same_v<U, std::string_view>, int> = 0>
     TargetBitmap
     PatternMatchImpl(std::string_view pattern, PatternOp op) const {
-        return index_->storage_.values.PatternMatch(
-            index_->storage_.state.total_num_rows, pattern, op);
+        const auto storage = index_->PinStorage(op_ctx_);
+        return storage->values.PatternMatch(
+            storage->state.total_num_rows, pattern, op);
     }
 
     std::shared_ptr<const SortedIndex<T>> index_;

@@ -205,3 +205,5 @@ before pinning, while count/type/capabilities come from validated packed metadat
 The existing heap/mmap decoding and candidate semantics are unchanged.
 
 RTree 同样把整份 Boost 树和 validity 数据作为一个缓存 cell，由请求 Reader 在查询时 pin。Count 使用加载参数中已有的权威行数，不读取索引文件。向调用方返回 validity 时，使用共享句柄保留对应 cell 的 pin，直到调用方释放句柄；普通 Candidates 和空值查询只在本次调用期间持有 pin。Growing 的分片和 validity 共享方式保持不变。
+
+Sorted 的数值和字符串索引均直接缓存各自的 `SortedIndexStorage<T>`，包括排序数据、validity 和反向坐标表。请求 Reader 的查询及 Gather 回调在同一次 storage pin 内完成；返回的 Lookup 值仍然拥有自己的数据。已解析的计数和能力保留在 Index 上，CreateReader 与元数据访问不加载 cell。JSON projection 暂留原加载路径，后续随 sidecar 一起迁移。
