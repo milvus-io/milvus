@@ -25,9 +25,7 @@ def schema_access_client(request):
 
 
 def snapshot(stub, name):
-    response = stub.DescribeCollection(
-        milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60
-    )
+    response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60)
     assert response.status.code == 0, response.status
     return response.collectionID, response.schema.version
 
@@ -47,16 +45,19 @@ def create_collection(client, name):
 def row(pk, value):
     past, future = "2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z"
     return {
-        "id": pk, "value": value, "vector": [float(pk), 0.0, 0.0, 0.0],
+        "id": pk,
+        "value": value,
+        "vector": [float(pk), 0.0, 0.0, 0.0],
         "expiry": past if pk == 1 else future,
         "next_expiry": future if pk == 1 else past,
     }
 
 
 def ids(client, name):
-    return sorted(r["id"] for r in client.query(
-        name, filter="id >= 0", output_fields=["id"], consistency_level="Strong", timeout=60
-    ))
+    return sorted(
+        r["id"]
+        for r in client.query(name, filter="id >= 0", output_fields=["id"], consistency_level="Strong", timeout=60)
+    )
 
 
 @pytest.mark.tags(CaseLabel.L1)
@@ -93,8 +94,14 @@ def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
     # Partial update performs an internal schema-bound read; vector output
     # exercises Search's field-refill/requery path on the legacy backend.
     client.upsert(name, {"id": 2, "value": 22}, partial_update=True, timeout=60)
-    result = client.search(name, data=[[2.0, 0.0, 0.0, 0.0]], limit=2,
-                           output_fields=["value", "vector"], consistency_level="Strong", timeout=60)
+    result = client.search(
+        name,
+        data=[[2.0, 0.0, 0.0, 0.0]],
+        limit=2,
+        output_fields=["value", "vector"],
+        consistency_level="Strong",
+        timeout=60,
+    )
     assert result[0][0]["id"] == 2
     assert result[0][0]["entity"]["value"] == 22
     client.delete(name, filter="value >= 20", timeout=60)
