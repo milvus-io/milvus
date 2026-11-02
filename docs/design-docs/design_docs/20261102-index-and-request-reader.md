@@ -177,3 +177,11 @@ Loader migration status: family loaders and `LoaderEntry::Load` now return
 metadata across request readers. Segment translators still create a reader at
 their existing cache boundary as a transitional adapter; the segment inventory
 and concrete storage caches have not switched yet.
+
+Marisa now supports resident storage or a typed `CacheSlot<MarisaIndexStorage>`.
+Its request reader pins storage once per operation, including the complete
+`Gather` callback scope. Known count/type/capabilities remain available without
+loading; an unknown count is read from storage with the request context. A
+permanently resident slot uses the cache's borrow fast path. This implements the
+query-side boundary; production loader and segment construction of these slots
+is still pending, so existing loads continue to use resident Marisa storage.

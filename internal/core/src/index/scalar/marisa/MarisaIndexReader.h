@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
 
 #include <marisa.h>
 
@@ -37,6 +38,11 @@
 
 // Trie-backed string predicates, patterns, reverse lookup, and null queries.
 // The reader is row-level only: it has no nested-mode constructor input.
+
+namespace milvus::cachinglayer {
+template <typename T>
+class CacheSlot;
+}
 
 namespace milvus::storage {
 class LocalDirectory;
@@ -104,6 +110,15 @@ class MarisaIndex final : public IIndex,
  public:
     explicit MarisaIndex(std::shared_ptr<const MarisaIndexStorage> storage);
 
+    /** @brief Retain a cold storage slot; metadata and reader creation do no I/O.
+     * @param count Known row count, or nullopt for legacy artifacts without it.
+     * @note The slot must load the same immutable index version on every reload.
+     */
+    MarisaIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<MarisaIndexStorage>> slot,
+        DataType value_type,
+        std::optional<int64_t> count);
+
     IndexMetadata
     Metadata() const override;
 
@@ -111,12 +126,22 @@ class MarisaIndex final : public IIndex,
     CreateReader(milvus::OpContext* op_ctx) const override;
 
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class MarisaIndexReader;
-    std::shared_ptr<const MarisaIndexStorage> storage_;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<MarisaIndexStorage>> slot;
+        DataType value_type;
+        std::optional<int64_t> count;
+    };
+
+    // Retains the exact cache cell until the query operation finishes.
+    std::shared_ptr<const MarisaIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+
+    std::variant<std::shared_ptr<const MarisaIndexStorage>, CachedStorage>
+        storage_;
 };
 
 class MarisaIndexReader final : public IIndexReaderBase,
@@ -189,17 +214,6 @@ class MarisaIndexReader final : public IIndexReaderBase,
     friend class MarisaIndex;
     MarisaIndexReader(std::shared_ptr<const MarisaIndex> index,
                       milvus::OpContext* op_ctx);
-
-    size_t
-    LookupKeyId(std::string_view value) const;
-
-    std::vector<size_t>
-    PrefixMatchKeyIds(std::string_view prefix) const;
-
-    // marisa's key order is not always lexicographic; range paths choose the
-    // appropriate route based on this result.
-    bool
-    InLexicographicOrder() const;
 
     std::shared_ptr<const MarisaIndex> index_;
     milvus::OpContext* const op_ctx_;
