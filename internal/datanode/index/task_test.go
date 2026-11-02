@@ -270,6 +270,10 @@ func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
 func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+	suite.Zero(params.CommonCfg.StorageTalonMode.GetAsUint32())
 
 	var captured *indexcgopb.BuildIndexInfo
 	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
@@ -291,6 +295,8 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 		},
 		StorageConfig: &indexpb.StorageConfig{
 			StorageType:                 "minio",
+			AccessKeyID:                 "request-access-key",
+			SecretAccessKey:             "request-secret-key",
 			MaxConnections:              237,
 			TalonMode:                   2,
 			TalonSmallReadThreshold:     65536,
@@ -300,21 +306,43 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 			TalonEnableForExternalTable: true,
 		},
 	}
-	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
-	task.newIndexParams = map[string]string{common.IndexTypeKey: "FLAT"}
-	task.newTypeParams = map[string]string{"dim": "128"}
-	task.tr = timerecord.NewTimeRecorder("test-max-connections")
+	for _, tc := range []struct {
+		name        string
+		localStages string
+		mask        uint32
+	}{
+		{name: "legacy", localStages: "load_open", mask: 0},
+		{name: "all", localStages: "load_open", mask: ^uint32(0)},
+		{name: "load_open", localStages: "all", mask: 1},
+	} {
+		suite.Run(tc.name, func() {
+			suite.Require().NoError(params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, tc.localStages))
+			for _, incomingMode := range []uint32{0, 1, 2} {
+				req.StorageConfig.TalonMode = incomingMode
+				req.StorageConfig.TalonEnabledStages = tc.mask
+				task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
+				task.newIndexParams = map[string]string{common.IndexTypeKey: "FLAT"}
+				task.newTypeParams = map[string]string{"dim": "128"}
+				task.tr = timerecord.NewTimeRecorder("test-max-connections")
 
-	err := task.Execute(ctx)
-	suite.NoError(err)
-	suite.Require().NotNil(captured)
-	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
-	suite.Equal(uint32(2), captured.GetStorageConfig().GetTalonMode())
-	suite.Equal(uint32(65536), captured.GetStorageConfig().GetTalonSmallReadThreshold())
-	suite.Equal("talon:7000", captured.GetStorageConfig().GetTalonCoordinator())
-	suite.Equal(uint32(8388608), captured.GetStorageConfig().GetTalonBlockSize())
-	suite.Equal(uint32(32), captured.GetStorageConfig().GetTalonMaxIdlePerAddr())
-	suite.True(captured.GetStorageConfig().GetTalonEnableForExternalTable())
+				err := task.Execute(ctx)
+				suite.NoError(err)
+				suite.Require().NotNil(captured)
+				suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
+				suite.Equal(incomingMode, captured.GetStorageConfig().GetTalonMode())
+				suite.Equal(tc.mask, captured.GetStorageConfig().GetTalonEnabledStages())
+				suite.Equal("request-access-key", captured.GetStorageConfig().GetAccessKeyID())
+				suite.Equal("request-secret-key", captured.GetStorageConfig().GetSecretAccessKey())
+				suite.Equal(uint32(65536), captured.GetStorageConfig().GetTalonSmallReadThreshold())
+				suite.Equal("talon:7000", captured.GetStorageConfig().GetTalonCoordinator())
+				suite.Equal(uint32(8388608), captured.GetStorageConfig().GetTalonBlockSize())
+				suite.Equal(uint32(32), captured.GetStorageConfig().GetTalonMaxIdlePerAddr())
+				suite.True(captured.GetStorageConfig().GetTalonEnableForExternalTable())
+				suite.Equal(incomingMode, req.GetStorageConfig().GetTalonMode())
+				suite.Equal(tc.mask, req.GetStorageConfig().GetTalonEnabledStages())
+			}
+		})
+	}
 }
 
 func TestIndexBuildTask(t *testing.T) {
@@ -424,6 +452,10 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+	defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+	suite.Zero(params.CommonCfg.StorageTalonMode.GetAsUint32())
 
 	var captured *clusteringpb.StorageConfig
 	patch := mockey.Mock(analyzecgowrapper.Analyze).To(
@@ -443,6 +475,8 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 		Dim:          128,
 		StorageConfig: &indexpb.StorageConfig{
 			StorageType:                 "minio",
+			AccessKeyID:                 "request-access-key",
+			SecretAccessKey:             "request-secret-key",
 			RootPath:                    "files",
 			MaxConnections:              237,
 			TalonMode:                   2,
@@ -453,23 +487,45 @@ func (suite *AnalyzeTaskSuite) TestMaxConnectionsReachesAnalyze() {
 			TalonEnableForExternalTable: true,
 		},
 	}
-	task := &analyzeTask{
-		ctx:    ctx,
-		cancel: cancel,
-		req:    req,
-		tr:     timerecord.NewTimeRecorder("test-analyze-max-connections"),
-	}
+	for _, tc := range []struct {
+		name        string
+		localStages string
+		mask        uint32
+	}{
+		{name: "legacy", localStages: "load_open", mask: 0},
+		{name: "all", localStages: "load_open", mask: ^uint32(0)},
+		{name: "load_open", localStages: "all", mask: 1},
+	} {
+		suite.Run(tc.name, func() {
+			suite.Require().NoError(params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, tc.localStages))
+			for _, incomingMode := range []uint32{0, 1, 2} {
+				req.StorageConfig.TalonMode = incomingMode
+				req.StorageConfig.TalonEnabledStages = tc.mask
+				task := &analyzeTask{
+					ctx:    ctx,
+					cancel: cancel,
+					req:    req,
+					tr:     timerecord.NewTimeRecorder("test-analyze-max-connections"),
+				}
 
-	err := task.Execute(ctx)
-	suite.NoError(err)
-	suite.Require().NotNil(captured)
-	suite.Equal(uint32(237), captured.GetMaxConnections())
-	suite.Equal(uint32(2), captured.GetTalonMode())
-	suite.Equal(uint32(65536), captured.GetTalonSmallReadThreshold())
-	suite.Equal("talon:7000", captured.GetTalonCoordinator())
-	suite.Equal(uint32(8388608), captured.GetTalonBlockSize())
-	suite.Equal(uint32(32), captured.GetTalonMaxIdlePerAddr())
-	suite.True(captured.GetTalonEnableForExternalTable())
+				err := task.Execute(ctx)
+				suite.NoError(err)
+				suite.Require().NotNil(captured)
+				suite.Equal(uint32(237), captured.GetMaxConnections())
+				suite.Equal(incomingMode, captured.GetTalonMode())
+				suite.Equal(tc.mask, captured.GetTalonEnabledStages())
+				suite.Equal("request-access-key", captured.GetAccessKeyID())
+				suite.Equal("request-secret-key", captured.GetSecretAccessKey())
+				suite.Equal(uint32(65536), captured.GetTalonSmallReadThreshold())
+				suite.Equal("talon:7000", captured.GetTalonCoordinator())
+				suite.Equal(uint32(8388608), captured.GetTalonBlockSize())
+				suite.Equal(uint32(32), captured.GetTalonMaxIdlePerAddr())
+				suite.True(captured.GetTalonEnableForExternalTable())
+				suite.Equal(incomingMode, req.GetStorageConfig().GetTalonMode())
+				suite.Equal(tc.mask, req.GetStorageConfig().GetTalonEnabledStages())
+			}
+		})
+	}
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

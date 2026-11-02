@@ -67,6 +67,7 @@ AdaptStorageConfig(const proto::indexcgo::StorageConfig& config) {
     result.tls_min_version = config.ssl_tls_min_version();
     result.use_crc32c_checksum = config.use_crc32c_checksum();
     result.talon_mode = config.talon_mode();
+    result.talon_enabled_stages = config.talon_enabled_stages();
     result.talon_small_read_threshold = config.talon_small_read_threshold();
     result.talon_coordinator = config.talon_coordinator();
     result.talon_block_size = config.talon_block_size();

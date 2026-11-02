@@ -64,7 +64,13 @@ StorageV2FSCache::Get(const Key& key) {
     }
     props[PROPERTY_FS_USE_CRC32C_CHECKSUM] = key.use_crc32c_checksum;
     if (key.storage_type != "local") {
-        props[PROPERTY_FS_TALON_MODE] = key.talon_mode;
+        // This shared FS serves arbitrary operations. Restricted policies are
+        // selected only at the corresponding operation's reader entry point.
+        props[PROPERTY_FS_TALON_MODE] =
+            (key.talon_enabled_stages == 0 ||
+             key.talon_enabled_stages == kTalonStagesAll)
+                ? key.talon_mode
+                : uint32_t{0};
         props[PROPERTY_FS_TALON_COORDINATOR] = key.talon_coordinator;
         if (key.talon_small_read_threshold > 0) {
             props[PROPERTY_FS_TALON_SMALL_READ_THRESHOLD] =
