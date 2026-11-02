@@ -29,6 +29,11 @@
 #include <vector>
 
 #include "index/Families.h"
+#include "index/Utils.h"
+#include "index/scalar/json/JsonFlatIndexReader.h"
+#include "storage/artifact/LocalDirectory.h"
+#include "tantivy-wrapper.h"
+#include "test_utils/Constants.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
@@ -39,6 +44,38 @@
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
+TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
+    auto directory = storage::LocalDirectory::CreateOwned(
+        TestLocalPath, "json-owner-XXXXXX", "JSON ownership test");
+    auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+        "json", TantivyDataType::JSON, directory->Path().c_str(), 5, false, false);
+    const std::vector<Json> values{Json(std::string_view(R"({"flag":true})")),
+                                   Json(std::string_view(R"({"flag":false})"))};
+    engine->add_json_data(values.data(), values.size(), 0);
+    engine->finish();
+    engine->create_reader(SetBitsetSealed);
+    auto state = JsonFlatIndexReaderState::Create(
+        std::move(directory), std::move(engine), "",
+        std::make_shared<const std::vector<size_t>>(), true, 0, 0);
+    std::weak_ptr<const JsonFlatIndexReaderState> lifetime = state;
+    auto index = std::make_shared<JsonFlatIndex>(std::move(state));
+    EXPECT_EQ(index->Metadata().count, 2);
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* json = dynamic_cast<const IJsonIndexReader*>(second.get());
+    ASSERT_NE(json, nullptr);
+    auto exists = json->Exists("/flag");
+    ASSERT_EQ(exists.size(), 2);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
+
 namespace {
 
 JsonCastType

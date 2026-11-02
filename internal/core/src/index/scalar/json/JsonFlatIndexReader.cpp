@@ -1100,10 +1100,42 @@ class JsonStringPathReader final
 
 }  // namespace
 
-JsonFlatIndexReader::JsonFlatIndexReader(
-    std::shared_ptr<const JsonFlatIndexReaderState> state)
+cachinglayer::ResourceUsage
+JsonFlatIndexReaderState::CellByteSize() const {
+    return {HeapBytes(), FileBytes()};
+}
+
+JsonFlatIndex::JsonFlatIndex(std::shared_ptr<const JsonFlatIndexReaderState> state)
     : state_(std::move(state)) {
     AssertInfo(state_ != nullptr, "JSON flat reader requires shared state");
+}
+
+IndexMetadata
+JsonFlatIndex::Metadata() const {
+    return {ReaderCaps{.json_paths = true, .exact = true},
+            Domain::Row,
+            DataType::JSON,
+            static_cast<int64_t>(state_->Count())};
+}
+
+IIndexReaderBasePtr
+JsonFlatIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(new JsonFlatIndexReader(shared_from_this(), op_ctx));
+}
+
+void
+JsonFlatIndex::CancelWarmup() const {
+}
+
+JsonFlatIndexReader::JsonFlatIndexReader(
+    std::shared_ptr<const JsonFlatIndexReaderState> state)
+    : JsonFlatIndexReader(std::make_shared<JsonFlatIndex>(std::move(state)),
+                          nullptr) {
+}
+
+JsonFlatIndexReader::JsonFlatIndexReader(
+    std::shared_ptr<const JsonFlatIndex> index, milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
 JsonFlatIndexReader::~JsonFlatIndexReader() = default;
@@ -1120,7 +1152,7 @@ JsonFlatIndexReader::CoordDomain() const {
 
 int64_t
 JsonFlatIndexReader::Count() const {
-    return static_cast<int64_t>(state_->Count());
+    return static_cast<int64_t>(index_->state_->Count());
 }
 
 DataType
@@ -1132,31 +1164,31 @@ int64_t
 JsonFlatIndexReader::MemoryUsage() const {
     const auto own =
         ToUsageBytes(sizeof(JsonFlatIndexReader), "JSON flat root reader");
-    if (state_->HeapBytes() > std::numeric_limits<int64_t>::max() - own) {
+    if (index_->state_->HeapBytes() > std::numeric_limits<int64_t>::max() - own) {
         ThrowInfo(DataFormatBroken, "JSON flat reader memory size overflows");
     }
-    return own + state_->HeapBytes();
+    return own + index_->state_->HeapBytes();
 }
 
 cachinglayer::ResourceUsage
 JsonFlatIndexReader::CellByteSize() const {
-    return {MemoryUsage(), state_->FileBytes()};
+    return {MemoryUsage(), index_->state_->FileBytes()};
 }
 
 TargetBitmap
 JsonFlatIndexReader::IsNull() const {
-    return state_->FieldIsNull();
+    return index_->state_->FieldIsNull();
 }
 
 TargetBitmap
 JsonFlatIndexReader::IsNotNull() const {
-    return state_->FieldIsNotNull();
+    return index_->state_->FieldIsNotNull();
 }
 
 JsonResolvedReader
 JsonFlatIndexReader::Resolve(std::string_view path,
                              JsonCastType cast_type) const {
-    auto tantivy_path = ResolveTantivyPath(state_->RootPath(), path);
+    auto tantivy_path = ResolveTantivyPath(index_->state_->RootPath(), path);
     if (!tantivy_path) {
         return {};
     }
@@ -1164,16 +1196,16 @@ JsonFlatIndexReader::Resolve(std::string_view path,
     switch (cast_type.element_type()) {
         case JsonCastType::DataType::BOOL:
             return JsonResolvedReader::Owned(
-                std::make_unique<JsonBoolPathReader>(state_.get(),
+                std::make_unique<JsonBoolPathReader>(index_->state_.get(),
                                                      std::move(*tantivy_path)));
         case JsonCastType::DataType::DOUBLE:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonNumericPathReader>(
-                    state_.get(), std::move(*tantivy_path)));
+                    index_->state_.get(), std::move(*tantivy_path)));
         case JsonCastType::DataType::VARCHAR:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonStringPathReader>(
-                    state_.get(), std::move(*tantivy_path)));
+                    index_->state_.get(), std::move(*tantivy_path)));
         case JsonCastType::DataType::UNKNOWN:
         case JsonCastType::DataType::ARRAY:
         case JsonCastType::DataType::JSON:
@@ -1184,18 +1216,18 @@ JsonFlatIndexReader::Resolve(std::string_view path,
 
 TargetBitmap
 JsonFlatIndexReader::Exists(std::string_view path) const {
-    auto tantivy_path = ResolveTantivyPath(state_->RootPath(), path);
+    auto tantivy_path = ResolveTantivyPath(index_->state_->RootPath(), path);
     AssertInfo(tantivy_path.has_value(),
                "JSON Exists requires a path supported by CastTypesOf");
     TargetBitmap result(Count());
-    state_->Engine().json_exist_query(
+    index_->state_->Engine().json_exist_query(
         *tantivy_path, true, ::JsonExistValueType::Any, &result);
     return result;
 }
 
 std::vector<JsonCastType>
 JsonFlatIndexReader::CastTypesOf(std::string_view path) const {
-    if (!ResolveTantivyPath(state_->RootPath(), path)) {
+    if (!ResolveTantivyPath(index_->state_->RootPath(), path)) {
         return {};
     }
     return {JsonCastType::FromString("BOOL"),

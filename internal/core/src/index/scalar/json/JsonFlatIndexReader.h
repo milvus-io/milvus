@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 
@@ -72,6 +72,9 @@ class JsonFlatIndexReaderState final {
     int64_t
     FileBytes() const;
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
     TargetBitmap
     FieldIsNull() const;
 
@@ -105,6 +108,26 @@ class JsonFlatIndexReaderState final {
     uint32_t count_{0};
     int64_t heap_bytes_{0};
     int64_t file_bytes_{0};
+};
+
+/** @brief Owns one immutable JSON field index independently of its readers. */
+class JsonFlatIndex final : public IIndex,
+                            public std::enable_shared_from_this<JsonFlatIndex> {
+ public:
+    explicit JsonFlatIndex(std::shared_ptr<const JsonFlatIndexReaderState> state);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class JsonFlatIndexReader;
+    std::shared_ptr<const JsonFlatIndexReaderState> state_;
 };
 
 class JsonFlatIndexReader final : public IIndexReaderBase,
@@ -162,7 +185,12 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
     CastTypesOf(std::string_view path) const override;
 
  private:
-    std::shared_ptr<const JsonFlatIndexReaderState> state_;
+    friend class JsonFlatIndex;
+    JsonFlatIndexReader(std::shared_ptr<const JsonFlatIndex> index,
+                       milvus::OpContext* op_ctx);
+
+    std::shared_ptr<const JsonFlatIndex> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index
