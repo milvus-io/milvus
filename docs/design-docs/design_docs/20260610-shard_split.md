@@ -936,9 +936,13 @@ discovery, retry across pchannel reassignment, and term fencing.
       already `Adopting` or `Done` is left alone; an `Aborted` one is rolled
       forward, §5). It also records the
       targets with residues taken from the post-image, marks each target
-      added (`catalog.MarkChannelAdded`, an idempotent save; a target already
-      marked for removal by `DropVirtualChannel` is left alone, so a late
-      redelivery cannot revive it), and only then seeds each target's genesis
+      added (`catalog.MarkChannelAdded`, an idempotent save; a commit that
+      lands after the collection was dropped marks nothing, since
+      `DropVirtualChannel` deletes a target's flag with its data and a flag
+      written back would revive the guard for a channel whose checkpoint no
+      longer advances; a deleted flag reads the same as one never written, so
+      the drop is read off RootCoord's `DescribeCollection`, as the garbage
+      collector reads it), and only then seeds each target's genesis
       channel checkpoint from the target's own append result, only if the
       target has none. The mark goes before the seed, as in `WatchChannels`:
       it is what the garbage collector's `ChannelExists` guard reads to keep a

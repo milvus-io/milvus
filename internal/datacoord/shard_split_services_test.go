@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -54,9 +55,17 @@ const (
 func newShardSplitTestServer(t *testing.T) *Server {
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)
-	s := &Server{meta: m, shardSplitTasks: newShardSplitTasks()}
+	s := &Server{meta: m, shardSplitTasks: newShardSplitTasks(), broker: splitTestBroker(t)}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	return s
+}
+
+// splitTestBroker answers HasCollection as RootCoord does for the collection
+// of a split in flight: still there.
+func splitTestBroker(t *testing.T) *broker.MockBroker {
+	b := broker.NewMockBroker(t)
+	b.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	return b
 }
 
 func splitTestPosition(vchannel string, ts uint64) *msgpb.MsgPosition {
@@ -992,23 +1001,47 @@ func TestCommitShardSplitMarkFailureIsSystemErrorAndSeedsNothing(t *testing.T) {
 	assert.Nil(t, svr.meta.GetChannelCheckpoint(splitTestTarget1))
 }
 
-// A redelivery that arrives after the target's data has been dropped (its
-// collection dropped, DropVirtualChannel ran) must not overwrite the removal
-// tombstone with the added mark: that would revive the GC guard for a channel
-// whose checkpoint is gone and pin its Dropped segments in meta forever.
-func TestCommitShardSplitDoesNotReviveADroppedTarget(t *testing.T) {
+// A commit that lands after the collection was dropped marks nothing:
+// DropVirtualChannel deleted the targets' flags with their data, and a flag
+// written back would revive the GC guard for channels whose checkpoints no
+// longer advance, pinning their Dropped segments in meta and the collection's
+// cleanup behind them. A deleted flag reads the same as one never written, so
+// the drop is read off RootCoord, as the garbage collector reads it.
+func TestCommitShardSplitOnADroppedCollectionMarksNoTarget(t *testing.T) {
 	svr := newShardSplitTestServer(t)
 	ctx := context.Background()
-	require.NoError(t, svr.meta.UpdateDropChannelSegmentInfo(ctx, splitTestTarget0, nil))
-	require.True(t, svr.meta.catalog.ShouldDropChannel(ctx, splitTestTarget0))
+	gone := broker.NewMockBroker(t)
+	gone.EXPECT().HasCollection(mock.Anything, int64(100)).Return(false, nil)
+	svr.broker = gone
 
 	status, err := svr.CommitShardSplit(ctx, splitTestCommitRequest())
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	assert.True(t, svr.meta.catalog.ShouldDropChannel(ctx, splitTestTarget0))
 	assert.False(t, channelExists(t, svr.meta.catalog, splitTestTarget0))
-	assert.True(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
+	assert.False(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
+	// The record is still written: the drain and the adoption read it to
+	// finish the split on a dropped collection.
+	persisted, err := svr.meta.catalog.ListSplitShardTask(ctx)
+	require.NoError(t, err)
+	assert.Len(t, persisted, 1)
+}
+
+// Not knowing whether the collection is still there is a failed commit the
+// callback retries, not a guess either way: nothing is marked or seeded.
+func TestCommitShardSplitAvailabilityCheckFailureIsSystemErrorAndMarksNothing(t *testing.T) {
+	svr := newShardSplitTestServer(t)
+	down := broker.NewMockBroker(t)
+	down.EXPECT().HasCollection(mock.Anything, int64(100)).Return(false, errors.New("rootcoord down"))
+	svr.broker = down
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceInternal)
+	assert.False(t, channelExists(t, svr.meta.catalog, splitTestTarget0))
+	assert.False(t, channelExists(t, svr.meta.catalog, splitTestTarget1))
+	assert.Nil(t, svr.meta.GetChannelCheckpoint(splitTestTarget0))
+	assert.Nil(t, svr.meta.GetChannelCheckpoint(splitTestTarget1))
 }
 
 // The guard itself, on a real catalog: a compacted-away segment on a committed

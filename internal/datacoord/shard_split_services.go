@@ -305,21 +305,28 @@ func mergeCommittedSplitSources(ctx context.Context, taskID int64, recorded, com
 // output and duplicates them.
 //
 // The mark is an idempotent save of a constant, so a redelivered callback
-// writes the same value again. The one value it must not overwrite is the
-// removal tombstone DropVirtualChannel leaves in the same key once the target's
-// data has been dropped: re-marking a dropped channel added would revive the
-// guard for a channel whose checkpoint is gone, and its Dropped segments would
-// never leave the meta the collection's drop waits on. A target already marked
-// for removal is therefore left alone.
+// writes the same value again. The one commit that must not mark is one that
+// lands after the collection was dropped: DropVirtualChannel deletes a target's
+// flag along with its data, and a flag written back afterwards would revive
+// the guard for a channel whose checkpoint no longer advances, pinning its
+// Dropped segments in meta and the collection's cleanup behind them. A deleted
+// flag reads the same as one never written, so the drop is read off RootCoord
+// instead, the way the garbage collector reads it before recycling a
+// collection: a collection DescribeCollection no longer finds, dropping or
+// gone, gets no mark. Not knowing is a failed commit, retried by the callback,
+// not a guess either way.
 func (s *Server) markSplitTargetsAdded(ctx context.Context, req *datapb.CommitShardSplitRequest) error {
+	available, err := s.broker.HasCollection(ctx, req.GetCollectionId())
+	if err != nil {
+		return merr.Wrapf(err, "check that collection %d is still available", req.GetCollectionId())
+	}
+	if !available {
+		mlog.Warn(ctx, "the split's collection is dropping or gone, not marking its targets added",
+			mlog.Int64("splitTaskID", req.GetSplitTaskId()), mlog.Int64("collectionID", req.GetCollectionId()))
+		return nil
+	}
 	for _, target := range req.GetTargets() {
-		vchannel := target.GetVchannel()
-		if s.meta.catalog.ShouldDropChannel(ctx, vchannel) {
-			mlog.Warn(ctx, "a split target is already marked for removal, not marking it added",
-				mlog.Int64("splitTaskID", req.GetSplitTaskId()), mlog.String("vchannel", vchannel))
-			continue
-		}
-		if err := s.meta.catalog.MarkChannelAdded(ctx, vchannel); err != nil {
+		if err := s.meta.catalog.MarkChannelAdded(ctx, target.GetVchannel()); err != nil {
 			return err
 		}
 	}
