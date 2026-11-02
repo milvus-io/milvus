@@ -79,6 +79,12 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
     return field_name.substr(0, left);
 }
 
+ArrowSchemaPtr
+BuildFieldArrowSchema(const std::unordered_map<FieldId, FieldMeta>& fields,
+                      const std::vector<FieldId>& field_ids,
+                      bool use_field_ids,
+                      bool text_lob_as_binary = false);
+
 class Schema {
  public:
     Schema() = default;
@@ -416,7 +422,7 @@ class Schema {
     }
 
     const std::unordered_map<FieldId, FieldMeta>
-    get_field_metas(const std::vector<FieldId>& field_ids) {
+    get_field_metas(const std::vector<FieldId>& field_ids) const {
         std::unordered_map<FieldId, FieldMeta> field_metas;
         for (const auto& field_id : field_ids) {
             field_metas.emplace(field_id, operator[](field_id));
@@ -551,14 +557,21 @@ class Schema {
     }
 
     bool
-    ShouldLoadField(FieldId field_id) {
+    ShouldLoadRawField(FieldId field_id) const {
         if (bm25_function_output_fields_.count(field_id) > 0) {
             return false;
         }
         auto it = fields_.find(field_id);
-        if (it != fields_.end() && !it->second.NeedLoad()) {
-            return false;
-        }
+        return it == fields_.end() || it->second.NeedLoad();
+    }
+
+    bool
+    ShouldLoadField(FieldId field_id) const {
+        return ShouldLoadRawField(field_id) && IsFieldInLoadScope(field_id);
+    }
+
+    bool
+    IsFieldInLoadScope(FieldId field_id) const {
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 
