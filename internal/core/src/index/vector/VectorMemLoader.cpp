@@ -315,11 +315,12 @@ PopulateState(bool use_async,
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto entries = co_await ReadEntries(use_async, source, plan.all_names);
         auto empty = DecodeEmptyEmbeddingList(entries);
-        state.engine.SetDim(empty.dim);
-        state.engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
         const auto id_map_path = co_await stage_id_map_mmap_dir();
         const auto input = co_await ReadValidity(
             use_async, source, plan, params, id_map_path, entries);
+        RestoreLegacyEmptyEmbListOffsets(empty.offsets, input);
+        state.engine.SetDim(empty.dim);
+        state.engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
         if (input.validity.has_value()) {
             auto local_io = [&] {
                 const auto status = state.engine.native_index.ImportValidity(
