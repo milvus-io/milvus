@@ -17,8 +17,11 @@
 #include <algorithm>
 #include <atomic>
 #include <string_view>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -76,6 +79,8 @@
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "milvus-storage/common/arrow_util.h"
+#include "parquet/arrow/reader.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
@@ -390,12 +395,15 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto value_builder =
-                    static_cast<arrow::FixedSizeBinaryBuilder*>(
+                auto* fixed_builder =
+                    dynamic_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
-                AssertInfo(value_builder != nullptr,
-                           "value_builder must be FixedSizeBinaryBuilder for "
-                           "VectorArray");
+                auto* binary_builder = dynamic_cast<arrow::BinaryBuilder*>(
+                    list_builder->value_builder());
+                AssertInfo(
+                    fixed_builder != nullptr || binary_builder != nullptr,
+                    "VectorArray value builder must be "
+                    "FixedSizeBinaryBuilder or BinaryBuilder");
 
                 DataType element_type = DataType::NONE;
                 auto append_vector_array = [&](const VectorArray& array) {
@@ -425,11 +433,31 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                                "Failed to append list: {}",
                                status.ToString());
 
-                    int num_vectors = array.physical_length();
-                    if (num_vectors > 0) {
-                        auto ast = value_builder->AppendValues(
+                    AssertInfo(array.is_element_nullable() ==
+                                   (binary_builder != nullptr),
+                               "VectorArray element validity does not match "
+                               "Arrow builder type");
+                    if (binary_builder != nullptr) {
+                        const auto width = vector_bytes_per_element(
+                            array.get_element_type(), array.dim());
+                        auto bits = array.element_validity_view();
+                        size_t physical = 0;
+                        for (int j = 0; j < array.length(); ++j) {
+                            auto ast =
+                                bits[j] ? binary_builder->Append(
+                                              reinterpret_cast<const uint8_t*>(
+                                                  array.data()) +
+                                                  physical++ * width,
+                                              width)
+                                        : binary_builder->AppendNull();
+                            AssertInfo(ast.ok(),
+                                       "Failed to append vector element: {}",
+                                       ast.ToString());
+                        }
+                    } else if (array.physical_length() > 0) {
+                        auto ast = fixed_builder->AppendValues(
                             reinterpret_cast<const uint8_t*>(array.data()),
-                            num_vectors);
+                            array.physical_length());
                         AssertInfo(ast.ok(),
                                    "Failed to batch append vectors: {}",
                                    ast.ToString());
@@ -541,6 +569,16 @@ CreateArrowBuilder(DataType data_type) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta) {
+    auto result = arrow::MakeBuilder(GetArrowDataType(field_meta));
+    AssertInfo(result.ok(),
+               "failed to create Arrow builder for field {}: {}",
+               field_meta.get_name().get(),
+               result.status().ToString());
+    return std::shared_ptr<arrow::ArrayBuilder>(std::move(*result));
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
@@ -754,6 +792,12 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta) {
+    return arrow::schema({arrow::field(
+        "val", GetArrowDataType(field_meta), field_meta.is_nullable())});
 }
 
 std::shared_ptr<arrow::Schema>
@@ -1663,6 +1707,23 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 
         // create a schema with only the field id
         auto field_schema = reader->schema()->field(col_offset)->Copy();
+        if (data_type == DataType::ARRAY &&
+            field_schema->type()->id() == arrow::Type::LIST) {
+            const auto outer =
+                std::static_pointer_cast<arrow::ListType>(field_schema->type());
+            bool nullable_element = outer->value_field()->nullable();
+            if (outer->value_type()->id() == arrow::Type::LIST) {
+                const auto inner = std::static_pointer_cast<arrow::ListType>(
+                    outer->value_type());
+                nullable_element |= inner->value_field()->nullable();
+            }
+            if (nullable_element) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "scalar index build on element-nullable array "
+                          "field {} is not supported yet",
+                          field_id);
+            }
+        }
         auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
         AssertInfo(status.ok(),
@@ -1781,7 +1842,16 @@ IterateFieldDataFromManifest(
     std::shared_ptr<arrow::Schema> reader_schema = nullptr;
     if (!is_external) {
         std::shared_ptr<arrow::Schema> arrow_schema;
-        if (IsVectorDataType(data_type.value())) {
+        if ((data_type.value() == DataType::ARRAY ||
+             data_type.value() == DataType::VECTOR_ARRAY) &&
+            (field_meta.field_schema.element_nullable() ||
+             field_meta.field_schema.has_type_schema())) {
+            auto schema = field_meta.field_schema;
+            if (schema.fieldid() == 0) {
+                schema.set_fieldid(field_meta.field_id);
+            }
+            arrow_schema = CreateArrowSchema(FieldMeta::ParseFrom(schema));
+        } else if (IsVectorDataType(data_type.value())) {
             if (data_type.value() == DataType::VECTOR_ARRAY) {
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
@@ -2316,6 +2386,57 @@ GetFieldIDList(FieldId column_group_id,
                "failed to close file reader when get field id list from {}",
                filepath);
     return field_id_list;
+}
+
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath) {
+    // Opening the reader reads the footer only; no column data is fetched.
+    auto reader_result = milvus_storage::MakeArrowFileReader(
+        *fs, filepath, GetReaderProperties(), GetArrowReaderProperties());
+    if (!reader_result.ok()) {
+        // Keep the classification the filesystem attached (a transient
+        // storage failure stays retriable, a missing object stays permanent).
+        const auto error =
+            milvus_storage::ToSegcoreError(reader_result.status());
+        ThrowInfo(error.get_error_code(),
+                  "failed to read footer of packed file {}: {}",
+                  filepath,
+                  reader_result.status().ToString());
+    }
+    std::shared_ptr<arrow::Schema> file_schema;
+    auto status = reader_result.ValueOrDie()->GetSchema(&file_schema);
+    if (!status.ok()) {
+        const auto error = milvus_storage::ToSegcoreError(status);
+        ThrowInfo(error.get_error_code(),
+                  "failed to read schema of packed file {}: {}",
+                  filepath,
+                  status.ToString());
+    }
+    std::vector<int64_t> field_ids;
+    field_ids.reserve(file_schema->num_fields());
+    for (const auto& field : file_schema->fields()) {
+        auto metadata = field->metadata();
+        std::string value;
+        if (metadata != nullptr) {
+            auto result = metadata->Get(milvus_storage::ARROW_FIELD_ID_KEY);
+            if (result.ok()) {
+                value = result.ValueUnsafe();
+            }
+        }
+        char* end = nullptr;
+        errno = 0;
+        auto field_id = std::strtoll(value.c_str(), &end, 10);
+        if (value.empty() || *end != '\0' || errno == ERANGE) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "column {} of packed file {} has no valid {} metadata",
+                      field->name(),
+                      filepath,
+                      milvus_storage::ARROW_FIELD_ID_KEY);
+        }
+        field_ids.push_back(field_id);
+    }
+    return field_ids;
 }
 
 std::string
@@ -2909,30 +3030,120 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     // List variants -> LIST (recursively canonicalize values)
     if (tid == arrow::Type::LARGE_LIST || tid == arrow::Type::LIST_VIEW ||
         tid == arrow::Type::LIST) {
+        const auto& data = array->data();
+        if (array->offset() < 0 || array->length() < 0 ||
+            array->offset() >
+                std::numeric_limits<int64_t>::max() - array->length() ||
+            data->buffers.empty()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: invalid list range");
+        }
+        auto require_buffer_range = [&](size_t index,
+                                        uint64_t count,
+                                        size_t width) {
+            if (count == 0) {
+                return;
+            }
+            const auto first = static_cast<uint64_t>(array->offset());
+            if (data->buffers.size() <= index ||
+                data->buffers[index] == nullptr ||
+                data->buffers[index]->size() < 0 ||
+                first > static_cast<uint64_t>(data->buffers[index]->size()) /
+                            width ||
+                count > static_cast<uint64_t>(data->buffers[index]->size()) /
+                                width -
+                            first) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list buffer {} is "
+                          "shorter than the declared range",
+                          index);
+            }
+        };
+        const auto& bitmap = data->buffers[0];
+        if (bitmap == nullptr && data->null_count > 0) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: null list has no bitmap");
+        }
+        if (bitmap != nullptr) {
+            const auto bits = static_cast<uint64_t>(array->offset()) +
+                              static_cast<uint64_t>(array->length());
+            const auto bytes = bits / 8 + (bits % 8 != 0);
+            if (bitmap->size() < 0 ||
+                bytes > static_cast<uint64_t>(bitmap->size())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list validity buffer "
+                          "is shorter than the declared range");
+            }
+        }
+        require_buffer_range(
+            1,
+            static_cast<uint64_t>(array->length()) +
+                (tid == arrow::Type::LIST_VIEW ? 0 : 1),
+            tid == arrow::Type::LARGE_LIST ? sizeof(int64_t) : sizeof(int32_t));
+        if (tid == arrow::Type::LIST_VIEW) {
+            require_buffer_range(
+                2, static_cast<uint64_t>(array->length()), sizeof(int32_t));
+        }
         std::shared_ptr<arrow::Array> values;
         std::vector<std::pair<int64_t, int64_t>> ranges;
         ranges.reserve(array->length());
+        auto append_range = [&](int64_t i, int64_t start, int64_t length) {
+            if (values == nullptr || values->length() < 0 || start < 0 ||
+                length < 0 || start > values->length() ||
+                length > values->length() - start) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list row {} exceeds "
+                          "child values",
+                          i);
+            }
+            if (array->IsNull(i) && length != 0) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: null list row {} has "
+                          "a non-empty child range",
+                          i);
+            }
+            ranges.emplace_back(start, start + length);
+        };
         if (tid == arrow::Type::LIST) {
             auto la = std::static_pointer_cast<arrow::ListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else if (tid == arrow::Type::LARGE_LIST) {
             auto la = std::static_pointer_cast<arrow::LargeListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else {
             auto lv = std::static_pointer_cast<arrow::ListViewArray>(array);
             values = lv->values();
             for (int64_t i = 0; i < lv->length(); ++i) {
                 int64_t s = lv->value_offset(i);
-                ranges.emplace_back(s, s + lv->value_length(i));
+                append_range(i, s, lv->value_length(i));
             }
+        }
+
+        if (values == nullptr) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: list has no child values");
         }
 
         auto canonical_values = CanonicalizeArrowVariants(values);
@@ -2954,8 +3165,11 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             if (!array->IsNull(i)) {
                 auto [s, e] = ranges[i];
                 int64_t len = e - s;
-                AssertInfo(cur + len <= INT32_MAX,
-                           "CanonicalizeArrowVariants: int32 offset overflow");
+                if (len > INT32_MAX - cur) {
+                    ThrowInfo(
+                        ErrorCode::DataFormatBroken,
+                        "CanonicalizeArrowVariants: int32 offset overflow");
+                }
                 slices.push_back(canonical_values->Slice(s, len));
                 cur += static_cast<int32_t>(len);
             }
@@ -2978,7 +3192,8 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
         auto offsets_buf =
             std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
         return std::make_shared<arrow::ListArray>(
-            arrow::list(canonical_values->type()),
+            arrow::list(
+                array->type()->field(0)->WithType(canonical_values->type())),
             array->length(),
             offsets_buf,
             concat_values,
@@ -3716,6 +3931,13 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
 
     ValidateScalarArrowType(data_type, array, field_meta);
 
+    if (field_meta.is_native_list_array()) {
+        if (type_id != arrow::Type::LIST) {
+            AssertExternalArrowType(array, "list", field_meta);
+        }
+        return array;
+    }
+
     // Dense vectors
     if (IsVectorDataType(data_type) &&
         !IsSparseFloatVectorDataType(data_type) &&
@@ -3739,6 +3961,14 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
         if (type_id == arrow::Type::LIST) {
+            if (field_meta.is_element_nullable()) {
+                auto list = std::dynamic_pointer_cast<arrow::ListArray>(array);
+                if (std::dynamic_pointer_cast<arrow::BinaryArray>(
+                        list->values()) == nullptr) {
+                    AssertExternalArrowType(array, "list<binary>", field_meta);
+                }
+                return array;
+            }
             auto result = NormalizeVectorArrayInner(
                 {array}, element_type, dim, field_meta);
             return result[0];

@@ -658,6 +658,99 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.False(estimate.emptyOnStaleSchema)
 }
 
+func (s *indexTaskSuite) TestFieldSchemaForIndexBuildFollowsStructNullability() {
+	for _, parentNullable := range []bool{false, true} {
+		child := &schemapb.FieldSchema{
+			FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+			Nullable: !parentNullable,
+		}
+		schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: parentNullable, Fields: []*schemapb.FieldSchema{child},
+		}}}
+		buildField := fieldSchemaForIndexBuild(schema, child)
+		s.Equal(parentNullable, buildField.GetNullable())
+		s.NotSame(child, buildField)
+		s.Equal(!parentNullable, child.GetNullable())
+
+		child.Nullable = parentNullable
+		s.Same(child, fieldSchemaForIndexBuild(schema, child))
+	}
+	plain := &schemapb.FieldSchema{FieldID: s.fieldID + 1, Nullable: false}
+	s.Same(plain, fieldSchemaForIndexBuild(&schemapb.CollectionSchema{}, plain))
+}
+
+func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: false, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, current, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, nil, schema, child))
+	// A non-element-nullable child cannot have been added by online schema
+	// evolution. Its missing binlog is not evidence of an empty added field.
+	child.ElementNullable = false
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	// A whole nullable struct added after the segment was written: its old
+	// rows are null struct rows, so the missing binlog is an empty field even
+	// for a child that is not element-nullable.
+	child.Nullable = true
+	schema.StructArrayFields[0].Nullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	child.ElementNullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+
+	// Top-level non-nullable fields retain the existing missing-binlog error.
+	topLevel := &schemapb.FieldSchema{FieldID: s.fieldID + 1, DataType: schemapb.DataType_ArrayOfVector}
+	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+	topLevel.Nullable = true
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+}
+
+// A nullable struct added with AddCollectionStructField after a segment was
+// flushed: its ordinary (not element-nullable) ArrayOfVector child has no
+// binlog in that segment, and the index build must treat it as empty instead
+// of failing the task.
+func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForAddedNullableStruct() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: true, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	// The segment-version and missing-binlog conditions still apply.
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	_, err = estimateVectorArrayElementCountForIndexBuild(current, schema, child)
+	s.ErrorIs(err, errVectorArrayFieldBinlogNotFound)
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
+}
+
 func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
 	const dim = 128
 
@@ -1127,4 +1220,131 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
+}
+
+// An element-nullable VectorArray uses the valid element count recorded in
+// the segment Statistics for the minimum-vector check; segments without the
+// count keep the binlog-size estimate.
+func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayUsesValidElementCount() {
+	const (
+		dim        = 128
+		enoughRows = int64(10000)
+	)
+	elementBytes := int64(dim * 4)
+	estimateBytes := func(vectors int64) int64 { return enoughRows*5 + vectors*elementBytes + 1 }
+
+	tests := []struct {
+		name              string
+		elementNullable   bool
+		binlogVectors     int64 // vectors the byte-size estimate sees, -1 for no binlogs
+		stats             *datapb.Statistics
+		manifest          bool
+		expectCreateIndex bool
+	}{
+		{
+			name:            "few valid elements fake-finish although the estimate is large",
+			elementNullable: true, binlogVectors: 4096,
+			stats: &datapb.Statistics{ValidElementCounts: map[int64]int64{s.fieldID: 10}},
+		},
+		{
+			name:            "enough valid elements build although the estimate is small",
+			elementNullable: true, binlogVectors: 0,
+			stats:             &datapb.Statistics{ValidElementCounts: map[int64]int64{s.fieldID: 4096}},
+			expectCreateIndex: true,
+		},
+		{
+			name:            "segment without the count falls back to the estimate",
+			elementNullable: true, binlogVectors: 4096,
+			stats:             &datapb.Statistics{NullCounts: map[int64]int64{s.fieldID: 0}},
+			expectCreateIndex: true,
+		},
+		{
+			name:            "recovered StorageV3 segment uses the count from Statistics",
+			elementNullable: true, binlogVectors: -1, manifest: true,
+			stats: &datapb.Statistics{ValidElementCounts: map[int64]int64{s.fieldID: 10}},
+		},
+		{
+			name:            "non element-nullable field keeps the estimate",
+			elementNullable: false, binlogVectors: 4096,
+			stats:             &datapb.Statistics{ValidElementCounts: map[int64]int64{s.fieldID: 10}},
+			expectCreateIndex: true,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			info := &datapb.SegmentInfo{
+				ID:            s.segID,
+				CollectionID:  s.collID,
+				PartitionID:   s.partID,
+				InsertChannel: "ch1",
+				NumOfRows:     enoughRows,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     enoughRows,
+				Level:         datapb.SegmentLevel_L2,
+				SchemaVersion: 1,
+				Stats:         tc.stats,
+			}
+			if tc.binlogVectors >= 0 {
+				info.Binlogs = []*datapb.FieldBinlog{{
+					FieldID: s.fieldID,
+					Binlogs: []*datapb.Binlog{{EntriesNum: enoughRows, MemorySize: estimateBytes(tc.binlogVectors)}},
+				}}
+			}
+			if tc.manifest {
+				info.StorageVersion = storage.StorageV3
+				info.ManifestPath = "files/manifest/1/1"
+			}
+			mt := &meta{
+				segments:  NewSegmentsInfo(),
+				indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+			}
+			mt.segments.SetSegment(s.segID, &SegmentInfo{SegmentInfo: info})
+			mt.indexMeta.indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "HNSW"},
+				{Key: common.MetricTypeKey, Value: "COSINE"},
+			}
+			segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+			s.True(ok)
+			segIndex.NumRows = enoughRows
+
+			field := &schemapb.FieldSchema{
+				Name:            "s[vec]",
+				FieldID:         s.fieldID,
+				DataType:        schemapb.DataType_ArrayOfVector,
+				ElementType:     schemapb.DataType_FloatVector,
+				Nullable:        true,
+				ElementNullable: tc.elementNullable,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)}},
+			}
+			handler := NewNMockHandler(s.T())
+			handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+				ID: s.collID,
+				Schema: &schemapb.CollectionSchema{
+					Version: 1,
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						FieldID: s.fieldID - 1, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{field},
+					}},
+				},
+				Partitions: []int64{s.partID},
+			}, nil).Maybe()
+			cm := mocks.NewChunkManager(s.T())
+			cm.EXPECT().RootPath().Return("root").Maybe()
+
+			cluster := session.NewMockCluster(s.T())
+			if tc.expectCreateIndex {
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+			}
+			it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
+			it.CreateTaskOnWorker(1, cluster)
+			if tc.expectCreateIndex {
+				s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+			} else {
+				s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
+			}
+		})
+	}
 }

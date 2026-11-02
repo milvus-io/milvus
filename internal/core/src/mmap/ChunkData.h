@@ -15,6 +15,7 @@
 // limitations under the License.
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -63,6 +64,41 @@ struct FixedLengthChunk {
     Type* data_ = nullptr;
     storage::MmapChunkDescriptorPtr mmap_descriptor_ = nullptr;
 };
+// Memory for the batches written into one VariableLengthChunk of Array,
+// ArrayValue or VectorArray. Each batch gets one allocation: from the mmap
+// chunk manager when the column is mmapped, from the heap otherwise. A heap
+// allocation is owned here and freed with the chunk, so a chunk must declare
+// this member before the views and Chunk objects that point into it.
+class ChunkBatchMemory {
+ public:
+    explicit ChunkBatchMemory(storage::MmapChunkDescriptorPtr mmap_descriptor)
+        : mmap_descriptor_(std::move(mmap_descriptor)) {
+    }
+
+    char*
+    Allocate(size_t bytes) {
+        if (mmap_descriptor_ == nullptr) {
+            std::unique_ptr<char[]> block(new char[bytes]);
+            heap_blocks_.push_back(std::move(block));
+            return heap_blocks_.back().get();
+        }
+        auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
+        auto* block =
+            static_cast<char*>(mcm->Allocate(mmap_descriptor_, bytes));
+        if (block == nullptr) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to allocate {} bytes from mmap_manager",
+                      bytes);
+        }
+        return block;
+    }
+
+ private:
+    // Null when the column is not mmapped.
+    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    std::vector<std::unique_ptr<char[]>> heap_blocks_;
+};
+
 /**
  * @brief VariableLengthChunk
  */
@@ -111,9 +147,7 @@ struct VariableLengthChunk<ArrayValue> {
 
     explicit VariableLengthChunk(
         const uint64_t size, storage::MmapChunkDescriptorPtr mmap_descriptor)
-        : size_(size),
-          mmap_descriptor_(std::move(mmap_descriptor)),
-          data_(size) {
+        : size_(size), memory_(std::move(mmap_descriptor)), data_(size) {
     }
 
     void
@@ -139,10 +173,10 @@ struct VariableLengthChunk<ArrayValue> {
             }
         }
 
-        auto chunk = CreateMmapColumnarArrayChunkFromValues(
+        auto chunk = CreateColumnarArrayChunkFromValues(
             std::span<const ArrayValue>(src, length),
             std::span<const uint8_t>(valid_data.data(), valid_data.size()),
-            mmap_descriptor_);
+            [this](size_t bytes) { return memory_.Allocate(bytes); });
         blocks_.push_back(chunk);
         for (size_t i = 0; i < length; ++i) {
             data_[begin + i] = chunk->View(i);
@@ -152,7 +186,7 @@ struct VariableLengthChunk<ArrayValue> {
     void
     set_rows(std::span<const ScalarFieldProto* const> rows,
              size_t begin,
-             const proto::schema::TypeSchema& type) {
+             const std::shared_ptr<const proto::schema::TypeSchema>& type) {
         AssertInfo(begin <= size_ && rows.size() <= size_ - begin,
                    "failed to set nested ARRAY chunk with length {} from "
                    "begin {}, chunk size={}",
@@ -163,8 +197,10 @@ struct VariableLengthChunk<ArrayValue> {
             return;
         }
 
-        auto chunk = CreateMmapColumnarArrayChunkFromProtoRows(
-            rows, type, mmap_descriptor_);
+        auto chunk = CreateColumnarArrayChunkFromProtoRows(
+            rows, type, [this](size_t bytes) {
+                return memory_.Allocate(bytes);
+            });
         blocks_.push_back(chunk);
         for (size_t i = 0; i < rows.size(); ++i) {
             data_[begin + i] = chunk->View(i);
@@ -188,10 +224,196 @@ struct VariableLengthChunk<ArrayValue> {
 
  private:
     int64_t size_{0};
-    // Keep the descriptor alive until every Chunk tree has been destroyed.
-    storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    // Outlives data_ and blocks_, which point into it.
+    ChunkBatchMemory memory_;
     FixedVector<ArrayValueView> data_;
     std::vector<ColumnarArrayChunk::Ptr> blocks_;
+};
+
+template <>
+struct VariableLengthChunk<Array> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(const uint64_t size,
+                                 storage::MmapChunkDescriptorPtr descriptor)
+        : size_(size), memory_(std::move(descriptor)), data_(size) {
+    }
+
+    void
+    set(const Array* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(
+            begin + length <= size_,
+            "failed to set a chunk with length: {} from begin {}, map_size={}",
+            length,
+            begin,
+            size_);
+        size_t total_size = 0;
+        for (auto i = 0; i < length; i++) {
+            total_size += src[i].byte_size();
+            if (IsVariableDataType(src[i].get_element_type())) {
+                total_size += (src[i].length() * sizeof(uint32_t));
+            }
+        }
+
+        char* data_ptr = memory_.Allocate(total_size);
+        for (auto i = 0; i < length; i++) {
+            auto element_type = src[i].get_element_type();
+            if ((check_data_valid.has_value() &&
+                 !check_data_valid.value()(i + begin)) ||
+                element_type == DataType::NONE) {
+                data_[i + begin] = ArrayView();
+            } else {
+                int length = src[i].length();
+                uint32_t* src_offsets_ptr = src[i].get_offsets_data();
+                // need copy offsets for variable types
+                uint32_t* target_offsets_ptr = nullptr;
+                if (IsVariableDataType(element_type)) {
+                    target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
+                    milvus::fastmem::FastMemcpy(target_offsets_ptr,
+                                                src_offsets_ptr,
+                                                length * sizeof(uint32_t));
+                    data_ptr += length * sizeof(uint32_t);
+                }
+                auto data_size = src[i].byte_size();
+                milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), data_size);
+                data_[i + begin] = ArrayView(data_ptr,
+                                             length,
+                                             data_size,
+                                             element_type,
+                                             target_offsets_ptr);
+                data_ptr += data_size;
+            }
+        }
+    }
+
+    const ArrayView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    // Outlives data_, which points into it.
+    ChunkBatchMemory memory_;
+    FixedVector<ArrayView> data_;
+};
+
+template <>
+struct VariableLengthChunk<VectorArray> {
+ public:
+    VariableLengthChunk() = delete;
+
+    explicit VariableLengthChunk(const uint64_t size,
+                                 storage::MmapChunkDescriptorPtr descriptor)
+        : size_(size), memory_(std::move(descriptor)), data_(size) {
+    }
+
+    void
+    set(const VectorArray* src,
+        uint32_t begin,
+        uint32_t length,
+        const std::optional<CheckDataValid>& check_data_valid = std::nullopt) {
+        AssertInfo(begin <= size_ && length <= size_ - begin,
+                   "failed to set VECTOR_ARRAY chunk with length {} from "
+                   "begin {}, chunk size={}",
+                   length,
+                   begin,
+                   size_);
+        if (length == 0) {
+            return;
+        }
+
+        size_t payload_bytes = 0;
+        size_t bitmap_bytes = 0;
+        for (uint32_t i = 0; i < length; ++i) {
+            if (check_data_valid && !(*check_data_valid)(begin + i)) {
+                continue;
+            }
+            payload_bytes += src[i].byte_size();
+            bitmap_bytes += src[i].element_validity_view().size_in_bytes();
+        }
+
+        char* payload = nullptr;
+        char* bitmap = nullptr;
+        if (payload_bytes > 0) {
+            payload = memory_.Allocate(payload_bytes);
+        }
+        if (bitmap_bytes > 0) {
+            bitmap = memory_.Allocate(bitmap_bytes);
+        }
+
+        size_t payload_offset = 0;
+        size_t bitmap_offset = 0;
+        for (uint32_t i = 0; i < length; ++i) {
+            if (check_data_valid && !(*check_data_valid)(begin + i)) {
+                data_[begin + i] = VectorArrayView();
+                continue;
+            }
+            const auto& row = src[i];
+            const auto row_bytes = row.byte_size();
+            char* row_payload = nullptr;
+            if (row_bytes > 0) {
+                row_payload = payload + payload_offset;
+                milvus::fastmem::FastMemcpy(row_payload, row.data(), row_bytes);
+                payload_offset += row_bytes;
+            }
+
+            auto validity = row.element_validity_view();
+            TargetBitmapView row_validity;
+            if (row.is_element_nullable()) {
+                const auto row_bitmap_bytes = validity.size_in_bytes();
+                if (row_bitmap_bytes > 0) {
+                    char* row_bitmap = bitmap + bitmap_offset;
+                    milvus::fastmem::FastMemcpy(
+                        row_bitmap, validity.data(), row_bitmap_bytes);
+                    row_validity = TargetBitmapView(row_bitmap, row.length());
+                    bitmap_offset += row_bitmap_bytes;
+                }
+            }
+            data_[begin + i] = VectorArrayView(row_payload,
+                                               row.dim(),
+                                               row.length(),
+                                               row_bytes,
+                                               row.get_element_type(),
+                                               row_validity,
+                                               row.is_element_nullable());
+        }
+    }
+
+    const VectorArrayView&
+    view(const int i) const {
+        return data_[i];
+    }
+
+    void*
+    data() {
+        return data_.data();
+    }
+
+    size_t
+    size() {
+        return size_;
+    }
+
+ private:
+    int64_t size_{0};
+    // Outlives data_, which points into it.
+    ChunkBatchMemory memory_;
+    FixedVector<VectorArrayView> data_;
 };
 
 // Template specialization for string
@@ -297,59 +519,6 @@ VariableLengthChunk<Json>::set(
             data_[i + begin] = Json(data_ptr, src[i].size());
         }
         offset += data_size;
-    }
-}
-
-// Template specialization for array
-template <>
-inline void
-VariableLengthChunk<Array>::set(
-    const Array* src,
-    uint32_t begin,
-    uint32_t length,
-    const std::optional<CheckDataValid>& check_data_valid) {
-    auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    AssertInfo(
-        begin + length <= size_,
-        "failed to set a chunk with length: {} from begin {}, map_size={}",
-        length,
-        begin,
-        size_);
-    size_t total_size = 0;
-    for (auto i = 0; i < length; i++) {
-        total_size += src[i].byte_size();
-        if (IsVariableDataType(src[i].get_element_type())) {
-            total_size += (src[i].length() * sizeof(uint32_t));
-        }
-    }
-
-    auto buf = (char*)mcm->Allocate(mmap_descriptor_, total_size);
-    AssertInfo(buf != nullptr, "failed to allocate memory from mmap_manager.");
-    char* data_ptr = buf;
-    for (auto i = 0; i < length; i++) {
-        auto element_type = src[i].get_element_type();
-        if ((check_data_valid.has_value() &&
-             !check_data_valid.value()(i + begin)) ||
-            element_type == DataType::NONE) {
-            data_[i + begin] = ArrayView();
-        } else {
-            int length = src[i].length();
-            uint32_t* src_offsets_ptr = src[i].get_offsets_data();
-            // need copy offsets for variable types
-            uint32_t* target_offsets_ptr = nullptr;
-            if (IsVariableDataType(element_type)) {
-                target_offsets_ptr = reinterpret_cast<uint32_t*>(data_ptr);
-                milvus::fastmem::FastMemcpy(target_offsets_ptr,
-                                            src_offsets_ptr,
-                                            length * sizeof(uint32_t));
-                data_ptr += length * sizeof(uint32_t);
-            }
-            auto data_size = src[i].byte_size();
-            milvus::fastmem::FastMemcpy(data_ptr, src[i].data(), data_size);
-            data_[i + begin] = ArrayView(
-                data_ptr, length, data_size, element_type, target_offsets_ptr);
-            data_ptr += data_size;
-        }
     }
 }
 

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var (
@@ -53,9 +54,7 @@ var (
 // basename collapse to one entry in both maps.
 func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourced, all map[string]string) {
 	all = lo.SliceToMap(paths, func(path string) (string, string) {
-		nameWithExt := filepath.Base(path)
-		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
-		return name, path
+		return pathFieldName(path), path
 	})
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
@@ -67,6 +66,50 @@ func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourc
 		}
 	}
 	return sourced, all
+}
+
+// pathFieldName returns the field name a NumPy file is matched by: its
+// basename without extension.
+func pathFieldName(path string) string {
+	nameWithExt := filepath.Base(path)
+	return strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
+}
+
+// checkStructFilePaths rejects a file named after a struct field or one of its
+// sub-fields, which resolveFieldPaths would otherwise skip as redundant and
+// leave the struct rows null. A sub-field is matched by its stored name
+// (struct[sub]) and by its own name (sub). A name that is also a top-level
+// field belongs to that field.
+func checkStructFilePaths(schema *schemapb.CollectionSchema, paths []string) error {
+	if len(schema.GetStructArrayFields()) == 0 {
+		return nil
+	}
+	topLevel := typeutil.NewSet[string]()
+	for _, field := range schema.GetFields() {
+		topLevel.Insert(field.GetName())
+	}
+	structNames := make(map[string]string) // file name -> struct field name
+	for _, structField := range schema.GetStructArrayFields() {
+		structNames[structField.GetName()] = structField.GetName()
+		for _, subField := range structField.GetFields() {
+			structNames[subField.GetName()] = structField.GetName()
+			if name, err := typeutil.ExtractStructFieldName(subField.GetName()); err == nil {
+				structNames[name] = structField.GetName()
+			}
+		}
+	}
+	for _, path := range paths {
+		name := pathFieldName(path)
+		if topLevel.Contain(name) {
+			continue
+		}
+		if structName, ok := structNames[name]; ok {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import does not support struct data: file '%s' names struct field '%s' or one of its sub-fields; use JSON, CSV or Parquet files",
+				path, structName)
+		}
+	}
+	return nil
 }
 
 // SourcePaths returns the paths CreateReaders will open for this schema: those

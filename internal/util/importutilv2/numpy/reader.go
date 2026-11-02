@@ -45,10 +45,21 @@ type reader struct {
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-// ValidateSchema rejects a NumPy import that cannot fill the collection: a
-// provided auto-id or function-output field, an unsupported type, or a required
-// field with no file.
+// ValidateSchema rejects a NumPy import that cannot fill the collection: struct
+// rows it cannot carry, a provided auto-id or function-output field, an
+// unsupported type, or a required field with no file.
 func ValidateSchema(schema *schemapb.CollectionSchema, paths []string) error {
+	for _, structField := range schema.GetStructArrayFields() {
+		if !structField.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import cannot fill struct field '%s', which is not nullable: numpy files cannot carry struct data; use JSON, CSV or Parquet files",
+				structField.GetName())
+		}
+	}
+	if err := checkStructFilePaths(schema, paths); err != nil {
+		return err
+	}
+
 	sourced, all := resolveFieldPaths(schema, paths)
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()

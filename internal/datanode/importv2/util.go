@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -204,20 +205,36 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	return nil
 }
 
+// NormalizeStructArrayFields brings the struct columns of one read batch into
+// the shape the writer expects: it backfills absent element-nullable
+// sub-fields (importcommon.FillMissingStructSubFields) and then verifies the
+// sub-fields of every struct agree row by row (CheckStructArrayConsistency).
+// The JSON, CSV and Parquet readers already hand out filled batches, so that
+// their batch memory limit sees the filled columns; the fill here is a backstop
+// and leaves a filled batch as is. Preimport and import both call it.
+func NormalizeStructArrayFields(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
+	if err := importcommon.FillMissingStructSubFields(schema, data); err != nil {
+		return err
+	}
+	return CheckStructArrayConsistency(schema, data)
+}
+
 // CheckStructArrayConsistency verifies that within each StructArrayField all
 // sub-field columns are row-wise consistent: for every row, the sub-fields
 // must agree on null-ness, and, when the row is valid, on the number of
 // struct elements (array length for scalar Array sub-fields, vector count
-// for ArrayOfVector sub-fields). The proxy enforces this invariant on the
-// insert path (checkAndFlattenStructFieldData), and JSON/CSV/Parquet/NumPy
-// importers produce consistent columns by construction, but binlog import
+// for ArrayOfVector sub-fields; for element-nullable sub-fields the length of
+// the element valid_data, null elements included). The proxy enforces this
+// invariant on the insert path (checkAndFlattenStructFieldData), and the
+// JSON/CSV/Parquet importers produce consistent columns by construction
+// (NumPy carries no struct data and leaves struct rows null), but binlog import
 // deserializes each sub-field's binlogs independently — divergent sub-field
 // data would otherwise be persisted and poison the segment (query-time
 // assertion failures or silently wrong element-level filter results).
 // Cost is O(rows * subFields), negligible compared with reading the data.
 func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
 	type subColumn struct {
-		name      string
+		schema    *schemapb.FieldSchema
 		data      storage.FieldData
 		validData []bool
 	}
@@ -259,21 +276,24 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				}
 				continue
 			}
-			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData, validData: validData})
+			columns = append(columns, subColumn{schema: subField, data: fieldData, validData: validData})
 		}
 		// A struct must be supplied whole: either all sub-fields present or all
 		// absent. A partial set is malformed input — the absent sub-fields get
 		// backfilled as all-NULL (AppendNullableDefaultFieldsData) while the
 		// present ones carry real elements, producing per-row element-count
 		// mismatches that poison the segment. (checkAndFlattenStructFieldData
-		// enforces the same on the proxy insert path.)
+		// enforces the same on the proxy insert path.) Absent element-nullable
+		// sub-fields are filled by importcommon.FillMissingStructSubFields
+		// before this check, which also rejects absent required ones, so this
+		// is a backstop.
 		if len(columns) == 0 {
 			continue
 		}
 		if len(columns) < len(subFields) {
 			return merr.WrapErrImportFailedMsg(
 				"struct field '%s' has a partial sub-field set: sub-field '%s' is present but sub-field '%s' is missing; provide all sub-fields or none",
-				structField.GetName(), columns[0].name, firstAbsent)
+				structField.GetName(), columns[0].schema.GetName(), firstAbsent)
 		}
 		ref := columns[0]
 		rows := ref.data.RowNum()
@@ -281,7 +301,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 			if col.data.RowNum() != rows {
 				return merr.WrapErrImportFailedMsg(
 					"struct field '%s' has misaligned sub-fields, sub-field '%s' with '%d' rows, sub-field '%s' with '%d' rows",
-					structField.GetName(), ref.name, rows, col.name, col.data.RowNum())
+					structField.GetName(), ref.schema.GetName(), rows, col.schema.GetName(), col.data.RowNum())
 			}
 		}
 
@@ -290,7 +310,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 			refCount := -1
 			if refValid {
 				var err error
-				refCount, err = structSubFieldRowElementCount(ref.data, i, structField.GetName(), ref.name)
+				refCount, err = importcommon.StructSubFieldRowElementCount(ref.data, ref.schema, i, structField.GetName())
 				if err != nil {
 					return err
 				}
@@ -300,105 +320,24 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				if valid != refValid {
 					return merr.WrapErrImportFailedMsg(
 						"struct field '%s' has inconsistent sub-field null-ness at row %d, sub-field '%s' valid=%t, sub-field '%s' valid=%t",
-						structField.GetName(), i, ref.name, refValid, col.name, valid)
+						structField.GetName(), i, ref.schema.GetName(), refValid, col.schema.GetName(), valid)
 				}
 				if !valid {
 					continue
 				}
-				count, err := structSubFieldRowElementCount(col.data, i, structField.GetName(), col.name)
+				count, err := importcommon.StructSubFieldRowElementCount(col.data, col.schema, i, structField.GetName())
 				if err != nil {
 					return err
 				}
 				if count != refCount {
 					return merr.WrapErrImportFailedMsg(
 						"struct field '%s' has inconsistent element count at row %d, sub-field '%s' with %d elements, sub-field '%s' with %d elements",
-						structField.GetName(), i, ref.name, refCount, col.name, count)
+						structField.GetName(), i, ref.schema.GetName(), refCount, col.schema.GetName(), count)
 				}
 			}
 		}
 	}
 	return nil
-}
-
-// structSubFieldRowElementCount returns the number of struct elements in row i
-// of a struct sub-field column: the array length for scalar Array sub-fields,
-// or the number of vectors for ArrayOfVector sub-fields.
-func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structName, subFieldName string) (int, error) {
-	switch fd := fieldData.(type) {
-	case *storage.ArrayFieldData:
-		count, ok := scalarFieldElementCount(fd.Data[i])
-		if !ok {
-			return 0, merr.WrapErrImportFailedMsg(
-				"invalid scalar array data at row %d of sub-field '%s' of struct field '%s': missing or unsupported scalar payload",
-				i, subFieldName, structName)
-		}
-		return count, nil
-	case *storage.VectorArrayFieldData:
-		row := fd.Data[i]
-		var payloadLen, width int
-		dim := int(fd.Dim)
-		switch fd.ElementType {
-		case schemapb.DataType_FloatVector:
-			payloadLen = len(row.GetFloatVector().GetData())
-			width = dim
-		case schemapb.DataType_BinaryVector:
-			payloadLen = len(row.GetBinaryVector())
-			width = (dim + 7) / 8
-		case schemapb.DataType_Float16Vector:
-			payloadLen = len(row.GetFloat16Vector())
-			width = dim * 2
-		case schemapb.DataType_BFloat16Vector:
-			payloadLen = len(row.GetBfloat16Vector())
-			width = dim * 2
-		case schemapb.DataType_Int8Vector:
-			payloadLen = len(row.GetInt8Vector())
-			width = dim
-		default:
-			return 0, merr.WrapErrImportSysFailedMsg(
-				"unsupported vector element type '%s' for sub-field '%s' of struct field '%s'",
-				fd.ElementType.String(), subFieldName, structName)
-		}
-		if width <= 0 || payloadLen%width != 0 {
-			return 0, merr.WrapErrImportFailedMsg(
-				"corrupted vector array data at row %d of sub-field '%s' of struct field '%s', payload length %d is not a multiple of vector width %d",
-				i, subFieldName, structName, payloadLen, width)
-		}
-		return payloadLen / width, nil
-	default:
-		return 0, merr.WrapErrImportSysFailedMsg(
-			"unexpected column type '%s' for sub-field '%s' of struct field '%s'",
-			fieldData.GetDataType().String(), subFieldName, structName)
-	}
-}
-
-// scalarFieldElementCount returns the number of elements held by one Array row
-// and whether its scalar payload type is recognized. A typed empty payload is
-// valid and returns (0, true); a nil or unset payload returns (0, false).
-func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
-	switch d := sf.GetData().(type) {
-	case *schemapb.ScalarField_BoolData:
-		return len(d.BoolData.GetData()), true
-	case *schemapb.ScalarField_IntData:
-		return len(d.IntData.GetData()), true
-	case *schemapb.ScalarField_LongData:
-		return len(d.LongData.GetData()), true
-	case *schemapb.ScalarField_FloatData:
-		return len(d.FloatData.GetData()), true
-	case *schemapb.ScalarField_DoubleData:
-		return len(d.DoubleData.GetData()), true
-	case *schemapb.ScalarField_StringData:
-		return len(d.StringData.GetData()), true
-	case *schemapb.ScalarField_BytesData:
-		return len(d.BytesData.GetData()), true
-	case *schemapb.ScalarField_ArrayData:
-		return len(d.ArrayData.GetData()), true
-	case *schemapb.ScalarField_JsonData:
-		return len(d.JsonData.GetData()), true
-	case *schemapb.ScalarField_TimestamptzData:
-		return len(d.TimestamptzData.GetData()), true
-	default:
-		return 0, false
-	}
 }
 
 // appendSystemFieldsDataWithCursor assigns the autoID PK/RowID/timestamp of a batch read
@@ -747,6 +686,9 @@ func CanBeZeroRowField(field *schemapb.FieldSchema) bool {
 	}
 	if IsFillableField(field) {
 		return true // nullable/default_value field can be automatically filled if the file doesn't contain this column
+	}
+	if field.GetElementNullable() {
+		return true // element-nullable struct sub-field, filled from its siblings by importcommon.FillMissingStructSubFields
 	}
 	return false
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -404,6 +405,38 @@ func TestProjectDescribeCollectionSchema_CopyOnWriteAndFinalization(t *testing.T
 	assert.NotContains(t, projected.GetExternalSpec(), "SECRET")
 	assert.Equal(t, int32(7), projected.GetVersion())
 	assert.Equal(t, "db", projected.GetDbName())
+}
+
+// The struct sub-field origin marker is internal and never reaches users.
+func TestProjectDescribeCollectionSchemaStripsStructSubFieldOriginMarker(t *testing.T) {
+	added := &schemapb.FieldSchema{
+		FieldID:    common.StartOfUserFieldID + 2,
+		Name:       "profile[added]",
+		DataType:   schemapb.DataType_Array,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	schemautil.MarkAddedStructSubField(added)
+	source := &schemapb.CollectionSchema{
+		Name: "collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: common.StartOfUserFieldID,
+			Name:    "profile",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID:    common.StartOfUserFieldID + 1,
+				Name:       "profile[original]",
+				DataType:   schemapb.DataType_Array,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			}, added},
+		}},
+	}
+
+	projected, err := ProjectDescribeCollectionSchema(source, true)
+	assert.NoError(t, err)
+	for _, field := range projected.GetStructArrayFields()[0].GetFields() {
+		assert.False(t, schemautil.IsAddedStructSubField(field), field.GetName())
+		assert.Equal(t, []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}, field.GetTypeParams())
+	}
+	assert.True(t, schemautil.IsAddedStructSubField(added), "the cached schema keeps the marker")
 }
 
 func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {

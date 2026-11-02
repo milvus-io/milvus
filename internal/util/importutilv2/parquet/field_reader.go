@@ -2421,10 +2421,55 @@ func buildVectorArrayFieldFromFixedSizeBinary(field *schemapb.FieldSchema, dim i
 	}
 }
 
+// buildVectorArrayFieldFromList builds one ArrayOfVector row from the vectors
+// [start, end) of a list<list<T>> column. The payload holds only the non-null
+// vectors. An element-nullable field accepts null vectors and carries element
+// valid_data of the full row length; any other field rejects them.
 func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vectors *array.List, start, end int64) (*schemapb.VectorField, error) {
+	row, validData, err := buildVectorArrayPayloadFromList(field, dim, vectors, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if field.GetElementNullable() {
+		typeutil.SetVectorArrayElementValidData(row, validData)
+	}
+	return row, nil
+}
+
+// vectorArrayElementValid reports whether vector vectorIndex is present. A null
+// vector is an error unless the field is element-nullable.
+func vectorArrayElementValid(field *schemapb.FieldSchema, vectors *array.List, vectorIndex int64) (bool, error) {
+	if !vectors.IsNull(int(vectorIndex)) {
+		return true, nil
+	}
+	if !field.GetElementNullable() {
+		return false, WrapNullElementErr(field)
+	}
+	return false, nil
+}
+
+// presentVectorCount returns how many of the vectors [start, end) are not
+// null. The payload of a row holds only these, so it is the capacity to
+// preallocate: sizing it by the logical element count would keep the backing
+// array of every null vector, memory the batch size accounting never sees.
+func presentVectorCount(vectors *array.List, start, end int64) int {
+	if vectors.NullN() == 0 {
+		return int(end - start)
+	}
+	count := 0
+	for i := start; i < end; i++ {
+		if !vectors.IsNull(int(i)) {
+			count++
+		}
+	}
+	return count
+}
+
+func buildVectorArrayPayloadFromList(field *schemapb.FieldSchema, dim int64, vectors *array.List, start, end int64) (*schemapb.VectorField, []bool, error) {
+	validData := make([]bool, 0, end-start)
 	switch field.GetElementType() {
 	case schemapb.DataType_FloatVector:
-		floatData := make([]float32, 0, int(end-start)*int(dim))
+		floatData := make([]float32, 0, presentVectorCount(vectors, start, end)*int(dim))
 		appendFloat := func(pos int) error {
 			switch values := vectors.ListValues().(type) {
 			case *array.Float32:
@@ -2443,25 +2488,33 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 			return nil
 		}
 		for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+			valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			validData = append(validData, valid)
+			if !valid {
+				continue
+			}
 			vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, int(dim))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for pos := vecStart; pos < vecEnd; pos++ {
 				if err := appendFloat(int(pos)); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		}
 		if err := typeutil.VerifyFloats32(floatData); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		return &schemapb.VectorField{
 			Dim: dim,
 			Data: &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{Data: floatData},
 			},
-		}, nil
+		}, validData, nil
 	case schemapb.DataType_BinaryVector:
 		return buildByteVectorArrayFieldFromList(field, dim, vectors, start, end, int((dim+7)/8), func(data []byte) *schemapb.VectorField {
 			return &schemapb.VectorField{
@@ -2486,17 +2539,25 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 	case schemapb.DataType_Int8Vector:
 		int8Values, ok := vectors.ListValues().(*array.Int8)
 		if !ok {
-			return nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
+			return nil, nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
 		}
-		int8Data := make([]byte, 0, int(end-start)*int(dim))
+		int8Data := make([]byte, 0, presentVectorCount(vectors, start, end)*int(dim))
 		for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+			valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			validData = append(validData, valid)
+			if !valid {
+				continue
+			}
 			vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, int(dim))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for pos := vecStart; pos < vecEnd; pos++ {
 				if int8Values.IsNull(int(pos)) {
-					return nil, WrapNullElementErr(field)
+					return nil, nil, WrapNullElementErr(field)
 				}
 				int8Data = append(int8Data, byte(int8Values.Value(int(pos))))
 			}
@@ -2504,11 +2565,11 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 		return &schemapb.VectorField{
 			Dim:  dim,
 			Data: &schemapb.VectorField_Int8Vector{Int8Vector: int8Data},
-		}, nil
+		}, validData, nil
 	case schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
+		return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
 	default:
-		return nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
 	}
 }
 
@@ -2533,23 +2594,32 @@ func buildByteVectorArrayFieldFromList(
 	end int64,
 	expectedBytes int,
 	build func([]byte) *schemapb.VectorField,
-) (*schemapb.VectorField, error) {
+) (*schemapb.VectorField, []bool, error) {
 	values, ok := vectors.ListValues().(*array.Uint8)
 	if !ok {
-		return nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
+		return nil, nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
 	}
-	data := make([]byte, 0, int(end-start)*expectedBytes)
+	validData := make([]bool, 0, end-start)
+	data := make([]byte, 0, presentVectorCount(vectors, start, end)*expectedBytes)
 	for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+		valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		validData = append(validData, valid)
+		if !valid {
+			continue
+		}
 		vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, expectedBytes)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for pos := vecStart; pos < vecEnd; pos++ {
 			if values.IsNull(int(pos)) {
-				return nil, WrapNullElementErr(field)
+				return nil, nil, WrapNullElementErr(field)
 			}
 		}
 		data = append(data, values.Uint8Values()[int(vecStart):int(vecEnd)]...)
 	}
-	return build(data), nil
+	return build(data), validData, nil
 }

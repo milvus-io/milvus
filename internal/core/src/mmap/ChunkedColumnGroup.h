@@ -537,7 +537,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 ErrorCode::Unsupported,
                 "[StorageV2] ArrayViews only supported for ChunkedArrayColumn");
         }
-        if (field_meta_.is_nested_array()) {
+        if (field_meta_.is_native_list_array()) {
+            if (field_meta_.has_nullable_array_element()) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "expressions on element-nullable array field {} "
+                          "are not supported yet",
+                          field_meta_.get_name().get());
+            }
             ThrowInfo(ErrorCode::Unsupported,
                       "legacy ArrayViews API does not support nested ARRAY");
         }
@@ -554,7 +560,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     std::optional<std::pair<int64_t, int64_t>> offset_len =
                         std::nullopt) const override {
         if (!IsChunkedArrayColumnDataType(data_type_) ||
-            !field_meta_.is_nested_array()) {
+            !field_meta_.is_native_list_array()) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] ArrayValueViews only supports recursive "
                       "ARRAY columns");
@@ -625,7 +631,13 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
-        if (field_meta_.is_nested_array()) {
+        if (field_meta_.is_native_list_array()) {
+            if (field_meta_.has_nullable_array_element()) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "expressions on element-nullable array field {} "
+                          "are not supported yet",
+                          field_meta_.get_name().get());
+            }
             ThrowInfo(
                 ErrorCode::Unsupported,
                 "legacy ArrayViewsByOffsets API does not support nested ARRAY");
@@ -643,7 +655,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         int64_t chunk_id,
         const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedArrayColumnDataType(data_type_) ||
-            !field_meta_.is_nested_array()) {
+            !field_meta_.is_native_list_array()) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] ArrayValueViewsByOffsets only supports "
                       "recursive ARRAY columns");
@@ -936,7 +948,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "[StorageV2] BulkArrayAt only supported for "
                       "ChunkedArrayColumn");
         }
-        if (field_meta_.is_nested_array()) {
+        if (field_meta_.is_native_list_array()) {
             ThrowInfo(ErrorCode::Unsupported,
                       "legacy BulkArrayAt API does not support nested ARRAY");
         }
@@ -957,7 +969,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                      const int64_t* offsets,
                      int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_) ||
-            !field_meta_.is_nested_array()) {
+            !field_meta_.is_native_list_array()) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] BulkArrayValueAt only supports nested "
                       "ARRAY columns");

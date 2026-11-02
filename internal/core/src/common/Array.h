@@ -57,6 +57,15 @@ ExpectedLiteralValCase(DataType element_type) {
 
 }  // namespace array_detail
 
+// One owning single-level scalar ARRAY row. Segments do not keep Array
+// objects: growing chunks hold one ArrayView per row into per-batch blocks and
+// sealed segments hold ArrayChunks, so stored rows are read as ArrayView. An
+// Array exists only for one conversion: an insert payload on its way into a
+// block, an element of FieldData<Array> while binlogs are read or written, a
+// growing segment is loaded or a scalar index is built, a row output as
+// Array, and an owned sealed Take result (RawTakeResult::GetOwn).
+// ConcurrentVector<Array> and VariableLengthChunk<Array> use the type only as
+// a tag and store ArrayViews.
 class Array {
  public:
     Array() = default;
