@@ -153,7 +153,7 @@ class VectorMemIndex : public VectorIndex {
 
     bool
     IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+        return !empty_emb_list_offsets_.empty();
     }
 
  protected:

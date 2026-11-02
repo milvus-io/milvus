@@ -1606,6 +1606,12 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         AssertInfo(index_params.find("metric_type") != index_params.end(),
                    "metric type is empty for vector index");
         index_info.metric_type = index_params.at("metric_type");
+        // Element nullability decides the domain of persisted VECTOR_ARRAY
+        // validity; index_params do not carry it.
+        if (field_type == DataType::VECTOR_ARRAY) {
+            config[milvus::index::ELEMENT_NULLABLE] =
+                load_index_info->schema.element_nullable();
+        }
     }
 
     if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
