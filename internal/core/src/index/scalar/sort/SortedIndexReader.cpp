@@ -720,25 +720,64 @@ SortedStorageView<T>::ShouldSkip(const T& lower,
 }  // namespace sorted_reader_detail
 
 template <typename T>
-SortedIndexReader<T>::SortedIndexReader(OpenArgs args)
-    : state_(std::move(args.state)), storage_(std::move(args.storage)) {
-    if (state_.value_type == DataType::NONE) {
+SortedIndexStorage<T>::SortedIndexStorage(OpenArgs args)
+    : state(std::move(args.state)), values(std::move(args.storage)) {
+    if (state.value_type == DataType::NONE) {
         if constexpr (std::is_same_v<T, std::string_view>) {
-            state_.value_type = DataType::VARCHAR;
+            state.value_type = DataType::VARCHAR;
         } else {
-            state_.value_type = CppDataType<T>(DataType::NONE);
+            state.value_type = CppDataType<T>(DataType::NONE);
         }
     }
     AssertInfo(
-        state_.idx_to_offsets_size == 0 || state_.idx_to_offsets != nullptr,
+        state.idx_to_offsets_size == 0 || state.idx_to_offsets != nullptr,
         "sorted reader offset pointer is null");
-    AssertInfo(!state_.value_lookup ||
-                   state_.idx_to_offsets_size == state_.total_num_rows,
+    AssertInfo(!state.value_lookup ||
+                   state.idx_to_offsets_size == state.total_num_rows,
                "sorted reader reverse offsets do not cover every row");
-    AssertInfo(state_.valid_bitset != nullptr,
+    AssertInfo(state.valid_bitset != nullptr,
                "sorted reader validity owner is null");
-    AssertInfo(state_.valid_bitset->size() == state_.total_num_rows,
+    AssertInfo(state.valid_bitset->size() == state.total_num_rows,
                "sorted reader validity size mismatch");
+}
+
+template <typename T>
+SortedIndex<T>::SortedIndex(typename SortedIndexStorage<T>::OpenArgs args)
+    : storage_(std::move(args)) {
+}
+
+template <typename T>
+IndexMetadata
+SortedIndex<T>::Metadata() const {
+    const auto& state = storage_.state;
+    return {ReaderCaps{.predicate = true,
+                       .pattern_match = std::is_same_v<T, std::string_view>,
+                       .nested = state.nested,
+                       .value_lookup = state.value_lookup,
+                       .cheap_value_lookup = state.value_lookup,
+                       .exact = !state.nested},
+            state.nested ? Domain::Element : Domain::Row,
+            state.value_type,
+            static_cast<int64_t>(state.total_num_rows)};
+}
+
+template <typename T>
+IIndexReaderBasePtr
+SortedIndex<T>::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new SortedIndexReader<T>(this->shared_from_this(), op_ctx));
+}
+
+template <typename T>
+SortedIndexReader<T>::SortedIndexReader(OpenArgs args)
+    : SortedIndexReader(std::make_shared<SortedIndex<T>>(std::move(args)),
+                        nullptr) {
+}
+
+template <typename T>
+SortedIndexReader<T>::SortedIndexReader(
+    std::shared_ptr<const SortedIndex<T>> index, milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
 template <typename T>
@@ -747,45 +786,46 @@ SortedIndexReader<T>::~SortedIndexReader() = default;
 template <typename T>
 ReaderCaps
 SortedIndexReader<T>::Caps() const {
-    return ReaderCaps{.predicate = true,
-                      .pattern_match = std::is_same_v<T, std::string_view>,
-                      .nested = state_.nested,
-                      .value_lookup = state_.value_lookup,
-                      .cheap_value_lookup = state_.value_lookup,
-                      .exact = !state_.nested};
+    return index_->Metadata().caps;
 }
 
 template <typename T>
 Domain
 SortedIndexReader<T>::CoordDomain() const {
-    return state_.nested ? Domain::Element : Domain::Row;
+    return index_->storage_.state.nested ? Domain::Element : Domain::Row;
 }
 
 template <typename T>
 int64_t
 SortedIndexReader<T>::Count() const {
-    return static_cast<int64_t>(state_.total_num_rows);
+    return static_cast<int64_t>(index_->storage_.state.total_num_rows);
 }
 
 template <typename T>
 DataType
 SortedIndexReader<T>::ValueType() const {
-    return state_.value_type;
+    return index_->storage_.state.value_type;
+}
+
+template <typename T>
+cachinglayer::ResourceUsage
+SortedIndexStorage<T>::CellByteSize() const {
+    return {ToInt64(state.valid_bitset->size_in_bytes() +
+                    state.idx_to_offsets_heap_bytes) +
+                values.MemoryUsage(),
+            ToInt64(state.idx_to_offsets_file_bytes) + values.FileUsage()};
 }
 
 template <typename T>
 int64_t
 SortedIndexReader<T>::MemoryUsage() const {
-    return ToInt64(state_.valid_bitset->size_in_bytes() +
-                   state_.idx_to_offsets_heap_bytes) +
-           storage_.MemoryUsage();
+    return index_->storage_.CellByteSize().memory_bytes;
 }
 
 template <typename T>
 cachinglayer::ResourceUsage
 SortedIndexReader<T>::CellByteSize() const {
-    return {MemoryUsage(),
-            ToInt64(state_.idx_to_offsets_file_bytes) + storage_.FileUsage()};
+    return index_->storage_.CellByteSize();
 }
 
 template <typename T>
@@ -793,13 +833,13 @@ TargetBitmap
 SortedIndexReader<T>::In(size_t n, const T* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "sorted In received null values with non-zero count");
-    TargetBitmap result(state_.total_num_rows, false);
+    TargetBitmap result(index_->storage_.state.total_num_rows, false);
     if constexpr (!std::is_same_v<T, std::string_view>) {
-        if (storage_.Empty()) {
+        if (index_->storage_.values.Empty()) {
             return result;
         }
     }
-    storage_.ApplyMembership(result, n, values, true);
+    index_->storage_.values.ApplyMembership(result, n, values, true);
     return result;
 }
 
@@ -810,26 +850,26 @@ SortedIndexReader<T>::NotIn(size_t n, const T* values) const {
         AssertInfo(n == 0 || values != nullptr,
                    "sorted NotIn received null values with non-zero count");
     }
-    auto result = state_.valid_bitset->clone();
+    auto result = index_->storage_.state.valid_bitset->clone();
     if constexpr (!std::is_same_v<T, std::string_view>) {
-        if (storage_.Empty()) {
+        if (index_->storage_.values.Empty()) {
             return result;
         }
         AssertInfo(n == 0 || values != nullptr,
                    "sorted NotIn received null values with non-zero count");
     }
-    storage_.ApplyMembership(result, n, values, false);
+    index_->storage_.values.ApplyMembership(result, n, values, false);
     return result;
 }
 
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::Range(const T& value, CompareOp op) const {
-    return storage_.Range(state_.total_num_rows,
-                          *state_.valid_bitset,
-                          state_.value_lookup,
-                          value,
-                          op);
+    return index_->storage_.values.Range(index_->storage_.state.total_num_rows,
+                                         *index_->storage_.state.valid_bitset,
+                                         index_->storage_.state.value_lookup,
+                                         value,
+                                         op);
 }
 
 template <typename T>
@@ -838,41 +878,42 @@ SortedIndexReader<T>::Range(const T& lo,
                             bool lo_inc,
                             const T& hi,
                             bool hi_inc) const {
-    return storage_.Range(state_.total_num_rows,
-                          *state_.valid_bitset,
-                          state_.value_lookup,
-                          lo,
-                          lo_inc,
-                          hi,
-                          hi_inc);
+    return index_->storage_.values.Range(index_->storage_.state.total_num_rows,
+                                         *index_->storage_.state.valid_bitset,
+                                         index_->storage_.state.value_lookup,
+                                         lo,
+                                         lo_inc,
+                                         hi,
+                                         hi_inc);
 }
 
 template <typename T>
 std::optional<owned_t<T>>
 SortedIndexReader<T>::Lookup(int64_t offset) const {
-    if (!state_.value_lookup) {
+    if (!index_->storage_.state.value_lookup) {
         return std::nullopt;
     }
-    AssertInfo(
-        offset >= 0 && static_cast<size_t>(offset) < state_.total_num_rows,
-        "sorted lookup offset {} is outside [0, {})",
-        offset,
-        state_.total_num_rows);
+    AssertInfo(offset >= 0 && static_cast<size_t>(offset) <
+                                  index_->storage_.state.total_num_rows,
+               "sorted lookup offset {} is outside [0, {})",
+               offset,
+               index_->storage_.state.total_num_rows);
     const auto row = static_cast<size_t>(offset);
-    if (!(*state_.valid_bitset)[row]) {
+    if (!(*index_->storage_.state.valid_bitset)[row]) {
         return std::nullopt;
     }
-    AssertInfo(row < state_.idx_to_offsets_size,
+    AssertInfo(row < index_->storage_.state.idx_to_offsets_size,
                "sorted offset map does not cover row {}",
                row);
-    const auto index = state_.idx_to_offsets[row];
-    if (!storage_.ValidReverseIndex(index)) {
+    const auto index = index_->storage_.state.idx_to_offsets[row];
+    if (!index_->storage_.values.ValidReverseIndex(index)) {
         ThrowInfo(DataFormatBroken,
                   "sorted value offset {} is invalid for row {}",
                   index,
                   row);
     }
-    return owned_t<T>(storage_.ValueAt(static_cast<size_t>(index)));
+    return owned_t<T>(
+        index_->storage_.values.ValueAt(static_cast<size_t>(index)));
 }
 
 template <typename T>
@@ -883,7 +924,7 @@ SortedIndexReader<T>::Gather(
     const std::function<void(int64_t i, const T*, bool valid)>& out) const {
     AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
                "sorted Gather received invalid offsets/count");
-    if (!state_.value_lookup) {
+    if (!index_->storage_.state.value_lookup) {
         for (int64_t i = 0; i < count; ++i) {
             out(i, nullptr, false);
         }
@@ -891,26 +932,28 @@ SortedIndexReader<T>::Gather(
     }
     for (int64_t i = 0; i < count; ++i) {
         const auto row = offsets[i];
-        AssertInfo(row >= 0 && static_cast<size_t>(row) < state_.total_num_rows,
+        AssertInfo(row >= 0 && static_cast<size_t>(row) <
+                                   index_->storage_.state.total_num_rows,
                    "sorted gather offset {} is outside [0, {})",
                    row,
-                   state_.total_num_rows);
+                   index_->storage_.state.total_num_rows);
         const auto coordinate = static_cast<size_t>(row);
-        if (!(*state_.valid_bitset)[coordinate]) {
+        if (!(*index_->storage_.state.valid_bitset)[coordinate]) {
             out(i, nullptr, false);
             continue;
         }
-        AssertInfo(coordinate < state_.idx_to_offsets_size,
+        AssertInfo(coordinate < index_->storage_.state.idx_to_offsets_size,
                    "sorted offset map does not cover row {}",
                    row);
-        const auto index = state_.idx_to_offsets[coordinate];
-        if (!storage_.ValidReverseIndex(index)) {
+        const auto index = index_->storage_.state.idx_to_offsets[coordinate];
+        if (!index_->storage_.values.ValidReverseIndex(index)) {
             ThrowInfo(DataFormatBroken,
                       "sorted value offset {} is invalid for row {}",
                       index,
                       row);
         }
-        const auto value = storage_.ValueAt(static_cast<size_t>(index));
+        const auto value =
+            index_->storage_.values.ValueAt(static_cast<size_t>(index));
         out(i, &value, true);
     }
 }
@@ -918,7 +961,7 @@ SortedIndexReader<T>::Gather(
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::IsNull() const {
-    auto result = state_.valid_bitset->clone();
+    auto result = index_->storage_.state.valid_bitset->clone();
     result.flip();
     return result;
 }
@@ -926,7 +969,7 @@ SortedIndexReader<T>::IsNull() const {
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::IsNotNull() const {
-    return state_.valid_bitset->clone();
+    return index_->storage_.state.valid_bitset->clone();
 }
 
 namespace sorted_reader_detail {
@@ -1120,6 +1163,8 @@ SortedStorageView<std::string_view>::PatternMatch(size_t count,
 
 #define INSTANTIATE_SORTED_READER(T)                           \
     template class sorted_reader_detail::SortedStorageView<T>; \
+    template class SortedIndexStorage<T>;                      \
+    template class SortedIndex<T>;                             \
     template class SortedIndexReader<T>;
 INSTANTIATE_SORTED_READER(bool)
 INSTANTIATE_SORTED_READER(int8_t)
@@ -1130,6 +1175,8 @@ INSTANTIATE_SORTED_READER(float)
 INSTANTIATE_SORTED_READER(double)
 #undef INSTANTIATE_SORTED_READER
 
+template class SortedIndexStorage<std::string_view>;
+template class SortedIndex<std::string_view>;
 template class SortedIndexReader<std::string_view>;
 
 }  // namespace milvus::index

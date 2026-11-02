@@ -23,6 +23,7 @@
 #include "common/Geometry.h"
 #include "common/Types.h"
 #include "index/SharedValidityBitmap.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
@@ -58,6 +59,9 @@ class RTreeIndexState final {
     int64_t
     MemoryUsage() const;
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
  private:
     friend class RTreeGrowingSpatialIndex;
 
@@ -82,6 +86,27 @@ class RTreeIndexState final {
     SharedValidityBitmap::Snapshot validity_;
     int64_t total_num_rows_{0};
     int64_t memory_usage_{0};
+};
+
+/** @brief Owns one immutable shard/validity generation for request readers. */
+class RTreeIndex final : public IIndex,
+                         public std::enable_shared_from_this<RTreeIndex> {
+ public:
+    explicit RTreeIndex(std::shared_ptr<const RTreeIndexState> state);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override {
+    }
+
+ private:
+    friend class RTreeIndexReader;
+    std::shared_ptr<const RTreeIndexState> state_;
 };
 
 class RTreeIndexReader final : public IIndexReaderBase,
@@ -133,7 +158,12 @@ class RTreeIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
-    std::shared_ptr<const RTreeIndexState> state_;
+    friend class RTreeIndex;
+    RTreeIndexReader(std::shared_ptr<const RTreeIndex> index,
+                     milvus::OpContext* op_ctx);
+
+    std::shared_ptr<const RTreeIndex> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index

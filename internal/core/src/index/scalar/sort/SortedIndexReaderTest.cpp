@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/scalar/sort/SortedIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
@@ -33,6 +34,41 @@
 
 namespace milvus::index::test {
 namespace {
+
+TEST(SortedIndexOwnershipTest, ReadersShareLayoutAndPreserveNulls) {
+    auto layout = SortedStringLayout::FromHeap({"apple"}, {{0}}, 2);
+    std::weak_ptr<const SortedStringLayout> lifetime = layout;
+    auto offsets = std::make_shared<const std::vector<int32_t>>(
+        std::initializer_list<int32_t>{0, -1});
+    auto validity = std::make_shared<TargetBitmap>(2, false);
+    validity->set(0);
+    SortedIndexStorage<std::string_view>::OpenArgs args;
+    args.state.valid_bitset = std::move(validity);
+    args.state.idx_to_offsets = offsets->data();
+    args.state.idx_to_offsets_size = offsets->size();
+    args.state.idx_to_offsets_owner = std::move(offsets);
+    args.state.total_num_rows = 2;
+    args.storage.layout = std::move(layout);
+    auto index =
+        std::make_shared<SortedIndex<std::string_view>>(std::move(args));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* predicates =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            second.get());
+    ASSERT_NE(predicates, nullptr);
+    const std::string_view value = "missing";
+    const auto hits = predicates->NotIn(1, &value);
+    ASSERT_EQ(hits.size(), 2);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
 
 template <typename T>
 void

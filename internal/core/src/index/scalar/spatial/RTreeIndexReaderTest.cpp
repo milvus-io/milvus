@@ -40,6 +40,30 @@ namespace milvus::index::test {
 
 namespace {
 
+TEST(RTreeIndexOwnershipTest, RetainsAuthoritativeCountForAllNullRows) {
+    auto engine = RTreeQueryEngine::Create({});
+    auto nulls = std::make_shared<const std::vector<size_t>>(
+        std::initializer_list<size_t>{0, 1});
+    auto state =
+        RTreeIndexState::Create(std::move(engine), std::move(nulls), 2);
+    std::weak_ptr<const RTreeIndexState> lifetime = state;
+    auto index = std::make_shared<RTreeIndex>(std::move(state));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 2);
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    EXPECT_EQ(second->Count(), 2);
+    const auto* validity = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(validity, nullptr);
+    EXPECT_EQ(validity->IsNull().count(), 2);
+    EXPECT_EQ(validity->IsNotNull().count(), 0);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
+
 TEST(SharedValidityBitmapTest, FirstNullUses16KiBDefaultCapacity) {
     SharedValidityBitmap writer;
     writer.PrepareAppend(18, true);
