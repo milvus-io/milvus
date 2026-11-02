@@ -250,7 +250,8 @@ class SegmentInterface {
 
     virtual bool
     is_primary_field(FieldId id) const {
-        return get_schema_snapshot()->get_primary_field_id() == id;
+        const auto primary = get_schema_snapshot()->get_primary_field_id();
+        return primary.has_value() && primary->get() == id.get();
     }
 
     virtual int64_t
