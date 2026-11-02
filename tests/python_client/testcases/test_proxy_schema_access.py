@@ -1,0 +1,147 @@
+"""Proxy schema selection stays coherent across TTL and collection identity changes."""
+
+import time
+import uuid
+
+import grpc
+import pytest
+from common.common_type import CaseLabel
+from pymilvus import DataType, MilvusClient
+from pymilvus.grpc_gen import milvus_pb2, milvus_pb2_grpc
+
+
+@pytest.fixture
+def schema_access_client(request):
+    host = request.config.getoption("--host")
+    port = request.config.getoption("--port")
+    client = MilvusClient(uri=f"http://{host}:{port}")
+    channel = grpc.insecure_channel(f"{host}:{port}")
+    stub = milvus_pb2_grpc.MilvusServiceStub(channel)
+    name = f"schema_access_{uuid.uuid4().hex}"
+    yield client, stub, name
+    client.drop_collection(name, timeout=60)
+    channel.close()
+    client.close()
+
+
+def snapshot(stub, name):
+    response = stub.DescribeCollection(
+        milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60
+    )
+    assert response.status.code == 0, response.status
+    return response.collectionID, response.schema.version
+
+
+def create_collection(client, name):
+    schema = client.create_schema(auto_id=False)
+    schema.add_field("id", DataType.INT64, is_primary=True)
+    schema.add_field("value", DataType.INT64)
+    schema.add_field("expiry", DataType.TIMESTAMPTZ, nullable=True)
+    schema.add_field("next_expiry", DataType.TIMESTAMPTZ, nullable=True)
+    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+    index = client.prepare_index_params()
+    index.add_index("vector", index_type="FLAT", metric_type="L2")
+    client.create_collection(name, schema=schema, index_params=index, shards_num=2, timeout=60)
+
+
+def row(pk, value):
+    past, future = "2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z"
+    return {
+        "id": pk, "value": value, "vector": [float(pk), 0.0, 0.0, 0.0],
+        "expiry": past if pk == 1 else future,
+        "next_expiry": future if pk == 1 else past,
+    }
+
+
+def ids(client, name):
+    return sorted(r["id"] for r in client.query(
+        name, filter="id >= 0", output_fields=["id"], consistency_level="Strong", timeout=60
+    ))
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    collection_id, version = snapshot(stub, name)
+    assert version == 0
+    client.insert(name, [row(1, 10), row(2, 20)], timeout=60)
+    assert ids(client, name) == [1, 2]
+
+    # Warm both selectors before each ALTER. Identical updates/deletes are no-ops.
+    transitions = [
+        ({"collection.ttl.seconds": "3600"}, [], 1, [1, 2]),
+        ({"collection.ttl.seconds": "3600"}, [], 1, [1, 2]),
+        ({"collection.ttl.seconds": "7200"}, [], 2, [1, 2]),
+        ({}, ["collection.ttl.seconds"], 3, [1, 2]),
+        ({}, ["collection.ttl.seconds"], 3, [1, 2]),
+        ({"ttl_field": "expiry"}, [], 4, [2]),
+        ({"ttl_field": "expiry"}, [], 4, [2]),
+        ({"ttl_field": "next_expiry"}, [], 5, [1]),
+        ({}, ["ttl_field"], 6, [1, 2]),
+        ({}, ["ttl_field"], 6, [1, 2]),
+    ]
+    for properties, deletes, expected_version, visible in transitions:
+        if properties:
+            client.alter_collection_properties(name, properties, timeout=60)
+        else:
+            client.drop_collection_properties(name, deletes, timeout=60)
+        assert snapshot(stub, name) == (collection_id, expected_version)
+        assert ids(client, name) == visible
+        client.upsert(name, row(2, 20), timeout=60)
+
+    # Partial update performs an internal schema-bound read; vector output
+    # exercises Search's field-refill/requery path on the legacy backend.
+    client.upsert(name, {"id": 2, "value": 22}, partial_update=True, timeout=60)
+    result = client.search(name, data=[[2.0, 0.0, 0.0, 0.0]], limit=2,
+                           output_fields=["value", "vector"], consistency_level="Strong", timeout=60)
+    assert result[0][0]["id"] == 2
+    assert result[0][0]["entity"]["value"] == 22
+    client.delete(name, filter="value >= 20", timeout=60)
+    assert ids(client, name) == [1]
+    client.release_collection(name, timeout=60)
+    client.delete(name, ids=[1], timeout=60)  # PK-only delete does not need load.
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_alias_rename_recreate(schema_access_client):
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    old_id, _ = snapshot(stub, name)
+    alias, renamed = f"{name}_alias", f"{name}_renamed"
+    client.create_alias(name, alias, timeout=60)
+    alias_present = True
+    try:
+        client.insert(alias, row(1, 10), timeout=60)
+        assert ids(client, alias) == [1]
+        client.rename_collection(name, renamed, timeout=60)
+        assert snapshot(stub, renamed)[0] == old_id
+        assert ids(client, alias) == [1]
+        client.drop_alias(alias, timeout=60)
+        alias_present = False
+        client.drop_collection(renamed, timeout=60)
+        create_collection(client, name)
+        assert snapshot(stub, name)[0] != old_id
+        client.insert(name, row(2, 20), timeout=60)
+        assert ids(client, name) == [2]
+        with pytest.raises(Exception, match="not found|not exist|can't find"):
+            client.query(alias, filter="id >= 0", output_fields=["id"], timeout=60)
+    finally:
+        if alias_present:
+            client.drop_alias(alias, timeout=60)
+        client.drop_collection(renamed, timeout=60)
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_ttl_duration_replaces_warm_cache(schema_access_client):
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    client.alter_collection_properties(name, {"collection.ttl.seconds": "3600"}, timeout=60)
+    client.insert(name, [row(1, 10), row(2, 20)], timeout=60)
+    assert ids(client, name) == [1, 2]
+    # A same-version cached body used to restore the old one-hour TTL after
+    # invalidation. Both old rows must now expire under the shorter snapshot.
+    client.alter_collection_properties(name, {"collection.ttl.seconds": "1"}, timeout=60)
+    assert snapshot(stub, name)[1] == 2
+    time.sleep(2)
+    assert ids(client, name) == []

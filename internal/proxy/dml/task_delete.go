@@ -572,6 +572,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
+				SchemaVersion:      dr.schema.GetVersion(),
 				PartitionIDs:       dr.partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,

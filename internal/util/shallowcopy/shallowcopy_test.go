@@ -20,6 +20,7 @@ func TestShallowCopySearchRequest(t *testing.T) {
 			ReqID:                   1,
 			DbID:                    2,
 			CollectionID:            3,
+			SchemaVersion:           7,
 			PartitionIDs:            []int64{10, 20},
 			Dsl:                     "dsl",
 			PlaceholderGroup:        []byte("placeholder"),
@@ -55,6 +56,7 @@ func TestShallowCopySearchRequest(t *testing.T) {
 		// Scalar fields copied
 		assert.Equal(t, src.ReqID, dst.ReqID)
 		assert.Equal(t, src.CollectionID, dst.CollectionID)
+		assert.Equal(t, src.SchemaVersion, dst.SchemaVersion)
 		assert.Equal(t, src.Nq, dst.Nq)
 		assert.Equal(t, src.Topk, dst.Topk)
 		assert.Equal(t, src.IsIterator, dst.IsIterator)
@@ -79,6 +81,7 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 			Base:                    &commonpb.MsgBase{TargetID: 100},
 			ReqID:                   1,
 			CollectionID:            3,
+			SchemaVersion:           7,
 			PartitionIDs:            []int64{10, 20},
 			SerializedExprPlan:      []byte("plan"),
 			OutputFieldsId:          []int64{1, 2},
@@ -99,6 +102,7 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 		assert.Equal(t, int64(100), src.Base.TargetID)
 		assert.Equal(t, src.ReqID, dst.ReqID)
 		assert.Equal(t, src.CollectionID, dst.CollectionID)
+		assert.Equal(t, src.SchemaVersion, dst.SchemaVersion)
 		assert.Equal(t, src.Limit, dst.Limit)
 		assert.Equal(t, src.IsIterator, dst.IsIterator)
 		assert.Equal(t, src.EntityTtlPhysicalTime, dst.EntityTtlPhysicalTime)

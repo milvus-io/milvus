@@ -58,13 +58,15 @@ type QueryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
 
-	ctx            context.Context
-	result         *milvuspb.QueryResults
-	request        *milvuspb.QueryRequest
-	ids            *schemapb.IDs
-	collectionName string
-	queryParams    *queryParams
-	schema         *schemaInfo
+	ctx               context.Context
+	result            *milvuspb.QueryResults
+	request           *milvuspb.QueryRequest
+	ids               *schemapb.IDs
+	collectionName    string
+	queryParams       *queryParams
+	schema            *schemaInfo
+	boundReadSchema   *schemaInfo
+	boundCollectionID int64
 
 	translatedOutputFields []string
 	userOutputFields       []string
@@ -148,6 +150,12 @@ func (t *QueryTask) Result() *milvuspb.QueryResults {
 // feature counters must not see them.
 func (t *QueryTask) MarkInternal() {
 	t.internalTask = true
+}
+
+// BindReadSchema fixes an internal read to its parent operation's schema.
+// Metadata refresh must not silently change a requery or an upsert read/merge.
+func (t *QueryTask) BindReadSchema(collectionID int64, schema *metacache.SchemaInfo) {
+	t.boundCollectionID, t.boundReadSchema = collectionID, schema
 }
 
 // SetActualChannelsMvcc installs the output snapshot for internal partial-update
@@ -816,7 +824,14 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
 	schema := colInfo.Schema
+	if t.boundReadSchema != nil {
+		if t.boundCollectionID != t.CollectionID {
+			return merr.WrapErrServiceUnavailableMsg("collection identity changed during internal query")
+		}
+		schema = t.boundReadSchema
+	}
 	t.schema = schema
+	t.SchemaVersion = schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
@@ -1013,13 +1028,14 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	if collectionInfo.CollectionTTL != 0 {
+	collectionTTL := metacache.GetCollectionTTL(t.schema.GetProperties())
+	if collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()

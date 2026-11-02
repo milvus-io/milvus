@@ -323,6 +323,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
+	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}

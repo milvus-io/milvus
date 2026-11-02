@@ -155,6 +155,8 @@ func TestSearchTask_RequeryPlanNamespace(t *testing.T) {
 		// Capture qt.plan to ensure request namespace is wired
 		mockTestTo(t, (*namespaceRequeryMockNode).ExecuteQuery, func(_ *namespaceRequeryMockNode, _ context.Context, qt taskmodel.Task, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			queryTask := qt.(*QueryTask)
+			assert.Same(t, tsk.schema, queryTask.boundReadSchema)
+			assert.Equal(t, tsk.GetCollectionID(), queryTask.boundCollectionID)
 			if queryTask.plan == nil || queryTask.plan.Namespace == nil || *queryTask.plan.Namespace != *tsk.request.Namespace {
 				t.Fatalf("requery plan namespace mismatch, got=%v want=%v", queryTask.plan.Namespace, *tsk.request.Namespace)
 			}

@@ -103,6 +103,7 @@ func (c *metadataPrivilegeCoordinator) GetReplicas(_ context.Context, req *milvu
 
 func setupMetadataPrivileges(t *testing.T) (*metadataPrivilegeCoordinator, func(string, ...commonpb.ObjectPrivilege)) {
 	t.Helper()
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 	for key, value := range map[string]string{
 		Params.CommonCfg.AuthorizationEnabled.Key:    "true",
