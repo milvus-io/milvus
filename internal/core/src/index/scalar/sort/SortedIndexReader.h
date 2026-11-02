@@ -313,12 +313,6 @@ class SortedIndexReader final
            const std::function<void(int64_t i, const T*, bool valid)>& out)
         const override;
 
-    void
-    GatherViews(const int64_t* offsets,
-                int64_t count,
-                const typename IScalarValueReader<T>::ViewsConsumer& consume)
-        const override;
-
     TargetBitmap
     IsNull() const override;
 

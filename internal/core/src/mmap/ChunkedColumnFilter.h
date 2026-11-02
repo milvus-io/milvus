@@ -38,12 +38,10 @@ class ColumnFilter final {
 
     ColumnFilter(MetricsSource source,
                  PhysicalCellPredicate predicate,
-                 bool skipped_validity_required = true,
-                 bool stable_across_inputs = false)
+                 bool skipped_validity_required = true)
         : source_(source),
           predicate_(std::move(predicate)),
-          skipped_validity_required_(skipped_validity_required),
-          stable_across_inputs_(stable_across_inputs) {
+          skipped_validity_required_(skipped_validity_required) {
     }
 
     MetricsSource
@@ -61,19 +59,11 @@ class ColumnFilter final {
         return predicate_ && predicate_(cell_id);
     }
 
-    // Opt in only for a fixed predicate over one immutable source generation.
-    // Const ownership alone does not prove a callback's captures are immutable.
-    bool
-    StableAcrossInputs() const {
-        return stable_across_inputs_;
-    }
-
  private:
     MetricsSource source_;
     PhysicalCellPredicate predicate_;
     // False only when the expression's consumer does not observe UNKNOWN.
     bool skipped_validity_required_;
-    bool stable_across_inputs_;
 };
 
 using ColumnFilterPtr = std::shared_ptr<const ColumnFilter>;

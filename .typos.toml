@@ -1,3 +1,0 @@
-[default.extend-words]
-# C++20 std::countr_zero, already used by the existing Expr kernels.
-countr = "countr"

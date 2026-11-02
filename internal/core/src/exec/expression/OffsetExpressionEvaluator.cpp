@@ -20,13 +20,9 @@ OffsetExpressionWorkspace::OffsetExpressionWorkspace(
     ExecContext* exec_context,
     OffsetExpressionOptions options)
     : exec_context_(exec_context),
-      take_context_(std::make_shared<TakeContext>(options.take)),
       expr_set_(CheckedRoot(std::move(expression), exec_context),
                 exec_context,
                 options.null_rejecting) {
-    for (const auto& root : expr_set_.exprs()) {
-        root->SetOffsetTakeContext(take_context_);
-    }
     // The compiled offset tree is fixed for this workspace. In particular,
     // offset execution never installs the sequential-only batch-LIKE node.
     supports_offset_input_ = std::all_of(

@@ -11,12 +11,11 @@ namespace milvus::exec {
 
 struct OffsetExpressionOptions {
     bool null_rejecting{false};
-    TakeContextOptions take;
 };
 
-// One mutable expression tree and positional-read budget per execution task.
-// Repeated calls reuse layout/owners, not predicate results. Inputs may exceed
-// 64 rows, preserve order/duplicates, and use the existing Expr kernels.
+// One existing ExprSet per task, reused for successive offset batches. Reading
+// and predicate evaluation stay in the original Expr implementations. Inputs
+// preserve order/duplicates and are not limited to a transport mask width.
 class OffsetExpressionWorkspace final {
  public:
     OffsetExpressionWorkspace(expr::TypedExprPtr expression,
@@ -38,14 +37,8 @@ class OffsetExpressionWorkspace final {
     std::shared_ptr<ColumnVector>
     EvalOffsets(OffsetVector& offsets);
 
-    const TakeContextStats&
-    ReadStats() const {
-        return take_context_->Stats();
-    }
-
  private:
     ExecContext* exec_context_;
-    std::shared_ptr<TakeContext> take_context_;
     ExprSet expr_set_;
     bool supports_offset_input_{false};
     std::vector<VectorPtr> results_;
