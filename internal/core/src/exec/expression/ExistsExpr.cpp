@@ -46,10 +46,6 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::DetermineExecPath() {
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
     SegmentExpr::DetermineExecPath();
 }
 

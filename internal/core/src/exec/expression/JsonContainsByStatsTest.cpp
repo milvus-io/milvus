@@ -37,6 +37,11 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/JsonContainsExpr.h"
+#include "index/Meta.h"
+#include "index/IndexFactory.h"
+#include "index/JsonScalarIndexWrapper.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
@@ -1587,4 +1592,201 @@ TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
     EXPECT_FALSE(reader->Get(nullptr, 3).has_value());
     Json raw{simdjson::padded_string(documents[0])};
     EXPECT_EQ(raw.at<std::string_view>("/s").value(), "");
+}
+
+namespace {
+
+struct JsonStatsExecFixture {
+    SchemaPtr schema = std::make_shared<Schema>();
+    FieldId field = schema->AddDebugField("json", DataType::JSON);
+    segcore::SegmentSealedUPtr segment = segcore::CreateSealedSegment(schema);
+    std::shared_ptr<FieldData<milvus::Json>> data =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    int64_t count;
+
+    JsonStatsExecFixture(const std::vector<std::string>& rows,
+                         int64_t id,
+                         bool with_stats = true)
+        : count(rows.size()) {
+        std::vector<milvus::Json> jsons;
+        jsons.reserve(rows.size());
+        for (const auto& row : rows) {
+            jsons.emplace_back(simdjson::padded_string(row));
+        }
+        data->add_json_data(jsons);
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(PrepareSingleFieldInsertBinlog(
+            id, id, id, field.get(), {data}, cm));
+        if (with_stats) {
+            auto stats = BuildAndLoadJsonKeyStats(
+                rows, field, TestLocalPath, id, id, id, field.get(), id, 1);
+            auto* sealed =
+                static_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+            sealed->SetJsonStatsForTesting(
+                field, MakeTestJsonStatsSlot(std::move(stats)));
+        }
+    }
+
+    void
+    Install(const std::string& path, const std::string& cast) {
+        storage::FileManagerContext ctx;
+        ctx.fieldDataMeta.field_id = field.get();
+        ctx.fieldDataMeta.field_schema.set_fieldid(field.get());
+        ctx.fieldDataMeta.field_schema.set_data_type(proto::schema::JSON);
+        auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::CreateIndexInfo{
+                .index_type = index::INVERTED_INDEX_TYPE,
+                .json_cast_type = JsonCastType::FromString(cast),
+                .json_path = path},
+            ctx);
+        if (cast == "JSON") {
+            auto* flat = dynamic_cast<index::JsonFlatIndex*>(index.get());
+            ASSERT_NE(flat, nullptr);
+            flat->BuildWithFieldData({data});
+            flat->finish();
+            flat->create_reader(index::SetBitsetSealed);
+        } else {
+            auto* numeric =
+                dynamic_cast<index::JsonInvertedIndex<double>*>(index.get());
+            ASSERT_NE(numeric, nullptr);
+            numeric->BuildWithFieldData({data});
+            numeric->finish();
+            numeric->create_reader(index::SetBitsetSealed);
+        }
+        segcore::LoadIndexInfo info;
+        info.field_id = field.get();
+        info.field_type = DataType::JSON;
+        info.index_params = {{JSON_PATH, path}, {JSON_CAST_TYPE, cast}};
+        info.cache_index =
+            CreateTestCacheIndex("stats-priority-" + path, std::move(index));
+        segment->LoadIndex(info);
+    }
+
+    std::shared_ptr<expr::UnaryRangeFilterExpr>
+    Unary(const std::string& path,
+          proto::plan::OpType op,
+          const proto::plan::GenericValue& value) const {
+        return std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field, DataType::JSON, {path}),
+            op,
+            value,
+            std::vector<proto::plan::GenericValue>{});
+    }
+
+    exec::ExprExecPath
+    Path(const std::shared_ptr<expr::UnaryRangeFilterExpr>& e) const {
+        exec::PhyUnaryRangeFilterExpr phy(
+            {}, e, "unary", nullptr, segment.get(), count, count, 0);
+        phy.EnsureExecPathDetermined();
+        return phy.GetExecPath();
+    }
+
+    exec::ExprExecPath
+    Path(const std::shared_ptr<expr::TermFilterExpr>& e) const {
+        exec::PhyTermFilterExpr phy({},
+                                    e,
+                                    "term",
+                                    nullptr,
+                                    segment.get(),
+                                    count,
+                                    MAX_TIMESTAMP,
+                                    count,
+                                    0);
+        phy.EnsureExecPathDetermined();
+        return phy.GetExecPath();
+    }
+
+    exec::ExprExecPath
+    Path(const std::shared_ptr<expr::JsonContainsExpr>& e) const {
+        exec::PhyJsonContainsFilterExpr phy(
+            {}, e, "contains", nullptr, segment.get(), count, count, 0);
+        phy.EnsureExecPathDetermined();
+        return phy.GetExecPath();
+    }
+
+    BitsetType
+    Eval(const expr::TypedExprPtr& e) const {
+        return query::ExecuteQueryExpr(
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, e),
+            segment.get(),
+            count,
+            MAX_TIMESTAMP);
+    }
+};
+
+}  // namespace
+
+TEST(JsonStatsExecPathTest, PathIndexWinsOverJsonStats) {
+    std::vector<std::string> rows;
+    for (int i = 0; i < 100; ++i) {
+        rows.emplace_back(fmt::format(R"({{"a": {}, "b": {}}})", i % 5, i % 3));
+    }
+    JsonStatsExecFixture f(rows, 1301);
+    proto::plan::GenericValue three;
+    three.set_int64_val(3);
+    auto unary = f.Unary("a", proto::plan::Equal, three);
+    auto term = std::make_shared<expr::TermFilterExpr>(
+        expr::ColumnInfo(f.field, DataType::JSON, {"a"}),
+        std::vector<proto::plan::GenericValue>{three},
+        false);
+    EXPECT_EQ(f.Path(unary), exec::ExprExecPath::JsonStats);
+    EXPECT_EQ(f.Path(term), exec::ExprExecPath::JsonStats);
+    const auto expected = f.Eval(unary);
+    f.Install("/b", "DOUBLE");
+    EXPECT_EQ(f.Path(unary), exec::ExprExecPath::JsonStats);
+    EXPECT_EQ(f.Path(term), exec::ExprExecPath::JsonStats);
+    f.Install("/a", "DOUBLE");
+    EXPECT_EQ(f.Path(unary), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(f.Path(term), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(f.Eval(unary), expected);
+    EXPECT_EQ(f.Eval(term), expected);
+    proto::plan::GenericValue text;
+    text.set_string_val("3");
+    EXPECT_EQ(f.Path(f.Unary("a", proto::plan::Equal, text)),
+              exec::ExprExecPath::JsonStats);
+}
+
+TEST(JsonStatsExecPathTest, FlatIndexWinsOverJsonStats) {
+    JsonStatsExecFixture f({R"({"a":1})", R"({"a":2})", R"({"a":null})"}, 1302);
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    auto unary = f.Unary("a", proto::plan::Equal, one);
+    const auto expected = f.Eval(unary);
+    f.Install("", "JSON");
+    EXPECT_EQ(f.Path(unary), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(f.Eval(unary), expected);
+}
+
+TEST(JsonStatsExecPathTest,
+     InvertedArrayIndexDoesNotPreemptJsonStatsForContains) {
+    const std::vector<std::string> rows = {R"({"tags":[1,2]})",
+                                           R"({"tags":[3]})",
+                                           R"({"other":1})",
+                                           R"({"tags":1})",
+                                           R"({"tags":null})",
+                                           R"({"tags":[]})"};
+    JsonStatsExecFixture f(rows, 1303);
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    auto contains = std::make_shared<expr::JsonContainsExpr>(
+        expr::ColumnInfo(f.field, DataType::JSON, {"tags"}),
+        proto::plan::JSONContainsExpr_JSONOp_Contains,
+        true,
+        std::vector<proto::plan::GenericValue>{one});
+    auto negation = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, contains);
+    f.Install("/tags", "ARRAY_DOUBLE");
+    EXPECT_EQ(f.Path(contains), exec::ExprExecPath::JsonStats);
+    auto positive = f.Eval(contains);
+    auto negative = f.Eval(negation);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(bool(positive[i]), i == 0) << i;
+        EXPECT_EQ(bool(negative[i]), i == 1 || i == 5) << i;
+    }
+    JsonStatsExecFixture raw(rows, 1304, false);
+    EXPECT_EQ(raw.Eval(contains), positive);
+    EXPECT_EQ(raw.Eval(negation), negative);
+    raw.Install("/tags", "ARRAY_DOUBLE");
+    EXPECT_EQ(raw.Path(contains), exec::ExprExecPath::ScalarIndex);
 }

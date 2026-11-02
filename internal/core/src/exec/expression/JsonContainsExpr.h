@@ -496,12 +496,16 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override {
-        if (CanUseJsonStatsAtInit()) {
-            exec_path_ = ExprExecPath::JsonStats;
-            return;
-        }
+        // JsonStats is the fallback applied by EnsureExecPathDetermined()
+        // when no index below serves this expression; see SegmentExpr::
+        // FallbackToJsonStatsIfEligible().
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -520,17 +524,21 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         }
         SegmentExpr::DetermineExecPath();
         if (exec_path_ != ExprExecPath::ScalarIndex ||
-            expr_->column_.data_type_ != DataType::JSON ||
-            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+            expr_->column_.data_type_ != DataType::JSON) {
             return;
         }
-        const auto has_unsafe_int_literal = std::any_of(
-            expr_->vals_.begin(),
-            expr_->vals_.end(),
-            [this](const auto& value) {
-                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
-            });
-        if (has_unsafe_int_literal) {
+        if (!PinnedJsonIndexIsFlat() && CanUseJsonStatsAtInit() &&
+            pinned_index_[0]->Type() != index::ASCENDING_SORT) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        if (value_type_ == DataType::INT64 && !PinnedJsonIndexIsFlat() &&
+            std::any_of(expr_->vals_.begin(),
+                        expr_->vals_.end(),
+                        [this](const auto& value) {
+                            return !IsInt64SafeForJsonDoubleIndex(
+                                value.int64_val());
+                        })) {
             exec_path_ = ExprExecPath::RawData;
         }
     }
