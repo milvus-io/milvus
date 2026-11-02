@@ -501,12 +501,16 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override {
-        if (CanUseJsonStatsAtInit()) {
-            exec_path_ = ExprExecPath::JsonStats;
-            return;
-        }
+        // JsonStats is the fallback applied by EnsureExecPathDetermined()
+        // when no index below serves this expression; see SegmentExpr::
+        // FallbackToJsonStatsIfEligible().
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -540,6 +544,33 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                              : expr_->column_.element_type_;
         req.json_array_cast = expr_->column_.data_type_ == DataType::JSON;
         SelectAndPinIndex(req);
+        if (exec_path_ == ExprExecPath::ScalarIndex &&
+            expr_->column_.data_type_ == DataType::JSON &&
+            TypedJsonArrayIndexHasInexactValidity() &&
+            CanUseJsonStatsAtInit()) {
+            // Keep the exact shredded ARRAY kernel instead.
+            ClearSelectedIndex();
+            exec_path_ = ExprExecPath::RawData;
+        }
+    }
+
+    // A typed ARRAY_* JSON path projection records a missing, null or
+    // non-array target as invalid only when it was built for HYBRID or
+    // STL_SORT. An INVERTED one records it as a valid empty array, so CONTAINS
+    // answers a known FALSE where raw data and JSON stats answer UNKNOWN, and
+    // NOT CONTAINS then returns those rows. The loaded entry reports the
+    // resolved family, and only SORT is exact once loaded: it always persists
+    // its validity. BITMAP persists validity only for a nullable field, so on
+    // a non-nullable JSON field the invalid rows load back as valid. INVERTED
+    // is ambiguous, because a HYBRID build that resolved to INVERTED looks the
+    // same as a plain INVERTED one here. Every family but SORT is declined.
+    bool
+    TypedJsonArrayIndexHasInexactValidity() const {
+        if (!selected_index_entry_.has_value() ||
+            index_path_detail::IsFlatJsonIndex(*selected_index_entry_)) {
+            return false;
+        }
+        return selected_index_entry_->family != index::families::kSort;
     }
 
  private:
