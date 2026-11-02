@@ -88,6 +88,12 @@ func (t *l0CompactionTask) GetTaskVersion() int64 {
 
 func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
+	if t.restoreMutationApplied() {
+		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn(t.context(), "retrying restored delete completion metadata", mlog.Err(err))
+		}
+		return
+	}
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to build compaction request", mlog.Err(err))
@@ -256,7 +262,11 @@ func (t *l0CompactionTask) Process() bool {
 }
 
 func (t *l0CompactionTask) processMetaSaved() bool {
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed), func(task *datapb.CompactionTask) {
+		if task.GetRestoreJobId() != 0 {
+			task.RestoreCompleted = true
+		}
+	})
 	if err != nil {
 		mlog.Warn(context.TODO(), "l0CompactionTask unable to processMetaSaved", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 		return false
@@ -313,16 +323,24 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	// Select flushed L1/L2 segments for LevelZero compaction that meets the condition:
-	// dmlPos < triggerInfo.pos
-	flushedSegments := t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
-			info.GetInsertChannel() == taskProto.GetChannel() &&
-			(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
-			!info.GetIsImporting() &&
-			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
-	}))
+	var flushedSegments []*SegmentInfo
+	if taskProto.GetRestoreJobId() != 0 {
+		var err error
+		flushedSegments, err = t.restoreTargets()
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		// Ordinary L0 compaction selects bases older than the trigger position.
+		flushedSegments = t.meta.SelectSegments(t.context(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+				info.GetInsertChannel() == taskProto.GetChannel() &&
+				(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
+				!info.GetIsImporting() &&
+				info.GetLevel() != datapb.SegmentLevel_L0 &&
+				segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
+		}))
+	}
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}
 	for _, info := range flushedSegments {
@@ -477,6 +495,23 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
+	if t.GetTaskProto().GetRestoreJobId() != 0 {
+		if t.restoreMutationApplied() {
+			return nil
+		}
+		if _, err := t.restoreTargets(); err != nil {
+			return err
+		}
+		allowed := make(map[int64]struct{}, len(t.GetTaskProto().GetRestoreTargetSegments()))
+		for _, id := range t.GetTaskProto().GetRestoreTargetSegments() {
+			allowed[id] = struct{}{}
+		}
+		for _, output := range outputSegs {
+			if _, ok := allowed[output.GetSegmentID()]; !ok {
+				return merr.WrapErrDataIntegrityMsg("restore compaction returned unexpected segment %d", output.GetSegmentID())
+			}
+		}
+	}
 	var operators []UpdateOperator
 	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {

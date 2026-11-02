@@ -26,6 +26,7 @@ import (
 
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	_ "github.com/milvus-io/milvus/pkg/v3/util/resource" // Register the shared protobuf codec before Params starts etcd RPCs.
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
