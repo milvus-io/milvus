@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -44,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -244,6 +247,46 @@ func TestHTTPWrapper(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestWrapperPostRecordsMetricsThroughTimeoutMiddleware is a regression test for
+// https://github.com/milvus-io/milvus/issues/52177. REST v2 handlers run inside
+// timeoutMiddleware on a copied gin context; before gin v1.10, Context.Copy()
+// dropped the private fullPath field, so routeToMethod[gCtx.FullPath()] missed
+// and milvus_proxy_req_count was never incremented for REST requests. The test
+// asserts the total and outcome deltas through the real middleware chain, and
+// fails on gin < v1.10.
+func TestWrapperPostRecordsMetricsThroughTimeoutMiddleware(t *testing.T) {
+	ginHandler := gin.New()
+	app := ginHandler.Group("/v2/vectordb", func(c *gin.Context) {
+		c.Set(ContextUsername, util.UserRoot)
+	})
+	app.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(
+		func() any { return &DatabaseReq{} },
+		func(ctx context.Context, c *gin.Context, req any, dbName string) (interface{}, error) {
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil)})
+			return merr.Success(), nil
+		},
+	)))
+
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	total := metrics.ProxyFunctionCall.WithLabelValues(
+		nodeID, "ShowCollections", metrics.TotalLabel, metrics.CauseNA, DefaultDbName, "",
+	)
+	success := metrics.ProxyFunctionCall.WithLabelValues(
+		nodeID, "ShowCollections", metrics.SuccessLabel, metrics.CauseNA, DefaultDbName, "",
+	)
+	totalBefore := testutil.ToFloat64(total)
+	successBefore := testutil.ToFloat64(success)
+
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, ListAction), bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	ginHandler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, float64(1), testutil.ToFloat64(total)-totalBefore)
+	require.Equal(t, float64(1), testutil.ToFloat64(success)-successBefore)
 }
 
 func TestGrpcWrapper(t *testing.T) {
