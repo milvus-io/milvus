@@ -131,7 +131,7 @@ func TestExpiredDeadlineRequeuesAtReadyQueueTail(t *testing.T) {
 	require.Equal(t, 2, <-order)
 }
 
-func TestDefaultRetryInterval(t *testing.T) {
+func TestDefaultExponentialRetryBackoff(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		err  error
@@ -144,20 +144,21 @@ func TestDefaultRetryInterval(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			s := New(1)
 			defer s.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			var firstRun time.Time
-			var interval time.Duration
+			var runs []time.Time
 			h := s.Submit(TaskFunc(func(context.Context) error {
-				if firstRun.IsZero() {
-					firstRun = time.Now()
+				runs = append(runs, time.Now())
+				if len(runs) <= 2 {
 					return test.err
 				}
-				interval = time.Since(firstRun)
 				return nil
 			}))
 			require.NoError(t, h.Wait(ctx))
-			require.GreaterOrEqual(t, interval, 100*time.Millisecond)
+			require.Len(t, runs, 3)
+			require.GreaterOrEqual(t, runs[1].Sub(runs[0]), 10*time.Millisecond)
+			require.GreaterOrEqual(t, runs[2].Sub(runs[1]), 20*time.Millisecond)
+			require.Equal(t, 40*time.Millisecond, h.(*taskHandle).entry.backoff.NextBackOff())
 		})
 	}
 }

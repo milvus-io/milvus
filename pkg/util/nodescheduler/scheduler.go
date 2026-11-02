@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -38,7 +39,8 @@ type Scheduler interface {
 	// waiting for queue capacity or task execution. Tasks may call Submit from
 	// Execute, so implementations must preserve this non-blocking contract to
 	// avoid exhausting all workers on nested submissions.
-	Submit(Task) TaskHandle
+	// Each submission owns its retry backoff, configurable with WithBackoff.
+	Submit(Task, ...Option) TaskHandle
 }
 
 type Task interface {
@@ -75,7 +77,7 @@ var ErrDelay = &ScheduleError{kind: scheduleErrorKindDelay}
 
 // DelayUntil asks the scheduler to retry no earlier than nextRun. Wrapping this
 // error preserves both its deadline and errors.Is(err, ErrDelay). The bare
-// sentinel remains supported with the default retry interval.
+// sentinel uses the submitted task's exponential retry backoff.
 func DelayUntil(nextRun time.Time) *ScheduleError {
 	return &ScheduleError{kind: scheduleErrorKindDelay, nextRun: nextRun}
 }
@@ -104,6 +106,7 @@ type taskEntry struct {
 	done       chan struct{}
 	once       sync.Once
 	cancelTask func()
+	backoff    *backoff.ExponentialBackOff // Accessed only by the worker executing this entry.
 	// nextRun is the earliest time a delayed (ErrDelay) requeue may execute
 	// again. Zero means the entry may run immediately.
 	nextRun   time.Time
@@ -185,7 +188,8 @@ func (s *nodeScheduler) resize(concurrency int) {
 	s.cond.Broadcast()
 }
 
-func (s *nodeScheduler) Submit(task Task) TaskHandle {
+func (s *nodeScheduler) Submit(task Task, opts ...Option) TaskHandle {
+	backoff := newTaskBackoff(opts...)
 	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
 	entry := &taskEntry{
 		task:      task,
@@ -193,6 +197,7 @@ func (s *nodeScheduler) Submit(task Task) TaskHandle {
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		heapIndex: -1,
+		backoff:   backoff,
 	}
 	entry.cancelTask = func() { s.cancelTask(entry) }
 	handle := &taskHandle{entry: entry}
@@ -280,10 +285,12 @@ func (s *nodeScheduler) runWorker() {
 			continue
 		}
 		if errors.Is(err, ErrDelay) {
-			nextRun := time.Now().Add(delayOnRequeue)
+			var nextRun time.Time
 			var delay *ScheduleError
 			if errors.As(err, &delay) && !delay.nextRun.IsZero() {
 				nextRun = delay.nextRun
+			} else {
+				nextRun = time.Now().Add(entry.backoff.NextBackOff())
 			}
 			if s.requeue(entry, nextRun) {
 				continue
@@ -375,10 +382,6 @@ func (s *nodeScheduler) promoteDelayed() {
 		s.cond.Broadcast()
 	}
 }
-
-// delayOnRequeue preserves the retry interval for tasks returning bare ErrDelay.
-// Tasks with a specific deadline return DelayUntil instead.
-const delayOnRequeue = 100 * time.Millisecond
 
 var getGlobalScheduler = sync.OnceValue(func() *nodeScheduler {
 	params := paramtable.Get()
