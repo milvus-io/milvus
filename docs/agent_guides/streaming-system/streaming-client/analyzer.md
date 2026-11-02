@@ -71,8 +71,12 @@ ready entry. Native code retains parameter and filename validation.
 Inline execution constructs a temporary analyzer and destroys it and each token
 stream on exit. Field execution validates assignment ownership and holds the
 WAL's Working lifetime. FunctionRunnerManager resolves collection ID +
-WAL-vchannel key + field ID using that key's current schema. No Proxy schema
-version is sent or compared. Managed BM25/MinHash analyzers are pinned
+WAL-vchannel key + field ID using that key's current schema. Public standalone
+analyzer requests use the current WAL schema. Internal
+rendering supplies optional `read_schema_version`, including zero, to select the
+search schema. The WAL adaptor resolves that exact version and allocates a
+request-scoped function-runner key, released after the operation. Managed
+BM25/MinHash analyzers are pinned
 through the entire operation; ordinary analyzer-enabled fields use one copied
 field schema and temporary analyzer for the operation. GC before pin returns a
 transient error; after pin it waits for execution. WAL shutdown waits for admitted field analyzer calls through
@@ -112,7 +116,8 @@ HandlerClient does not interpret business Status or retry business failures.
 Collection identity is pinned before execution: Proxy resolves field/channel
 metadata by the original collection ID, and all streaming recovery attempts retain
 that ID. A same-name drop/recreate cannot redirect a request to the new collection.
-There is no historical schema lookup or schema-version admission check.
+Internal highlighting resolves the exact search schema; an unavailable version
+fails rather than falling back to the latest write schema.
 
 ## Compatibility
 
@@ -258,3 +263,21 @@ an unsupported new RPC surfaces as Unimplemented.
 - `internal/util/fileresource/pull.go` — process-wide analyzer resource manager access.
 - `internal/util/fileresource/analyzer_resource_manager.go` — ID-keyed loading, download flights, resource ownership and idle leases.
 - `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.
+
+## Lexical highlighting
+
+After search field retrieval, Proxy sends the search/query/corpus texts and their
+analyzer names to the field RunAnalyzer source with `TokenizeOptions.with_detail`.
+It retains the search CollectionID and SchemaVersion across this post-processing
+step, including schema version zero. Proxy then builds fragments with the shared
+`highlight.BuildFragments` helper and renders tags. The existing DQL highlight
+task queue remains in use. This path needs no QueryNode GetHighlight call or
+shard delegator; the legacy RPC remains available for older callers.
+
+The exact schema binding lasts through each analyzer call. It does not reserve
+schema history between search and highlighting: concurrent DDL/history cleanup
+can make the selected version unavailable. Detailed tokens travel from SN to
+Proxy before fragment construction, so large result sets require more response
+traffic than returning fragments alone. The PhraseMatch batching policy does not
+apply to this Tokenize operation. Upgrade SNs to support exact-schema analysis
+before activating the new Proxy path.

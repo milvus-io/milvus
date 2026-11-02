@@ -154,7 +154,8 @@ A field analyzer request may carry optional `read_schema_version`. Presence,
 including zero, selects the exact schema and a call-owned function scope, released
 when analysis finishes. Absence retains the existing WAL function-runner path.
 The handler clones and forwards the optional field across assignment retries;
-Proxy highlighting is not switched by this extraction.
+Proxy lexical highlighting uses this exact-schema analyzer binding after search;
+fragment construction and tag rendering run on Proxy.
 
 ## Payload ownership and wire compatibility
 
