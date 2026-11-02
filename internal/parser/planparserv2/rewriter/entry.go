@@ -2,8 +2,6 @@ package rewriter
 
 import (
 	"math"
-	"sort"
-	"strconv"
 
 	"google.golang.org/protobuf/proto"
 
@@ -147,68 +145,7 @@ func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
 	parts = v.deduplicateIdenticalExprs(parts)
-	parts = sortAndPartsBySelectivity(parts)
 	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
-}
-
-func andExprSelectivityScore(e *planpb.Expr) int {
-	if e == nil {
-		return 999
-	}
-	if IsAlwaysFalseExpr(e) {
-		return 0 // False first so short-circuit happens immediately
-	}
-	if IsAlwaysTrueExpr(e) {
-		return 998
-	}
-	switch real := e.GetExpr().(type) {
-	case *planpb.Expr_UnaryRangeExpr:
-		switch real.UnaryRangeExpr.GetOp() {
-		case planpb.OpType_Equal:
-			return 10 // Point equality is highest selectivity
-		case planpb.OpType_GreaterThan, planpb.OpType_GreaterEqual,
-			planpb.OpType_LessThan, planpb.OpType_LessEqual:
-			return 30 // Bounded on one side
-		case planpb.OpType_NotEqual:
-			return 70 // Negation matches almost everything
-		case planpb.OpType_PrefixMatch:
-			return 40
-		default:
-			return 50
-		}
-	case *planpb.Expr_TermExpr:
-		vals := real.TermExpr.GetValues()
-		n := len(vals)
-		if n == 1 {
-			return 10 // Single-value IN is effectively equality
-		}
-		if n <= 10 {
-			return 15 + n // Small IN list: still quite selective
-		}
-		return 35 // Larger IN list
-	case *planpb.Expr_BinaryRangeExpr:
-		return 25 // Bounded range [a, b] is more selective than semi-bounded range
-	case *planpb.Expr_JsonContainsExpr:
-		return 60
-	case *planpb.Expr_UnaryExpr:
-		return 65
-	case *planpb.Expr_BinaryExpr:
-		return 50
-	default:
-		return 80
-	}
-}
-
-func sortAndPartsBySelectivity(parts []*planpb.Expr) []*planpb.Expr {
-	if len(parts) <= 1 {
-		return parts
-	}
-	sorted := make([]*planpb.Expr, len(parts))
-	copy(sorted, parts)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return andExprSelectivityScore(sorted[i]) < andExprSelectivityScore(sorted[j])
-	})
-	return sorted
 }
 
 func genericValueHasNaN(v *planpb.GenericValue) bool {
@@ -264,69 +201,57 @@ func canDeduplicate(e *planpb.Expr) bool {
 		return false
 	}
 	switch e.GetExpr().(type) {
-	case *planpb.Expr_RandomSampleExpr, *planpb.Expr_ElementFilterExpr:
+	case *planpb.Expr_RandomSampleExpr, *planpb.Expr_ElementFilterExpr, *planpb.Expr_RoaringFilterExpr:
 		return false
 	}
 	return !exprHasNaN(e)
 }
 
-func exprBucketKey(e *planpb.Expr) string {
-	if e == nil {
-		return ""
+var deterministicMarshal = proto.MarshalOptions{Deterministic: true}
+
+func fnv1a64(b []byte) uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for _, c := range b {
+		h ^= uint64(c)
+		h *= prime64
 	}
-	if IsAlwaysTrueExpr(e) {
-		return "always_true"
-	}
-	if IsAlwaysFalseExpr(e) {
-		return "always_false"
-	}
-	switch real := e.GetExpr().(type) {
-	case *planpb.Expr_UnaryRangeExpr:
-		return "ur|" + columnKey(real.UnaryRangeExpr.GetColumnInfo())
-	case *planpb.Expr_BinaryRangeExpr:
-		return "br|" + columnKey(real.BinaryRangeExpr.GetColumnInfo())
-	case *planpb.Expr_TermExpr:
-		return "te|" + columnKey(real.TermExpr.GetColumnInfo())
-	case *planpb.Expr_NullExpr:
-		return "ne|" + columnKey(real.NullExpr.GetColumnInfo())
-	case *planpb.Expr_CompareExpr:
-		return "ce|" + columnKey(real.CompareExpr.GetLeftColumnInfo())
-	case *planpb.Expr_JsonContainsExpr:
-		return "jc|" + columnKey(real.JsonContainsExpr.GetColumnInfo())
-	case *planpb.Expr_ValueExpr:
-		return "val|" + valueCaseWithNil(real.ValueExpr.GetValue())
-	case *planpb.Expr_UnaryExpr:
-		return "un|" + strconv.Itoa(int(real.UnaryExpr.GetOp()))
-	case *planpb.Expr_BinaryExpr:
-		return "be|" + strconv.Itoa(int(real.BinaryExpr.GetOp()))
-	default:
-		return "other"
-	}
+	return h
 }
 
 func (v *visitor) deduplicateIdenticalExprs(parts []*planpb.Expr) []*planpb.Expr {
 	if len(parts) <= 1 {
 		return parts
 	}
-	buckets := make(map[string][]*planpb.Expr)
+	buckets := make(map[uint64][]*planpb.Expr, len(parts))
 	out := make([]*planpb.Expr, 0, len(parts))
+	buf := make([]byte, 0, 128)
 
 	for _, e := range parts {
 		if !canDeduplicate(e) {
 			out = append(out, e)
 			continue
 		}
-		key := exprBucketKey(e)
-		existing := buckets[key]
+		var err error
+		buf, err = deterministicMarshal.MarshalAppend(buf[:0], e)
+		if err != nil {
+			out = append(out, e)
+			continue
+		}
+		h := fnv1a64(buf)
+		candidates := buckets[h]
 		found := false
-		for _, ex := range existing {
-			if proto.Equal(ex, e) {
+		for _, cand := range candidates {
+			if proto.Equal(cand, e) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			buckets[key] = append(existing, e)
+			buckets[h] = append(candidates, e)
 			out = append(out, e)
 		}
 	}

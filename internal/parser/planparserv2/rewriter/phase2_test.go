@@ -88,10 +88,11 @@ func TestRewrite_IntegerDomainContradiction(t *testing.T) {
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr2), "should fold to AlwaysFalse")
 }
 
-func TestRewrite_SelectivityOrdering_EqualityBeforeRange(t *testing.T) {
+func TestRewrite_OperandSourceOrderPreserved(t *testing.T) {
 	helper := buildSchemaHelperForPhase2Test(t)
 
-	// Input has wide range first, equality second: (10 <= age <= 100) and category == 1
+	// Input has range first, equality second: (10 <= age <= 100) and category == 1
+	// Preserving operand source order guarantees AST stability and caller contract expectations.
 	expr, err := parser.ParseExpr(helper, "(10 <= age <= 100) and category == 1", nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
@@ -99,37 +100,15 @@ func TestRewrite_SelectivityOrdering_EqualityBeforeRange(t *testing.T) {
 	binary := expr.GetBinaryExpr()
 	require.NotNil(t, binary, "should produce BinaryExpr for two different conditions")
 
-	// Left operand MUST be category == 1 (higher selectivity)
-	leftUR := binary.GetLeft().GetUnaryRangeExpr()
-	require.NotNil(t, leftUR, "Left should be equality expression")
-	require.Equal(t, int64(101), leftUR.GetColumnInfo().GetFieldId())
+	// Left operand should be the range expression, preserving source order
+	leftBR := binary.GetLeft().GetBinaryRangeExpr()
+	require.NotNil(t, leftBR, "Left should be range expression preserving source order")
+	require.Equal(t, int64(102), leftBR.GetColumnInfo().GetFieldId())
 
-	// Right operand should be the range expression
-	rightBR := binary.GetRight().GetBinaryRangeExpr()
-	require.NotNil(t, rightBR, "Right should be range expression")
-	require.Equal(t, int64(102), rightBR.GetColumnInfo().GetFieldId())
-}
-
-func TestRewrite_SelectivityOrdering_EqualityBeforeNegation(t *testing.T) {
-	helper := buildSchemaHelperForPhase2Test(t)
-
-	// Input has negation first, equality second: status != 5 and category == 1
-	expr, err := parser.ParseExpr(helper, "status != 5 and category == 1", nil)
-	require.NoError(t, err)
-	require.NotNil(t, expr)
-
-	binary := expr.GetBinaryExpr()
-	require.NotNil(t, binary)
-
-	// Left operand MUST be category == 1 (equality has higher selectivity than negation)
-	leftUR := binary.GetLeft().GetUnaryRangeExpr()
-	require.NotNil(t, leftUR)
-	require.Equal(t, int64(101), leftUR.GetColumnInfo().GetFieldId())
-
-	// Right operand should be status != 5
+	// Right operand should be category == 1
 	rightUR := binary.GetRight().GetUnaryRangeExpr()
-	require.NotNil(t, rightUR)
-	require.Equal(t, int64(106), rightUR.GetColumnInfo().GetFieldId())
+	require.NotNil(t, rightUR, "Right should be equality expression")
+	require.Equal(t, int64(101), rightUR.GetColumnInfo().GetFieldId())
 }
 
 func TestRewrite_LiteralAndTrueIdentity_Elimination(t *testing.T) {

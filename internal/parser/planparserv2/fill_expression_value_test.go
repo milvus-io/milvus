@@ -195,6 +195,9 @@ func (s *FillExpressionValueSuite) TestEmptyArrayComparisonNormalization() {
 }
 
 func (s *FillExpressionValueSuite) TestWholeArrayTemplateMembershipNormalization() {
+	old := paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue("false")
+	defer paramtable.Get().CommonCfg.EnabledOptimizeExpr.SwapTempValue(old)
+
 	schemaH := newTestSchemaHelper(s.T())
 	emptyArray := func() *schemapb.TemplateArrayValue {
 		return &schemapb.TemplateArrayValue{}
