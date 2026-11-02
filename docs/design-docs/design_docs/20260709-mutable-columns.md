@@ -23,6 +23,7 @@ that and changes the following:
 | R5 | Retries out of scope | **Request-level idempotency key**; no CAS for patch ops | Today the SDKs auto-retry Upsert and there is no Upsert idempotency key, so non-idempotent array ops can apply twice (#54943) |
 | R6 | Three phases | **Two phases**: Phase 1 brute force only; Phase 2 index-backed search (scalar index result correction, text match delta, vector search correction) | |
 | R7 | — | Two delete-path invariants made explicit: patch entries dedupe by `(offset, column, ts, seq)` exactly like `DeletedRecord`'s `(ts, offset)` set, and `fold_ts` never exceeds the channel's L0-distributed watermark | Unlike deletes, APPEND is not idempotent and a late older SET must not override a folded newer one |
+| R8 | New `update()` DML API; touching a non-mutable column is a client error; `mutable=true` per field | **Reuse `upsert(partial_update=True)`**: the server runs a request locally when every touched field is local-ready and supported, and by read-merge-write otherwise. Both paths share one op semantics | One API, and results do not depend on which path ran the request |
 
 Sections below are revision 1 text unless they carry a "(rev 2)" marker or
 were rewritten for the changes above.
@@ -100,13 +101,16 @@ folding)". No mechanism in this design is invented from scratch.
 | column folding | Background rewrite of the mutable column group with patches applied, swapped in atomically via the segment manifest |
 | fold_ts | Per-(segment, column group) watermark recorded in the manifest; load replays only entries with `ts > fold_ts` |
 | L0-distributed watermark | Per-channel ts below which every L0 patch has already been routed to its target segments (rev 2) |
-| request_id | Client-supplied idempotency key of one `update()` call, reused across retries (rev 2) |
+| request_id | Client-supplied idempotency key of one upsert call, reused across retries (rev 2) |
+| local-ready | Per-field state maintained by DataCoord: every segment stores the field in its own Vortex column group, so partial updates on it can run locally (rev 2) |
 | patched_bitset | Monotone per-(segment, column) bitmap of ever-patched rows; used for index result correction (Phase 2) |
 
 ## Goals
 
-- Partial update of designated (`mutable=true`) columns by primary key, with
-  **no read on the write path and no CAS**.
+- Partial update through the existing `upsert(partial_update=True)`. It runs
+  **locally** whenever the touched fields allow it: no read beyond a PK
+  existence check, and no CAS. Otherwise it runs by read-merge-write. Both
+  paths have identical semantics.
 - **Phase 1 types**: BOOL, INT8/16/32/64, FLOAT, DOUBLE, TIMESTAMPTZ,
   VARCHAR/STRING, TEXT, JSON, the dynamic field `$meta`, GEOMETRY, ARRAY
   (legacy and native list: element-nullable and nested), and ArrayOfStruct
@@ -141,59 +145,90 @@ folding)". No mechanism in this design is invented from scratch.
   from new inputs.
 - Raw local format for mutable columns. This becomes possible once local
   format phase 2 moves all sealed reads behind `ColumnInterface`.
-- Synchronous feedback on whether an update matched a row (see API).
+- State-dependent errors for an overflowing APPEND and an out-of-range
+  PATH_REPLACE. Both paths adopt the no-error semantics; see API.
 
-## Schema and API Semantics
+## Schema and API Semantics (rev 2)
 
-A field may be declared with `mutable=true`. Constraints:
+There is **no new API**. `upsert(partial_update=True)` keeps its request
+shape. For each request the server decides whether to execute it **locally**
+(the patch path this document describes) or through today's
+**read-merge-write** path.
 
-- **Not allowed** for: the primary key, partition key, clustering key, or a
-  function output field. Vector, sparse vector and EmbList fields are allowed
-  only from Phase 2.
-- **Storage**: the split policy places mutable fields in their own column
-  group(s). That group is written in the Vortex physical format and loaded
-  with `local_format=vortex`. The PK never shares a group with a mutable
-  field.
-- **Phase 1 only**: a mutable field may not carry a scalar index, text match,
-  NGRAM, FM, TRIE or RTREE. JSON stats are allowed; dirty rows bypass them.
-  Output values must come from column data, never reverse-looked-up from an
-  index.
-- **`$meta`**: allowed. It is treated like JSON (see "JSON and the dynamic
-  field").
+**Enablement.**
 
-New DML API (rev 2):
+- Local partial update is gated per collection by a collection property,
+  which doubles as the rolling-upgrade gate.
+- When it is enabled, the split policy places every locally-updatable field
+  in its own column group, written as Vortex and loaded with
+  `local_format=vortex`. The PK never shares a group with such a field.
+- Existing segments are converted in the background by a column-group
+  rewrite. It uses the same replace primitive as backfill (#53491).
+- DataCoord tracks a per-field **local-ready** state. A field becomes ready
+  only when every segment of the collection holds it in such a group. The
+  proxy reads this state from its schema cache.
+- There is no per-field user flag. In this document, a column is "mutable"
+  when it is local-ready.
+
+**Routing rule.** A request executes locally only if every field it touches
+meets all three conditions:
+
+1. the field is local-ready;
+2. the field type and op are supported in the current phase. Phase 1
+   excludes fields with a scalar index, text match, NGRAM, FM, TRIE or RTREE,
+   and all vector fields (see the table below);
+3. the field is not the PK, partition key, clustering key, or a function
+   output.
+
+Otherwise the whole request takes the read-merge-write path. A request is
+never split across the two paths, because that would turn one row update
+into two messages with two timestamps.
+
+**Missing PKs.**
+
+- The local path first runs a PK existence check against the bloom filter
+  and the PK index. No column is read.
+- Existing PKs are patched.
+- Missing PKs keep today's insert-on-missing semantics. The request must
+  carry the complete row; otherwise today's error is returned.
+- If a row is deleted between the check and the patch, the patch is a no-op.
+  This window is small and is documented.
+- Once the StreamingNode-side PK index (#53596 and follow-ups) lands, the
+  check can move to the WAL owner.
+
+**Unified semantics.** The result must not depend on which path executed the
+request, so both paths implement the same op semantics. Revision 2 changes
+today's read-merge-write behaviour where needed, and the change goes into
+the release notes:
+
+- APPEND that exceeds `max_capacity` keeps the most recent `max_capacity`
+  elements. Today it returns an error.
+- PATH_REPLACE with an out-of-range index, a missing JSON parent or a wrong
+  parent type is a no-op. Today it returns an error. A missing final JSON key
+  is still created.
+- SET/REPLACE, REMOVE (all occurrences) and TRIM have no state-dependent
+  errors and behave identically on both paths.
+- Lost updates: the local path orders blind ops by WAL timestamp, and the
+  read-merge-write path keeps CAS. Patches publish PK versions, so a
+  concurrent read-merge-write CAS detects them.
+
+**Request shape**: unchanged except for `request_id`. The example below is
+illustrative and reuses the existing `FieldPartialUpdateOp` plumbing.
 
 ```
-update(collection,
-       pks=[...],
-       ops={
-         "status":  Set(v),                    # any mutable type, including NULL
-         "tags":    Append([v, ...]),          # array tail (RPUSH)
-         "blocked": Remove([v, ...]),          # remove all occurrences (LREM 0)
-         "events":  Remove(where=("id", 7)),   # ArrayOfStruct: by scalar sub-field value
-         "recent":  Trim(start, stop),         # keep [start, stop] (LTRIM)
-         "meta":    PathReplace('["a"][0]', v) # positional / JSON path (LSET-like)
-       },
-       request_id=None,      # SDK generates one per logical call, reuses it on retry
-       check_exists=False)   # optional best-effort PK existence check
+client.upsert(collection_name="events",
+              data=[{"pk": 1, "status": "done", "tags": ["a"]}],
+              partial_update=True,
+              field_ops={"tags": ARRAY_APPEND},  # ARRAY_TRIM is new (#54943)
+              request_id=None)  # new: one per logical call, reused on retry
 ```
 
 Rules:
 
-- **One op per field per request.** Ordering inside a request is never
-  ambiguous; a multi-step change is several requests, ordered by ts.
-- **Operands** are either broadcast to every PK or given per PK.
-- **Missing PK: silent ignore**, like a delete whose PK matches no segment.
-  The call returns "accepted", not "applied". With `check_exists=True` the
-  proxy rejects PKs that the PK bloom filter / PK index cannot find. This is
-  best effort: a row deleted after the check makes the patch a no-op.
-- **Errors that need the current value cannot be reported** on the write
-  path. Out-of-range PATH_REPLACE, a missing JSON parent and similar cases are
-  deterministic no-ops on every replica.
-- **`upsert(partial_update=True)` is unchanged.** It remains a read-merge-write
-  path with CAS, synchronous errors and insert-on-missing-PK. Users who need
-  those semantics keep using it.
-- **Idempotency**: see "Write Path → Request-level idempotency".
+- **One op per field per request.**
+- **Operands** are broadcast or given per row, as today.
+- **Idempotency** applies to both paths. See "Write Path → Request-level
+  idempotency".
 
 ### Supported types × operations (rev 2)
 
@@ -273,9 +308,9 @@ documented rather than prevented.
 
 **`max_capacity` clamps after every op (rev 2).** APPEND that overflows keeps
 the most recent `max_capacity` elements and drops the oldest, giving
-sliding-window behaviour. This differs from today's
-`upsert(partial_update=True)`, which rejects an overflowing APPEND; that path
-is unchanged. The clamp must run after each op, in op order, because clamping
+sliding-window behaviour. Today's read-merge-write path rejects an
+overflowing APPEND; revision 2 changes it to the same clamp, so both paths
+agree (see API). The clamp must run after each op, in op order, because clamping
 only once at the end gives a different answer:
 
 ```
@@ -415,7 +450,7 @@ its existing CAS.
 A retried APPEND or pop-form TRIM therefore applies twice (#54943).
 Revision 2 adds:
 
-1. **`request_id`.** The SDK generates one per logical `update()` call and
+1. **`request_id`.** The SDK generates one per logical upsert call and
    reuses it on every retry. Users may also supply their own.
 2. **Dedup at the WAL owner.** The StreamingNode keeps a TTL-bounded table
    keyed by `(collection, request_id, vchannel)`. The dedup check and the
@@ -426,9 +461,9 @@ Revision 2 adds:
 3. **Multi-vchannel batches.** Each vchannel dedups independently. Retrying a
    partially committed batch re-applies only the vchannels that did not
    commit. An ambiguous outcome answers "already applied" on retry.
-4. **SDK retry policy.** `update()` is auto-retried only with a
-   `request_id`, and an SDK without `request_id` support cannot call
-   `update()`. CDC carries `request_id` to the target cluster, which dedups
+4. **SDK retry policy.** A partial upsert is auto-retried only with a
+   `request_id`, and a request without one is never routed to the local
+   path. CDC carries `request_id` to the target cluster, which dedups
    the same way.
 
 ### Growing segments use the same overlay
@@ -1145,19 +1180,21 @@ part of the segment's file set and are reloaded with the segment (see
 - **Compaction.** In-flight patches routed to a segment that gets compacted
   away are replayed to the successor segment, reusing the delete path's
   existing mechanism.
-- **Schema evolution.** Altering an existing column to `mutable=true` is
-  cheap (segments start with empty overlays). Altering back to immutable
-  requires folding all outstanding patches first. Interactions with
+- **Schema evolution.** Enabling local partial update on an existing
+  collection starts the background column-group conversion, and fields
+  become local-ready one by one. Disabling it requires folding all
+  outstanding patches first. Interactions with
   add-field/drop-field need a pass during implementation.
 - **Rolling upgrade.** Older query/data nodes cannot parse update messages
   or patch deltalogs. Mutable columns are gated behind a collection-level
   feature flag that can only be enabled once the whole cluster runs a
   supporting version.
-- (rev 2) **`update()` vs `upsert(partial_update=True)`.** The two APIs
-  coexist: `update()` is blind (patch path, no CAS, no synchronous errors,
-  missing PK ignored); partial upsert stays read-merge-write with CAS,
-  synchronous errors and insert-on-missing-PK. Both publish PK versions, so
-  a partial upsert's CAS detects concurrent patches.
+- (rev 2) **Local and read-merge-write paths coexist on the same rows.**
+  - The read-merge-write path reads through the overlay, so it sees
+    patched values.
+  - Patches publish PK versions, so its CAS detects concurrent patches.
+  - Its delete + insert writes a new row version whose insert ts is newer
+    than every earlier patch, so those patches stop applying to it.
 - (rev 2) **Struct sub-field evolution** (#54514): adding a sub-field
   starts it with no patch components (older APPEND operands materialize
   NULL/default); dropping a sub-field discards its components.
@@ -1244,9 +1281,12 @@ operations", with ops SET / APPEND / REMOVE / TRIM / PATH_REPLACE. Dirty rows
 are evaluated row-wise. No index is read or modified for a mutable column.
 
 - **Schema and API**
-  - `mutable=true` and constraint validation;
-  - the split policy gives mutable fields their own Vortex column group;
-  - the `update()` API with `request_id` and `check_exists`;
+  - the collection gate and the per-field local-ready state in DataCoord;
+  - the split policy gives local-updatable fields their own Vortex column
+    group, plus background conversion of existing segments;
+  - proxy routing (local vs read-merge-write) and the PK existence check;
+  - `request_id` on upsert;
+  - unified op semantics in the read-merge-write path;
   - the new WAL message type via codegen, with an op enum that already
     reserves INCR;
   - `ARRAY_TRIM` in `FieldPartialUpdateOp` (#54943).
@@ -1285,7 +1325,7 @@ are evaluated row-wise. No index is read or modified for a mutable column.
 **Exit criteria**
 
 1. **Differential test.** The same random op sequence goes through the old
-   path (delete + full insert) and through `update()`. Results must be
+   path (delete + full insert) and through the local path. Results must be
    identical for every query shape: filter, search+filter, iterative filter,
    outputs, order by, aggregation, group-by (including JSON-shredded keys),
    and query/search iterators.
@@ -1339,7 +1379,8 @@ are evaluated row-wise. No index is read or modified for a mutable column.
 - Fold triggers: the default patch-ratio and memory watermarks per column
   type. Variable-length and struct columns need their own stress tests.
 - Dedup table: the TTL and how it relates to WAL retention and checkpoints.
-- `check_exists`: whether it is worth shipping in Phase 1.
+- Conversion of existing segments: scheduling and cost of rewriting column
+  groups into Vortex before a field becomes local-ready.
 - Whether deletes decrement BM25 statistics today. This is the baseline for
   Phase 2 function fields.
 - The verified list of index-pinning call sites outside `ProcessIndexChunks`,
