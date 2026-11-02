@@ -7664,3 +7664,96 @@ func TestFloatVectorBase64V2(t *testing.T) {
 	assert.Equal(t, [][]byte{want, want}, searchValues, "base64 and array search must build the same placeholder")
 	assert.Equal(t, [][]byte{want, want}, hybridValues)
 }
+
+type snapshotSummaryRESTProxy struct {
+	types.ProxyComponent
+}
+
+func TestSnapshotSummaryRESTV2UTCTimestamps(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	const hybridTimestamp int64 = 445644800032243754
+	for _, timestamp := range []struct{ tt, utc int64 }{{hybridTimestamp, 1700000000123}, {hybridTimestamp, 0}, {0, 0}} {
+		for _, allowInt64 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d/%d/%t", timestamp.tt, timestamp.utc, allowInt64), func(t *testing.T) {
+				proxy := &snapshotSummaryRESTProxy{}
+				list := mockey.Mock((*snapshotSummaryRESTProxy).ListSnapshots).Return(&milvuspb.ListSnapshotsResponse{
+					Status:            merr.Success(),
+					Snapshots:         []string{"backup"},
+					SnapshotSummaries: []*milvuspb.SnapshotSummary{{Name: "backup", CreateTs: timestamp.tt, CreateUtcTs: timestamp.utc}},
+				}, nil).Build()
+				defer list.UnPatch()
+				server := initHTTPServerV2(proxy, false)
+				req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewBufferString(`{"collectionName":"books"}`))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprint(allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Zero(t, gjson.Get(recorder.Body.String(), "code").Int())
+				for field, value := range map[string]int64{"createTs": timestamp.tt, "createUtcTs": timestamp.utc} {
+					expected := fmt.Sprint(value)
+					if !allowInt64 {
+						expected = fmt.Sprintf("%q", expected)
+					}
+					assert.Equal(t, expected, gjson.Get(recorder.Body.String(), "snapshotSummaries.0."+field).Raw)
+				}
+			})
+		}
+	}
+}
+
+func TestListSnapshotSummariesRESTV2(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	for _, mode := range []string{"metadata", "legacy", "empty", "error"} {
+		for _, allowInt64 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%t", mode, allowInt64), func(t *testing.T) {
+				proxy := &snapshotSummaryRESTProxy{}
+				patch := mockey.Mock((*snapshotSummaryRESTProxy).ListSnapshots).To(func(_ *snapshotSummaryRESTProxy, _ context.Context, req *milvuspb.ListSnapshotsRequest) (*milvuspb.ListSnapshotsResponse, error) {
+					require.Equal(t, "archive", req.GetDbName())
+					require.Equal(t, "books", req.GetCollectionName())
+					if mode == "error" {
+						return &milvuspb.ListSnapshotsResponse{Status: merr.Status(merr.ErrServiceNotReady)}, nil
+					}
+					result := &milvuspb.ListSnapshotsResponse{Status: merr.Success()}
+					if mode != "empty" {
+						result.Snapshots = []string{"backup"}
+					}
+					if mode == "metadata" {
+						result.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "backup", CreateTs: 9007199254740993, Description: "daily"}}
+					}
+					return result, nil
+				}).Build()
+				defer patch.UnPatch()
+				server := initHTTPServerV2(proxy, false)
+				req := httptest.NewRequest(http.MethodPost, versionalV2(SnapshotCategory, ListAction), bytes.NewBufferString(`{"dbName":"archive","collectionName":"books"}`))
+				req.Header.Set(HTTPHeaderAllowInt64, fmt.Sprint(allowInt64))
+				recorder := httptest.NewRecorder()
+				server.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				if mode == "error" {
+					assert.NotZero(t, gjson.Get(recorder.Body.String(), "code").Int())
+					return
+				}
+				assert.Zero(t, gjson.Get(recorder.Body.String(), "code").Int())
+				if mode == "metadata" {
+					assert.Equal(t, "backup", gjson.Get(recorder.Body.String(), "data.0").String())
+					assert.Equal(t, "backup", gjson.Get(recorder.Body.String(), "snapshotSummaries.0.name").String())
+					assert.Equal(t, "daily", gjson.Get(recorder.Body.String(), "snapshotSummaries.0.description").String())
+					expected := `"9007199254740993"`
+					if allowInt64 {
+						expected = "9007199254740993"
+					}
+					assert.Equal(t, expected, gjson.Get(recorder.Body.String(), "snapshotSummaries.0.createTs").Raw)
+				} else {
+					assert.Equal(t, "[]", gjson.Get(recorder.Body.String(), "snapshotSummaries").Raw)
+					if mode == "legacy" {
+						assert.Equal(t, "backup", gjson.Get(recorder.Body.String(), "data.0").String())
+					}
+				}
+			})
+		}
+	}
+}

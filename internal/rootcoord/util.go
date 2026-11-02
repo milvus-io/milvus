@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -383,6 +384,9 @@ func checkNestedArrayTypeSchemaCapacity(fieldSchema *schemapb.FieldSchema) error
 
 func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, fieldSchema := range fieldSchemas {
+		if err := schemautil.RejectStructSubFieldOriginMarker(fieldSchema); err != nil {
+			return err
+		}
 		if err := typeutil.ValidateFieldTypeSchema(fieldSchema); err != nil {
 			return err
 		}
@@ -510,6 +514,21 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 		}
 	}
 
+	return nil
+}
+
+// rejectStructSubFieldOriginMarkers rejects user-supplied sub-fields that carry
+// the internal origin marker. It is not part of checkStructArrayFieldSchema
+// because that check also runs on an existing struct merged with an added
+// sub-field, whose earlier added sub-fields carry the marker legitimately.
+func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, structField := range schemas {
+		for _, field := range structField.GetFields() {
+			if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

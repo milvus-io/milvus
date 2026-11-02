@@ -33,6 +33,7 @@ func ComposeCollectionIndexMeta(ctx context.Context, indexInfos []*indexpb.Index
 	for _, info := range indexInfos {
 		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
 			CollectionID:    info.GetCollectionID(),
+			IndexId:         info.GetIndexID(),
 			FieldID:         info.GetFieldID(),
 			IndexName:       info.GetIndexName(),
 			TypeParams:      info.GetTypeParams(),

@@ -184,6 +184,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
 	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
 		return err
 	}

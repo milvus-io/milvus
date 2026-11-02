@@ -68,6 +68,13 @@ func observeDelete(m *walsummary.Manager, tick uint64) {
 // gRPC, Summary reads, event delivery and reconnect are the production path.
 func summaryRPC(t *testing.T) (streamingpb.StreamingNodeHandlerServiceClient, *walsummary.Manager, <-chan wal.TransformLogStream) {
 	t.Helper()
+	return summaryRPCWithStream(t, func(manager *walsummary.Manager) wal.TransformLogStream {
+		return walsummary.NewStream(manager)
+	})
+}
+
+func summaryRPCWithStream(t *testing.T, newStream func(*walsummary.Manager) wal.TransformLogStream) (streamingpb.StreamingNodeHandlerServiceClient, *walsummary.Manager, <-chan wal.TransformLogStream) {
+	t.Helper()
 	manager := walsummary.NewManager(walsummary.ManagerConfig{})
 	observeDelete(manager, 10)
 	observeDelete(manager, 11)
@@ -76,7 +83,7 @@ func summaryRPC(t *testing.T) (streamingpb.StreamingNodeHandlerServiceClient, *w
 	acquired := make(chan wal.TransformLogStream, 8)
 	acquire := mockey.Mock(mockey.GetMethod(accesser, "AcquireStream")).To(func(_ context.Context, channel string) (wal.TransformLogStream, error) {
 		require.Equal(t, "p", channel)
-		s := walsummary.NewStream(manager)
+		s := newStream(manager)
 		acquired <- s
 		return s, nil
 	}).Build()

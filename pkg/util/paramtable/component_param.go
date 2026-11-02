@@ -2754,6 +2754,7 @@ type proxyConfig struct {
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
 	MaxNameLength                  ParamItem `refreshable:"true"`
 	MaxCollectionDescriptionLength ParamItem `refreshable:"true"`
+	MaxSnapshotDescriptionLength   ParamItem `refreshable:"true"`
 	MaxUsernameLength              ParamItem `refreshable:"true"`
 	MaxUserDescriptionLength       ParamItem `refreshable:"true"`
 	MinPasswordLength              ParamItem `refreshable:"true"`
@@ -2894,6 +2895,16 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.MaxCollectionDescriptionLength.Init(base.mgr)
+
+	p.MaxSnapshotDescriptionLength = ParamItem{
+		Key:          "proxy.maxSnapshotDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "3.0.5",
+		PanicIfEmpty: true,
+		Doc:          "The maximum byte length of a snapshot description accepted by CreateSnapshot. Enforced by Proxy. Existing snapshot descriptions are not revalidated or truncated.",
+		Export:       false,
+	}
+	p.MaxSnapshotDescriptionLength.Init(base.mgr)
 
 	p.MinPasswordLength = ParamItem{
 		Key:          "proxy.minPasswordLength",
@@ -4382,10 +4393,11 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	StrictGroupStrategy              ParamItem `refreshable:"true"`
-	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
-	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
-	SoPath                           ParamItem `refreshable:"false"`
+	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"true"`
+	StrictGroupStrategy                   ParamItem `refreshable:"true"`
+	StrictGroupPhase1CandidateWeight      ParamItem `refreshable:"true"`
+	StrictGroupSkipRefine                 ParamItem `refreshable:"true"`
+	SoPath                                ParamItem `refreshable:"false"`
 
 	// stats
 	// Deprecated: Never used
@@ -6264,6 +6276,17 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
+	p.QueryViewTransformLogDrainConcurrency = ParamItem{
+		Key:          "queryNode.queryView.transformLogDrainConcurrencyRatio",
+		Version:      "3.1.0",
+		DefaultValue: "0.25",
+		Doc:          "QueryNode-wide TransformLog backlog drain worker count is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.",
+		Export:       true,
+		Formatter: func(v string) string {
+			return strconv.Itoa(max(1, int(float64(hardware.GetCPUNum())*getAsFloat(v))))
+		},
+	}
+	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -9332,6 +9355,8 @@ type streamingConfig struct {
 	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
 	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
 
+	TransformLogCatchupConcurrencyPerPChannel ParamItem `refreshable:"true"`
+
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemorySlowdownThreshold      ParamItem `refreshable:"true"`
@@ -9891,6 +9916,18 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		},
 	}
 	p.QueryViewLiveEventDispatchConcurrencyPerPChannel.Init(base.mgr)
+
+	p.TransformLogCatchupConcurrencyPerPChannel = ParamItem{
+		Key:          "streaming.transformLog.catchupConcurrencyRatioPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "0.25",
+		Doc:          "TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.",
+		Export:       true,
+		Formatter: func(v string) string {
+			return strconv.Itoa(max(1, int(float64(hardware.GetCPUNum())*getAsFloat(v))))
+		},
+	}
+	p.TransformLogCatchupConcurrencyPerPChannel.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

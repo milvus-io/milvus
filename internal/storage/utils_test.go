@@ -3625,6 +3625,71 @@ func TestInsertDataWithStructAndMissingField(t *testing.T) {
 	}
 }
 
+func TestFillMissingStructChildrenFromSibling(t *testing.T) {
+	nested := testNestedField(schemapb.DataType_Int64, true, false)
+	nested.FieldID = 203
+	nested.Name = "s[nested]"
+	vector := &schemapb.FieldSchema{
+		FieldID: 204, Name: "s[vector]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+		FieldID: 200, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{
+			{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+			{FieldID: 202, Name: "s[scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true},
+			nested, vector,
+		},
+	}}}
+	data := &InsertData{Data: map[FieldID]FieldData{201: &ArrayFieldData{
+		ElementType: schemapb.DataType_Int64, Nullable: true,
+		Data: []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}},
+			{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+			nil,
+		},
+		ValidData: []bool{true, true, false},
+	}}}
+	require.NoError(t, fillMissingFields(schema, data))
+	for _, id := range []FieldID{202, 203, 204} {
+		filled := data.Data[id]
+		require.Equal(t, 3, filled.RowNum())
+		require.Equal(t, []bool{true, true, false}, filled.GetValidData())
+		require.Nil(t, filled.GetRow(2))
+	}
+	require.Equal(t, []bool{false, false}, data.Data[202].GetRow(0).(*schemapb.ScalarField).GetValidData())
+	require.Empty(t, data.Data[202].GetRow(1).(*schemapb.ScalarField).GetValidData())
+	require.Len(t, data.Data[203].GetRow(0).(*schemapb.ScalarField).GetArrayData().GetData(), 2)
+	require.Equal(t, []bool{false, false}, data.Data[203].GetRow(0).(*schemapb.ScalarField).GetValidData())
+	require.Equal(t, []bool{false, false}, data.Data[204].GetRow(0).(*schemapb.VectorField).GetValidData())
+}
+
+func TestFillMissingStructChildFromCompactNestedSibling(t *testing.T) {
+	nested := testNestedField(schemapb.DataType_Int64, true, false)
+	nested.FieldID = 201
+	nested.Name = "s[nested]"
+	added := &schemapb.FieldSchema{
+		FieldID: 202, Name: "s[added]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true,
+	}
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+		FieldID: 200, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{nested, added},
+	}}}
+	data := &InsertData{Data: map[FieldID]FieldData{201: &ArrayFieldData{
+		ElementType: schemapb.DataType_Array, Nullable: true, ElementNullable: true,
+		Data: []*schemapb.ScalarField{{
+			Data:      &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64}},
+			ValidData: []bool{false, false},
+		}, nil},
+		ValidData: []bool{true, false},
+	}}}
+	require.NoError(t, fillMissingFields(schema, data))
+	filled := data.Data[202]
+	require.Equal(t, []bool{true, false}, filled.GetValidData())
+	require.Equal(t, []bool{false, false}, filled.GetRow(0).(*schemapb.ScalarField).GetValidData())
+	require.Nil(t, filled.GetRow(1))
+}
+
 func TestMergeVectorArrayField(t *testing.T) {
 	t.Run("nullable merge", func(t *testing.T) {
 		data := &InsertData{Data: make(map[FieldID]FieldData)}

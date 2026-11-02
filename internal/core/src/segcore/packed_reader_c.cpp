@@ -17,6 +17,8 @@
 
 #include <arrow/c/bridge.h>
 #include <arrow/status.h>
+#include <algorithm>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -38,6 +40,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
+#include "storage/Util.h"
 #include "storage/plugin/PluginInterface.h"
 #include "storage/StatusToErrorCode.h"
 
@@ -67,6 +70,42 @@ UpdateCipherPluginIfNeeded(CPluginContext* c_plugin_context) {
     }
 }
 
+milvus_storage::ArrowFileSystemPtr
+GetFsFromStorageConfig(const CStorageConfig& c_storage_config) {
+    return milvus::storage::StorageV2FSCache::Instance().Get({
+        std::string(c_storage_config.address),
+        std::string(c_storage_config.bucket_name),
+        std::string(c_storage_config.access_key_id),
+        std::string(c_storage_config.access_key_value),
+        std::string(c_storage_config.root_path),
+        std::string(c_storage_config.storage_type),
+        std::string(c_storage_config.cloud_provider),
+        std::string(c_storage_config.iam_endpoint),
+        std::string(c_storage_config.log_level),
+        std::string(c_storage_config.region),
+        c_storage_config.useSSL,
+        std::string(c_storage_config.sslCACert),
+        c_storage_config.useIAM,
+        c_storage_config.useVirtualHost,
+        c_storage_config.requestTimeoutMs,
+        false,
+        std::string(c_storage_config.gcp_credential_json),
+        c_storage_config.use_custom_part_upload,
+        c_storage_config.max_connections,
+        c_storage_config.tls_min_version != nullptr
+            ? std::string(c_storage_config.tls_min_version)
+            : "",
+        c_storage_config.use_crc32c_checksum,
+        c_storage_config.talon_mode,
+        c_storage_config.talon_small_read_threshold,
+        c_storage_config.talon_coordinator != nullptr
+            ? c_storage_config.talon_coordinator
+            : "",
+        c_storage_config.talon_block_size,
+        c_storage_config.talon_max_idle_per_addr,
+    });
+}
+
 }  // namespace
 
 CStatus
@@ -83,38 +122,7 @@ NewPackedReaderWithStorageConfig(char** paths,
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
-        auto trueFs = milvus::storage::StorageV2FSCache::Instance().Get({
-            std::string(c_storage_config.address),
-            std::string(c_storage_config.bucket_name),
-            std::string(c_storage_config.access_key_id),
-            std::string(c_storage_config.access_key_value),
-            std::string(c_storage_config.root_path),
-            std::string(c_storage_config.storage_type),
-            std::string(c_storage_config.cloud_provider),
-            std::string(c_storage_config.iam_endpoint),
-            std::string(c_storage_config.log_level),
-            std::string(c_storage_config.region),
-            c_storage_config.useSSL,
-            std::string(c_storage_config.sslCACert),
-            c_storage_config.useIAM,
-            c_storage_config.useVirtualHost,
-            c_storage_config.requestTimeoutMs,
-            false,
-            std::string(c_storage_config.gcp_credential_json),
-            c_storage_config.use_custom_part_upload,
-            c_storage_config.max_connections,
-            c_storage_config.tls_min_version != nullptr
-                ? std::string(c_storage_config.tls_min_version)
-                : "",
-            c_storage_config.use_crc32c_checksum,
-            c_storage_config.talon_mode,
-            c_storage_config.talon_small_read_threshold,
-            c_storage_config.talon_coordinator != nullptr
-                ? c_storage_config.talon_coordinator
-                : "",
-            c_storage_config.talon_block_size,
-            c_storage_config.talon_max_idle_per_addr,
-        });
+        auto trueFs = GetFsFromStorageConfig(c_storage_config);
         if (!trueFs) {
             return milvus::FailureCStatus(
                 milvus::ErrorCode::FileReadFailed,
@@ -286,6 +294,57 @@ CloseReader(CPackedReader c_packed_reader) {
                 c_packed_reader);
         packed_reader->Close();
         delete packed_reader;
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+GetPackedFileFieldIDs(char** paths,
+                      int64_t num_paths,
+                      const CStorageConfig* c_storage_config,
+                      CPluginContext* c_plugin_context,
+                      int64_t** field_ids,
+                      int64_t** field_counts) {
+    SCOPE_CGO_CALL_METRIC();
+
+    *field_ids = nullptr;
+    *field_counts = nullptr;
+    try {
+        auto fs = c_storage_config != nullptr
+                      ? GetFsFromStorageConfig(*c_storage_config)
+                      : milvus::segcore::GetDefaultArrowFileSystem();
+        if (!fs) {
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
+        }
+        UpdateCipherPluginIfNeeded(c_plugin_context);
+
+        std::vector<int64_t> ids;
+        std::vector<int64_t> counts;
+        counts.reserve(num_paths);
+        for (int64_t i = 0; i < num_paths; ++i) {
+            auto file_ids =
+                milvus::storage::GetPackedFileColumnFieldIDs(fs, paths[i]);
+            ids.insert(ids.end(), file_ids.begin(), file_ids.end());
+            counts.push_back(static_cast<int64_t>(file_ids.size()));
+        }
+
+        auto* out_counts = static_cast<int64_t*>(
+            std::malloc(sizeof(int64_t) * std::max<size_t>(counts.size(), 1)));
+        auto* out_ids = static_cast<int64_t*>(
+            std::malloc(sizeof(int64_t) * std::max<size_t>(ids.size(), 1)));
+        if (out_counts == nullptr || out_ids == nullptr) {
+            std::free(out_counts);
+            std::free(out_ids);
+            return milvus::FailureCStatus(milvus::ErrorCode::MemAllocateFailed,
+                                          "failed to allocate field id output");
+        }
+        std::copy(counts.begin(), counts.end(), out_counts);
+        std::copy(ids.begin(), ids.end(), out_ids);
+        *field_counts = out_counts;
+        *field_ids = out_ids;
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

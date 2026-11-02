@@ -110,9 +110,8 @@ type MetaStore interface {
 
 	// Channel lifecycle
 	MarkChannelAdded(ctx context.Context, channel string) error
-	ShouldDropChannel(ctx context.Context, channel string) bool
 	ChannelExists(ctx context.Context, channel string) (bool, error)
-	DropChannel(ctx context.Context, channel string) error
+	RemoveDroppedChannelFlags(ctx context.Context) (int, error)
 
 	// GC
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
@@ -402,13 +401,13 @@ func (s *metaStore) PutCollection(info *CollectionInfo) {
 
 func (s *metaStore) RemoveCollection(collectionID int64) {
 	s.mu.Lock()
-	if _, ok := s.collections[collectionID]; !ok {
-		s.mu.Unlock()
-		return
+	if _, ok := s.collections[collectionID]; ok {
+		delete(s.collections, collectionID)
+		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(s.collections)))
 	}
-	delete(s.collections, collectionID)
-	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(s.collections)))
 	s.mu.Unlock()
+	// The collection metrics are emitted from segments rather than from this
+	// cache, so they are cleaned up even when the collection was never cached.
 	metrics.CleanupDataCoordWithCollectionID(collectionID)
 }
 
@@ -582,16 +581,12 @@ func (s *metaStore) MarkChannelAdded(ctx context.Context, channel string) error 
 	return s.catalog.MarkChannelAdded(ctx, channel)
 }
 
-func (s *metaStore) ShouldDropChannel(ctx context.Context, channel string) bool {
-	return s.catalog.ShouldDropChannel(ctx, channel)
-}
-
 func (s *metaStore) ChannelExists(ctx context.Context, channel string) (bool, error) {
 	return s.catalog.ChannelExists(ctx, channel)
 }
 
-func (s *metaStore) DropChannel(ctx context.Context, channel string) error {
-	return s.catalog.DropChannel(ctx, channel)
+func (s *metaStore) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {
+	return s.catalog.RemoveDroppedChannelFlags(ctx)
 }
 
 // --- File resource methods ---
