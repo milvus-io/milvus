@@ -26,8 +26,7 @@ import (
 
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	// Register the gRPC codec before Params starts background etcd RPCs.
-	_ "github.com/milvus-io/milvus/pkg/v3/util/resource"
+	_ "github.com/milvus-io/milvus/pkg/v3/util/resource" // Register the codec before Params starts background etcd RPCs.
 )
 
 var Params *paramtable.ComponentParam = paramtable.Get()
