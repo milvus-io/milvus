@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -31,6 +33,38 @@ func RunOperation(ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzer
 				response.Result = &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: results}}
 			}
 			return err
+		})
+	case *streamingpb.StreamingNodeRunAnalyzerRequest_Highlight:
+		err = withAnalyzer(func(run BatchRun, names []string) error {
+			analyzed, err := run(req.GetPlaceholder(), true, false, names)
+			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			options := operation.Highlight
+			task := &querypb.HighlightTask{
+				SearchTextNum: options.GetSearchTextNum(), CorpusTextNum: options.GetCorpusTextNum(),
+				Queries: options.GetQueries(), Options: options.GetOptions(),
+				Texts: make([]string, len(req.GetPlaceholder())),
+			}
+			for i, text := range req.GetPlaceholder() {
+				task.Texts[i] = string(text)
+			}
+			tokens := make([][]*milvuspb.AnalyzerToken, len(analyzed))
+			for i, result := range analyzed {
+				tokens[i] = result.GetTokens()
+			}
+			fragments, err := highlight.BuildFragments(task, options.GetTopks(), tokens)
+			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			response.Result = &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: fragments}}
+			return nil
 		})
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch:
 		result := &streamingpb.PhraseMatchResult{}

@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -161,8 +160,10 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 				require.Equal(t, version, req.GetFieldAnalyzer().GetReadSchemaVersion())
 				require.Equal(t, "p_7v0", req.GetFieldAnalyzer().GetVchannel())
 				require.Equal(t, []string{"default", "zh", "default", "zh"}, req.GetFieldAnalyzer().GetAnalyzerNames())
-				require.True(t, req.GetTokenize().GetWithDetail())
-				require.False(t, req.GetTokenize().GetWithHash())
+				require.NotNil(t, req.GetHighlight())
+				require.Equal(t, int64(2), req.GetHighlight().GetSearchTextNum())
+				require.Equal(t, int64(2), req.GetHighlight().GetCorpusTextNum())
+				require.Equal(t, []int64{1, 1}, req.GetHighlight().GetTopks())
 				require.Equal(t, [][]byte{[]byte("hello"), []byte("世界"), []byte("hello 👋"), []byte("你好世界")}, req.GetPlaceholder())
 				if scenario == "transport" {
 					return nil, streamingstatus.NewOnShutdownError("WAL is closing")
@@ -173,14 +174,12 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 				if scenario == "business" || (scenario == "late business" && calls == 2) {
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 				}
-				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: []*milvuspb.AnalyzerResult{
-					{Tokens: []*milvuspb.AnalyzerToken{{Token: "hello", StartOffset: 0, EndOffset: 5}}},
-					{Tokens: []*milvuspb.AnalyzerToken{{Token: "世界", StartOffset: 0, EndOffset: 6}}},
-					{Tokens: []*milvuspb.AnalyzerToken{{Token: "hello", StartOffset: 0, EndOffset: 5}}},
-					{Tokens: []*milvuspb.AnalyzerToken{{Token: "世界", StartOffset: 6, EndOffset: 12}}},
+				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: []*querypb.HighlightResult{
+					{Fragments: []*querypb.HighlightFragment{{Offsets: []int64{0, 5}}}},
+					{Fragments: []*querypb.HighlightFragment{{Offsets: []int64{2, 4}}}},
 				}}}}
 				if scenario == "malformed" {
-					resp.GetTokenize().Results = resp.GetTokenize().Results[:1]
+					resp.GetHighlight().Results = resp.GetHighlight().Results[:1]
 				}
 				return resp, nil
 			}).Build()
@@ -221,14 +220,17 @@ func mockPipelineAnalyzer(t *testing.T, expectedTexts []string) {
 	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{VChannels: []string{"p_1v0"}}, nil)
 	mockTestTo(t, (*highlightAnalyzer).RunAnalyzer, func(_ *highlightAnalyzer, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 		texts := make([]string, len(req.GetPlaceholder()))
-		results := make([]*milvuspb.AnalyzerResult, len(texts))
+		results := make([]*querypb.HighlightResult, req.GetHighlight().GetCorpusTextNum())
 		for i, text := range req.GetPlaceholder() {
 			texts[i] = string(text)
-			results[i] = &milvuspb.AnalyzerResult{}
 		}
+		for i := range results {
+			results[i] = &querypb.HighlightResult{}
+		}
+		require.NotNil(t, req.GetHighlight())
 		require.Equal(t, expectedTexts, texts)
 		require.Equal(t, "p_1v0", req.GetFieldAnalyzer().GetVchannel())
 		require.NotNil(t, req.GetFieldAnalyzer().ReadSchemaVersion)
-		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: results}}}, nil
+		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: results}}}, nil
 	})
 }

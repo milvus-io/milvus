@@ -11,11 +11,12 @@ allocation. QueryCoord, QueryNode and ManagerClient are not involved in this cal
 path. Analyzer calls do not use the DQL task queue or its concurrency limit.
 
 The unpublished request uses two independent oneofs: `source` selects the
-analyzer, and `operation` selects `TokenizeOptions` or `PhraseMatchOptions`.
+analyzer, and `operation` selects `TokenizeOptions`, `PhraseMatchOptions` or
+`HighlightOptions`.
 `placeholder` is shared input. Tokenization options carry `with_detail` and
 `with_hash`; phrase options carry `query_text`. Responses have a matching
-`result` oneof (`TokenizeResult` or `PhraseMatchResult`) and a common business
-Status. An absent operation is rejected; there is no legacy-field fallback.
+`result` oneof (`TokenizeResult`, `PhraseMatchResult` or `HighlightResult`) and
+a common business Status. An absent operation is rejected; there is no legacy-field fallback.
 
 Public `ComputePhraseMatchSlop` adapts to this same RunAnalyzer RPC with inline
 parameters. It needs no Coordinator, QueryNode, collection or load state. The
@@ -33,7 +34,7 @@ including repeated terms and stop-word position gaps. A missing term yields
 Analyzer construction, resource loading and execution failures return business
 Status rather than being treated as non-matches. No new native ABI is needed.
 
-Both operations share native tokenization and the same analyzer resource leases.
+All operations share native tokenization and the same analyzer resource leases.
 Inline resources live until the tokenizer and token streams are destroyed;
 returned token strings and positions are Go-owned, so slop computation retains
 no native pointer. Field operations hold the existing WAL lifetime and runner
@@ -268,18 +269,24 @@ an unsupported new RPC surfaces as Unimplemented.
 
 ## Lexical highlighting
 
-After search field retrieval, Proxy sends the search/query/corpus texts and their
-analyzer names to the field RunAnalyzer source with `TokenizeOptions.with_detail`.
-It retains the search CollectionID and SchemaVersion across this post-processing
-step, including schema version zero. Proxy then builds fragments with the shared
-`highlight.BuildFragments` helper and renders tags. The existing DQL highlight
-task queue remains in use. This path needs no QueryNode GetHighlight call or
-shard delegator; the legacy RPC remains available for older callers.
+After search field retrieval, Proxy sends search/query/corpus texts in the shared
+placeholder, with per-text analyzer names in the field source and layout/fragment
+parameters in `HighlightOptions`. The source retains the original CollectionID
+and exact search SchemaVersion, including zero. StreamingNode holds one analyzer
+and resource binding through tokenization and `highlight.BuildFragments`, then
+returns only `HighlightResult` fragments. Proxy inserts the display tags. The
+existing DQL highlight task queue remains in use; the legacy QueryNode
+GetHighlight RPC remains available for older callers.
+
+The Highlight operation supports the same inline and field sources as ordinary
+tokenization. It returns no intermediate tokens. The fragment algorithm, corpus
+ordering and byte-to-rune offset conversion are shared with legacy GetHighlight.
+Tokenization still materializes a field task's token working set on SN; this
+change does not impose a token-memory cap. Request texts or unusually large
+fragment outputs can still hit gRPC limits, which fail without size-error retries.
 
 The exact schema binding lasts through each analyzer call. It does not reserve
 schema history between search and highlighting: concurrent DDL/history cleanup
-can make the selected version unavailable. Detailed tokens travel from SN to
-Proxy before fragment construction, so large result sets require more response
-traffic than returning fragments alone. The PhraseMatch batching policy does not
-apply to this Tokenize operation. Upgrade SNs to support exact-schema analysis
-before activating the new Proxy path.
+can make the selected version unavailable. Upgrade SNs to support the Highlight
+operation and exact-schema analysis before activating the new Proxy path. An older
+SN rejects an absent/unknown operation; there is no fallback to detailed tokens.

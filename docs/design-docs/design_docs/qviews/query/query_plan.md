@@ -155,7 +155,8 @@ including zero, selects the exact schema and a call-owned function scope, releas
 when analysis finishes. Absence retains the existing WAL function-runner path.
 The handler clones and forwards the optional field across assignment retries;
 Proxy lexical highlighting uses this exact-schema analyzer binding after search;
-fragment construction and tag rendering run on Proxy.
+fragment construction runs inside the SN Highlight operation and tag rendering
+runs on Proxy. The response carries fragments rather than detailed tokens.
 
 ## Payload ownership and wire compatibility
 

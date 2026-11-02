@@ -5,6 +5,7 @@ package milvus.proto.streaming;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb";
 
 import "data_coord.proto";
+import "query_coord.proto";
 import "view.proto";
 import "messages.proto";
 import "common.proto";
@@ -1042,6 +1043,7 @@ message StreamingNodeRunAnalyzerRequest {
     oneof operation {
         TokenizeOptions tokenize = 4;
         PhraseMatchOptions phrase_match = 5;
+        HighlightOptions highlight = 6;
     }
 }
 message TokenizeOptions {
@@ -1068,6 +1070,7 @@ message StreamingNodeRunAnalyzerResponse {
     oneof result {
         TokenizeResult tokenize = 1;
         PhraseMatchResult phrase_match = 3;
+        HighlightResult highlight = 4;
     }
     common.Status status = 2;
 }
@@ -1263,3 +1266,16 @@ message CloseReplicaWatchSubscriptionResponse {
 }
 
 message CloseReplicaWatchStreamResponse {}
+
+// Texts are in placeholder order: search texts, query texts, then corpus texts.
+// Analyzer selection belongs to source, including per-text analyzer names.
+message HighlightOptions {
+    int64 search_text_num = 1;
+    int64 corpus_text_num = 2;
+    repeated query.HighlightQuery queries = 3;
+    query.HighlightOptions options = 4;
+    repeated int64 topks = 5;
+}
+message HighlightResult {
+    repeated query.HighlightResult results = 1;
+}

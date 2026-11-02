@@ -21,9 +21,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -116,7 +114,10 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
 				CollectionId: t.collectionID, Vchannel: info.VChannels[0], FieldId: task.GetFieldId(), AnalyzerNames: task.GetAnalyzerNames(), ReadSchemaVersion: t.readSchemaVersion,
 			}},
-			Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{WithDetail: true}},
+			Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
+				SearchTextNum: task.GetSearchTextNum(), CorpusTextNum: task.GetCorpusTextNum(),
+				Queries: task.GetQueries(), Options: task.GetOptions(), Topks: t.GetTopks(),
+			}},
 		})
 		if err != nil {
 			if status.IsCanceled(err) {
@@ -127,13 +128,9 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 		if err := merr.Error(response.GetStatus()); err != nil {
 			return err
 		}
-		tokens := make([][]*milvuspb.AnalyzerToken, len(response.GetTokenize().GetResults()))
-		for i, analyzed := range response.GetTokenize().GetResults() {
-			tokens[i] = analyzed.GetTokens()
-		}
-		fragments, err := highlight.BuildFragments(task, t.GetTopks(), tokens)
-		if err != nil {
-			return err
+		fragments := response.GetHighlight().GetResults()
+		if int64(len(fragments)) != task.GetCorpusTextNum() {
+			return merr.WrapErrServiceInternalMsg("highlight result count does not match corpus count")
 		}
 		result.Results = append(result.Results, fragments...)
 	}
