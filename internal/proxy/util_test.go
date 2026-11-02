@@ -2620,9 +2620,9 @@ func assertParameterParseError(t *testing.T, err, cause error, value, fieldName,
 	assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
 	assert.False(t, merr.IsRetryableErr(err))
 	assert.False(t, status.GetRetriable())
-	assert.Contains(t, status.GetReason(), paramKey)
-	assert.Contains(t, status.GetReason(), fieldName)
-	assert.Contains(t, status.GetReason(), value)
+	expectedReason := fmt.Sprintf("the value for %s of field %s must be an integer: %s", paramKey, fieldName, parseErr.Error())
+	assert.Equal(t, expectedReason, status.GetReason())
+	assert.Equal(t, expectedReason, status.GetDetail())
 }
 
 func TestAppendUserInfoForRPC(t *testing.T) {
