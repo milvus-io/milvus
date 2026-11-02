@@ -512,14 +512,15 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 	mlog.Info(context.TODO(), "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
 }
 
-// DropCollection drop a collection from meta
+// DropCollection drops a collection from meta and removes its metrics. The
+// metrics are removed even when the collection is not cached, since they are
+// emitted from segments rather than from the cache.
 func (m *meta) DropCollection(collectionID int64) {
 	mlog.Info(context.TODO(), "meta update: drop collection", mlog.Int64("collectionID", collectionID))
-	if _, ok := m.collections.GetAndRemove(collectionID); ok {
-		metrics.CleanupDataCoordWithCollectionID(collectionID)
-		metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
-		mlog.Info(context.TODO(), "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
-	}
+	m.collections.Remove(collectionID)
+	metrics.CleanupDataCoordWithCollectionID(collectionID)
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(m.collections.Len()))
+	mlog.Info(context.TODO(), "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
 }
 
 // GetCollection returns collection info with provided collection id from local cache
@@ -2206,13 +2207,11 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetric
 	return clonedSegment, metricMutation
 }
 
-// batchSaveDropSegments saves drop segments info with channel removal flag
-// since the channel unwatching operation is not atomic here
-// ** the removal flag is always with last batch
-// ** the last batch must contains at least one segment
-//  1. when failure occurs between batches, failover mechanism will continue with the earliest  checkpoint of this channel
-//     since the flag is not marked so DataNode can re-consume the drop collection msg
-//  2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
+// batchSaveDropSegments saves the dropped segments of a channel, then deletes
+// the channel's removal-flag key. A missing flag reads as a dropped channel,
+// so the flag is deleted instead of being rewritten to "removed" and leaking
+// forever. A failure after the segments are saved is retried by RootCoord,
+// which re-sends DropVirtualChannel until it succeeds.
 func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSegments map[int64]*SegmentInfo) error {
 	var modSegIDs []int64
 	for k := range modSegments {
@@ -2229,7 +2228,7 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 		return err
 	}
 
-	if err = m.catalog.MarkChannelDeleted(ctx, channel); err != nil {
+	if err = m.catalog.DropChannel(ctx, channel); err != nil {
 		return err
 	}
 

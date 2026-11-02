@@ -2132,9 +2132,12 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
+		catalog:     catalog,
+		channelCPs:  newChannelCps(),
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 	}
+	m.collections.Insert(123, &collectionInfo{ID: 123})
+	m.collections.Insert(124, &collectionInfo{ID: 124})
 
 	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
@@ -2159,7 +2162,7 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		"cluster-id-rootcoord-dm_1_123v0":                   nil,
 		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
 		"cluster-id-rootcoord-dm_0_124v0":                   nil,
-	}, nil).Times(3)
+	}, nil).Times(4)
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
@@ -2171,18 +2174,41 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
+	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(6)
+	t.Run("drop collection meta fail keeps channel cp", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(errors.New("mock error")).Once()
+		gc.recycleChannelCPMeta(context.TODO(), nil)
+		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		assert.True(t, m.collections.Contain(123))
+	})
+
 	t.Run("drop channel cp fail", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
+		catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, int64(123)).Return(nil).Once()
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
 		gc.recycleChannelCPMeta(context.TODO(), nil)
 		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+		// Only the collection whose segments are all recycled leaves the cache.
+		assert.False(t, m.collections.Contain(123))
+		assert.True(t, m.collections.Contain(124))
 	})
+}
+
+func TestGarbageCollector_recycleDroppedChannelFlags(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := &meta{catalog: catalog}
+	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{checkInterval: time.Millisecond})
+
+	// A failed sweep is retried; the sweep stops after the first success.
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(0, errors.New("mock error")).Once()
+	catalog.EXPECT().RemoveDroppedChannelFlags(mock.Anything).Return(2, nil).Once()
+	gc.recycleDroppedChannelFlags(context.TODO())
 }
 
 func TestGarbageCollector_removeObjectPool(t *testing.T) {
