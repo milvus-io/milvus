@@ -24,10 +24,49 @@
 #include <string>
 #include <vector>
 
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
 
 namespace milvus::index {
+
+class VectorIndexReader;
+
+/** @brief Owns a Knowhere handle and the metadata of one published version. */
+class VectorIndex final : public IIndex,
+                          public std::enable_shared_from_this<VectorIndex> {
+ public:
+    explicit VectorIndex(KnowhereEngine engine);
+    VectorIndex(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
+    VectorIndex(KnowhereEngine engine,
+                int64_t logical_count,
+                int64_t physical_count,
+                knowhere::Json search_defaults);
+
+    IndexMetadata
+    Metadata() const override;
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+    void
+    CancelWarmup() const override {
+    }
+
+ private:
+    friend class VectorIndexReader;
+    enum class Backend {
+        Memory,
+        Disk,
+    };
+
+    KnowhereEngine engine_;
+    Backend backend_{Backend::Memory};
+    uint32_t disk_ann_beamwidth_{8};
+    int64_t physical_count_;
+    // Growing only: the frozen public row count this generation may answer
+    // for. Sealed readers read their row domain from the immutable IdMap.
+    int64_t logical_count_{0};
+    std::optional<knowhere::Json> growing_search_defaults_;
+};
 
 class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
  public:
@@ -136,10 +175,11 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
                     const std::string& metric_type) const override;
 
  private:
-    enum class Backend {
-        Memory,
-        Disk,
-    };
+    friend class VectorIndex;
+    VectorIndexReader(std::shared_ptr<const VectorIndex> index,
+                      milvus::OpContext* op_ctx);
+
+    using Backend = VectorIndex::Backend;
 
     static constexpr std::array<const char*, 5> kGrowingQueryOverrides = {
         "radius",
@@ -194,14 +234,8 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     bool
     IsEmptyEngine() const;
 
-    KnowhereEngine engine_;
-    Backend backend_{Backend::Memory};
-    uint32_t disk_ann_beamwidth_{8};
-    int64_t physical_count_;
-    // Growing only: the frozen public row count this generation may answer
-    // for. Sealed readers read their row domain from the immutable IdMap.
-    int64_t logical_count_{0};
-    std::optional<knowhere::Json> growing_search_defaults_;
+    std::shared_ptr<const VectorIndex> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index

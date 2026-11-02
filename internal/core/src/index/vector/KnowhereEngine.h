@@ -94,6 +94,12 @@ class KnowhereEngine {
     std::shared_ptr<const void> backing_owner;
     knowhere::Index<knowhere::IndexNode> native_index;
 
+    // Native owned memory/file accounting is unavailable; zero is a sentinel.
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return {};
+    }
+
     // --- self-description ---------------------------------------------------
 
     IndexType

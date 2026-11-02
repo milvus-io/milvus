@@ -106,6 +106,53 @@ OpenFloatVectors(bool all_null) {
     return LoadFloatVectors(input, false);
 }
 
+TEST(VectorIndexOwnershipTest, IteratorRetainsIndexAfterReadersAreReleased) {
+    KnowhereEngine engine(
+        DataType::VECTOR_FLOAT,
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_HNSW,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false);
+    engine.SetDim(kDim);
+    const std::array<float, 6> rows{0, 0, 1, 1, 2, 2};
+    const knowhere::Json config{
+        {"metric_type", "L2"}, {"M", 16}, {"efConstruction", 64}};
+    ASSERT_EQ(engine.native_index.Build(
+                  knowhere::GenDataSet(3, kDim, rows.data()), config, false),
+              knowhere::Status::success);
+    auto index = std::make_shared<VectorIndex>(std::move(engine));
+    std::weak_ptr<const VectorIndex> lifetime = index;
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 3);
+    const auto* vectors = dynamic_cast<const IVectorReader*>(second.get());
+    ASSERT_NE(vectors, nullptr);
+    const std::array<float, 2> query{0, 0};
+    auto iterators = vectors->Iterators(GenDataset(1, kDim, query.data()),
+                                        {{"metric_type", "L2"}, {"ef", 64}},
+                                        BitsetView{},
+                                        nullptr);
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 1);
+    auto iterator = std::move(iterators.value().front());
+    ASSERT_NE(iterator, nullptr);
+    index.reset();
+    first.reset();
+    second.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto has_next = iterator->HasNext();
+    ASSERT_TRUE(has_next.has_value());
+    ASSERT_TRUE(has_next.value());
+    const auto hit = iterator->Next();
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit.value().first, 0);
+    EXPECT_FLOAT_EQ(hit.value().second, 0);
+    iterator.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
+
 TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     auto reader = OpenFloatVectors(false);
     ASSERT_NE(reader, nullptr);
