@@ -19,6 +19,7 @@ var (
 func init() {
 	logger, props := newStdLogger()
 	ReplaceGlobals(logger, props)
+	initGRPCLogger(logger)
 }
 
 // initGlobalLogger replaces the global logger with the provided one.
