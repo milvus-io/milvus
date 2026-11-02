@@ -44,6 +44,15 @@ const SnapshotSourcePlanMaxBytes = 256 * 1024
 // to workers; old consumers reject the version rather than losing semantics.
 const SnapshotPreparationVersion = 9
 
+// SnapshotBoundedVersionOffset marks descriptors whose files are cut at a
+// per-PChannel end bound: versions 17-24 are the 1-8 contract plus this offset.
+// A new number, not a reuse of the shared-L0 family, because a worker that does
+// not know the bound must reject the job rather than import the bundle past the
+// point replication resumes and duplicate the tail. Versions 10-16 stay
+// reserved so the preparation marker can never be mistaken for a runnable
+// descriptor.
+const SnapshotBoundedVersionOffset = 16
+
 func IsSnapshotPreparation(files []*internalpb.ImportFile) bool {
 	return len(files) == 1 && files[0].GetSnapshotSource().GetVersion() == SnapshotPreparationVersion
 }
@@ -123,12 +132,13 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		return nil
 	}
 	size := 0
-	// The option's JSON contract was validated above; only presence matters
-	// when checking the coordinator-produced descriptor.
+	// The option contracts were validated above; only presence matters when
+	// checking the coordinator-produced descriptors.
 	_, mappingErr := funcutil.GetAttrByKeyFromRepeatedKV(PartitionMapping, options)
+	_, pchannelEndErr := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotPChannelEndTs, options)
 	for _, file := range files {
 		source := file.GetSnapshotSource()
-		if source != nil && (source.GetVersion() < 1 || source.GetVersion() > 8) {
+		if source != nil && !validSnapshotSourceVersion(source) {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
 		}
 		// Development versions persisted L0 paths in every segment descriptor.
@@ -138,14 +148,22 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		if len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "snapshot import tasks with inline L0 are no longer supported; resubmit the snapshot import")
 		}
-		contractVersion := source.GetVersion()
+		contractVersion := SnapshotSourceBaseVersion(source)
 		if SnapshotSourceUsesSharedL0(source) {
 			contractVersion -= 4
+		}
+		if SnapshotSourceScoped(source) {
 			if source.GetSourceChannel() == "" || source.GetSourcePartitionId() <= 0 {
-				return merr.WrapErrServiceInternalMsg("invalid task-shared snapshot source descriptor")
+				if SnapshotSourceUsesSharedL0(source) {
+					return merr.WrapErrServiceInternalMsg("invalid task-shared snapshot source descriptor")
+				}
+				return merr.WrapErrServiceInternalMsg("invalid bounded snapshot source descriptor")
 			}
 		} else if source.GetSourceChannel() != "" || source.GetSourcePartitionId() != 0 {
 			return merr.WrapErrServiceInternalMsg("legacy snapshot descriptor contains shared source scope")
+		}
+		if (pchannelEndErr == nil) != SnapshotSourceBounded(source) {
+			return merr.WrapErrServiceInternalMsg("snapshot import per-PChannel bound and bounded descriptor disagree")
 		}
 		external := contractVersion == 2 || contractVersion == 4
 		if HasExternalSource(options) {
@@ -184,8 +202,47 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 // Versions 5-8 preserve the local/external and mapped/unmapped contracts of
 // versions 1-4, but require a separate L0 inventory. Older workers reject the
 // version rather than silently ignoring deletes they do not know how to bind.
+// Bounded descriptors (17-24) carry the same scope without an inventory unless
+// the job also has deletes, so the version is read through the offset first.
 func SnapshotSourceUsesSharedL0(source *internalpb.SnapshotImportSource) bool {
-	return source.GetVersion() >= 5 && source.GetVersion() <= 8
+	version := SnapshotSourceBaseVersion(source)
+	return version >= 5 && version <= 8
+}
+
+// SnapshotSourceBounded reports whether the descriptor's files are cut at a
+// per-PChannel end bound. The cut itself is applied to the reader's timestamp
+// range; the descriptor only carries the channel that picks the bound.
+func SnapshotSourceBounded(source *internalpb.SnapshotImportSource) bool {
+	version := source.GetVersion()
+	return version > SnapshotBoundedVersionOffset && version <= SnapshotBoundedVersionOffset+8
+}
+
+// SnapshotSourceScoped reports whether the descriptor names its file's source
+// channel and partition, either to bind a shared L0 inventory or to resolve a
+// per-PChannel end bound.
+func SnapshotSourceScoped(source *internalpb.SnapshotImportSource) bool {
+	return SnapshotSourceUsesSharedL0(source) || SnapshotSourceBounded(source)
+}
+
+// SnapshotSourceBaseVersion strips the bounded offset, leaving the 1-8 contract
+// that describes storage, routing and the L0 inventory.
+func SnapshotSourceBaseVersion(source *internalpb.SnapshotImportSource) uint32 {
+	if SnapshotSourceBounded(source) {
+		return source.GetVersion() - SnapshotBoundedVersionOffset
+	}
+	return source.GetVersion()
+}
+
+// validSnapshotSourceVersion accepts the 1-8 contract and the bounded family.
+// The preparation marker and the reserved 10-16 range never reach a worker as
+// an executable descriptor, and an unknown version must fail rather than be
+// read through a contract it does not implement.
+func validSnapshotSourceVersion(source *internalpb.SnapshotImportSource) bool {
+	version := source.GetVersion()
+	if version >= 1 && version <= 8 {
+		return true
+	}
+	return SnapshotSourceBounded(source)
 }
 
 type snapshotSourceScope struct {
