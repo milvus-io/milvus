@@ -120,13 +120,13 @@ TextIndex::TextIndex(
     DataType value_type,
     bool file_backed,
     size_t payload_bytes)
-    : storage_(std::move(directory),
-               std::move(engine),
-               std::move(null_offsets),
-               count,
-               value_type,
-               file_backed,
-               payload_bytes) {
+    : TextIndex(std::make_shared<TextIndexStorage>(std::move(directory),
+                                                   std::move(engine),
+                                                   std::move(null_offsets),
+                                                   count,
+                                                   value_type,
+                                                   file_backed,
+                                                   payload_bytes)) {
 }
 
 TextIndexReader::TextIndexReader(
@@ -155,13 +155,13 @@ TextIndex::TextIndex(
     DataType value_type,
     bool file_backed,
     size_t payload_bytes)
-    : storage_(std::move(directory),
-               std::move(engine),
-               std::move(validity),
-               count,
-               value_type,
-               file_backed,
-               payload_bytes) {
+    : TextIndex(std::make_shared<TextIndexStorage>(std::move(directory),
+                                                   std::move(engine),
+                                                   std::move(validity),
+                                                   count,
+                                                   value_type,
+                                                   file_backed,
+                                                   payload_bytes)) {
 }
 
 TextIndexReader::TextIndexReader(
@@ -182,12 +182,62 @@ TextIndexReader::TextIndexReader(
                       nullptr) {
 }
 
+TextIndex::TextIndex(std::shared_ptr<const TextIndexStorage> storage)
+    : storage_(std::move(storage)) {
+    AssertInfo(
+        std::get<std::shared_ptr<const TextIndexStorage>>(storage_) != nullptr,
+        "text index requires storage");
+}
+
+TextIndex::TextIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot,
+    IndexMetadata metadata)
+    : storage_(CachedStorage{std::move(slot), metadata}) {
+    AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+               "text index requires a cache slot");
+    AssertInfo(!metadata.count || *metadata.count >= 0,
+               "text count must not be negative");
+}
+
+std::shared_ptr<const TextIndexStorage>
+TextIndex::PinStorage(milvus::OpContext* op_ctx) const {
+    if (const auto* resident =
+            std::get_if<std::shared_ptr<const TextIndexStorage>>(&storage_))
+        return *resident;
+    const auto& cached = std::get<CachedStorage>(storage_);
+    std::shared_ptr<const TextIndexStorage> storage;
+    if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+        storage = {cached.slot, resident};
+    } else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        storage = {std::move(pin), cell};
+    }
+    AssertInfo(storage != nullptr &&
+                   (!cached.metadata.count ||
+                    storage->count_ == *cached.metadata.count) &&
+                   storage->value_type_ == cached.metadata.value_type,
+               "text storage disagrees with index metadata");
+    return storage;
+}
+
+void
+TextIndex::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_))
+        cached->slot->CancelWarmup();
+}
+
 IndexMetadata
 TextIndex::Metadata() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_))
+        return cached->metadata;
+    const auto& storage =
+        *std::get<std::shared_ptr<const TextIndexStorage>>(storage_);
     return {ReaderCaps{.text_match = true},
             Domain::Row,
-            storage_.value_type_,
-            storage_.count_};
+            storage.value_type_,
+            storage.count_};
 }
 
 IIndexReaderBasePtr
@@ -252,58 +302,58 @@ TextIndexReader::CoordDomain() const {
 
 int64_t
 TextIndexReader::Count() const {
-    return index_->storage_.count_;
+    if (const auto count = index_->Metadata().count)
+        return *count;
+    return index_->PinStorage(op_ctx_)->count_;
 }
 
 DataType
 TextIndexReader::ValueType() const {
-    return index_->storage_.value_type_;
+    return index_->Metadata().value_type;
 }
 
 int64_t
 TextIndexReader::MemoryUsage() const {
-    return index_->storage_.MemoryUsage();
+    return index_->PinStorage(op_ctx_)->MemoryUsage();
 }
 
 cachinglayer::ResourceUsage
 TextIndexReader::CellByteSize() const {
-    return index_->storage_.CellByteSize();
-}
-
-TargetBitmap
-TextIndexReader::PrepareBitset() const {
-    return TargetBitmap(static_cast<size_t>(index_->storage_.count_));
+    return index_->PinStorage(op_ctx_)->CellByteSize();
 }
 
 TargetBitmap
 TextIndexReader::MatchQuery(std::string_view query,
                             uint32_t min_should_match) const {
-    auto bitset = PrepareBitset();
-    index_->storage_.engine_->match_query(
-        OwnString(query), min_should_match, &bitset);
+    const auto storage = index_->PinStorage(op_ctx_);
+    TargetBitmap bitset(static_cast<size_t>(storage->count_));
+    storage->engine_->match_query(OwnString(query), min_should_match, &bitset);
     return bitset;
 }
 
 TargetBitmap
 TextIndexReader::PhraseMatchQuery(std::string_view query, uint32_t slop) const {
-    auto bitset = PrepareBitset();
-    index_->storage_.engine_->phrase_match_query(
-        OwnString(query), slop, &bitset);
+    const auto storage = index_->PinStorage(op_ctx_);
+    TargetBitmap bitset(static_cast<size_t>(storage->count_));
+    storage->engine_->phrase_match_query(OwnString(query), slop, &bitset);
     return bitset;
 }
 
 TargetBitmap
 TextIndexReader::FuzzyMatchQuery(std::string_view query,
                                  uint32_t max_edit_distance) const {
-    auto bitset = PrepareBitset();
-    index_->storage_.engine_->fuzzy_match_query(
+    const auto storage = index_->PinStorage(op_ctx_);
+    TargetBitmap bitset(static_cast<size_t>(storage->count_));
+    storage->engine_->fuzzy_match_query(
         OwnString(query), max_edit_distance, &bitset);
     return bitset;
 }
 
-const SharedValidityBitmap::Snapshot&
+std::shared_ptr<const SharedValidityBitmap::Snapshot>
 TextIndexReader::Validity() const {
-    return index_->storage_.validity_;
+    auto storage = index_->PinStorage(op_ctx_);
+    const auto* validity = &storage->validity_;
+    return {std::move(storage), validity};
 }
 
 TargetBitmap
@@ -315,7 +365,7 @@ TextIndexReader::IsNull() const {
 
 TargetBitmap
 TextIndexReader::IsNotNull() const {
-    return index_->storage_.validity_.ToBitmap();
+    return index_->PinStorage(op_ctx_)->validity_.ToBitmap();
 }
 
 }  // namespace milvus::index

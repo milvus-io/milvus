@@ -134,6 +134,39 @@ class TextIndexTranslatorTest : public ::testing::Test {
     size_t old_slots_{};
 };
 
+TEST_F(TextIndexTranslatorTest, CachedIndexCreatesRequestReaders) {
+    storage::text_test::TextPublicationFixture fixture;
+    for (const bool packed : {false, true}) {
+        const auto stats = fixture.Publish(packed);
+        for (const bool async : {false, true}) {
+            storagev2translator::SetStorageV2AsyncLoadEnabled(async);
+            for (const bool warmup : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << packed << async << warmup);
+                auto config = fixture.LoadConfig(stats, true);
+                TextMatchIndexTranslator translator(
+                    {true,
+                     3,
+                     101,
+                     "{}",
+                     stats.MemSize(),
+                     3,
+                     warmup ? "sync" : "disable",
+                     ""},
+                    fixture.context,
+                    config);
+                auto index = translator.CreateIndex(nullptr);
+                ASSERT_NE(index, nullptr);
+                EXPECT_EQ(index->Metadata().count, 3);
+                OpContext context;
+                auto reader = index->CreateReader(&context);
+                index->CancelWarmup();
+                index.reset();
+                CheckTextReader(*reader);
+            }
+        }
+    }
+}
+
 TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
     storagev2translator::SetStorageV2AsyncLoadEnabled(false);
     storage::text_test::TextPublicationFixture fixture;

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -30,10 +31,12 @@
 
 namespace milvus::index {
 
+struct TextIndexStorage;
+
 /**
  * @brief Loads text readers from legacy or packed V3 artifacts.
  *
- * Owns the opened source and fixed load options; each Load creates a new reader.
+ * Owns fixed load options and the source; cached construction transfers the source to the slot.
  */
 class TextIndexLoader final : public IndexLoader {
  public:
@@ -61,13 +64,28 @@ class TextIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     TextIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    static folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+    LoadLegacyStorage(storage::FileSource& source,
+                      const storage::LoadOptions& opts,
+                      bool use_async);
+
+    static folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Materialize Tantivy files and initialize the configured analyzer.

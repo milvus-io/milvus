@@ -21,6 +21,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/SharedValidityBitmap.h"
@@ -107,17 +109,27 @@ class TextIndex final : public IIndex,
               bool file_backed,
               size_t payload_bytes);
 
+    explicit TextIndex(std::shared_ptr<const TextIndexStorage> storage);
+    TextIndex(std::shared_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot,
+              IndexMetadata metadata);
+
     IndexMetadata
     Metadata() const override;
     IIndexReaderBasePtr
     CreateReader(milvus::OpContext* op_ctx) const override;
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class TextIndexReader;
-    TextIndexStorage storage_;
+    std::shared_ptr<const TextIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const TextIndexStorage>, CachedStorage>
+        storage_;
 };
 
 class TextIndexReader final : public IIndexReaderBase,
@@ -195,17 +207,13 @@ class TextIndexReader final : public IIndexReaderBase,
     TargetBitmap
     IsNotNull() const override;
 
-    const SharedValidityBitmap::Snapshot&
+    std::shared_ptr<const SharedValidityBitmap::Snapshot>
     Validity() const;
 
  private:
     friend class TextIndex;
     TextIndexReader(std::shared_ptr<const TextIndex> index,
                     milvus::OpContext* op_ctx);
-
-    // Allocates the result bitmap and installs the tantivy set-bit callback.
-    TargetBitmap
-    PrepareBitset() const;
 
     std::shared_ptr<const TextIndex> index_;
     milvus::OpContext* const op_ctx_;

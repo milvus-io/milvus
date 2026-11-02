@@ -6295,9 +6295,7 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
                                           translator->ValueType(),
                                           translator->Caps(),
                                           IndexInventory::RootSlot{}};
-    resolved.index = milvus::cachinglayer::Manager::GetInstance()
-                         .CreateCacheSlot<index::IIndexReaderBase>(
-                             std::move(translator), op_ctx);
+    resolved.index = translator->CreateIndex(op_ctx);
 
     CheckCancellation(op_ctx,
                       segment_id,

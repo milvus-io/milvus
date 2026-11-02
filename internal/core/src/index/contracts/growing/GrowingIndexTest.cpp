@@ -432,9 +432,9 @@ TEST(GrowingIndexContractTest, TextPublicationsShareValidityAndFreezeTail) {
     const auto second = owner.PinSnapshot();
     const auto& before = dynamic_cast<const TextIndexReader&>(first.Reader());
     const auto& after = dynamic_cast<const TextIndexReader&>(second.Reader());
-    ASSERT_NE(before.Validity().FullWords().data(), nullptr);
-    EXPECT_EQ(before.Validity().FullWords().data(),
-              after.Validity().FullWords().data());
+    ASSERT_NE(before.Validity()->FullWords().data(), nullptr);
+    EXPECT_EQ(before.Validity()->FullWords().data(),
+              after.Validity()->FullWords().data());
     const auto old_nulls = before.IsNull();
     const auto new_nulls = after.IsNull();
     ASSERT_EQ(old_nulls.size(), 65);

@@ -24,6 +24,9 @@
 #include <vector>
 
 #include "index/Meta.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/scalar/text/TextIndexReader.h"
+#include "storage/artifact/LocalDirectory.h"
 #include "index/scalar/text/TextIndexLoader.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
@@ -33,6 +36,260 @@
 
 namespace milvus::index::test {
 namespace {
+
+void
+CheckCachedText() {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("TextVarcharV7Heap");
+    ScalarTestData<std::string_view> data(
+        {"apple", "banana", "banana", "pear"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact =
+        backend.Build(input.View(), {.row_count = data.values.size()});
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "text-cache-XXXXXX",
+                        "Text cache test");
+                    const auto persisted = packed ? SerializeV3(*artifact)
+                                                  : SerializeV1V2(*artifact);
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 4});
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (known_count)
+                        EXPECT_EQ(reader->Count(), 4);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* nulls =
+                        dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)nulls->IsNull(); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 4);
+                    nulls = dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    const auto result = nulls->IsNull();
+                    EXPECT_EQ(result.count(), 1);
+                    EXPECT_TRUE(result[3]);
+                    const auto* text =
+                        dynamic_cast<const ITextMatchReader*>(reader.get());
+                    ASSERT_NE(text, nullptr);
+                    EXPECT_EQ(text->MatchQuery("banana", 1).count(), 2);
+                    EXPECT_EQ(text->PhraseMatchQuery("banana", 0).count(), 2);
+                    EXPECT_EQ(text->FuzzyMatchQuery("banan", 1).count(), 2);
+                }
+            }
+        }
+    }
+}
+
+TEST(TextIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    CheckCachedText();
+}
+
+TEST(TextIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("TextVarcharV7Heap");
+    ScalarTestData<std::string_view> data(
+        {"apple", "banana", "banana", "pear"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    for (const bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "text-bad-count-XXXXXX",
+            "text count test");
+        const auto persisted =
+            packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+        auto source = [&]() -> OpenedIndexSource {
+            if (!packed)
+                return LegacyIndexSource{
+                    std::make_shared<TestArtifactSource>(
+                        persisted, storage::Generation::V1V2),
+                    false};
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(persisted)));
+            return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                storage::IndexEntryReader::Open(input, input->Size()))};
+        }();
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 4});
+        options.params[INDEX_NUM_ROWS_KEY] = 3;
+        options.enable_mmap = true;
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            (void)LoaderRegistry::Instance()
+                .Lookup(backend.Family())
+                .Load({std::move(source), options, cache});
+        });
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
+
+TEST(TextIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<TextIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto directory = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "text-pin-XXXXXX",
+            "text pin test");
+        auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+            "values",
+            true,
+            "",
+            TANTIVY_INDEX_LATEST_VERSION,
+            "milvus_tokenizer",
+            R"({"tokenizer":"standard"})",
+            "");
+        const std::string docs[] = {"apple", "banana"};
+        engine->add_data<std::string>(docs, 2, 0);
+        engine->commit();
+        engine = engine->create_snapshot_reader(SetBitsetSealed);
+        engine->register_tokenizer("milvus_tokenizer",
+                                   R"({"tokenizer":"standard"})");
+        co_return std::make_unique<TextIndexStorage>(
+            std::move(directory),
+            std::move(engine),
+            std::make_shared<const std::vector<size_t>>(),
+            2,
+            DataType::VARCHAR,
+            false,
+            0);
+    };
+    IndexCacheConfig cache{
+        "text-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        0};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<TextIndexStorage>>(
+        std::make_unique<SingleCellIndexStorageTranslator<TextIndexStorage>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = std::make_shared<TextIndex>(
+        slot,
+        IndexMetadata{
+            ReaderCaps{.text_match = true}, Domain::Row, DataType::VARCHAR, 2});
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* text = dynamic_cast<const ITextMatchReader*>(first.get());
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->MatchQuery("apple", 1).count(), 1);
+    auto validity =
+        dynamic_cast<const TextIndexReader*>(first.get())->Validity();
+    EXPECT_FALSE(slot->ManualEvict(0));
+    EXPECT_EQ(validity->Count(), 2);
+    validity.reset();
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    first.reset();
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 0);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
 
 TEST(TextIndexArtifactTest, WriterBudgetConstantsMatchBuildAndGrowingModes) {
     EXPECT_EQ(tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,

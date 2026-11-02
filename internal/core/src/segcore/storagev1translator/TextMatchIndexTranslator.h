@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "common/LoadInfo.h"
 #include "segcore/storagev1translator/IndexReaderTranslator.h"
 #include "common/resource_c.h"
@@ -48,6 +49,9 @@ class TextMatchIndexTranslator : public IndexReaderTranslator {
 
     ~TextMatchIndexTranslator() override = default;
 
+    index::IndexPtr
+    CreateIndex(milvus::OpContext* ctx);
+
     size_t
     num_cells() const override;
 
@@ -74,6 +78,9 @@ class TextMatchIndexTranslator : public IndexReaderTranslator {
     meta() override;
 
  private:
+    index::IndexPtr
+    LoadIndex(milvus::OpContext* ctx, bool cache_storage);
+
     TextMatchIndexLoadInfo load_info_;
     milvus::storage::FileManagerContext file_manager_context_;
     milvus::Config config_;

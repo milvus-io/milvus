@@ -213,3 +213,5 @@ Bitmap 保持 Roaring 与 Bitset 两种具体 posting 表示，分别使用 `Bit
 Inverted 使用 `InvertedIndexStorage<T>` 保存 Tantivy engine、validity 和映射目录，并在每次谓词或模式查询中持有同一个 pin。普通标量索引优先使用加载参数中已知的行数；缺少该元数据时，Count 通过加载 Storage 得到。嵌套索引的元素计数不能使用 segment 行数代替，因此也保留加载后的计数。JSON projection 仍等待 sidecar 迁移。
 
 Ngram 使用 `NgramIndexStorage` 保存 engine、gram 范围、平均行大小和 validity。每次候选查询只 pin 一次，正则分支与迭代过滤复用该 Storage。CanHandle 和 CandidatesAreExact 只读取 Index 保存的 gram 范围，不触发加载。已知行数直接用于元数据访问，旧记录缺少行数时通过加载 Storage 获取；加载器在发布缓存前校验已知行数。候选过滤算法与平均行大小 sidecar 保持原有行为。
+
+Text 的文件加载入口直接创建 `TextIndex`，由它持有 `TextIndexStorage` 或对应的缓存 slot。Match、Phrase、Fuzzy 查询各自在一次 storage pin 内完成；返回 validity 的共享句柄保留该 pin。Growing 快照仍共享原有 validity 完整字，保留私有尾字。加载器继续在原来的事务内初始化 analyzer、校验 null offsets 和行数，并保留异步加载失败时的目录清理。

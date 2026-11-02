@@ -97,6 +97,7 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
         file_manager_context_.fieldDataMeta.field_schema.data_type());
     AssertInfo(IsStringDataType(value_type),
                "text index requires a string field type");
+    config_[INDEX_NUM_ROWS_KEY] = load_info_.num_rows;
     config_["field_type"] = static_cast<int32_t>(value_type);
     config_["value_type"] = static_cast<int32_t>(value_type);
     config_["nested"] = false;
@@ -228,11 +229,27 @@ TextMatchIndexTranslator::key() const {
     return key_;
 }
 
+index::IndexPtr
+TextMatchIndexTranslator::CreateIndex(milvus::OpContext* ctx) {
+    return LoadIndex(ctx, true);
+}
+
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IIndexReaderBase>>>
 TextMatchIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    auto index = LoadIndex(ctx, false);
+    std::vector<std::pair<milvus::cachinglayer::cid_t,
+                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
+        result;
+    result.emplace_back(0, index->CreateReader(nullptr));
+    return result;
+}
+
+index::IndexPtr
+TextMatchIndexTranslator::LoadIndex(milvus::OpContext* ctx,
+                                    bool cache_storage) {
     // Preparation belongs only to the first attempt, including cancellation.
     auto prepared_source = std::move(prepared_source_);
     // Check for cancellation before loading text match index
@@ -267,7 +284,19 @@ TextMatchIndexTranslator::get_cells(
                "no index loader is registered for family {}",
                Family());
 
-    std::unique_ptr<milvus::index::IIndexReaderBase> reader;
+    std::optional<index::IndexCacheConfig> cache;
+    if (cache_storage) {
+        const auto [loaded, overhead] = estimated_byte_size_of_cell(0);
+        cache.emplace(index::IndexCacheConfig{
+            key_,
+            meta_,
+            loaded,
+            overhead,
+            cells_storage_bytes({0}),
+            index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY)
+                .value_or(0)});
+    }
+    index::IndexPtr index;
     {
         milvus::ScopedTimer timer(
             "text_match_index_load",
@@ -276,40 +305,39 @@ TextMatchIndexTranslator::get_cells(
             },
             milvus::ScopedTimer::LogLevel::Info);
         if (IsPackedV3(*files)) {
-            reader = loader_entry.Load(
+            index = loader_entry.Load(
                 {index::IndexFiles{
                      file_manager_context_,
                      {files->front()},
                      index::PackedIndexStorageConfig{
                          storage::ArtifactStorageNamespace::TextLog}},
-                 options})->CreateReader(nullptr);
+                 options,
+                 cache});
         } else if (prepared_source) {
-            reader = loader_entry.Load(
+            index = loader_entry.Load(
                 {index::OpenedIndexSource{index::LegacyIndexSource{
                      std::move(prepared_source), true}},
-                 options})->CreateReader(nullptr);
+                 options,
+                 cache});
         } else {
-            reader = loader_entry.Load(
+            index = loader_entry.Load(
                 {index::IndexFiles{
                      file_manager_context_,
                      *files,
                      index::LegacyIndexStorageConfig{
                          storage::V1SourceLayout::DiskFiles,
                          storage::ArtifactStorageNamespace::TextLog}},
-                 options})->CreateReader(nullptr);
+                 options,
+                 cache});
         }
     }
-    AssertInfo(reader != nullptr, "text loader returned a null reader");
+    AssertInfo(index != nullptr, "text loader returned a null index");
 
     LOG_INFO("load text match index success for field:{} of segment:{}",
              load_info_.field_id,
              load_info_.segment_id);
 
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
-        result;
-    result.emplace_back(std::make_pair(0, std::move(reader)));
-    return result;
+    return index;
 }
 
 milvus::cachinglayer::Meta*
