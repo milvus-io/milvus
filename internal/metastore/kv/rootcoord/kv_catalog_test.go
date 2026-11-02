@@ -3717,6 +3717,15 @@ func TestRBACListPolicyBulkLoadsGranteeIDs(t *testing.T) {
 		})
 	})
 
+	t.Run("legacy ownership index is initialized after modern grantees", func(t *testing.T) {
+		assertBulkLoadCount(t, func(granteeKey string, i int) string {
+			if i%2 == 0 {
+				return crypto.GranteeID(granteeKey)
+			}
+			return fmt.Sprintf("%016x", i)
+		})
+	})
+
 	t.Run("falls back to computed id and skips malformed privilege keys", func(t *testing.T) {
 		ctx := context.Background()
 		metaKV := memkv.NewMemoryKV()
