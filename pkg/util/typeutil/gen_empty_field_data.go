@@ -108,6 +108,20 @@ func genEmptyArrayFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	}
 }
 
+func genEmptyTimestamptzFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      field.GetDataType(),
+		FieldName: field.GetName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: nil}},
+			},
+		},
+		FieldId:   field.GetFieldID(),
+		IsDynamic: field.GetIsDynamic(),
+	}
+}
+
 func genEmptyJSONFieldData(field *schemapb.FieldSchema) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      field.GetDataType(),
@@ -300,7 +314,7 @@ func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error)
 	case schemapb.DataType_Double:
 		return genEmptyDoubleFieldData(field), nil
 	case schemapb.DataType_Timestamptz:
-		return genEmptyLongFieldData(field), nil
+		return genEmptyTimestamptzFieldData(field), nil
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return genEmptyVarCharFieldData(field), nil
 	case schemapb.DataType_Array:

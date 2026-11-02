@@ -47,3 +47,20 @@ func TestGenEmptyNestedArrayFieldData(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetElementType())
 }
+
+func TestGenEmptyTimestamptzFieldData(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:     "updated_at_tz",
+		FieldID:  101,
+		DataType: schemapb.DataType_Timestamptz,
+	}
+
+	data, err := GenEmptyFieldData(field)
+	require.NoError(t, err)
+	require.Equal(t, schemapb.DataType_Timestamptz, data.GetType())
+	// A Timestamptz column carries its payload in the field-specific
+	// TimestamptzData variant, the same one every producer and consumer of
+	// Timestamptz FieldData switches on; LongData is the Int64 payload.
+	require.NotNil(t, data.GetScalars().GetTimestamptzData())
+	require.Nil(t, data.GetScalars().GetLongData())
+}
