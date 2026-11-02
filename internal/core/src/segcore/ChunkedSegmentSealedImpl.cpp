@@ -10938,10 +10938,13 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 inner_values == nullptr || inner_values->byte_width() == width,
                 "VECTOR_ARRAY field {} has unexpected vector width",
                 field_meta.get_name().get());
-            auto* va = data_array->mutable_vectors()
-                           ->mutable_vector_array()
-                           ->mutable_data();
-            data_array->mutable_vectors()->set_dim(dim);
+            auto* vectors = data_array->mutable_vectors();
+            vectors->set_dim(dim);
+            auto* vector_array = vectors->mutable_vector_array();
+            vector_array->set_dim(dim);
+            vector_array->set_element_type(
+                static_cast<proto::schema::DataType>(element_type));
+            auto* va = vector_array->mutable_data();
             for (int64_t i = 0; i < size; i++) {
                 auto idx = result_mapping[i];
                 int64_t start = outer_list->value_offset(idx);
