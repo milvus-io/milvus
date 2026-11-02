@@ -383,9 +383,9 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
 
 class ReaderStringSnapshot : public SegmentReadSnapshot {
  public:
-    ReaderStringSnapshot(std::shared_ptr<ChunkedColumnInterface> column,
-                         SchemaPtr schema)
-        : column_(std::move(column)), schema_(std::move(schema)) {
+    explicit ReaderStringSnapshot(
+        std::shared_ptr<ChunkedColumnInterface> column)
+        : column_(std::move(column)) {
     }
     int64_t
     chunk_size(FieldId, int64_t chunk, OpContext* = nullptr) const override {
@@ -421,15 +421,10 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         ThrowInfo(ErrorCode::Unsupported,
                   "string test snapshot does not support struct offsets");
     }
-    SchemaPtr
-    get_schema_snapshot() const override {
-        return schema_;
-    }
     mutable int64_t column_reads = 0;
 
  private:
     std::shared_ptr<ChunkedColumnInterface> column_;
-    SchemaPtr schema_;
 };
 
 class SegmentChunkReaderStringTest
@@ -576,7 +571,7 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
-    ReaderStringSnapshot snapshot(column_, schema_);
+    ReaderStringSnapshot snapshot(column_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
@@ -612,7 +607,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
         // Non-nullable columns short-circuit inside ApplyValidDataInChunk.
         return;
     }
-    ReaderStringSnapshot snapshot(column_, schema_);
+    ReaderStringSnapshot snapshot(column_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);

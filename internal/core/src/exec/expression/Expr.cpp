@@ -103,8 +103,7 @@ ExprSet::Eval(int32_t begin,
 // This means: keep entities with null TTL (never expire) OR entities with TTL > current time (not expired)
 expr::TypedExprPtr
 CreateTTLFieldFilterExpression(QueryContext* query_context) {
-    auto segment = query_context->get_segment();
-    auto schema = segment->get_schema_snapshot();
+    auto schema = query_context->get_read_schema();
     if (!schema->get_ttl_field_id().has_value()) {
         return nullptr;
     }
@@ -499,7 +498,10 @@ CompileExpression(const expr::TypedExprPtr& expr,
     // non-pinned paths) to this expression. Runs for the whole compiled tree
     // because CompileExpression is recursive over inputs.
     result->SetSnapshot(context->get_read_snapshot().get());
-    result->SetFeatureRecorder(plan_options.feature_recorder.get());
+    if (plan_options.feature_recorder) {
+        result->SetFeatureRecorder(plan_options.feature_recorder.get(),
+                                   *context->get_read_schema());
+    }
     return result;
 }
 
@@ -629,8 +631,11 @@ SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             // The coarse pass is where the R-Tree serves the group. The refine
             // pass always re-checks its candidates on raw data by design, so
             // it records nothing.
-            coarse->SetFeatureRecorder(
-                qc->get_plan_options().feature_recorder.get());
+            if (qc->get_plan_options().feature_recorder) {
+                coarse->SetFeatureRecorder(
+                    qc->get_plan_options().feature_recorder.get(),
+                    *qc->get_read_schema());
+            }
             out.push_back(std::move(coarse));
             out.push_back(std::make_shared<PhyGISRefineConjunctExpr>(
                 state,
@@ -735,7 +740,9 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // Rewrite same-column geometry predicates into Coarse + Refine nodes before
     // bucketing, so the buckets below schedule coarse early / refine last.
     SplitFuseGISConjunct(expr, context);
-    auto schema = segment->get_schema_snapshot();
+    auto schema = segment->type() == SegmentType::Growing
+                      ? segment->get_schema_snapshot()
+                      : context->get_query_context()->get_read_schema();
     auto namespace_field_id = schema->get_namespace_field_id();
     std::vector<size_t> reorder;
     std::vector<size_t> numeric_expr;

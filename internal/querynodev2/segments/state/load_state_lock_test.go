@@ -278,6 +278,31 @@ func TestWaitOrPanic(t *testing.T) {
 		}
 		assert.True(t, executed)
 	})
+
+	t.Run("watchdog_keeps_pinned_resources_alive", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key, "0.01")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.MaxWLockConditionalWaitTime.Key)
+
+		l := NewLoadStateLock(LoadStateDataLoaded)
+		assert.True(t, l.PinIfNotReleased())
+		released := make(chan struct{})
+		go func() {
+			l.StartReleaseAll().Done(nil)
+			close(released)
+		}()
+		select {
+		case <-released:
+			t.Fatal("watchdog must not release a pinned segment")
+		case <-time.After(100 * time.Millisecond):
+		}
+		l.Unpin()
+		select {
+		case <-released:
+		case <-time.After(time.Second):
+			t.Fatal("release did not finish after the last pin was removed")
+		}
+		assert.False(t, l.PinIfNotReleased())
+	})
 }
 
 func TestPinIf(t *testing.T) {
