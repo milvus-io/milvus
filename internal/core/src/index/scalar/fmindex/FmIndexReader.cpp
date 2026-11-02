@@ -70,6 +70,13 @@ RejectDanglingEscape(std::string_view pattern) {
     }
 }
 
+TargetBitmap
+NonNullBitmap(const FmIndexStorage& storage) {
+    auto result = storage.NullBitmap().clone();
+    result.flip();
+    return result;
+}
+
 }  // namespace
 
 FmIndexMappedFile::FmIndexMappedFile(void* data,
@@ -140,7 +147,7 @@ FmIndexStorage::FmIndexStorage(
       file_bytes_(file_bytes) {
 }
 
-std::shared_ptr<const FmIndexStorage>
+std::unique_ptr<FmIndexStorage>
 FmIndexStorage::Create(std::shared_ptr<const FmIndexMappedFile> mapped_file,
                        std::shared_ptr<const fmindex::FMIndex> engine,
                        TargetBitmap null_bitmap,
@@ -216,7 +223,7 @@ FmIndexStorage::Create(std::shared_ptr<const FmIndexMappedFile> mapped_file,
         SaturatingAdd(heap_bytes, mapped_file->HeapBytes());
         file_bytes = SaturatingSize(mapped_file->MappedBytes());
     }
-    return std::shared_ptr<const FmIndexStorage>(
+    return std::unique_ptr<FmIndexStorage>(
         new FmIndexStorage(std::move(mapped_file),
                            std::move(engine),
                            std::move(null_bitmap),
@@ -275,18 +282,68 @@ FmIndexStorage::CellByteSize() const {
 
 FmIndex::FmIndex(std::shared_ptr<const FmIndexStorage> storage,
                  double cost_ratio)
-    : storage_(std::move(storage)), cost_ratio_(cost_ratio) {
-    AssertInfo(storage_ != nullptr, "FM-index reader requires shared storage");
+    : storage_(storage), cost_ratio_(cost_ratio) {
+    AssertInfo(storage != nullptr, "FM-index reader requires shared storage");
+    AssertInfo(std::isfinite(cost_ratio_) && cost_ratio_ >= 0,
+               "FM-index cost ratio must be finite and non-negative");
+}
+
+FmIndex::FmIndex(std::shared_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot,
+                 DataType value_type,
+                 int64_t count,
+                 double cost_ratio)
+    : storage_(CachedStorage{std::move(slot), value_type, count}),
+      cost_ratio_(cost_ratio) {
+    AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+               "FM-index requires a cache slot");
+    AssertInfo(count >= 0, "FM-index count must not be negative");
+    AssertInfo(IsStringDataType(value_type),
+               "FM-index requires a string value type");
     AssertInfo(std::isfinite(cost_ratio_) && cost_ratio_ >= 0,
                "FM-index cost ratio must be finite and non-negative");
 }
 
 IndexMetadata
 FmIndex::Metadata() const {
-    return {ReaderCaps{.pattern_match = true},
-            Domain::Row,
-            storage_->ValueType(),
-            storage_->Count()};
+    if (const auto* storage =
+            std::get_if<std::shared_ptr<const FmIndexStorage>>(&storage_)) {
+        return {{.pattern_match = true},
+                Domain::Row,
+                (*storage)->ValueType(),
+                (*storage)->Count()};
+    }
+    const auto& cached = std::get<CachedStorage>(storage_);
+    return {
+        {.pattern_match = true}, Domain::Row, cached.value_type, cached.count};
+}
+
+std::shared_ptr<const FmIndexStorage>
+FmIndex::PinStorage(milvus::OpContext* op_ctx) const {
+    if (const auto* storage =
+            std::get_if<std::shared_ptr<const FmIndexStorage>>(&storage_)) {
+        return *storage;
+    }
+    const auto& cached = std::get<CachedStorage>(storage_);
+    std::shared_ptr<const FmIndexStorage> storage;
+    if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+        storage = {cached.slot, resident};
+    } else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        storage = {std::move(pin), cell};
+    }
+    AssertInfo(storage != nullptr && storage->Count() == cached.count &&
+                   storage->ValueType() == cached.value_type,
+               "FM-index storage disagrees with index metadata");
+    return storage;
+}
+
+void
+FmIndex::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_)) {
+        cached->slot->CancelWarmup();
+    }
 }
 
 IIndexReaderBasePtr
@@ -319,34 +376,40 @@ FmIndexReader::CoordDomain() const {
 
 int64_t
 FmIndexReader::Count() const {
-    return index_->storage_->Count();
+    return *index_->Metadata().count;
 }
 
 DataType
 FmIndexReader::ValueType() const {
-    return index_->storage_->ValueType();
+    return index_->Metadata().value_type;
 }
 
 int64_t
 FmIndexReader::MemoryUsage() const {
+    const auto storage = index_->PinStorage(op_ctx_);
     size_t total = sizeof(FmIndexReader);
-    SaturatingAdd(total, static_cast<size_t>(index_->storage_->MemoryUsage()));
+    SaturatingAdd(total, static_cast<size_t>(storage->MemoryUsage()));
     return SaturatingSize(total);
 }
 
 cachinglayer::ResourceUsage
 FmIndexReader::CellByteSize() const {
-    return {MemoryUsage(), index_->storage_->FileBytes()};
+    const auto storage = index_->PinStorage(op_ctx_);
+    size_t total = sizeof(FmIndexReader);
+    SaturatingAdd(total, static_cast<size_t>(storage->MemoryUsage()));
+    return {SaturatingSize(total), storage->FileBytes()};
 }
 
 TargetBitmap
 FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
+    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& storage = *pin;
     if (pattern.empty()) {
         switch (op) {
             case PatternOp::PrefixMatch:
             case PatternOp::PostfixMatch:
             case PatternOp::InnerMatch:
-                return IsNotNull();
+                return NonNullBitmap(storage);
             default:
                 break;
         }
@@ -354,16 +417,17 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
 
     switch (op) {
         case PatternOp::PrefixMatch:
-            return DocsToBitmap(index_->storage_->Engine().LocatePrefixDocs(
-                Bytes(pattern), pattern.size()));
+            return DocsToBitmap(storage,
+                                storage.Engine().LocatePrefixDocs(
+                                    Bytes(pattern), pattern.size()));
         case PatternOp::PostfixMatch:
-            return DocsToBitmap(index_->storage_->Engine().LocateSuffixDocs(
-                Bytes(pattern), pattern.size()));
+            return DocsToBitmap(storage,
+                                storage.Engine().LocateSuffixDocs(
+                                    Bytes(pattern), pattern.size()));
         case PatternOp::InnerMatch: {
-            TargetBitmap result(static_cast<size_t>(index_->storage_->Count()),
-                                false);
-            const auto rows = static_cast<uint64_t>(index_->storage_->Count());
-            index_->storage_->Engine().VisitMatchingDocs(
+            TargetBitmap result(static_cast<size_t>(storage.Count()), false);
+            const auto rows = static_cast<uint64_t>(storage.Count());
+            storage.Engine().VisitMatchingDocs(
                 Bytes(pattern), pattern.size(), [&](uint64_t document) {
                     if (document < rows) {
                         result.set(static_cast<size_t>(document));
@@ -379,8 +443,9 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             // are excluded up front: a NULL never matches a LIKE under either
             // polarity.
             RejectDanglingEscape(pattern);
-            auto not_null = IsNotNull();
-            const auto rarest = RarestMatchFragment(pattern);
+            auto not_null = NonNullBitmap(storage);
+            const auto rarest = RarestMatchFragment(
+                storage, milvus::split_by_wildcard(std::string(pattern)));
             if (!rarest.has_value()) {
                 // No literal fragment ("%", "%_%", or an empty pattern):
                 // every non-null row is a candidate. ShouldUseForOp declines
@@ -388,10 +453,10 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
                 // direct API caller still gets a safe candidate superset.
                 return not_null;
             }
-            TargetBitmap candidates(
-                static_cast<size_t>(index_->storage_->Count()), false);
-            const auto rows = static_cast<uint64_t>(index_->storage_->Count());
-            index_->storage_->Engine().VisitMatchingDocs(
+            TargetBitmap candidates(static_cast<size_t>(storage.Count()),
+                                    false);
+            const auto rows = static_cast<uint64_t>(storage.Count());
+            storage.Engine().VisitMatchingDocs(
                 Bytes(rarest->literal),
                 rarest->literal.size(),
                 [&](uint64_t document) {
@@ -408,27 +473,26 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             double cost;
             auto selected = condition.Select(
                 [&](const std::string& literal) {
-                    return index_->storage_->Engine().Count(Bytes(literal),
-                                                            literal.size());
+                    return storage.Engine().Count(Bytes(literal),
+                                                  literal.size());
                 },
                 cost);
             // Selected AND children may be omitted; every OR branch remains.
             // These contains lookups are candidates for canonical RE2 recheck.
             return selected.Evaluate(
                 [&](const std::string& literal) {
-                    TargetBitmap hits(
-                        static_cast<size_t>(index_->storage_->Count()), false);
-                    index_->storage_->Engine().VisitMatchingDocs(
+                    TargetBitmap hits(static_cast<size_t>(storage.Count()),
+                                      false);
+                    storage.Engine().VisitMatchingDocs(
                         Bytes(literal), literal.size(), [&](uint64_t row) {
-                            if (row < static_cast<uint64_t>(
-                                          index_->storage_->Count()) &&
-                                !index_->storage_->NullBitmap()[row]) {
+                            if (row < static_cast<uint64_t>(storage.Count()) &&
+                                !storage.NullBitmap()[row]) {
                                 hits.set(static_cast<size_t>(row));
                             }
                         });
                     return hits;
                 },
-                [&] { return IsNotNull(); });
+                [&] { return NonNullBitmap(storage); });
         }
         default:
             ThrowInfo(UnexpectedError,
@@ -464,7 +528,9 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
     if (pattern.empty()) {
         return true;
     }
-    const auto occurrences = PatternCount(pattern, op);
+    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& storage = *pin;
+    const auto occurrences = PatternCount(storage, pattern, op);
     if (occurrences < 0) {
         return true;
     }
@@ -472,40 +538,37 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
         return true;
     }
     return static_cast<double>(occurrences) *
-               static_cast<double>(
-                   index_->storage_->Engine().sa_sample_rate()) <
-           index_->cost_ratio_ *
-               static_cast<double>(index_->storage_->TotalTokens());
+               static_cast<double>(storage.Engine().sa_sample_rate()) <
+           index_->cost_ratio_ * static_cast<double>(storage.TotalTokens());
 }
 
 TargetBitmap
 FmIndexReader::IsNull() const {
-    return index_->storage_->NullBitmap().clone();
+    return index_->PinStorage(op_ctx_)->NullBitmap().clone();
 }
 
 TargetBitmap
 FmIndexReader::IsNotNull() const {
-    auto result = index_->storage_->NullBitmap().clone();
-    result.flip();
-    return result;
+    return NonNullBitmap(*index_->PinStorage(op_ctx_));
 }
 
 std::optional<FmIndexReader::RarestFragment>
-FmIndexReader::RarestMatchFragment(std::string_view pattern) const {
+FmIndexReader::RarestMatchFragment(
+    const FmIndexStorage& storage,
+    const std::vector<std::string>& parts) const {
     // Maximal literal runs between unescaped LIKE wildcards. Shared with the
     // NGRAM candidate generator (common/RegexQuery.h), so the two families
     // split a pattern the same way.
-    const auto parts = milvus::split_by_wildcard(std::string(pattern));
     if (parts.empty()) {
         return std::nullopt;
     }
     RarestFragment rarest;
     rarest.literal = parts[0];
     rarest.occurrences = SaturatingSize(
-        index_->storage_->Engine().Count(Bytes(parts[0]), parts[0].size()));
+        storage.Engine().Count(Bytes(parts[0]), parts[0].size()));
     for (size_t i = 1; i < parts.size(); ++i) {
         const auto occurrences = SaturatingSize(
-            index_->storage_->Engine().Count(Bytes(parts[i]), parts[i].size()));
+            storage.Engine().Count(Bytes(parts[i]), parts[i].size()));
         if (occurrences < rarest.occurrences) {
             rarest.occurrences = occurrences;
             rarest.literal = parts[i];
@@ -516,15 +579,13 @@ FmIndexReader::RarestMatchFragment(std::string_view pattern) const {
 
 bool
 FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
-    const auto rarest = RarestMatchFragment(pattern);
-    if (!rarest.has_value()) {
-        // Covers the wildcard-only patterns ("%", "%_%") and, because
-        // split_by_wildcard("") is also empty, the empty pattern: answering
-        // would mean handing every non-null row to the phase-2 recheck, which
-        // is the raw scan wearing an index costume. Decline so the executor
-        // runs the scan directly.
+    const auto parts = milvus::split_by_wildcard(std::string(pattern));
+    if (parts.empty()) {
         return false;
     }
+    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& storage = *pin;
+    const auto rarest = RarestMatchFragment(storage, parts);
     if (rarest->occurrences == 0) {
         return true;
     }
@@ -536,10 +597,8 @@ FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
     // column read on top of the locate. Revisit with end-to-end measurements
     // across row length and selectivity before recalibrating.
     return static_cast<double>(rarest->occurrences) *
-               static_cast<double>(
-                   index_->storage_->Engine().sa_sample_rate()) <
-           index_->cost_ratio_ *
-               static_cast<double>(index_->storage_->TotalTokens());
+               static_cast<double>(storage.Engine().sa_sample_rate()) <
+           index_->cost_ratio_ * static_cast<double>(storage.TotalTokens());
 }
 
 bool
@@ -549,11 +608,12 @@ FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
     if (condition.IsTrue()) {
         return false;
     }
+    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& storage = *pin;
     double occurrences;
     condition.Select(
         [&](const std::string& literal) {
-            return index_->storage_->Engine().Count(Bytes(literal),
-                                                    literal.size());
+            return storage.Engine().Count(Bytes(literal), literal.size());
         },
         occurrences);
     if (occurrences == 0) {
@@ -561,27 +621,27 @@ FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
     }
     // Counts belong to this index and upper-bound locate work, including every
     // selected OR branch. Like the LIKE guard, this does not price raw reads.
-    return occurrences * static_cast<double>(
-                             index_->storage_->Engine().sa_sample_rate()) <
-           index_->cost_ratio_ *
-               static_cast<double>(index_->storage_->TotalTokens());
+    return occurrences *
+               static_cast<double>(storage.Engine().sa_sample_rate()) <
+           index_->cost_ratio_ * static_cast<double>(storage.TotalTokens());
 }
 
 int64_t
-FmIndexReader::PatternCount(std::string_view pattern, PatternOp op) const {
+FmIndexReader::PatternCount(const FmIndexStorage& storage,
+                            std::string_view pattern,
+                            PatternOp op) const {
     size_t count = 0;
     switch (op) {
         case PatternOp::PrefixMatch:
-            count = index_->storage_->Engine().CountPrefixDocs(Bytes(pattern),
-                                                               pattern.size());
+            count = storage.Engine().CountPrefixDocs(Bytes(pattern),
+                                                     pattern.size());
             break;
         case PatternOp::PostfixMatch:
-            count = index_->storage_->Engine().CountSuffixDocs(Bytes(pattern),
-                                                               pattern.size());
+            count = storage.Engine().CountSuffixDocs(Bytes(pattern),
+                                                     pattern.size());
             break;
         case PatternOp::InnerMatch:
-            count = index_->storage_->Engine().Count(Bytes(pattern),
-                                                     pattern.size());
+            count = storage.Engine().Count(Bytes(pattern), pattern.size());
             break;
         case PatternOp::Match:
         case PatternOp::RegexMatch:
@@ -593,9 +653,10 @@ FmIndexReader::PatternCount(std::string_view pattern, PatternOp op) const {
 }
 
 TargetBitmap
-FmIndexReader::DocsToBitmap(const std::vector<uint64_t>& docs) const {
-    TargetBitmap result(static_cast<size_t>(index_->storage_->Count()), false);
-    const auto rows = static_cast<uint64_t>(index_->storage_->Count());
+FmIndexReader::DocsToBitmap(const FmIndexStorage& storage,
+                            const std::vector<uint64_t>& docs) const {
+    TargetBitmap result(static_cast<size_t>(storage.Count()), false);
+    const auto rows = static_cast<uint64_t>(storage.Count());
     for (const auto document : docs) {
         if (document < rows) {
             result.set(static_cast<size_t>(document));

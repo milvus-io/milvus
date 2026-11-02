@@ -197,3 +197,9 @@ Retirement retains the inventory entry rather than only an already-created
 slot. If a lazy factory finishes after retirement, its Index receives warmup
 cancellation too; existing snapshots can still create readers and demand-load
 storage.
+
+FM-index uses the same optional single-cell cache with `FmIndexStorage` as its
+cell. Pattern operations retain one storage pin across engine calls and null
+filtering. Cost guards reject wildcard-only LIKE and unselective regex conditions
+before pinning, while count/type/capabilities come from validated packed metadata.
+The existing heap/mmap decoding and candidate semantics are unchanged.

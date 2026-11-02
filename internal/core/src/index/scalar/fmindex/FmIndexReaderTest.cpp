@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/RegexQuery.h"
+#include "index/SingleCellIndexStorageTranslator.h"
 #include "index/scalar/fmindex/FmIndexReader.h"
 #include "index/fmindex/FMIndex.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -32,17 +33,82 @@
 namespace milvus::index::test {
 namespace {
 
+TEST(FmIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<FmIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto engine = std::make_shared<fmindex::FMIndex>();
+        const std::vector<std::string_view> docs{"apple", ""};
+        engine->Build(docs, 32);
+        TargetBitmap nulls(2, false);
+        nulls.set(1);
+        co_return FmIndexStorage::Create(nullptr,
+                                         std::move(engine),
+                                         std::move(nulls),
+                                         2,
+                                         DataType::VARCHAR,
+                                         true,
+                                         FmIndexStateOrigin::Builder);
+    };
+    IndexCacheConfig cache{
+        "fm-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        0};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<FmIndexStorage>>(
+        std::make_unique<SingleCellIndexStorageTranslator<FmIndexStorage>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = std::make_shared<FmIndex>(slot, DataType::VARCHAR, 2, 0.001);
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* pattern = dynamic_cast<const IPatternMatchReader*>(first.get());
+    ASSERT_NE(pattern, nullptr);
+    EXPECT_EQ(pattern->PatternMatch("apple", PatternOp::PrefixMatch).count(),
+              1);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    first.reset();
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 1);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
 TEST(FmIndexOwnershipTest, ReadersRetainSharedStorage) {
     auto engine = std::make_shared<fmindex::FMIndex>();
     const std::vector<std::string_view> docs{"apple", "banana"};
     engine->Build(docs, 32);
-    auto storage = FmIndexStorage::Create(nullptr,
-                                          std::move(engine),
-                                          TargetBitmap(2, false),
-                                          2,
-                                          DataType::VARCHAR,
-                                          false,
-                                          FmIndexStateOrigin::Builder);
+    std::shared_ptr<const FmIndexStorage> storage =
+        FmIndexStorage::Create(nullptr,
+                               std::move(engine),
+                               TargetBitmap(2, false),
+                               2,
+                               DataType::VARCHAR,
+                               false,
+                               FmIndexStateOrigin::Builder);
     std::weak_ptr<const FmIndexStorage> lifetime = storage;
     auto index = std::make_shared<FmIndex>(std::move(storage));
     auto first = index->CreateReader(nullptr);

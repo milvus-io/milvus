@@ -23,6 +23,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
@@ -76,7 +78,7 @@ enum class FmIndexStateOrigin {
 // backing mapping is unmapped.
 class FmIndexStorage final {
  public:
-    static std::shared_ptr<const FmIndexStorage>
+    static std::unique_ptr<FmIndexStorage>
     Create(std::shared_ptr<const FmIndexMappedFile> mapped_file,
            std::shared_ptr<const fmindex::FMIndex> engine,
            TargetBitmap null_bitmap,
@@ -141,6 +143,11 @@ class FmIndex final : public IIndex,
     explicit FmIndex(std::shared_ptr<const FmIndexStorage> storage,
                      double cost_ratio = 0.001);
 
+    FmIndex(std::shared_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot,
+            DataType value_type,
+            int64_t count,
+            double cost_ratio);
+
     IndexMetadata
     Metadata() const override;
 
@@ -148,12 +155,18 @@ class FmIndex final : public IIndex,
     CreateReader(milvus::OpContext* op_ctx) const override;
 
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class FmIndexReader;
-    std::shared_ptr<const FmIndexStorage> storage_;
+    std::shared_ptr<const FmIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot;
+        DataType value_type;
+        int64_t count;
+    };
+    std::variant<std::shared_ptr<const FmIndexStorage>, CachedStorage> storage_;
     double cost_ratio_;
 };
 
@@ -220,10 +233,13 @@ class FmIndexReader final : public IIndexReaderBase,
 
     // O(|pattern|) occurrence count; -1 means "unknown, accept".
     int64_t
-    PatternCount(std::string_view pattern, PatternOp op) const;
+    PatternCount(const FmIndexStorage& storage,
+                 std::string_view pattern,
+                 PatternOp op) const;
 
     TargetBitmap
-    DocsToBitmap(const std::vector<uint64_t>& docs) const;
+    DocsToBitmap(const FmIndexStorage& storage,
+                 const std::vector<uint64_t>& docs) const;
 
     // Count-first guard for general LIKE (Match). Declines an empty pattern
     // and every pattern with no literal fragment (`%`, `%_%`), because phase 1
@@ -246,7 +262,8 @@ class FmIndexReader final : public IIndexReaderBase,
     };
 
     std::optional<RarestFragment>
-    RarestMatchFragment(std::string_view pattern) const;
+    RarestMatchFragment(const FmIndexStorage& storage,
+                        const std::vector<std::string>& parts) const;
 
     // Regex TRUE conditions decline routing. Otherwise select against current
     // index counts, using the same locate-only cost bound as LIKE.

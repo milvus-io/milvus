@@ -18,6 +18,7 @@
 
 #include <string_view>
 #include <utility>
+#include <optional>
 
 #include "index/Families.h"
 #include "index/IndexLoader.h"
@@ -29,6 +30,8 @@
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+class FmIndexStorage;
 
 /**
  * @brief Loads FM-index readers from packed V3 artifacts.
@@ -61,7 +64,7 @@ class FmIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    PackedIndexSource source_;
+    std::optional<PackedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -77,6 +80,11 @@ class FmIndexLoader final : public IndexLoader {
     PlanPacked(const storage::IndexEntryDirectory& directory,
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts);
+
+    static folly::coro::Task<std::unique_ptr<FmIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Initialize an index from populated targets without committing them.
