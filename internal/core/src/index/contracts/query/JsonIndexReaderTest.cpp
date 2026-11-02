@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "index/Families.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/scalar/json/JsonFlatIndexReader.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
@@ -50,7 +51,12 @@ TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
     auto directory = storage::LocalDirectory::CreateOwned(
         TestLocalPath, "json-owner-XXXXXX", "JSON ownership test");
     auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
-        "json", TantivyDataType::JSON, directory->Path().c_str(), 5, false, false);
+        "json",
+        TantivyDataType::JSON,
+        directory->Path().c_str(),
+        TANTIVY_INDEX_LATEST_VERSION,
+        false,
+        false);
     const std::vector<Json> values{Json(std::string_view(R"({"flag":true})")),
                                    Json(std::string_view(R"({"flag":false})"))};
     engine->add_json_data(values.data(), values.size(), 0);
