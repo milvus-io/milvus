@@ -43,7 +43,7 @@ func makeGroupAggReducer() *GroupAggReducer {
 func TestReduceNilResultReturnsError(t *testing.T) {
 	reducer := makeGroupAggReducer()
 
-	validResult := &AggregationResult{
+	validResult := &PartialAggregationResult{
 		fieldDatas: []*schemapb.FieldData{
 			{
 				Type: schemapb.DataType_VarChar,
@@ -70,8 +70,8 @@ func TestReduceNilResultReturnsError(t *testing.T) {
 	}
 
 	// A nil entry in the results slice should return an error, not panic.
-	results := []*AggregationResult{validResult, nil}
-	_, err := reducer.Reduce(context.Background(), results)
+	results := []*PartialAggregationResult{validResult, nil}
+	_, err := reducer.Merge(context.Background(), results)
 	assert.Error(t, err, "Reduce should return an error when a result is nil, not panic")
 }
 
@@ -103,8 +103,8 @@ func TestBucketAccumulateErrorPropagated(t *testing.T) {
 func TestReduceWithValidGroupResults(t *testing.T) {
 	reducer := makeGroupAggReducer()
 
-	makeResult := func(key string, val int64) *AggregationResult {
-		return &AggregationResult{
+	makeResult := func(key string, val int64) *PartialAggregationResult {
+		return &PartialAggregationResult{
 			fieldDatas: []*schemapb.FieldData{
 				{
 					Type: schemapb.DataType_VarChar,
@@ -131,13 +131,13 @@ func TestReduceWithValidGroupResults(t *testing.T) {
 		}
 	}
 
-	results := []*AggregationResult{
+	results := []*PartialAggregationResult{
 		makeResult("a", 10),
 		makeResult("a", 20),
 		makeResult("b", 5),
 	}
 
-	out, err := reducer.Reduce(context.Background(), results)
+	out, err := reducer.Merge(context.Background(), results)
 	require.NoError(t, err)
 	require.NotNil(t, out)
 	assert.Equal(t, int64(3), out.GetAllRetrieveCount())
@@ -146,7 +146,7 @@ func TestReduceWithValidGroupResults(t *testing.T) {
 // TestReduceEmptyResults verifies that reduce returns an empty result for empty input.
 func TestReduceEmptyResults(t *testing.T) {
 	reducer := makeGroupAggReducer()
-	out, err := reducer.Reduce(context.Background(), []*AggregationResult{})
+	out, err := reducer.Merge(context.Background(), []*PartialAggregationResult{})
 	require.NoError(t, err)
 	require.NotNil(t, out)
 }
@@ -154,7 +154,7 @@ func TestReduceEmptyResults(t *testing.T) {
 // TestReduceSingleResult verifies that reduce returns the single input unchanged.
 func TestReduceSingleResult(t *testing.T) {
 	reducer := makeGroupAggReducer()
-	singleResult := &AggregationResult{
+	singleResult := &PartialAggregationResult{
 		fieldDatas: []*schemapb.FieldData{
 			{
 				Type: schemapb.DataType_VarChar,
@@ -180,7 +180,7 @@ func TestReduceSingleResult(t *testing.T) {
 		allRetrieveCount: 1,
 	}
 
-	out, err := reducer.Reduce(context.Background(), []*AggregationResult{singleResult})
+	out, err := reducer.Merge(context.Background(), []*PartialAggregationResult{singleResult})
 	require.NoError(t, err)
 	assert.Equal(t, singleResult, out)
 }
@@ -195,16 +195,16 @@ func buildTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
-// buildAggResult creates an AggregationResult with N distinct groups.
+// buildAggResult creates an PartialAggregationResult with N distinct groups.
 // Each group has group key = startKey+i and count = 1.
-func buildAggResult(startKey int64, numGroups int) *AggregationResult {
+func buildAggResult(startKey int64, numGroups int) *PartialAggregationResult {
 	groupKeys := make([]int64, numGroups)
 	counts := make([]int64, numGroups)
 	for i := 0; i < numGroups; i++ {
 		groupKeys[i] = startKey + int64(i)
 		counts[i] = 1
 	}
-	return NewAggregationResult([]*schemapb.FieldData{
+	return newPartialAggregationResult([]*schemapb.FieldData{
 		{
 			Type:      schemapb.DataType_Int64,
 			FieldName: "group_field",
@@ -242,12 +242,12 @@ func TestGroupAggReducer_MaxGroupByGroupsExceeded(t *testing.T) {
 	reducer := NewGroupAggReducer([]int64{100}, aggregates, -1, schema)
 
 	// Two results each with 10 distinct groups (20 total > 10 limit)
-	results := []*AggregationResult{
+	results := []*PartialAggregationResult{
 		buildAggResult(0, 10),
 		buildAggResult(10, 10),
 	}
 
-	_, err := reducer.Reduce(context.Background(), results)
+	_, err := reducer.Merge(context.Background(), results)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "too many groups"))
 }
@@ -265,12 +265,12 @@ func TestGroupAggReducer_MaxGroupByGroupsExactlyAtLimit(t *testing.T) {
 
 	// Exactly 10 groups = limit, should succeed
 	// Use 2 results to force cross-segment merge path (single result fast-returns)
-	results := []*AggregationResult{
+	results := []*PartialAggregationResult{
 		buildAggResult(0, 5),
 		buildAggResult(5, 5),
 	}
 
-	result, err := reducer.Reduce(context.Background(), results)
+	result, err := reducer.Merge(context.Background(), results)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -288,12 +288,12 @@ func TestGroupAggReducer_MaxGroupByGroupsJustOverLimit(t *testing.T) {
 
 	// 6 + 5 = 11 distinct groups > 10 limit, should fail
 	// Need 2 results to trigger cross-segment merge path (single result fast-returns)
-	results := []*AggregationResult{
+	results := []*PartialAggregationResult{
 		buildAggResult(0, 6),
 		buildAggResult(6, 5),
 	}
 
-	_, err := reducer.Reduce(context.Background(), results)
+	_, err := reducer.Merge(context.Background(), results)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "too many groups"))
 }

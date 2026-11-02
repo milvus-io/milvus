@@ -504,8 +504,8 @@ BuildSearchResultBatch(
             auto& field_data = it->second;
             auto& field_meta = schema->operator[](field_id);
             auto name = std::string(field_meta.get_name().get());
-            auto result =
-                FieldDataToArrow(name, *field_data, total_valid, true);
+            auto result = FieldDataToArrow(
+                name, *field_data, total_valid, true, nullptr, &field_meta);
             if (!result.ok()) {
                 return result.status();
             }
@@ -699,7 +699,8 @@ BuildExplicitFieldsBatch(
             }
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
-                FieldDataToArrow(name, *it->second, total_rows, true));
+                FieldDataToArrow(
+                    name, *it->second, total_rows, true, nullptr, &field_meta));
             array = converted.second;
         }
 

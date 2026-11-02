@@ -135,9 +135,45 @@ CanReadVortexAsTargetType(const FieldMeta& field_meta, TargetType target_type) {
     if (field_meta.get_data_type() != DataType::ARRAY) {
         return true;
     }
-    return field_meta.is_nested_array()
+    // Native-list ARRAY (nested or element-nullable) is read through
+    // ArrayValueView, like ChunkedArrayColumn; legacy ARRAY through ArrayView.
+    return field_meta.is_native_list_array()
                ? target_type == TargetType::ArrayValueView
                : target_type == TargetType::ArrayView;
+}
+
+// Builds the ColumnarArrayChunk the raw load path builds for a native-list
+// ARRAY field, from Vortex-decoded Arrow lists. The chunk carries row,
+// inner-array and leaf validity, so ArrayValueViews over it see every level.
+std::shared_ptr<ColumnarArrayChunk>
+MakeNativeListArrayChunk(const FieldMeta& field_meta,
+                         const arrow::ArrayVector& arrays,
+                         int64_t expected_rows) {
+    AssertInfo(field_meta.is_native_list_array() &&
+                   field_meta.get_data_type() == DataType::ARRAY,
+               "vortex field {} is not a native-list ARRAY",
+               field_meta.get_id().get());
+    for (const auto& array : arrays) {
+        if (array == nullptr || array->type_id() != arrow::Type::LIST) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vortex native-list ARRAY field {} expected Arrow "
+                      "list, got {}",
+                      field_meta.get_id().get(),
+                      array == nullptr ? "<null>" : array->type()->ToString());
+        }
+    }
+    std::shared_ptr<Chunk> chunk = create_chunk(field_meta, arrays);
+    auto array_chunk = std::dynamic_pointer_cast<ColumnarArrayChunk>(chunk);
+    AssertInfo(array_chunk != nullptr,
+               "vortex native-list ARRAY field {} must build a "
+               "ColumnarArrayChunk",
+               field_meta.get_id().get());
+    AssertInfo(static_cast<int64_t>(array_chunk->row_count()) == expected_rows,
+               "vortex native-list ARRAY field {} built {} rows, expected {}",
+               field_meta.get_id().get(),
+               array_chunk->row_count(),
+               expected_rows);
+    return array_chunk;
 }
 
 ScalarFieldProto::DataCase
@@ -576,6 +612,7 @@ struct VortexColumn::OrderedTakeOwner {
     std::vector<ArrayView> array_views;
     std::vector<ArrayValue> array_values;
     std::vector<ArrayValueView> array_value_views;
+    std::vector<std::shared_ptr<const ColumnarArrayChunk>> native_list_chunks;
 };
 
 template <bool HasCandidateMask>
@@ -1278,6 +1315,7 @@ class VortexDataBatchReader final {
         std::vector<ArrayView> array_views;
         std::vector<ArrayValue> array_values;
         std::vector<ArrayValueView> array_value_views;
+        std::shared_ptr<const ColumnarArrayChunk> native_list_chunk;
     };
 
     bool
@@ -1437,13 +1475,38 @@ class VortexDataBatchReader final {
     }
 
     void
+    FillNativeListArrayOutput(const std::shared_ptr<arrow::Array>& array,
+                              const std::shared_ptr<BatchOwner>& owner,
+                              ChunkedColumnInterface::ScanBatch* out) const {
+        AssertInfo(
+            target_type_ == ChunkedColumnInterface::TargetType::ArrayValueView,
+            "vortex native-list ARRAY scan field {} requires "
+            "ArrayValueView",
+            column_->field_id_.get());
+        auto rows =
+            array->length() == out->size ? array : array->Slice(0, out->size);
+        owner->native_list_chunk =
+            MakeNativeListArrayChunk(column_->field_meta_, {rows}, out->size);
+        auto views = owner->native_list_chunk->Views();
+        owner->array_value_views = std::move(views.first);
+        out->values.target_type =
+            ChunkedColumnInterface::TargetType::ArrayValueView;
+        out->values.data = owner->array_value_views.data();
+        out->values.byte_width = sizeof(ArrayValueView);
+        out->values.offset = 0;
+        FillValidityPointer(array, out);
+    }
+
+    void
     FillArrayOutput(const std::shared_ptr<arrow::Array>& array,
                     const std::shared_ptr<BatchOwner>& owner,
                     ChunkedColumnInterface::ScanBatch* out) const {
-        // TODO(local-format): ARRAY Scan currently normalizes native List and
+        if (column_->field_meta_.is_native_list_array()) {
+            FillNativeListArrayOutput(array, owner, out);
+            return;
+        }
+        // TODO(local-format): legacy ARRAY Scan normalizes native List and
         // Milvus-written Binary to the same protobuf-per-row representation.
-        // Return reader-backed native List views after writer/local-format
-        // ARRAY representation is unified.
         AssertInfo(array->type_id() == arrow::Type::BINARY,
                    "vortex array scan field {} expected normalized Arrow "
                    "binary, got {}",
@@ -2144,7 +2207,8 @@ VortexColumn::ArrayViews(
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::ArrayViews only supports array fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(ErrorCode::Unsupported,
                   "legacy ArrayViews API does not support nested ARRAY");
     }
@@ -2160,15 +2224,16 @@ VortexColumn::ArrayValueViews(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::ArrayValueViews only supports recursive "
+                  "VortexColumn::ArrayValueViews only supports native-list "
                   "ARRAY fields");
     }
+    RejectNullableArrayElements();
     auto chunk = MaterializeChunk(op_ctx, chunk_id, offset_len);
     auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
     AssertInfo(array_chunk != nullptr,
-               "vortex recursive ARRAY chunk {} must use ColumnarArrayChunk",
+               "vortex native-list ARRAY chunk {} must use ColumnarArrayChunk",
                chunk_id);
     auto views = array_chunk->Views();
     return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
@@ -2277,7 +2342,8 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                   "VortexColumn::ArrayViewsByOffsets only supports array "
                   "fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(
             ErrorCode::Unsupported,
             "legacy ArrayViewsByOffsets API does not support nested ARRAY");
@@ -2332,11 +2398,12 @@ VortexColumn::ArrayValueViewsByOffsets(
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::ArrayValueViewsByOffsets only supports "
-                  "recursive ARRAY fields");
+                  "native-list ARRAY fields");
     }
+    RejectNullableArrayElements();
     CheckChunkId(chunk_id);
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> views;
     views.first.resize(offsets.size());
@@ -2830,6 +2897,9 @@ VortexColumn::MaterializeChunk(
                   length);
     }
     arrays = storage::NormalizeArrowForChunkWriter(arrays, field_meta_);
+    if (data_type_ == DataType::ARRAY && field_meta_.is_native_list_array()) {
+        return MakeNativeListArrayChunk(field_meta_, arrays, length);
+    }
     if (data_type_ == DataType::ARRAY) {
         for (const auto& array : arrays) {
             auto binary = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
@@ -3130,6 +3200,32 @@ VortexColumn::CopyArrowPrimitiveValues(
 
 ChunkedColumnInterface::TakeResultPtr
 VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
+    ValidateArrayViewTarget(options.target_type);
+    return TakeUnchecked(op_ctx, std::move(options));
+}
+
+void
+VortexColumn::ValidateArrayViewTarget(TargetType target_type) const {
+    if (target_type == TargetType::ArrayView ||
+        target_type == TargetType::ArrayValueView) {
+        RejectNullableArrayElements();
+    }
+}
+
+void
+VortexColumn::RejectNullableArrayElements() const {
+    if (data_type_ == DataType::ARRAY &&
+        field_meta_.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are "
+                  "not supported yet",
+                  field_name_);
+    }
+}
+
+ChunkedColumnInterface::TakeResultPtr
+VortexColumn::TakeUnchecked(milvus::OpContext* op_ctx,
+                            TakeOptions options) const {
     const auto& offsets = options.offsets;
     AssertInfo(offsets.size >= 0,
                "take offset count must be non-negative, got {}",
@@ -3469,10 +3565,44 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             break;
         }
         case DataType::ARRAY: {
-            // TODO(local-format): Like Scan, ARRAY Take currently parses the
-            // normalized protobuf Binary rows. Replace this with owned or
-            // reader-backed native List results when the writer representation
-            // is unified.
+            if (field_meta_.is_native_list_array()) {
+                // Each group's taken rows become one ColumnarArrayChunk; the
+                // views point into it and the owner keeps it alive.
+                owner->array_value_views.resize(offsets.size);
+                for (const auto& group : groups) {
+                    auto take = TakeArrowFromFile(
+                        op_ctx, group.file_id, group.unique_offsets, group.pin);
+                    if (group.validity_only) {
+                        copy_validity(take, group);
+                        continue;
+                    }
+                    auto table = normalize_table(take);
+                    auto chunk = MakeNativeListArrayChunk(
+                        field_meta_,
+                        table->column(0)->chunks(),
+                        static_cast<int64_t>(group.unique_offsets.size()));
+                    for (size_t i = 0; i < group.unique_offsets.size(); ++i) {
+                        const auto valid = chunk->is_valid(i);
+                        const auto view = chunk->View(i);
+                        for_each_original_position(
+                            group, i, [&](auto original_position) {
+                                owner->array_value_views[original_position] =
+                                    view;
+                                if (IsNullable()) {
+                                    owner->validity.set(original_position,
+                                                        valid);
+                                }
+                            });
+                    }
+                    owner->native_list_chunks.emplace_back(std::move(chunk));
+                }
+                values.target_type = TargetType::ArrayValueView;
+                values.data = owner->array_value_views.data();
+                values.byte_width = sizeof(ArrayValueView);
+                break;
+            }
+            // TODO(local-format): legacy ARRAY Take parses the normalized
+            // protobuf Binary rows.
             size_t unique_count = 0;
             for (const auto& group : groups) {
                 unique_count += group.unique_offsets.size();
@@ -3753,7 +3883,8 @@ VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::BulkArrayAt only supports array fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(ErrorCode::Unsupported,
                   "BulkArrayAt does not support nested ARRAY");
     }
@@ -3782,17 +3913,19 @@ VortexColumn::BulkArrayValueAt(
     const int64_t* offsets,
     int64_t count) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkArrayValueAt only supports recursive "
+                  "VortexColumn::BulkArrayValueAt only supports native-list "
                   "ARRAY fields");
     }
     if (count == 0) {
         return;
     }
-    auto take = Take(op_ctx,
-                     TakeOptions{OffsetView::From(offsets, count),
-                                 TargetType::ArrayValueView});
+    // Output path: like ChunkedArrayColumn::BulkArrayValueAt, served for
+    // fields with null elements too.
+    auto take = TakeUnchecked(op_ctx,
+                              TakeOptions{OffsetView::From(offsets, count),
+                                          TargetType::ArrayValueView});
     AssertInfo(take != nullptr, "vortex recursive array take is unsupported");
     AssertInfo(take->Size() == count,
                "vortex recursive array take returned {} rows, expected {}",
@@ -3917,6 +4050,7 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
                options.start_offset,
                NumRows());
     if (options.output == ScanOutput::Data) {
+        ValidateArrayViewTarget(options.target_type);
         // Dense data scans do not accept pushed-down predicates. Predicates
         // that must be evaluated by Milvus should use a plain data scan and
         // let the expression layer compare values from the returned batches.

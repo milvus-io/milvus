@@ -248,6 +248,19 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::unique_ptr<ColumnPlanner>
     BuildPlanner() const override;
 
+    // Same contract as ChunkedArrayColumn: array views of a field with null
+    // elements are not served to expressions yet.
+    void
+    ValidateArrayViewTarget(TargetType target_type) const override;
+
+    void
+    RejectNullableArrayElements() const;
+
+    // Take without ValidateArrayViewTarget, for output paths such as
+    // BulkArrayValueAt that the raw column also serves for such fields.
+    TakeResultPtr
+    TakeUnchecked(milvus::OpContext* op_ctx, TakeOptions options) const;
+
     struct FileState {
         bool direct_data_scan = false;
     };

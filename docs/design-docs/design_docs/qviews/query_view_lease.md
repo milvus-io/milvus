@@ -23,8 +23,9 @@ Coord state pushes, and repeated Down requests do not renew the deadline.
 The Search ignore-growing fast path does not access an Up view and grants no
 lease. A view never accessed by a query has no timed retention.
 
-GetQueryPlan continues selecting the highest Up version. Older Up versions
-remain accessible to explicit-version Phase 2 requests, and those accesses can
+GetQueryPlan selects the highest Up version matching the request's exact
+SchemaVersion, including version zero. It does not fall back to a newer schema.
+Older Up versions remain accessible to explicit-version Phase 2 requests, and those accesses can
 continue renewing them without a hard lifetime cap. Continuous reuse of an old
 plan can therefore delay resource reclamation indefinitely.
 
@@ -72,7 +73,10 @@ The serving deadline and pending Down intent are process-local and are not
 persisted. The clock uses Go's monotonic time component. A crash or WAL ownership
 change invalidates the continuity guarantee; callers retry through existing
 view/WAL errors. Recovery rebuilds persisted views as UpRecovering without a
-new lease; Coord re-delivers its desired state.
+new lease; Coord re-delivers its desired state. Queries for a recovering view
+wait on local state notifications with the caller context. Recovery completion,
+failure, teardown and shutdown wake waiters to recheck state; waiting alone does
+not grant a serving lease.
 
 A missing query runtime or one closed during MVCC waiting/handle acquisition
 returns `VIEW_INVALIDATED`; a WAL that rejects MVCC acquisition during shutdown

@@ -20,39 +20,12 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ComposeIndexMeta builds segcore CollectionIndexMeta from coordinator index infos.
 func ComposeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
-	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0, len(indexInfos))
-	for _, info := range indexInfos {
-		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
-			CollectionID:    info.GetCollectionID(),
-			FieldID:         info.GetFieldID(),
-			IndexName:       info.GetIndexName(),
-			TypeParams:      info.GetTypeParams(),
-			IndexParams:     info.GetIndexParams(),
-			IsAutoIndex:     info.GetIsAutoIndex(),
-			UserIndexParams: info.GetUserIndexParams(),
-		})
-	}
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
-	maxIndexRecordPerSegment := int64(0)
-	if err != nil || sizePerRecord == 0 {
-		mlog.Warn(ctx, "failed to transfer segment size to collection, because failed to estimate size per record", mlog.Err(err))
-	} else {
-		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
-		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
-		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
-	}
-
-	return &segcorepb.CollectionIndexMeta{
-		IndexMetas:       fieldIndexMetas,
-		MaxIndexRowCount: maxIndexRecordPerSegment,
-	}
+	return segcore.ComposeCollectionIndexMeta(ctx, indexInfos, schema)
 }

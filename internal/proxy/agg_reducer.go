@@ -31,7 +31,15 @@ func NewMilvusAggReducer(groupByFieldIds []int64, aggregates []*planpb.Aggregate
 }
 
 func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
-	reducedAggRes, err := reducer.groupAggReducer.Reduce(context.Background(), agg.InternalResult2AggResult(results))
+	partials, err := reducer.groupAggReducer.DecodeInternalResults(results)
+	if err != nil {
+		return nil, err
+	}
+	merged, err := reducer.groupAggReducer.Merge(context.Background(), partials)
+	if err != nil {
+		return nil, err
+	}
+	reducedAggRes, err := reducer.groupAggReducer.Finalize(merged)
 	if err != nil {
 		return nil, err
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -27,6 +25,17 @@ func NewServer(provider TaskProvider, scheduler Scheduler) *Server {
 	}
 }
 
+func (s *Server) StatisticsOnView(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	if err := validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc()); err != nil {
+		return nil, err
+	}
+	rows, err := s.provider.Statistics(ctx, req)
+	if err != nil {
+		return nil, toRPCError(err)
+	}
+	return &viewpb.StatisticsOnViewResponse{RowCount: rows}, nil
+}
+
 func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 	if err := validateSearchRequest(req); err != nil {
 		return nil, err
@@ -38,7 +47,7 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 	if req.GetLegacyReq().GetIsAdvanced() {
 		result, err = s.executeAdvancedSearch(ctx, req)
 	} else {
-		result, err = s.executeSearch(ctx, req, req.GetLegacyReq())
+		result, err = s.executeSearch(ctx, req, req.GetLegacyReq(), req.GetSegmentSelection())
 	}
 	if err != nil {
 		return nil, toRPCError(err)
@@ -48,6 +57,9 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 
 func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOnViewRequest) (*internalpb.SearchResults, error) {
 	legacyReq := req.GetLegacyReq()
+	if len(req.GetSubSelections()) != 0 && len(req.GetSubSelections()) != len(legacyReq.GetSubReqs()) {
+		return nil, merr.WrapErrServiceInternalMsg("hybrid segment selections do not match subrequests")
+	}
 	subRequests, err := BuildSubSearchRequests(legacyReq)
 	if err != nil {
 		return nil, err
@@ -61,7 +73,7 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 				results[index] = emptySearchResults(subRequests[index])
 				return nil
 			}
-			result, err := s.executeSearch(groupCtx, req, subRequests[index])
+			result, err := s.executeSearch(groupCtx, req, subRequests[index], subSelection(req, index))
 			if err != nil {
 				return err
 			}
@@ -81,13 +93,14 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 	return assembleAdvancedSearchResults(results), nil
 }
 
-func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest) (*internalpb.SearchResults, error) {
+func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest, selection *viewpb.SegmentSelection) (*internalpb.SearchResults, error) {
 	tasks, err := s.provider.AcquireSearchSegmentTasks(
 		ctx,
 		qviews.FromProtoShardID(req.GetShardId()),
 		qviews.FromProtoQueryViewVersion(req.GetVersion()),
 		req.GetMvcc(),
 		searchReq,
+		selection,
 	)
 	if err != nil {
 		return nil, err
@@ -97,6 +110,9 @@ func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequ
 		return emptySearchResults(searchReq), nil
 	}
 
+	if req.GetExecutionOptions() != nil {
+		tasks = &SearchTasksWithOptions{SearchSegmentTasks: tasks, Options: req.GetExecutionOptions()}
+	}
 	result, err := s.scheduler.Search(ctx, tasks)
 	if err != nil {
 		return nil, err
@@ -114,6 +130,7 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 		qviews.FromProtoQueryViewVersion(req.GetVersion()),
 		req.GetMvcc(),
 		req.GetLegacyReq(),
+		req.GetSegmentSelection(),
 	)
 	if err != nil {
 		return nil, toRPCError(err)
@@ -130,6 +147,9 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 	return &viewpb.QueryOnViewResponse{LegacyResults: result}, nil
 }
 
-func (s *Server) RequeryOnView(context.Context, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "RequeryOnView is not implemented")
+func subSelection(req *viewpb.SearchOnViewRequest, index int) *viewpb.SegmentSelection {
+	if len(req.GetSubSelections()) != 0 {
+		return req.GetSubSelections()[index]
+	}
+	return req.GetSegmentSelection()
 }

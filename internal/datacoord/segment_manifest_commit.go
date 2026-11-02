@@ -181,6 +181,8 @@ type SegmentManifestCommit struct {
 // scrape, runs after segMu and the fieldIndexLock read side are released
 // (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
+	var manifestUpdates []*SegmentInfo
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 	}
@@ -473,6 +475,9 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 		// Memory is installed only after the catalog write has succeeded while the
 		// same segMu critical section still excludes competing full-record writers.
+		if segment.GetManifestPath() != updated.GetManifestPath() {
+			manifestUpdates = append(manifestUpdates, updated)
+		}
 		m.segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
 			stagedIndex.install()
@@ -1119,6 +1124,8 @@ var segmentManifestLockEscalationThreshold = 30 * time.Second
 // same transaction and must be pure catalog mutations: they must not advance a V3
 // manifest pointer (which would require its own per-segment manifest lock).
 func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
+	var manifestUpdates []*SegmentInfo
+	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	idSet := make(map[int64]struct{}, len(commits))
 	for _, commit := range commits {
 		if commit.SegmentID == 0 {
@@ -1202,7 +1209,8 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		operators = append(operators, m.publishSegmentManifestOperator(prepared[i]))
 	}
 	operators = append(operators, extraOperators...)
-	return m.UpdateSegmentsInfo(ctx, operators...)
+	manifestUpdates, err = m.updateSegmentsInfo(ctx, operators...)
+	return err
 }
 
 // acquireSegmentManifestLocks takes every segment's manifest lock in two phases.

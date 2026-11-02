@@ -106,7 +106,8 @@ InitEmptyVectorArrayRow(proto::schema::VectorField* row,
 int64_t
 GetArrayLeafRawDataSize(
     const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
-    DataType element_type) {
+    DataType element_type,
+    bool native_width = false) {
     int64_t result = 0;
     switch (element_type) {
         case DataType::BOOL:
@@ -115,7 +116,17 @@ GetArrayLeafRawDataSize(
             }
             break;
         case DataType::INT8:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int8_t) : sizeof(int));
+            }
+            break;
         case DataType::INT16:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int16_t) : sizeof(int));
+            }
+            break;
         case DataType::INT32:
             for (const auto& row : rows) {
                 result += row.int_data().data_size() * sizeof(int);
@@ -166,9 +177,10 @@ GetNestedArrayRawDataSize(
     int64_t result = static_cast<int64_t>(offsets_size);
     const auto& element_schema = type_schema.array_element();
     if (element_schema.has_leaf_type()) {
-        return result +
-               GetArrayLeafRawDataSize(
-                   rows, static_cast<DataType>(element_schema.leaf_type()));
+        return result + GetArrayLeafRawDataSize(
+                            rows,
+                            static_cast<DataType>(element_schema.leaf_type()),
+                            true);
     }
 
     for (const auto& row : rows) {
@@ -319,7 +331,9 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         array_data, field_meta.get_array_type_schema());
                 } else {
                     result += GetArrayLeafRawDataSize(
-                        array_data, field_meta.get_element_type());
+                        array_data,
+                        field_meta.get_element_type(),
+                        field_meta.is_native_list_array());
                 }
                 break;
             }
@@ -398,6 +412,94 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         scalar_array->mutable_valid_data()->Resize(count, false);
     }
     return data_array;
+}
+
+std::unique_ptr<DataArray>
+CreateNullStructSubFieldDataArray(
+    const FieldMeta& field_meta,
+    const int32_t* lengths,
+    int64_t count,
+    const std::function<bool(int64_t)>& row_valid) {
+    AssertInfo(field_meta.is_native_list_array(),
+               "struct sub-field {} must be a native list",
+               field_meta.get_id().get());
+    auto result = std::make_unique<DataArray>();
+    result->set_field_id(field_meta.get_id().get());
+    result->set_type(
+        static_cast<proto::schema::DataType>(field_meta.get_data_type()));
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        auto* vectors = result->mutable_vectors();
+        vectors->set_dim(field_meta.get_dim());
+        auto* rows = vectors->mutable_vector_array();
+        rows->set_dim(field_meta.get_dim());
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            AssertInfo(lengths[i] >= 0,
+                       "struct sub-field row {} has negative length",
+                       i);
+            AssertInfo(field_meta.is_nullable() || valid,
+                       "non-nullable struct sub-field has null row {}",
+                       i);
+            AssertInfo(valid || lengths[i] == 0,
+                       "null struct row {} has {} elements",
+                       i,
+                       lengths[i]);
+            if (field_meta.is_nullable()) {
+                vectors->add_valid_data(valid);
+            }
+            if (!valid) {
+                continue;
+            }
+            auto* row = rows->add_data();
+            row->set_dim(field_meta.get_dim());
+            InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+            row->mutable_valid_data()->Resize(lengths[i], false);
+        }
+    } else {
+        auto* scalars = result->mutable_scalars();
+        auto* rows = scalars->mutable_array_data();
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            AssertInfo(lengths[i] >= 0,
+                       "struct sub-field row {} has negative length",
+                       i);
+            AssertInfo(field_meta.is_nullable() || valid,
+                       "non-nullable struct sub-field has null row {}",
+                       i);
+            AssertInfo(valid || lengths[i] == 0,
+                       "null struct row {} has {} elements",
+                       i,
+                       lengths[i]);
+            if (field_meta.is_nullable()) {
+                scalars->add_valid_data(valid);
+            }
+            if (!valid) {
+                continue;
+            }
+            auto* row = rows->add_data();
+            if (field_meta.is_nested_array()) {
+                auto leaf_type =
+                    static_cast<DataType>(field_meta.get_array_type_schema()
+                                              .array_element()
+                                              .array_element()
+                                              .leaf_type());
+                row->mutable_array_data()->set_element_type(
+                    static_cast<proto::schema::DataType>(leaf_type));
+            } else {
+                auto* typed_row = row;
+                SetUpScalarFieldData(typed_row,
+                                     field_meta.get_element_type(),
+                                     field_meta.get_element_type(),
+                                     0);
+            }
+            row->mutable_valid_data()->Resize(lengths[i], false);
+        }
+    }
+    return result;
 }
 
 void

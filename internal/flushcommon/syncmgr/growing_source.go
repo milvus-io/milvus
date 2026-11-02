@@ -67,11 +67,14 @@ type GrowingFlushConfig struct {
 	PKStatsBlob             []byte
 	MergedPKStatsBlob       []byte
 	ReadVersion             int64
-	WriterFormat            string
-	SchemaBasedPattern      string
-	SchemaBasedFormats      string
-	AllowedFieldIDs         []int64
-	ColumnGroups            []storagecommon.ColumnGroup
+	// ReadManifestSize is the byte size of the ReadVersion manifest, or 0 when
+	// unknown; it lets the flush read that manifest without a size request.
+	ReadManifestSize   int64
+	WriterFormat       string
+	SchemaBasedPattern string
+	SchemaBasedFormats string
+	AllowedFieldIDs    []int64
+	ColumnGroups       []storagecommon.ColumnGroup
 }
 
 type GrowingFlushResult struct {
@@ -877,18 +880,18 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 	rootPath := t.chunkManager.RootPath()
 	segmentBasePath := storage.SegmentManifestBasePath(rootPath, t.collectionID, t.partitionID, t.segmentID)
 	partitionBasePath := storage.SegmentPartitionBasePath(rootPath, t.collectionID, t.partitionID)
-	manifestBasePath, readVersion, err := growingSourceManifest(segment.ManifestPath(), columnGroups)
+	readManifest, err := growingSourceManifest(segment.ManifestPath(), columnGroups)
 	if err != nil {
 		return nil, err
 	}
-	if manifestBasePath != "" {
+	if readManifest.BasePath != "" {
 		// A base and a read version identify one manifest together, so they must
 		// come from the same place on every backend: changing only the base would
 		// reopen that version somewhere it does not exist. A recovered local
 		// segment can still live under the legacy minio prefix, which is why the
 		// stored base wins over the recomputed one.
-		segmentBasePath = manifestBasePath
-		partitionBasePath = path.Dir(manifestBasePath)
+		segmentBasePath = readManifest.BasePath
+		partitionBasePath = path.Dir(readManifest.BasePath)
 	}
 
 	allowedFieldIDs, allowedFieldSet := allowedFieldsFromColumnGroups(columnGroups)
@@ -944,7 +947,8 @@ func (t *GrowingSourceSyncTask) buildFlushConfig(segment *metacache.SegmentInfo,
 		BM25FieldIDs:            bm25FieldIDs,
 		BM25StatsLogIDs:         bm25StatsLogIDs,
 		WriteMergedBM25Stats:    t.IsFlush() && t.level != datapb.SegmentLevel_L0 && t.schema != nil && hasBM25Function(t.schema),
-		ReadVersion:             readVersion,
+		ReadVersion:             readManifest.ManifestVersion,
+		ReadManifestSize:        readManifest.Size,
 		WriterFormat:            writerFormat,
 		SchemaBasedPattern:      schemaBasedPattern,
 		SchemaBasedFormats:      schemaBasedFormats,
@@ -1027,24 +1031,24 @@ func (t *GrowingSourceSyncTask) fillPrimaryKeyStatsConfig(ctx context.Context, s
 	return nil
 }
 
-func growingSourceManifest(manifestPath string, columnGroups []storagecommon.ColumnGroup) (string, int64, error) {
+func growingSourceManifest(manifestPath string, columnGroups []storagecommon.ColumnGroup) (packed.ManifestJSON, error) {
 	if manifestPath == "" {
-		return "", packed.ManifestEarliest, nil
+		return packed.ManifestJSON{ManifestVersion: packed.ManifestEarliest}, nil
 	}
-	basePath, version, err := packedManifestVersion(manifestPath)
+	manifest, err := packed.ParseManifestPath(manifestPath)
 	if err != nil {
-		return "", 0, err
+		return packed.ManifestJSON{}, err
 	}
-	if version == packed.ManifestEarliest {
-		return basePath, version, nil
+	if manifest.ManifestVersion == packed.ManifestEarliest {
+		return manifest, nil
 	}
 	for _, columnGroup := range columnGroups {
 		if columnGroup.Format == "" {
-			return "", 0, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
+			return packed.ManifestJSON{}, merr.WrapErrDataIntegrityMsg("column group %d fields %v missing format for existing manifest %s",
 				columnGroup.GroupID, columnGroup.Fields, manifestPath)
 		}
 	}
-	return basePath, version, nil
+	return manifest, nil
 }
 
 func allowedFieldsFromColumnGroups(columnGroups []storagecommon.ColumnGroup) ([]int64, map[int64]struct{}) {
@@ -1182,20 +1186,6 @@ func cloneFieldBinlogMap(binlogs map[int64]*datapb.FieldBinlog) map[int64]*datap
 		cloned[fieldID] = proto.Clone(binlog).(*datapb.FieldBinlog)
 	}
 	return cloned
-}
-
-func manifestVersion(manifestPath string) int64 {
-	if manifestPath == "" {
-		return packed.ManifestEarliest
-	}
-	if _, version, err := packedManifestVersion(manifestPath); err == nil {
-		return version
-	}
-	return packed.ManifestEarliest
-}
-
-func packedManifestVersion(manifestPath string) (string, int64, error) {
-	return packed.UnmarshalManifestPath(manifestPath)
 }
 
 func (t *GrowingSourceSyncTask) startPositions() []*datapb.SegmentStartPosition {

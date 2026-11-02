@@ -30,6 +30,8 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
+#include <variant>
 #include <vector>
 #include "segcore/default_fs.h"
 
@@ -42,6 +44,7 @@
 #include "common/StructElementOffsets.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -316,6 +319,9 @@ int32_t
 GetVectorArrayLength(const proto::schema::VectorField& vec_field,
                      DataType element_type,
                      int64_t dim) {
+    if (vec_field.valid_data_size() != 0) {
+        return vec_field.valid_data_size();
+    }
     switch (element_type) {
         case DataType::VECTOR_FLOAT:
             return vec_field.float_vector().data_size() / dim;
@@ -354,11 +360,10 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] =
-                    raw_data[source_index].physical_length();
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 auto* raw_data = static_cast<const ArrayValue*>(data->Data());
                 for (int64_t i = 0; i < num_rows; ++i) {
                     array_lengths[offset + i] =
@@ -446,14 +451,40 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
-        if (field_meta.is_nested_array()) {
+        if (field_meta.is_native_list_array()) {
             const auto has_valid_data = valid_data.size() == num_rows;
+            const auto nested =
+                field_meta.get_element_type() == DataType::ARRAY;
+            int64_t valid_count = 0;
+            if (has_valid_data) {
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    valid_count += valid_data[i];
+                }
+            }
+            const bool compact_nullable =
+                has_valid_data && array_data.data_size() == valid_count &&
+                array_data.data_size() != num_rows;
+            AssertInfo(array_data.data_size() == num_rows || compact_nullable,
+                       "native list field {} has {} payload rows for {} "
+                       "logical rows and {} valid rows",
+                       field_meta.get_id().get(),
+                       array_data.data_size(),
+                       num_rows,
+                       valid_count);
+            int64_t physical_row = 0;
             for (int64_t i = 0; i < num_rows; ++i) {
                 if (has_valid_data && !valid_data[i]) {
                     array_lengths[i] = 0;
                     continue;
                 }
-                array_lengths[i] = array_data.data(i).array_data().data_size();
+                const auto& row =
+                    array_data.data(compact_nullable ? physical_row++ : i);
+                array_lengths[i] =
+                    row.valid_data_size() > 0
+                        ? row.valid_data_size()
+                        : (nested ? row.array_data().data_size()
+                                  : GetLeafElementCount(
+                                        row, field_meta.get_element_type()));
             }
             return;
         }
@@ -562,7 +593,8 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
     // Group fields by struct_name
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
-    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+    for (auto field_id : schema->get_field_ids()) {
+        const auto& field_meta = (*schema)[field_id];
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
@@ -574,7 +606,7 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
         auto struct_element_offsets =
             std::make_shared<StructElementOffsetsGrowing>();
 
-        // Pick the first field as representative (any field works since array lengths are identical)
+        // The first sub-field in schema order supplies lengths for inserts.
         FieldId representative_field = field_ids[0];
 
         // Map all field_ids from this struct to the same StructElementOffsetsGrowing
@@ -1537,6 +1569,52 @@ SegmentGrowingImpl::Insert(
                    field.field_id());
     }
 
+    // Only old proxy messages missing a child need sibling lengths. Normal
+    // inserts calculate their representative lengths in the write loop below.
+    std::unordered_set<std::string> structs_to_fill;
+    for (auto field_id : schema->get_field_ids()) {
+        if (field_id_to_offset.count(field_id) > 0 ||
+            schema->is_function_output(field_id)) {
+            continue;
+        }
+        if (auto name = GetStructNameForArrayField((*schema)[field_id])) {
+            structs_to_fill.insert(*name);
+        }
+    }
+
+    // Capture lengths from real input before synthetic children are attached.
+    // The representative may itself be missing from an old proxy message.
+    std::unordered_map<std::string, std::vector<int32_t>> struct_lengths;
+    std::unordered_map<std::string, std::vector<uint8_t>> struct_validity;
+    for (auto field_id : schema->get_field_ids()) {
+        auto source = field_id_to_offset.find(field_id);
+        if (source == field_id_to_offset.end()) {
+            continue;
+        }
+        const auto& meta = (*schema)[field_id];
+        auto name = GetStructNameForArrayField(meta);
+        if (!name || structs_to_fill.count(*name) == 0 ||
+            struct_lengths.count(*name) > 0) {
+            continue;
+        }
+        const auto& source_data =
+            insert_record_proto->fields_data(source->second);
+        auto& lengths = struct_lengths[*name];
+        lengths.resize(num_rows);
+        ExtractArrayLengths(source_data, meta, num_rows, lengths.data());
+        const auto& valid_data = GetFieldDataRowValidData(source_data);
+        AssertInfo(!meta.is_nullable() || valid_data.size() == num_rows,
+                   "struct provider {} has {} validity rows, expected {}",
+                   field_id.get(),
+                   valid_data.size(),
+                   num_rows);
+        auto& valid = struct_validity[*name];
+        valid.resize(num_rows, 1);
+        for (int64_t i = 0; i < num_rows && !valid_data.empty(); ++i) {
+            valid[i] = valid_data.Get(i);
+        }
+    }
+
     // segment have latest schema while insert used old one
     // need to fill insert data with field_meta
     for (auto& [field_id, field_meta] : schema->get_fields()) {
@@ -1561,7 +1639,18 @@ SegmentGrowingImpl::Insert(
             id_,
             field_id.get(),
             field_meta.get_data_type());
-        auto data = bulk_subscript_not_exist_field(field_meta, num_rows);
+        std::unique_ptr<DataArray> data;
+        auto name = GetStructNameForArrayField(field_meta);
+        if (name && struct_lengths.count(*name) > 0) {
+            const auto& lengths = struct_lengths.at(*name);
+            const auto& valid = struct_validity.at(*name);
+            data = CreateNullStructSubFieldDataArray(
+                field_meta, lengths.data(), num_rows, [&](int64_t i) {
+                    return valid[i] != 0;
+                });
+        } else {
+            data = bulk_subscript_not_exist_field(field_meta, num_rows);
+        }
         insert_record_proto->add_fields_data()->CopyFrom(*data);
         field_id_to_offset.emplace(field_id, field_offset++);
     }
@@ -1779,10 +1868,11 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
-            if (field_meta.is_nested_array() &&
+            if (field_meta.is_native_list_array() &&
                 infos.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "nested ARRAY field {} is supported only by Storage "
+                          "native-list ARRAY field {} is supported only by "
+                          "Storage "
                           "V2/V3",
                           field_id.get());
             }
@@ -1808,7 +1898,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto lack_num = info.row_count - total;
             std::optional<proto::schema::TypeSchema> array_type;
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
             auto field_data = storage::CreateFieldDataFromDefaultValue(
@@ -1828,7 +1919,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
         }
@@ -2176,7 +2268,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows,
-                            field.second.is_nested_array()
+                            field.second.is_native_list_array() &&
+                                    data_type == DataType::ARRAY
                                 ? std::make_optional(
                                       field.second.get_array_type_schema())
                                 : std::nullopt);
@@ -2288,9 +2381,15 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     int64_t chunk_id) const {
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    if (field_meta.is_nested_array()) {
+    if (field_meta.is_native_list_array()) {
+        if (field_meta.has_nullable_array_element()) {
+            ThrowInfo(ErrorCode::NotImplemented,
+                      "expressions on element-nullable array field {} are "
+                      "not supported yet",
+                      field_meta.get_name().get());
+        }
         ThrowInfo(ErrorCode::Unsupported,
-                  "Span API does not support nested ARRAY field {}",
+                  "Span API does not support native-list ARRAY field {}",
                   field_id.get());
     }
     return cachinglayer::PinWrapper<SpanBase>(
@@ -2409,9 +2508,15 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
                "fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -2559,17 +2664,9 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
         logical_offsets.data(), len, row_valid.get(), physical_offsets);
 
     size_t next_physical = 0;
-    auto append_valid_view = [&](int64_t logical_offset) {
-        auto vector_array = vector_data->get_physical_element(
-            physical_offsets[next_physical++]);
-        AssertInfo(vector_array != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   logical_offset);
-        views.emplace_back(const_cast<char*>(vector_array->data()),
-                           vector_array->dim(),
-                           vector_array->physical_length(),
-                           vector_array->byte_size(),
-                           vector_array->get_element_type());
+    auto append_valid_view = [&] {
+        views.push_back(vector_data->view_physical_element(
+            physical_offsets[next_physical++]));
     };
 
     if (nullable) {
@@ -2581,7 +2678,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                 views.emplace_back();
                 continue;
             }
-            append_valid_view(logical_offsets[i]);
+            append_valid_view();
         }
         std::pair<std::vector<VectorArrayView>, ValidityView> content{
             std::move(views), ValidityView::FromExpanded(valid_data->data())};
@@ -2595,7 +2692,7 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                logical_start,
                logical_start + len);
     for (int64_t i = 0; i < len; ++i) {
-        append_valid_view(logical_offsets[i]);
+        append_valid_view();
     }
     std::pair<std::vector<VectorArrayView>, ValidityView> content{
         std::move(views), ValidityView{}};
@@ -2637,9 +2734,15 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_views_by_offsets only supports recursive "
                "ARRAY fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -3337,11 +3440,7 @@ SegmentGrowingImpl::bulk_subscript_vector_array_impl(
         if (valid_data != nullptr && !valid_data[i]) {
             continue;
         }
-        auto value = vec.get_physical_element(physical_offset);
-        AssertInfo(value != nullptr,
-                   "Cannot find VECTOR_ARRAY data at segment offset {}",
-                   seg_offsets[i]);
-        dst->at(i) = value->output_data();
+        dst->at(i) = vec.view_physical_element(physical_offset).output_data();
     }
 }
 
@@ -3484,9 +3583,10 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
-                          "raw Array* API does not support nested ARRAY field "
+                          "raw Array* API does not support native-list ARRAY "
+                          "field "
                           "{}; use protobuf retrieve output",
                           field_id.get());
             }
@@ -3803,13 +3903,50 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         // Finish every other schema-side allocation before making any owner
         // visible. RegisterBatch then publishes the complete staged set in one
         // rollback-safe operation; the following shared_ptr store cannot fail.
-        for (const auto& field_meta : *absent_fields) {
-            if (sch->is_function_output(field_meta.get_id())) {
+        // Visit new fields in schema order so the struct offsets provider is
+        // the first sub-field in proto order.
+        for (auto field_id : sch->get_field_ids()) {
+            if (current_schema->has_field(field_id) ||
+                sch->is_function_output(field_id)) {
                 continue;
             }
-            EnsureStructElementOffsetsForField(field_meta, raw_ready_end, *sch);
+            EnsureStructElementOffsetsForField(
+                (*sch)[field_id], raw_ready_end, *sch);
+        }
+        // Struct offsets aliases of sub-fields dropped by this schema stay in
+        // the map and keep pointing to the struct's offsets. Erasing them
+        // here, before the schema is published, would open a mixed-state
+        // window: readers take the schema and the aliases separately and
+        // hold no lock across them, so a reader still on the old schema
+        // (for example MATCH_ANY resolving the struct through its first
+        // sub-field) must keep finding every alias of that schema, both
+        // while this Reopen runs (and after it fails partway) and after the
+        // new schema is published. All aliases of a struct point to the same
+        // offsets object, so a kept alias is always correct; field IDs are
+        // never reused, so it cannot be mistaken for a later field.
+        //
+        // The representative sub-field of each struct, which Insert uses to
+        // append element counts, is staged here and swapped in with the
+        // schema: Insert holds sch_mutex_ shared, so it runs either before
+        // this Reopen or after the schema store, never in between.
+        std::unordered_set<FieldId> staged_representatives;
+        {
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            std::unordered_set<std::string> represented_structs;
+            for (auto field_id : sch->get_field_ids()) {
+                auto struct_name = GetStructNameForArrayField((*sch)[field_id]);
+                if (struct_name &&
+                    struct_element_offsets_map_.count(field_id) > 0 &&
+                    represented_structs.insert(*struct_name).second) {
+                    staged_representatives.insert(field_id);
+                }
+            }
         }
         growing_indexes_.RegisterBatch(std::move(staged_appenders));
+        {
+            std::unique_lock lock(struct_element_offsets_map_mutex_);
+            struct_representative_fields_.swap(staged_representatives);
+        }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
     }
@@ -3912,6 +4049,65 @@ SegmentGrowingImpl::FillAbsentFieldsThrough(int64_t row_end) {
         return;
     }
     auto schema = get_schema_snapshot();
+    std::unordered_set<std::string> visited_structs;
+    for (auto field_id : schema->get_field_ids()) {
+        auto name = GetStructNameForArrayField((*schema)[field_id]);
+        if (!name || !visited_structs.insert(*name).second) {
+            continue;
+        }
+        FieldId provider(-1);
+        std::shared_ptr<StructElementOffsetsGrowing> offsets;
+        for (auto sibling_id : schema->get_field_ids()) {
+            if (GetStructNameForArrayField((*schema)[sibling_id]) != name ||
+                !insert_record_.is_data_exist(sibling_id)) {
+                continue;
+            }
+            auto* column = insert_record_.get_data_base(sibling_id);
+            const bool loaded =
+                !column->empty() ||
+                (insert_record_.is_valid_data_exist(sibling_id) &&
+                 !insert_record_.get_valid_data(sibling_id)->empty());
+            if (!loaded) {
+                continue;
+            }
+            provider = sibling_id;
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            auto it = struct_element_offsets_map_.find(sibling_id);
+            if (it != struct_element_offsets_map_.end()) {
+                offsets = it->second;
+            }
+            break;
+        }
+        if (provider.get() < 0 || !offsets) {
+            continue;
+        }
+        auto filled_rows = offsets->GetRowCount();
+        if (filled_rows < row_end) {
+            const auto rows = row_end;
+            constexpr int64_t kLengthBatchRows = 4096;
+            std::vector<int64_t> row_ids(
+                std::min(kLengthBatchRows, rows - filled_rows));
+            std::vector<int32_t> lengths(row_ids.size());
+            milvus::OpContext op_ctx;
+            for (int64_t begin = filled_rows; begin < rows;
+                 begin += kLengthBatchRows) {
+                const auto count = std::min(kLengthBatchRows, rows - begin);
+                std::iota(row_ids.begin(), row_ids.begin() + count, begin);
+                auto data =
+                    bulk_subscript(&op_ctx, provider, row_ids.data(), count);
+                ExtractArrayLengths(
+                    *data, (*schema)[provider], count, lengths.data());
+                offsets->Insert(begin, lengths.data(), count);
+            }
+        }
+        std::unique_lock lock(struct_element_offsets_map_mutex_);
+        for (auto sibling_id : schema->get_field_ids()) {
+            if (GetStructNameForArrayField((*schema)[sibling_id]) == name) {
+                struct_representative_fields_.erase(sibling_id);
+            }
+        }
+        struct_representative_fields_.insert(provider);
+    }
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
@@ -3920,14 +4116,16 @@ SegmentGrowingImpl::FillAbsentFieldsThrough(int64_t row_end) {
             continue;
         }
         if (IsVectorDataType(field_meta.get_data_type())) {
-            // A vector field may be legally absent from the loaded data only
-            // when it is nullable (added by AddField after the binlogs were
-            // written). Backfill its validity bitmap so that queries observe
-            // all-null values instead of an uninitialized column.
-            if (field_meta.is_nullable() &&
-                insert_record_.is_data_exist(field_id) &&
-                insert_record_.is_valid_data_exist(field_id) &&
-                insert_record_.get_valid_data(field_id)->empty()) {
+            // A vector field may be legally absent from the loaded data when
+            // it was added after the binlogs were written: a nullable vector,
+            // or an element-nullable vector array sub-field of a non-nullable
+            // struct. Backfill it so that queries observe null rows instead of
+            // an uninitialized column. An empty raw column alone does not mean
+            // absent: once a growing interim index owns the raw vectors, the
+            // column is reclaimed and later batches skip it, so ask
+            // HasFieldData, which also counts validity and index-held rows.
+            if (insert_record_.is_data_exist(field_id) &&
+                !HasFieldData(field_id)) {
                 fill_empty_field(field_meta, row_end);
                 EnsureStructElementOffsetsForField(
                     field_meta, row_end, *schema);
@@ -4192,7 +4390,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                         ? field.get_dim()
                         : 1,
                     rows_to_load,
-                    field.is_nested_array()
+                    field.is_native_list_array() && data_type == DataType::ARRAY
                         ? std::make_optional(field.get_array_type_schema())
                         : std::nullopt);
                 auto array = record_batch->column(i);
@@ -4305,7 +4503,61 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
             text_column->set_data_raw(offset, refs.data(), count);
         }
     } else {
-        auto data = bulk_subscript_not_exist_field(field_meta, missing);
+        std::shared_ptr<StructElementOffsetsGrowing> struct_offsets;
+        FieldId struct_provider(-1);
+        if (auto name = field_meta.is_element_nullable()
+                            ? GetStructNameForArrayField(field_meta)
+                            : std::nullopt) {
+            auto schema = get_schema_snapshot();
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            for (auto sibling_id : schema->get_field_ids()) {
+                if (sibling_id == field_id ||
+                    GetStructNameForArrayField((*schema)[sibling_id]) != name) {
+                    continue;
+                }
+                auto it = struct_element_offsets_map_.find(sibling_id);
+                if (it != struct_element_offsets_map_.end() &&
+                    it->second->GetRowCount() >= total_row_num) {
+                    struct_offsets = it->second;
+                    struct_provider = sibling_id;
+                    break;
+                }
+            }
+        }
+        std::unique_ptr<DataArray> data;
+        if (struct_offsets) {
+            std::vector<int32_t> starts(missing + 1);
+            struct_offsets->CopyRowElementStarts(
+                filled, missing, starts.data());
+            std::vector<int32_t> lengths(missing);
+            for (int64_t i = 0; i < missing; ++i) {
+                lengths[i] = starts[i + 1] - starts[i];
+            }
+            std::unique_ptr<bool[]> validity;
+            if (field_meta.is_nullable()) {
+                AssertInfo(insert_record_.is_valid_data_exist(struct_provider),
+                           "struct provider {} has no row validity",
+                           struct_provider.get());
+                validity = std::make_unique<bool[]>(missing);
+                insert_record_.get_valid_data(struct_provider)
+                    ->bulk_is_valid_range(filled, missing, validity.get());
+            }
+            data = CreateNullStructSubFieldDataArray(
+                field_meta, lengths.data(), missing, [&](int64_t i) {
+                    return !validity || validity[i];
+                });
+        } else {
+            // No sibling holds rows: the growing segment predates the struct.
+            // A growing segment created after the struct stores its original
+            // sub-fields, and the drop rule keeps one of them in the schema
+            // (schemautil.CheckStructKeepsOriginalSubField), so the rows here
+            // are null struct rows. Unlike a sealed segment there is no stored
+            // field set to check. The column and interim index of a dropped
+            // sub-field are not released right away: inserts after the drop
+            // no longer write or feed them, and both are freed with the
+            // growing segment.
+            data = bulk_subscript_not_exist_field(field_meta, missing);
+        }
         if (insert_record_.is_valid_data_exist(field_id)) {
             // Offset-addressed write: idempotent when `filled` is 0 for a
             // non-mapping column being refilled, unlike the appending overload,
@@ -4372,16 +4624,21 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     std::unique_lock lock(struct_element_offsets_map_mutex_);
 
     std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
-    for (const auto& [field_id, offsets] : struct_element_offsets_map_) {
-        auto field_it = schema.get_fields().find(field_id);
-        if (field_it == schema.get_fields().end()) {
+    FieldId representative = field_meta.get_id();
+    bool first_child = true;
+    for (auto field_id : schema.get_field_ids()) {
+        auto existing_struct_name =
+            GetStructNameForArrayField(schema[field_id]);
+        if (existing_struct_name != struct_name) {
             continue;
         }
-
-        auto existing_struct_name =
-            GetStructNameForArrayField(field_it->second);
-        if (existing_struct_name == struct_name) {
-            struct_element_offsets = offsets;
+        if (first_child) {
+            representative = field_id;
+            first_child = false;
+        }
+        auto it = struct_element_offsets_map_.find(field_id);
+        if (it != struct_element_offsets_map_.end()) {
+            struct_element_offsets = it->second;
             break;
         }
     }
@@ -4389,7 +4646,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     if (!struct_element_offsets) {
         struct_element_offsets =
             std::make_shared<StructElementOffsetsGrowing>();
-        struct_representative_fields_.insert(field_meta.get_id());
+        struct_representative_fields_.insert(representative);
     }
 
     auto current_row_count = struct_element_offsets->GetRowCount();

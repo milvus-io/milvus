@@ -832,29 +832,87 @@ func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", "16")}))
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", "16")}), "nested array can only be in a struct array field")
+	checkNested := func(field *schemapb.FieldSchema) error {
+		return checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "items", Fields: []*schemapb.FieldSchema{field},
+		}})
+	}
+	require.NoError(t, checkNested(nestedField("32", "16")))
 
 	matchingMirror := nestedField("32", "16")
 	matchingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
-	require.NoError(t, checkFieldSchema([]*schemapb.FieldSchema{matchingMirror}))
+	require.NoError(t, checkNested(matchingMirror))
 
 	conflictingMirror := nestedField("32", "16")
 	conflictingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
-	err := checkFieldSchema([]*schemapb.FieldSchema{conflictingMirror})
+	err := checkNested(conflictingMirror)
 	require.ErrorContains(t, err, "must match type_schema root capacity")
 
 	invalidRepresentation := nestedField("32", "16")
 	invalidRepresentation.DataType = schemapb.DataType_None
 	invalidRepresentation.ElementType = schemapb.DataType_None
-	err = checkFieldSchema([]*schemapb.FieldSchema{invalidRepresentation})
+	err = checkNested(invalidRepresentation)
 	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
 
 	tooLarge := strconv.FormatInt(Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10)
-	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField(tooLarge, "16")})
+	err = checkNested(nestedField(tooLarge, "16"))
 	require.ErrorContains(t, err, "maximum capacity")
 
-	err = checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", tooLarge)})
+	err = checkNested(nestedField("32", tooLarge))
 	require.ErrorContains(t, err, "maximum capacity")
+}
+
+func TestCheckStructArrayFieldSchemaNestedNullable(t *testing.T) {
+	newField := func(row, element, leaf bool) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+			Nullable: row, ElementNullable: element,
+			TypeSchema: &schemapb.TypeSchema{
+				Nullable: row, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable: element, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Nullable: leaf, Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+	}
+	check := func(row bool, field *schemapb.FieldSchema) error {
+		return checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "items", Nullable: row, Fields: []*schemapb.FieldSchema{field},
+		}})
+	}
+	for _, row := range []bool{false, true} {
+		for _, element := range []bool{false, true} {
+			for _, leaf := range []bool{false, true} {
+				require.NoError(t, check(row, newField(row, element, leaf)))
+			}
+		}
+	}
+	field := newField(true, true, true)
+	field.TypeSchema.Nullable = false
+	require.ErrorContains(t, check(true, field), "root nullable=false must match field nullable=true")
+	field = newField(true, true, true)
+	field.TypeSchema.GetArrayElement().Nullable = false
+	require.ErrorContains(t, check(true, field), "inner nullable=false must match element_nullable=true")
+	field = newField(true, true, true)
+	field.TypeSchema.GetArrayElement().GetArrayElement().Kind = &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}}}
+	require.ErrorContains(t, check(true, field), "supports exactly one nested array level")
+	field = newField(true, true, true)
+	field.Nullable = false
+	require.ErrorContains(t, check(true, field), "root nullable=true must match field nullable=false")
+
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}}), "element_nullable is only supported")
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_ArrayOfVector}}), "ArrayOfVector is only supported")
+	require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+		Name: "items", Fields: []*schemapb.FieldSchema{{
+			Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}, {Key: common.DimKey, Value: "4"}},
+		}},
+	}}))
 }
 
 func TestValidateLocalFormat(t *testing.T) {

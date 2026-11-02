@@ -141,6 +141,8 @@ func TestCheckpointAvailabilityFallback(t *testing.T) {
 					catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, int64(-1)).Return(tc.confirm).Twice()
 				}
 				if tc.dropped {
+					// Each dropped collection's DataCoord meta goes before its checkpoints.
+					catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, mock.Anything).Return(nil).Twice()
 					catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Times(3)
 				}
 				store := metacache.NewMetaStore(catalog)

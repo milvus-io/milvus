@@ -459,7 +459,6 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
-			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
 				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
@@ -516,7 +515,6 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
-			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if collectionMetrics == nil {
 				return true
@@ -540,8 +538,7 @@ func (q *QuotaCenter) collectMetrics() error {
 		})
 
 		for _, collectionID := range datacoordQuotaCollections {
-			_, ok := q.collectionIDToDBID.Get(collectionID)
-			if ok {
+			if collections.Contain(collectionID) {
 				continue
 			}
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
@@ -549,7 +546,6 @@ func (q *QuotaCenter) collectMetrics() error {
 				// skip limit check if the collection meta has been removed from rootcoord meta
 				continue
 			}
-			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 		}
 
@@ -1413,6 +1409,14 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 		}
 	}
 	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	// Build the collection-to-DB mapping from the same metadata snapshot as the
+	// limiter tree. Node metrics omit unloaded or unflushed collections, while
+	// WAL lag protection still covers every collection on a pchannel.
+	for dbID, collections := range partitions {
+		for collectionID := range collections {
+			q.collectionIDToDBID.Insert(collectionID, dbID)
+		}
+	}
 	initLimiters(partitions)
 	return nil
 }
@@ -1714,7 +1718,12 @@ func (q *QuotaCenter) recordMetrics() {
 				case internalpb.RateScope_Database:
 					name = "db_" + dbIDs[node.GetID()]
 				case internalpb.RateScope_Collection:
-					name = "collection_" + collectionIDs[node.GetID()]
+					collectionID := node.GetID()
+					if collectionName, ok := collectionIDs[collectionID]; ok {
+						name = "collection_" + collectionName
+					} else {
+						name = "collection_id_" + strconv.FormatInt(collectionID, 10)
+					}
 				default:
 					return false
 				}

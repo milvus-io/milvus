@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -776,13 +777,26 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         expected_nq=None,
         expected_limit=None,
         score_sign=1.0,
+        expected_ids=None,
+        expected_rows=None,
     ):
         expected_by_id = {idx + 1: score for idx, score in enumerate(expected_scores)}
         assert len(result_sets) == (cls.nq if expected_nq is None else expected_nq)
-        for hits in result_sets:
+        if expected_ids is not None:
+            assert len(expected_ids) == len(result_sets)
+        rows_by_id = {row["id"]: row for row in expected_rows} if expected_rows is not None else None
+        for query_index, hits in enumerate(result_sets):
             hit_limit = cls.limit if expected_limit is None else expected_limit
             assert len(hits) == hit_limit
             assert len({hit["id"] for hit in hits}) == hit_limit
+            if expected_ids is not None:
+                assert [hit["id"] for hit in hits] == expected_ids[query_index]
+            if rows_by_id is not None:
+                assert all(set(hit["entity"]) == set(cls.feature_names) for hit in hits)
+                cls._assert_rows_round_trip(
+                    [{"id": hit["id"], **hit["entity"]} for hit in hits],
+                    [rows_by_id[hit["id"]] for hit in hits],
+                )
             for hit in hits:
                 assert hit["id"] in expected_by_id
                 assert hit["distance"] == pytest.approx(
@@ -1544,19 +1558,31 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             },
         )
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="Proxy FileResource sync is disabled by default, so L2 cannot load the XGBoost model")
+    @pytest.mark.parametrize(
+        "stage",
+        [
+            pytest.param(FunctionChainStage.L1_RERANK, marks=pytest.mark.tags(CaseLabel.L1), id="l1"),
+            # Proxy FileResource synchronization requires a dedicated deployment.
+            pytest.param(FunctionChainStage.L2_RERANK, marks=pytest.mark.tags(CaseLabel.L3), id="l2"),
+        ],
+    )
     def test_milvus_client_xgboost_supports_l1_l2_rerank_stages(
         self,
         tmp_path,
         minio_host,
         minio_bucket,
+        stage,
+        request,
     ):
         """
         target: verify XGBoost is accepted at L1 and L2 FunctionChain stages
-        method: train and register one model, then execute the same rerank at L1 and L2
-        expected: both stages return scores and ordering matching local XGBoost predictions
+        method: FLAT recall over disjoint query-specific candidates, with model order opposing ANN order
+        expected: exact per-query IDs, model scores, ordering and stored feature fields after recovery
+        prerequisite: the L3 L2-rerank case requires Proxy FileResource synchronization in the target deployment
         """
+        self.skip_global_role_cleanup = True
+        if stage == FunctionChainStage.L2_RERANK and not request.config.getoption("--xgboost-proxy-sync"):
+            pytest.skip("requires --xgboost-proxy-sync after verifying Proxy FileResource synchronization")
         client = self._client()
         columns, features, embeddings, query_vectors, labels = self._regression_dataset(
             feature_seed=19542,
@@ -1570,6 +1596,23 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             labels,
             "reg:squarederror",
         )
+        # Keep the filtered rows in one sealed segment: L1 reranks its ANN topK,
+        # while L2 reranks the same candidates after Proxy reduction.
+        # Each query recalls a disjoint topK from more than K eligible rows.
+        group_size = self.limit + 2
+        selected_ids = list(range(1, 2 * group_size + 1))
+        candidate_ids = []
+        for query_index, sign in enumerate((1.0, -1.0)):
+            group = selected_ids[query_index * group_size : (query_index + 1) * group_size]
+            group.sort(key=lambda pk: (expected_scores[pk - 1], pk))
+            for rank, pk in enumerate(group):
+                embeddings[pk - 1] = 0
+                embeddings[pk - 1, :2] = [sign, (rank + 1) / 100]
+            candidate_ids.append(group[: self.limit])
+        query_vectors = [[sign, *([0.0] * (self.dim - 1))] for sign in (1.0, -1.0)]
+        expected_ids = [sorted(ids, key=lambda pk: (-expected_scores[pk - 1], pk)) for ids in candidate_ids]
+        assert all(order != candidates for order, candidates in zip(expected_ids, candidate_ids))
+        rows = self._build_rows(columns, embeddings)
         resource_name = cf.gen_unique_str("xgboost_l1_l2_resource")
         remote_path = f"xgboost/{resource_name}.ubj"
         minio_client = self._upload_model(
@@ -1584,32 +1627,43 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         try:
             collection_name = self._create_collection(
                 client,
-                self._build_rows(columns, embeddings),
-                index_type="HNSW",
+                rows,
+                index_type="FLAT",
             )
-            for stage in (
-                FunctionChainStage.L1_RERANK,
-                FunctionChainStage.L2_RERANK,
-            ):
-                result_sets, _ = self.search(
-                    client,
-                    collection_name,
-                    data=query_vectors,
-                    anns_field=self.vector_field,
-                    search_params={
-                        "metric_type": "COSINE",
-                        "params": self.index_configs["HNSW"]["search_params"],
-                    },
-                    limit=self.limit,
-                    output_fields=self.feature_names,
-                    function_chains=self._xgboost_chain(
-                        resource_name,
-                        self.feature_names,
-                        "raw",
-                        stage=stage,
-                    ),
-                )
-                self._assert_scores_match(result_sets, expected_scores)
+            # Reject a request/model feature-count mismatch before checking legal recovery.
+            invalid_chain = self._xgboost_chain(resource_name, self.feature_names[:-1], "raw", stage=stage)
+            error, _ = self.search(
+                client,
+                collection_name,
+                data=query_vectors,
+                anns_field=self.vector_field,
+                search_params={"metric_type": "COSINE"},
+                limit=self.limit,
+                filter=f"id in {selected_ids}",
+                function_chains=invalid_chain,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1100, "err_msg": "expected 6 feature columns, got 5"},
+            )
+            assert error.code == 1100
+            rerank_chain = self._xgboost_chain(resource_name, self.feature_names, "raw", stage=stage)
+            if stage == FunctionChainStage.L2_RERANK:
+                rerank_chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            result_sets, _ = self.search(
+                client,
+                collection_name,
+                data=query_vectors,
+                anns_field=self.vector_field,
+                search_params={
+                    "metric_type": "COSINE",
+                },
+                limit=self.limit,
+                filter=f"id in {selected_ids}",
+                output_fields=self.feature_names,
+                function_chains=rerank_chain,
+            )
+            self._assert_scores_match(
+                result_sets, expected_scores, expected_nq=2, expected_ids=expected_ids, expected_rows=rows
+            )
         finally:
             self._cleanup_file_resource(
                 client,
@@ -3991,3 +4045,108 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                 fixture["resource_name"],
                 fixture["remote_path"],
             )
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_milvus_client_xgboost_l2_matches_each_proxy(self, tmp_path, minio_host, minio_bucket, request):
+        """target: independent Proxy L2 execution; method: direct Pod URIs and one shared model; expected: exact scores and recovery."""
+        self.skip_global_role_cleanup = True
+        endpoints = request.config.getoption("--xgboost-proxy-uri")
+        if not endpoints or not request.config.getoption("--xgboost-proxy-sync"):
+            pytest.skip("requires direct Proxy Pod URIs and verified Proxy FileResource sync")
+        assert len(endpoints) >= 2 and len(set(endpoints)) == len(endpoints)
+        client = self._client()
+        baseline = client.get_server_version(detail=True)
+        columns, features, embeddings, query_vectors, labels = self._regression_dataset(
+            feature_seed=20542, embedding_seed=20543, query_seed=20544
+        )
+        _, model_path, expected_scores, _ = self._train_xgboost_model(
+            tmp_path, "xgboost_l2_multi_proxy", features, labels, "reg:squarederror"
+        )
+        resource_name = cf.gen_unique_str("xgboost_l2_multi_proxy")
+        remote_path = f"xgboost/{resource_name}.ubj"
+        storage = self._new_minio_client(minio_host)
+        # Four rows from each sealed/growing batch; FLAT plus this filter fixes the full candidate set.
+        selected_ids = [base + offset for base in (0, self.nb, 2 * self.nb) for offset in range(1, 5)]
+        rows = self._build_rows(columns, embeddings)
+        selected_rows = [rows[pk - 1] for pk in selected_ids]
+        expected_ids = sorted(selected_ids, key=lambda pk: (-expected_scores[pk - 1], pk))
+        failures = []
+        direct_clients = []
+        try:
+            self._upload_model(client, minio_host, minio_bucket, resource_name, remote_path, model_path)
+            collection_name = self._create_collection(client, rows, index_type="FLAT")
+            chain = self._xgboost_chain(resource_name, self.feature_names, "raw", stage=FunctionChainStage.L2_RERANK)
+            chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            invalid = self._xgboost_chain(
+                resource_name, self.feature_names[:-1], "raw", stage=FunctionChainStage.L2_RERANK
+            )
+            for endpoint in endpoints:
+                try:
+                    direct, _ = self.init_milvus_client(uri=endpoint, token=cf.param_info.param_token)
+                    direct_clients.append(direct)
+                    identity = direct.get_server_version(detail=True)
+                    assert identity["git_commit"] == baseline["git_commit"]
+                    assert identity["deploy_mode"] != "STANDALONE"
+                    for phase in ("cold", "warm", "recovery"):
+                        if phase == "recovery":
+                            error, _ = self.search(
+                                direct,
+                                collection_name,
+                                data=query_vectors,
+                                anns_field=self.vector_field,
+                                search_params={"metric_type": "COSINE"},
+                                limit=len(selected_ids),
+                                filter=f"id in {selected_ids}",
+                                function_chains=invalid,
+                                check_task=CheckTasks.err_res,
+                                check_items={"err_code": 1100, "err_msg": "expected 6 feature columns, got 5"},
+                            )
+                            assert error.code == 1100
+                            log.info(
+                                "XGBOOST_L2_PROXY_NEGATIVE %s",
+                                json.dumps({"endpoint": endpoint, "code": error.code, "message": str(error)}),
+                            )
+                        results, _ = self.search(
+                            direct,
+                            collection_name,
+                            data=query_vectors,
+                            anns_field=self.vector_field,
+                            search_params={"metric_type": "COSINE"},
+                            limit=len(selected_ids),
+                            filter=f"id in {selected_ids}",
+                            output_fields=self.feature_names,
+                            function_chains=chain,
+                        )
+                        self._assert_scores_match(
+                            results,
+                            expected_scores,
+                            expected_limit=len(selected_ids),
+                            expected_ids=[expected_ids for _ in query_vectors],
+                            expected_rows=selected_rows,
+                        )
+                        ledger = {
+                            "endpoint": endpoint,
+                            "phase": phase,
+                            "server": identity,
+                            "resource": resource_name,
+                            "model_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+                            "expected_ids": expected_ids,
+                            "expected_scores": [expected_scores[pk - 1] for pk in expected_ids],
+                            "actual": [
+                                [{"id": hit["id"], "score": hit["distance"]} for hit in hits] for hits in results
+                            ],
+                            "max_absolute_error": max(
+                                abs(hit["distance"] - expected_scores[hit["id"] - 1])
+                                for hits in results
+                                for hit in hits
+                            ),
+                        }
+                        log.info("XGBOOST_L2_PROXY_RESULT %s", json.dumps(ledger, sort_keys=True))
+                except Exception as exc:
+                    failures.append({"endpoint": endpoint, "error": str(exc)})
+                    log.exception("XGBOOST_L2_PROXY_FAILURE endpoint=%s", endpoint)
+            assert not failures, failures
+        finally:
+            for direct in direct_clients:
+                self.close(direct)
+            self._cleanup_file_resource(client, storage, minio_bucket, resource_name, remote_path)

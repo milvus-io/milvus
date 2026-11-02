@@ -38,7 +38,7 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9})
-	optimizer := NewGlobalOptimizer(runtime, functionKey)
+	optimizer := testGlobalOptimizer(runtime, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestGlobalOptimizerDoesNotSkipEmptyLatestBM25Corpus(t *testing.T) {
 
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{})
-	optimizer := NewGlobalOptimizer(runtime, functionKey)
+	optimizer := testGlobalOptimizer(runtime, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestGlobalOptimizerOptimizesAdvancedBM25SubSearch(t *testing.T) {
 		},
 	}
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
-	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9}), functionKey)
+	optimizer := testGlobalOptimizer(NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9}), functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestGlobalOptimizerDoesNotSkipOldViewSubSearches(t *testing.T) {
 			SerializedExprPlan: bm25Req.GetSerializedExprPlan(),
 		}
 	}
-	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), functionKey)
+	optimizer := testGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), functionKey)
 
 	mixedReq := &internalpb.SearchRequest{
 		CollectionID: collectionID,
@@ -244,7 +244,7 @@ func TestGlobalOptimizerBatchesHybridIDFRead(t *testing.T) {
 		return []IDFResult{{Avgdl: 3}, {Avgdl: 3}}, nil
 	}).Build()
 	defer patch.UnPatch()
-	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+	opt := testGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
 	_, err := opt.OptimizeSearch(context.Background(), hybrid)
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
@@ -255,7 +255,7 @@ func TestGlobalOptimizerBM25InvalidRequests(t *testing.T) {
 	const collection = int64(501)
 	require.NoError(t, function.GetManager().Alloc(collection, key, testBM25Schema(101, 102)))
 	defer function.GetManager().Release(collection, key)
-	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+	opt := testGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
 	_, err := opt.OptimizeSearch(context.Background(), nil)
 	require.Error(t, err)
 	_, err = opt.OptimizeSearch(context.Background(), &internalpb.SearchRequest{IsAdvanced: true})
@@ -280,7 +280,7 @@ func TestGlobalOptimizerBM25InvalidRequests(t *testing.T) {
 		})
 	}
 	req := testBM25SearchRequest(t, collection, 101, 102)
-	_, err = NewGlobalOptimizer(nil, key).OptimizeSearch(context.Background(), req)
+	_, err = testGlobalOptimizer(nil, key).OptimizeSearch(context.Background(), req)
 	require.Error(t, err)
 	patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).Return(nil, context.Canceled).Build()
 	defer patch.UnPatch()
@@ -293,7 +293,7 @@ func TestGlobalOptimizerIDFResourceErrors(t *testing.T) {
 	const collection = int64(502)
 	require.NoError(t, function.GetManager().Alloc(collection, key, testBM25Schema(101, 102)))
 	defer function.GetManager().Release(collection, key)
-	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+	opt := testGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
 
 	for _, tc := range []struct {
 		name      string
@@ -355,4 +355,60 @@ func TestGlobalOptimizerIDFResourceErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGlobalOptimizerMinHash(t *testing.T) {
+	const collectionID = int64(99001)
+	const key = "minhash-search-test"
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "hash", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+	}, Functions: []*schemapb.FunctionSchema{{
+		Name: "minhash", Type: schemapb.FunctionType_MinHash,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+		Params: []*commonpb.KeyValuePair{{Key: function.NumHashesKey, Value: "4"}, {Key: function.ShingleSizeKey, Value: "1"}},
+	}}}
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, schema))
+	defer function.GetManager().Release(collectionID, key)
+	optimizer := testGlobalOptimizer(NewQueryRuntime(), key)
+	for _, advanced := range []bool{false, true} {
+		req := testBM25SearchRequest(t, collectionID, 101, 102)
+		req.MetricType = metric.MHJACCARD
+		if advanced {
+			req = &internalpb.SearchRequest{CollectionID: collectionID, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{
+				FieldId: 102, MetricType: req.MetricType, PlaceholderGroup: req.PlaceholderGroup, SerializedExprPlan: req.SerializedExprPlan,
+			}}}
+		}
+		_, err := optimizer.OptimizeSearch(t.Context(), req)
+		require.NoError(t, err)
+		data := req.PlaceholderGroup
+		if advanced {
+			data = req.SubReqs[0].PlaceholderGroup
+		}
+		holder := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(data, holder))
+		require.Equal(t, commonpb.PlaceholderType_BinaryVector, holder.Placeholders[0].Type)
+		require.Len(t, holder.Placeholders[0].Values[0], 16)
+	}
+	req := testBM25SearchRequest(t, collectionID, 101, 102)
+	req.MetricType = metric.L2
+	_, err := optimizer.OptimizeSearch(t.Context(), req)
+	require.Error(t, err)
+	req.MetricType = metric.MHJACCARD
+	req.PlaceholderGroup = []byte{255}
+	_, err = optimizer.OptimizeSearch(t.Context(), req)
+	require.Error(t, err)
+}
+
+func testGlobalOptimizer(r *QueryRuntime, key string) globalOptimizer {
+	o := globalOptimizer{functionRunnerKey: key}
+	if r != nil {
+		for _, m := range r.modules {
+			if idf, ok := m.(idfOracle); ok {
+				o.idf = idf
+				break
+			}
+		}
+	}
+	return o
 }

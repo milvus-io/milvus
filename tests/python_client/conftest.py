@@ -27,6 +27,17 @@ delete_timeout = 60
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--run-pyudf-disabled",
+        action="store_true",
+        default=False,
+        help="Run PyUDF-disabled cases against a dedicated deployment with function.pyUDF.enabled=false",
+    )
+    parser.addoption(
+        "--pyudf-management-endpoint",
+        default=None,
+        help="Coordinator management URL for PyUDF L3 cases, e.g. http://standalone:9091",
+    )
     parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
@@ -49,6 +60,18 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
+    )
+    parser.addoption(
+        "--xgboost-proxy-sync",
+        action="store_true",
+        default=False,
+        help="enable L3 XGBoost L2-rerank tests after verifying Proxy FileResource synchronization",
+    )
+    parser.addoption(
+        "--xgboost-proxy-uri",
+        action="append",
+        default=[],
+        help="direct Proxy Pod URI for the L3 multi-Proxy case; repeat for each independent Proxy",
     )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")

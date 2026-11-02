@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -28,10 +30,19 @@ type Builder interface {
 
 // Runtime is the csegment-backed growing side prepared for one DataVersion.
 type Runtime struct {
-	mu                       sync.RWMutex
-	mvccCond                 *sync.Cond
-	closed                   bool
-	collection               *segcore.CCollection
+	prepareMu sync.Mutex
+	eventMu   sync.Mutex
+	eventCond *sync.Cond
+	refresh   *partitionRefresh
+	view      walview.VChannelWALView
+
+	mu         sync.RWMutex
+	mvccCond   *sync.Cond
+	closed     bool
+	collection *segcore.CCollection
+	// Each replay owns its ordered write schema, even when partition refresh
+	// borrows a collection whose serving dispatcher has already advanced.
+	writeSchema              *schemapb.CollectionSchema
 	loadedPartitions         map[int64]struct{} // nil: unrestricted; empty: none
 	segments                 map[int64]*growingSegment
 	segmentIDs               []int64
@@ -47,6 +58,7 @@ func newRuntime() *Runtime {
 	runtime := &Runtime{
 		segments: make(map[int64]*growingSegment),
 	}
+	runtime.eventCond = sync.NewCond(&runtime.eventMu)
 	runtime.mvccCond = sync.NewCond(&runtime.mu)
 	return runtime
 }
@@ -192,4 +204,11 @@ func (r *Runtime) releaseCollectionIfIdleLocked() *segcore.CCollection {
 	collection := r.collection
 	r.collection = nil
 	return collection
+}
+
+// WriteSchemaVersion is the schema already applied on the serialized WAL path.
+func (r *Runtime) WriteSchemaVersion() int32 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.writeSchema.GetVersion()
 }

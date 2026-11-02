@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -85,6 +86,16 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 
 	oldFieldProperties, err := GetFieldProperties(coll, req.GetFieldName())
 	if err != nil {
+		return err
+	}
+	// The struct sub-field origin marker is internal; a property request can
+	// neither set nor delete it.
+	propertyKeys := make([]string, 0, len(req.GetProperties())+len(req.GetDeleteKeys()))
+	for _, prop := range req.GetProperties() {
+		propertyKeys = append(propertyKeys, prop.GetKey())
+	}
+	propertyKeys = append(propertyKeys, req.GetDeleteKeys()...)
+	if err := schemautil.RejectStructSubFieldOriginMarkerKeys(req.GetFieldName(), propertyKeys...); err != nil {
 		return err
 	}
 	oldFieldPropertiesMap := common.CloneKeyValuePairs(oldFieldProperties).ToMap()

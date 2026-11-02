@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // GlobalOptimizer optimizes a request using global query view information.
@@ -12,6 +13,7 @@ import (
 //
 // Implementations include BM25 IDF computation and search parameter tuning.
 type GlobalOptimizer interface {
+	OptimizePlan(context.Context, *viewpb.QueryPlan, *viewpb.QueryViewOfShard) (*viewpb.GlobalOptimizerExecutionSummary, error)
 	OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (SearchOptimization, error)
 	OptimizeRetrieve(ctx context.Context, req *internalpb.RetrieveRequest) error
 }
@@ -33,4 +35,8 @@ func (noopGlobalOptimizer) OptimizeSearch(context.Context, *internalpb.SearchReq
 
 func (noopGlobalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest) error {
 	return nil
+}
+
+func (noopGlobalOptimizer) OptimizePlan(context.Context, *viewpb.QueryPlan, *viewpb.QueryViewOfShard) (*viewpb.GlobalOptimizerExecutionSummary, error) {
+	return nil, nil
 }

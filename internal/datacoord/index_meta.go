@@ -78,10 +78,12 @@ type indexMeta struct {
 	ctx     context.Context
 	catalog metastore.DataCoordCatalog
 
-	// collectionIndexes records which indexes are on the collection
-	// collID -> indexID -> index
-	// fieldIndexLock guards the in-memory definitions only; index DDL never
-	// holds it across catalog I/O.
+	// fieldIndexLock protects collection index definitions and serializes the
+	// resident publication of segment index records observed together by
+	// getQueryViewIndexSnapshot. The concurrent maps remain self-synchronized
+	// for readers that do not require that cross-metadata snapshot boundary.
+	// Index DDL never holds it across catalog I/O.
+	// indexes: collID -> indexID -> index
 	fieldIndexLock sync.RWMutex
 	indexes        map[UniqueID]map[UniqueID]*model.Index
 	taskCounts     indexTaskCounts
@@ -297,9 +299,11 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 			mlog.Err(err))
 		return err
 	}
+	m.fieldIndexLock.Lock()
 	for _, segIdx := range segIdxes {
 		m.updateSegmentIndex(segIdx)
 	}
+	m.fieldIndexLock.Unlock()
 	m.taskCounts.publishStoredSizes()
 	return nil
 }
@@ -638,7 +642,12 @@ func (m *indexMeta) addSegmentIndex(ctx context.Context, segIndex *model.Segment
 		}
 	}
 
+	// Resident publication must be serialized with collection-index mutation and
+	// QueryView index snapshots. The gauge write can wait for a Prometheus scrape,
+	// so it runs after the lock is released.
+	m.fieldIndexLock.Lock()
 	m.updateSegmentIndex(segIndex)
+	m.fieldIndexLock.Unlock()
 	m.taskCounts.publishStoredSizes()
 
 	mlog.Info(ctx, "meta update: adding segment index success", mlog.Int64("collectionID", segIndex.CollectionID),
@@ -776,6 +785,20 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 		}
 	}
 	return indexInfos
+}
+
+// GetIndexesByID resolves exact index references, including definitions retained
+// after logical deletion. It does not substitute a newer index on the same field.
+func (m *indexMeta) GetIndexesByID(collectionID int64, ids []int64) []*model.Index {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	result := make([]*model.Index, 0, len(ids))
+	for _, id := range ids {
+		if index := m.indexes[collectionID][id]; index != nil {
+			result = append(result, model.CloneIndex(index))
+		}
+	}
+	return result
 }
 
 // ListAllIndexes returns a clone of every index that is not deleted, across all
@@ -923,6 +946,27 @@ func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID)
 		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
 	}
 	return segmentsIndexes
+}
+
+// getQueryViewIndexSnapshot returns collection index definitions and segment
+// index records from the same field-index metadata snapshot. Callers must use
+// the returned collection definitions to build FieldIndexInfo instead of
+// looking the definitions up again after this method returns.
+func (m *indexMeta) getQueryViewIndexSnapshot(collectionID UniqueID, segmentIDs []UniqueID) ([]*model.Index, map[int64]map[UniqueID]*model.SegmentIndex) {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
+	indexes := make([]*model.Index, 0, len(m.indexes[collectionID]))
+	for _, index := range m.indexes[collectionID] {
+		if !index.IsDeleted {
+			indexes = append(indexes, model.CloneIndex(index))
+		}
+	}
+	segmentIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		segmentIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
+	}
+	return indexes, segmentIndexes
 }
 
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {

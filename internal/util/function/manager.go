@@ -1167,6 +1167,13 @@ func embeddingFunctions(schema *schemapb.CollectionSchema) []*schemapb.FunctionS
 	return functions
 }
 
+// FunctionSignature identifies reusable function semantics independently of
+// unrelated collection fields and the collection schema version.
+func FunctionSignature(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, error) {
+	signature, _, _, err := embeddingFunctionMetadata(schema, fn)
+	return signature, err
+}
+
 func embeddingFunctionMetadata(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (string, []int64, []int64, error) {
 	if schema == nil {
 		return "", nil, nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")

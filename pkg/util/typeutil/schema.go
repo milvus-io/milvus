@@ -3245,6 +3245,9 @@ func ValidateExternalCollectionResolvedSchema(schema *schemapb.CollectionSchema)
 	if !IsExternalCollection(schema) {
 		return nil
 	}
+	if len(schema.GetStructArrayFields()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support struct fields", schema.GetName())
+	}
 	generatedColumns := externalGeneratedColumnOwners(schema)
 	externalFieldOwners := make(map[string][]*schemapb.FieldSchema)
 	for _, field := range schema.GetFields() {
@@ -3628,6 +3631,11 @@ func normalizeMilvusTableKVPairs(kvs []*commonpb.KeyValuePair) []*commonpb.KeyVa
 // validateExternalFieldType applies external-collection restrictions that
 // depend on the complete field schema, not only its top-level data type.
 func validateExternalFieldType(collectionName string, field *schemapb.FieldSchema) error {
+	if field.GetElementNullable() &&
+		(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+		return merr.WrapErrParameterInvalidMsg("element-nullable %s field %s in external collection %s is not supported yet",
+			field.GetDataType().String(), field.GetName(), collectionName)
+	}
 	if IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 		return merr.WrapErrParameterInvalidMsg("external collection %s does not support recursive ARRAY field %s",
 			collectionName, field.GetName())
