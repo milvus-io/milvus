@@ -8333,6 +8333,15 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 			defer close.UnPatch()
 			exists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
 			defer exists.UnPatch()
+			// The split refusal describes the collection under the lock.
+			describe := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{
+					Status:              merr.Success(),
+					CollectionID:        100,
+					ShardsNum:           1,
+					VirtualChannelNames: []string{"p1_100v0"},
+				}, nil).Build()
+			defer describe.UnPatch()
 			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
 			defer publish.UnPatch()
 			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &embeddedBroker{}}
