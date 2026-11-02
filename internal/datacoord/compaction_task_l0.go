@@ -262,11 +262,7 @@ func (t *l0CompactionTask) Process() bool {
 }
 
 func (t *l0CompactionTask) processMetaSaved() bool {
-	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed), func(task *datapb.CompactionTask) {
-		if task.GetRestoreJobId() != 0 {
-			task.RestoreCompleted = true
-		}
-	})
+	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 	if err != nil {
 		mlog.Warn(context.TODO(), "l0CompactionTask unable to processMetaSaved", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 		return false

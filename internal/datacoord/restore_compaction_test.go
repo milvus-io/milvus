@@ -108,26 +108,93 @@ func TestRestoreL0MaterializationResumesFixedPlans(t *testing.T) {
 		require.Equal(t, 1, allocations.Times())
 		first := proto.Clone(plans[0]).(*datapb.CompactionTask)
 		first.State = datapb.CompactionTaskState_cleaned
-		first.RestoreCompleted = true
+		first.TerminalState = datapb.CompactionTaskState_completed
 		require.NoError(t, m.SaveCompactionTask(ctx, first))
 		ready, err = c.materializeRestoreDeletes(copies.GetJob(ctx, 100))
 		require.NoError(t, err)
 		require.False(t, ready)
 		last := proto.Clone(plans[1]).(*datapb.CompactionTask)
 		last.State = datapb.CompactionTaskState_cleaned
-		last.RestoreCompleted = false
+		last.TerminalState = datapb.CompactionTaskState_failed
 		require.NoError(t, m.SaveCompactionTask(ctx, last))
 		ready, err = c.materializeRestoreDeletes(copies.GetJob(ctx, 100))
 		require.NoError(t, err)
 		require.False(t, ready)
 		require.Equal(t, 3, submissions, "failed cleaned attempt retries its stable plan")
-		last.RestoreCompleted = true
-		require.NoError(t, m.SaveCompactionTask(ctx, last))
+		var retried *datapb.CompactionTask
+		for _, plan := range m.GetCompactionTasksByTriggerID(ctx, 100) {
+			if plan.GetPlanID() == last.GetPlanID() {
+				retried = plan
+			}
+		}
+		require.NotNil(t, retried)
+		require.Equal(t, datapb.CompactionTaskState_unknown, retried.GetTerminalState(), "a new attempt must not inherit the failed terminal state")
+		retryTask := newL0CompactionTask(retried, nil, m)
+		require.True(t, retryTask.processMetaSaved())
+		require.True(t, retryTask.Clean())
+		m.compactionTaskMeta, err = newCompactionTaskMeta(ctx, catalog)
+		require.NoError(t, err)
+		copies, err = NewCopySegmentMeta(ctx, catalog, m, m.snapshotMeta, nil)
+		require.NoError(t, err)
+		c.copyMeta = copies
 		ready, err = c.materializeRestoreDeletes(copies.GetJob(ctx, 100))
 		require.NoError(t, err)
 		require.True(t, ready)
 		require.True(t, m.GetSegment(ctx, 2).GetIsImporting(), "materialization does not itself publish data")
 	})
+}
+
+func TestRestoreL0RequiresSuccessfulTerminalState(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		state    datapb.CompactionTaskState
+		terminal datapb.CompactionTaskState
+		ready    bool
+		retry    bool
+	}{
+		{name: "legacy cleaned", state: datapb.CompactionTaskState_cleaned, retry: true},
+		{name: "cleaned failure", state: datapb.CompactionTaskState_cleaned, terminal: datapb.CompactionTaskState_failed, retry: true},
+		{name: "cleaned timeout", state: datapb.CompactionTaskState_cleaned, terminal: datapb.CompactionTaskState_timeout, retry: true},
+		{name: "meta saved", state: datapb.CompactionTaskState_meta_saved},
+		{name: "failed before cleanup", state: datapb.CompactionTaskState_failed, terminal: datapb.CompactionTaskState_failed},
+		{name: "completed", state: datapb.CompactionTaskState_completed, terminal: datapb.CompactionTaskState_completed, ready: true},
+		{name: "cleaned success", state: datapb.CompactionTaskState_cleaned, terminal: datapb.CompactionTaskState_completed, ready: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mockey.PatchConvey("only a durable success permits restore publication", t, func() {
+				ctx := t.Context()
+				catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+				store := metacache.NewMetaStore(nil)
+				m := &meta{metaStore: store, ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(store)}
+				var err error
+				m.compactionTaskMeta, err = newCompactionTaskMeta(ctx, catalog)
+				require.NoError(t, err)
+				copies, err := NewCopySegmentMeta(ctx, catalog, m, nil, nil)
+				require.NoError(t, err)
+				job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+				job.CollectionId = 200
+				job.CreatesCollection = true
+				job.IdMappings = []*datapb.CopySegmentIDMapping{{TargetSegmentId: 1}}
+				job.RestoreCompactionPlans = map[string]int64{"v1/-1": 77}
+				require.NoError(t, copies.AddJob(ctx, job))
+				m.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 200, InsertChannel: "v1", PartitionID: -1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, IsImporting: true}))
+				require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, State: test.state, TerminalState: test.terminal}))
+				mockey.Mock(loadCopySnapshot).Return(&snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{}}, nil).Build()
+				submit := mockey.Mock((*compactionInspector).enqueueCompaction).To(func(_ *compactionInspector, plan *datapb.CompactionTask) error {
+					require.EqualValues(t, 77, plan.GetPlanID())
+					require.Equal(t, datapb.CompactionTaskState_unknown, plan.GetTerminalState())
+					return m.SaveCompactionTask(ctx, plan)
+				}).Build()
+				checker := &copySegmentChecker{ctx: ctx, meta: m, copyMeta: copies, compactions: &compactionInspector{}}
+				ready, err := checker.materializeRestoreDeletes(copies.GetJob(ctx, 100))
+				require.NoError(t, err)
+				require.Equal(t, test.ready, ready)
+				require.Equal(t, test.retry, submit.Times() != 0)
+				require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, copies.GetJob(ctx, 100).GetState())
+				require.True(t, m.GetSegment(ctx, 1).GetIsImporting())
+			})
+		})
+	}
 }
 
 func TestRestoreL0CommitAndTaskSaveCrash(t *testing.T) {
@@ -143,9 +210,9 @@ func TestRestoreL0CommitAndTaskSaveCrash(t *testing.T) {
 		task.CreateTaskOnWorker(8, nil) // must not read or resend the retired L0
 		require.Equal(t, datapb.CompactionTaskState_meta_saved, task.GetTaskProto().State)
 		require.True(t, task.Process())
-		require.True(t, task.GetTaskProto().RestoreCompleted)
+		require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState())
 		require.True(t, task.Clean())
-		require.True(t, task.GetTaskProto().RestoreCompleted, "cleanup retains successful completion")
+		require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState(), "cleanup retains successful completion")
 		require.NoError(t, task.saveSegmentMeta(nil), "replaying an applied result does not append twice")
 		gc := &garbageCollector{}
 		require.False(t, gc.checkDroppedSegmentGC(m.GetSegment(ctx, 1), nil, nil, 0))
