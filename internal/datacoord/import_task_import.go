@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -293,6 +294,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				maxTs = importStats.GetTimestampTo()
 			}
 
+			opAccept := acceptImportSegmentOperator(info.GetSegmentID())
 			opBinlog := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs(), info.GetBm25Logs())
 			opManifest := UpdateManifest(info.GetSegmentID(), info.GetManifestPath())
 			opState := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
@@ -301,7 +303,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 			// UpdateBinlogsOperator so it wins over the array-derived value);
 			// when nil it array-derives from the arrays just set above.
 			opStats := UpdateSegmentStats(info.GetSegmentID(), info.GetStats())
-			err = t.meta.UpdateSegmentsInfo(context.TODO(), opBinlog, opManifest, opState, opPosition, opStats)
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), opAccept, opBinlog, opManifest, opState, opPosition, opStats)
 			if err != nil {
 				updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
 				if updateErr != nil {
@@ -373,4 +375,25 @@ func (t *importTask) MarshalJSON() ([]byte, error) {
 		CompleteTime: t.GetCompleteTime(),
 	}
 	return json.Marshal(importTask)
+}
+
+// acceptImportSegmentOperator checks that a preallocated import segment can
+// still take the DataNode's result. The segment is Importing until the first
+// acceptance and Flushed when the task is replayed after a crash. Any other
+// state means DropCollection, DropPartition or a failed-job GC retired the
+// segment while the task was running, and its result must not revive it.
+func acceptImportSegmentOperator(segmentID int64) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID, "import segment is missing"))
+		}
+		switch segment.GetState() {
+		case commonpb.SegmentState_Importing, commonpb.SegmentState_Flushed:
+			return true
+		default:
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID,
+				"import segment is "+segment.GetState().String()+", its result is not accepted"))
+		}
+	}
 }

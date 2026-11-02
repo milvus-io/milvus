@@ -112,7 +112,7 @@ func TestDeduplicateByGroupsOperator(t *testing.T) {
 		out := outs[0].(*internalpb.RetrieveResults)
 		require.Len(t, out.GetFieldsData(), 2)
 		assert.Len(t, out.GetFieldsData()[0].GetScalars().GetStringData().GetData(), 0)
-		assert.Equal(t, []int64{0}, out.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+		assert.Empty(t, out.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 	})
 
 	t.Run("multiple aggregate columns", func(t *testing.T) {

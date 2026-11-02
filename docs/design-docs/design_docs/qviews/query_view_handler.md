@@ -114,11 +114,33 @@ When a Coord push arrives for a view not in the handler (e.g., node restarted):
    - **Success**: calls `OnReady(readySegments)` (may be called multiple times for incremental progress) → SM advances Preparing → Ready → report Ready to Coord.
    - **Fatal error**: calls `OnUnrecoverable` for the acquire invocation → SM advances Preparing → Unrecoverable → report Unrecoverable to Coord.
 3. Coord pushes Dropped → SM enters Dropping → calls `segMgr.Release(OnDropped)`.
-4. SegmentManager releases segments asynchronously → calls `OnDropped` → SM advances Dropping → Dropped → report Dropped to Coord → entry cleaned up.
+4. SegmentManager waits for this View's segment operations and references to
+   finish, then joins destruction of unshared or already-closing segment owners.
+   Only then does it call `OnDropped` → SM advances Dropping → Dropped → report
+   Dropped to Coord → entry cleaned up. A segment still owned by another View
+   may remain; per-field/index/ReadState pruning inside that shared segment is
+   not part of this whole-segment completion promise.
 
 All callbacks must be asynchronous (not during Acquire/Release) to avoid deadlocking the shard mutex.
 Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 `SegmentManager`.
+
+**QueryNode shutdown:** `QNQueryViewHandler.Close(ctx)` rejects new Preparing
+Views and turns existing Preparing Views into Unrecoverable, canceling their
+preparation and releasing partial resources early. Ready Views keep serving.
+Close waits on every admitted View's Dropped completion, including
+Unrecoverable and already-Dropping entries; resource cleanup alone does not
+erase an Unrecoverable report before Coord withdraws the View.
+
+The first Close context bounds migration. Its cancellation withdraws remaining
+Views locally and starts final drain; a context error is not proof of completed
+cleanup. Later Close calls join the same shutdown. On normal migration,
+ViewSync stays open through the last Dropped report; final drain closes its
+streams and joins SegmentManager callbacks and shared workers. Only successful
+Close permits the node to destroy segcore. QueryNode's legacy migration loop
+does not wait on or count QueryViews; an empty legacy manager cannot cut short
+the handler's deadline. A QV-only node waits for Coord withdrawal or that deadline,
+without using the legacy no-active-peer shortcut.
 
 ### 4.2 SN: ResourceManager + Catalog Interaction
 

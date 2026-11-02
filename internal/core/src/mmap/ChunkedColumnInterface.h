@@ -491,6 +491,10 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         return std::nullopt;
     }
 
+    virtual void
+    ValidateArrayViewTarget(TargetType target_type) const {
+    }
+
     FixedVector<bool> valid_data_;
     std::vector<int64_t> valid_count_per_chunk_;
     std::vector<int64_t> num_valid_rows_until_chunk_;
@@ -510,7 +514,11 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         valid_array_offsets_per_chunk_.assign(chunk_pws.size(), {});
         for (size_t i = 0; i < chunk_pws.size(); ++i) {
             auto chunk = static_cast<VectorArrayChunk*>(chunk_pws[i].get());
-            auto logical_offsets = chunk->Offsets();
+            // Offsets() is the physical vector prefix sum. Null elements do
+            // not occupy payload slots, including in element-nullable chunks.
+            // Search on those fields is rejected by SearchOnSealed/Growing;
+            // this path also serves ordinary nullable-row reads.
+            auto physical_offsets = chunk->Offsets();
             auto& valid_offsets = valid_array_offsets_per_chunk_[i];
             valid_offsets.reserve(valid_count_per_chunk_[i] + 1);
             valid_offsets.push_back(0);
@@ -521,7 +529,7 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                 if (!chunk->isValid(j)) {
                     continue;
                 }
-                total += logical_offsets[j + 1] - logical_offsets[j];
+                total += physical_offsets[j + 1] - physical_offsets[j];
                 valid_offsets.push_back(total);
             }
         }

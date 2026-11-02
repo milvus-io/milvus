@@ -36,9 +36,9 @@ func (info *VChannelView) GetSchemaVersion(collectionID int64, version int32) (*
 
 // canonicalReadSchemaLocked is the compatibility mapping for pre-versioned
 // semantic updates (for example legacy TTL changes). The last retained normal
-// payload of that version is its read identity. Legacy same-version updates
-// retain their existing behavior until schema versioning is enabled by consumers.
-// This accessor does not change existing segment encoding recovery.
+// payload of that version is the upgrade's read identity. All new semantic
+// updates advance SchemaVersion, so this mapping stays immutable afterwards.
+// Segment encoding additionally uses its allocation boundary, not this alias.
 func (info *VChannelView) canonicalReadSchemaLocked(version int32) *streamingpb.CollectionSchemaOfVChannel {
 	history := info.meta.GetCollectionInfo().GetSchemas()
 	for i := len(history) - 1; i >= 0; i-- {

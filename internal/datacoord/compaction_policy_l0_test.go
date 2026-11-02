@@ -128,6 +128,47 @@ func (s *L0CompactionPolicySuite) TestTriggerIdle() {
 	mlog.Info(context.TODO(), "cView", mlog.String("string", cView.String()))
 }
 
+func (s *L0CompactionPolicySuite) TestActiveCollectionWithoutL0() {
+	store := metacache.NewMetaStore(nil)
+	m := &meta{segments: NewSegmentsInfo(store), metaStore: store}
+	store.PutCollection(s.collection)
+	m.segments.SetSegment(1, genTestSegmentInfo(s.testLabel, 1, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed))
+	s.l0Policy.meta = m
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(1, nil)
+	s.l0Policy.OnCollectionUpdate(s.collection.ID)
+	active := s.l0Policy.activeCollections.collections[s.collection.ID]
+
+	events, err := s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(events)
+	s.ElementsMatch([]int64{s.collection.ID}, s.l0Policy.activeCollections.GetActiveCollections())
+	s.EqualValues(1, active.readCount.Load())
+
+	// A newly eligible L0 keeps the active classification from the preceding pass.
+	segment := genTestSegmentInfo(s.testLabel, 2, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed)
+	segment.DmlPosition = &msgpb.MsgPosition{Timestamp: 1}
+	m.segments.SetSegment(2, segment)
+	events, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Len(events[TriggerTypeLevelZeroViewChange], 1)
+	s.Empty(events[TriggerTypeLevelZeroViewIDLE])
+
+	// An in-flight L0 leaves the L1-only collection participating in idle aging.
+	m.segments.SetIsCompacting(2, true)
+	active.lastRefresh = time.Now().Add(-4 * paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.GetAsDuration(time.Second))
+	events, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(events)
+	s.Empty(s.l0Policy.activeCollections.GetActiveCollections())
+
+	// When no eligible segment remains, the stale active entry is removed immediately.
+	s.l0Policy.OnCollectionUpdate(s.collection.ID)
+	m.segments.SetIsCompacting(1, true)
+	_, err = s.l0Policy.Trigger(context.Background())
+	s.Require().NoError(err)
+	s.Empty(s.l0Policy.activeCollections.GetActiveCollections())
+}
+
 func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 	segArgs := []struct {
 		ID   UniqueID

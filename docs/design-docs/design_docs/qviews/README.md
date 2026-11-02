@@ -23,13 +23,20 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 3. **StreamingNode is no longer responsible for Search/Query logic forwarding**: Proxy uses a two-phase query approach — it generates a query plan on StreamingNode, then sends the query plan to designated QueryNodes to complete the query, and performs all distributed Reduce operations itself.
 4. **StreamingNode no longer actively applies incremental delete data**: After LoadSegment, QueryNode proactively subscribes to the corresponding Delete data from StreamingNode and applies Delete data on its own.
 
+The query execution components include [versioned partition statistics and
+segment pruning](query/segment_pruning.md), including conservative fallback,
+per-worker/subquery selection, and empty-shard MVCC/result normalization.
+
 ## 3. Two-Phase Query Process
 
 The following end-to-end flow describes the target architecture. The current
-extraction implements the SN server side; it does not wire the new Proxy client,
-complete Coord scheduling, or QN query execution/remote Delete subscriptions.
+components include SN execution and an injectable
+[query client](query/query_client.md). They do not switch production Proxy
+routing or activate the new Coordinator runtime. QN execution/resource preparation
+and scoped WAL barrier production are separate dependencies; this extraction
+only supplies their query contracts.
 
-1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
+1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest Up QueryView matching the request schema:
    - Includes MVCC
    - Query optimization (BM25, Segment filtering, etc.)
    - Query view version
@@ -40,7 +47,8 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
 
 ### Current SN implementation
 
-- **Phase 1:** `GetQueryPlan` acquires the highest available Up view, resolves
+- **Phase 1:** `GetQueryPlan` acquires the highest available Up view at the exact request
+  SchemaVersion, resolves
   query MVCC, performs request/BM25 optimization and selects the plan's workers.
   `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
   [consistency-level discussion](#13-consistency-implementation-consistency-level)
@@ -62,8 +70,9 @@ complete Coord scheduling, or QN query execution/remote Delete subscriptions.
   Boost scorers follow the same ownership rule: SN adapters borrow the pinned
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
-- **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
-  complete SN/QN end-to-end flow above remain integration work.
+- **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
+  Production Proxy wiring
+  remains integration work. See [plan/schema/snapshot contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,
@@ -136,12 +145,14 @@ derived by DataViewManager. The manager validates unique Segment-ID placement,
 but the projection decides when a Segment is loadable and must not report
 overlapping logical data under different Segment IDs.
 
-Each partition also carries a packed Manifest-version array parallel to its
-packed Segment-ID array. Version `0` keeps the Coordinator SegmentMeta watch
-and resolves full SegmentInfo for loading. A positive version denotes a
-canonical StorageV3 Manifest: QueryNode derives its object-storage path from
-Collection/Partition/Segment IDs and the version, loads all data metadata from
-the Manifest, and does not watch Coordinator SegmentMeta for that Segment.
+Each partition carries a packed Manifest-version array parallel to its Segment
+IDs. The QN resource path assumes StorageV3 and manifest-backed index artifacts.
+It obtains a complete loading snapshot through `GetQueryViewSegmentLoadInfo`
+when a View's requirements cannot reuse resident resources. Positive Manifest
+versions constrain that snapshot; version `0` supplies no explicit minimum,
+but does not enable a non-V3 loading path. SegmentMeta Watch is not used.
+New Manifest publication drives DataView and QueryView advancement. Full
+manifest-only loading without the metadata RPC is a separate capability.
 
 ### 5.2 Data Structures
 
@@ -411,30 +422,22 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ## 13. Consistency Implementation (Consistency Level)
 
-### TODO: Consistency Levels — Pending Discussion
+### Current primary routing
 
-The table below records the proposed target behavior, not a completed capability
-matrix or a finalized replica-routing policy. Replica-SN MVCC selection and the
-mapping of consistency levels to primary/replica routing remain pending discussion.
+The query client discovers eligible replicas through the primary SN's
+[replica directory](query/replica_discovery.md), selects an explicit ReplicaID,
+and still plans through that primary WAL owner. Strong and Session
+are sent as Strong; Bounded and Eventually preserve the requested enum.
+`wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
+prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
+writes, Eventually can reuse the current complete snapshot, and Bounded also
+requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
+also requires RW access. WAL-secondary routing remains future work; QueryView replicas on the current
+owner are selected explicitly and support shard-level failover.
 
-| Level | MvccTimestamp Generation Logic |
-|---|---|
-| **Strong** | Proxy requests a query plan from the primary SN. SN obtains the maximum ts of messages written to the current WAL VChannel as MvccTimestamp (if ts has not yet triggered timeticksync, trigger it proactively) |
-| **Bounded** | Proxy requests from any SN. Primary SN → same as Strong; Replica SN → obtains the maximum ts of the current WAL subscription stream VChannel |
-| **Session** | Same as Strong |
-| **Eventual** | Same as Bounded |
-
-**Current implementation:** `wal/adaptor/query_plan.go` handles every
-`ConsistencyLevel` request through the RW WAL's local query MVCC and rejects
-non-RW WALs with NotPrimary; it does not branch on the level's enum value.
-`GetMVCCTimestamp` also requires RW access. A request carrying an explicit
-`QueryPlanMVCC` follows a separate path and does not demonstrate that replica
-selection or the table's consistency-level routing has been implemented.
-
-The follow-up discussion must settle which node supplies each level's MVCC,
-what freshness/visibility it guarantees, and how the client routes or retries
-when only a non-primary node is available. No routing or MVCC behavior changes
-are part of this documentation update.
+Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
+[Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with
+write-side conflict and history checks, without a separate read certificate.
 
 Target changes:
 - GuaranteeTS assignment logic is moved down to StreamingNode, obtained from the WAL system.
@@ -465,3 +468,10 @@ consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
 uses a QueryView handoff fence (QueryCoord target update in the legacy model).
 The MVCC extension and distributed delivery are outside the current SN query
 extraction PR; a progress barrier alone does not implement DDL visibility.
+
+## QueryNode subsystem extraction
+
+See [implemented scope and production dependencies](querynode_extraction.md),
+[resource preparation](qnview/querynode_queryview_resource_preparation.md), and
+[query execution](query/query_execution.md). The node waits for applied Transform
+MVCC on the exact physical registrations retained by its query handles.

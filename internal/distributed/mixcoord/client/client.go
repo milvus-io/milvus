@@ -2398,3 +2398,9 @@ func (c *Client) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 		return client.GetStreamingNodeQueryViewResources(ctx, req)
 	})
 }
+
+func (c *Client) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+		return client.GetQueryViewSegmentLoadInfo(ctx, req, opts...)
+	})
+}

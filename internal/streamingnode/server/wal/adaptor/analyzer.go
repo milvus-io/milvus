@@ -2,6 +2,8 @@ package adaptor
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -14,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+var readAnalyzerSequence atomic.Uint64
+
 func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("WAL is closing")
@@ -24,6 +28,20 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 	}
 	field := req.GetFieldAnalyzer()
 	key := shard.WALFunctionRunnerKey(field.GetVchannel())
+	if field.ReadSchemaVersion != nil {
+		snapshot, err := w.GetCollectionSchema(ctx, &streamingpb.StreamingNodeGetCollectionSchemaRequest{
+			Vchannel: field.GetVchannel(),
+			Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: field.GetReadSchemaVersion()},
+		})
+		if err != nil {
+			return nil, err
+		}
+		key = fmt.Sprintf("read-analyzer/%s/%d", field.GetVchannel(), readAnalyzerSequence.Add(1))
+		if err := function.GetManager().Alloc(field.GetCollectionId(), key, snapshot.GetSchema()); err != nil {
+			return nil, err
+		}
+		defer function.GetManager().Release(field.GetCollectionId(), key)
+	}
 	return analyzer.RunOperation(ctx, req, func(use func(analyzer.BatchRun, []string) error) error {
 		ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), key, field.GetFieldId(), func(a function.Analyzer) error {
 			multiAnalyzer := len(a.GetInputFields()) != 1

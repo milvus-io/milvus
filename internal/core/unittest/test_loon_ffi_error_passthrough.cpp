@@ -35,7 +35,8 @@ loon_milvus_table_create_manifest_from_segment_manifests(
     const char* external_source,
     const LoonProperties* properties,
     int has_external_primary_key,
-    char** out_manifest_path);
+    int64_t* out_committed_version,
+    int64_t* out_manifest_size);
 
 // The err_code a loon FFI call reports must survive milvus's OWN C-ABI export
 // layer (milvus_table_c.cpp), whose tail returns a LoonFFIResult. That tail
@@ -57,7 +58,7 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     std::vector<char*> manifests{missing_manifest.data()};
     std::vector<int64_t> row_counts{1};
     std::vector<char*> columns{column.data()};
-    char* out_manifest_path = nullptr;
+    int64_t committed_version = -1;
 
     auto result = loon_milvus_table_create_manifest_from_segment_manifests(
         base_path.c_str(),
@@ -69,7 +70,8 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
         /*external_source=*/nullptr,
         /*properties=*/nullptr,
         /*has_external_primary_key=*/0,
-        &out_manifest_path);
+        &committed_version,
+        /*out_manifest_size=*/nullptr);
 
     ASSERT_EQ(loon_ffi_is_success(&result), 0)
         << "a missing source manifest must fail";
@@ -82,7 +84,4 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     EXPECT_NE(milvus::storage::LoonErrCodeToErrorCode(result.err_code),
               milvus::ErrorCode::UnexpectedError);
     loon_ffi_free_result(&result);
-    if (out_manifest_path != nullptr) {
-        free(out_manifest_path);
-    }
 }

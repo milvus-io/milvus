@@ -149,14 +149,16 @@ func TestTalonPrewarmDataCoordStartAfterHealthy(t *testing.T) {
 	patchInfo := mockey.Mock(sessionutil.SaveServerInfo).To(func(string, int64) {}).Build()
 	defer patchInfo.UnPatch()
 
-	s := &Server{ctx: context.Background(), meta: newEmptyTestMeta(), importInspector: &importInspector{}}
+	s := &Server{
+		ctx:             context.Background(),
+		meta:            newEmptyTestMeta(),
+		importInspector: &importInspector{},
+		session:         &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
+	}
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
 	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, ManifestPath: "unloaded/object",
 	}))
-	session := sessionutil.NewMockSession(t)
-	session.EXPECT().GetServerID().Return(int64(1))
-	s.session = session
 	c := &recordingTalonPrewarm{stats: map[string]int{}, pending: make(chan struct{}), closeStarted: make(chan struct{})}
 	s.talonPrewarmInspector = NewTalonPrewarmInspector(s.ctx, s.GetPublishedManifestPaths, c,
 		func(s string) (string, error) { return s, nil }, time.Hour, 1)

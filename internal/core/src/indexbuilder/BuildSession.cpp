@@ -749,14 +749,16 @@ BuildSession::RunToArtifact() {
             AssertInfo(missing_rows >= 0,
                        "index-build missing row count {} is negative",
                        missing_rows);
-            AssertInfo(
-                missing_rows == 0 || field_spec_.nullable ||
-                    file_manager_context_.fieldDataMeta.field_schema
-                        .has_default_value(),
-                "index-build source is missing {} rows for non-nullable field "
-                "{} without a default value",
-                missing_rows,
-                req_.field_id.get());
+            if (missing_rows > 0 && !field_spec_.nullable &&
+                !file_manager_context_.fieldDataMeta.field_schema
+                     .has_default_value()) {
+                ThrowInfo(DataFormatBroken,
+                          "index-build source is missing {} rows for "
+                          "non-nullable field "
+                          "{} without a default value",
+                          missing_rows,
+                          req_.field_id.get());
+            }
             while (missing_rows > 0) {
                 const auto batch_rows = MissingBatchRows(
                     field_spec_.estimated_missing_row_bytes, missing_rows);

@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -27,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func bm25Insert(t *testing.T, segmentID int64, tf float32) message.ImmutableMessage {
+func bm25Insert(t *testing.T, segmentID int64, tf float32, ticks ...uint64) message.ImmutableMessage {
 	t.Helper()
 	raw, err := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{
 		CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: segmentID}}},
@@ -36,7 +37,11 @@ func bm25Insert(t *testing.T, segmentID int64, tf float32) message.ImmutableMess
 		FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"already materialized"}}}}}}, {FieldId: 102, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: tf})}}}}}}},
 	}).BuildMutable()
 	require.NoError(t, err)
-	return raw.WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
+	tick := uint64(10)
+	if len(ticks) != 0 {
+		tick = ticks[0]
+	}
+	return raw.WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
 }
 
 // Persisted stats, snapshot/live inserts and sealed handoff contribute exactly once.
@@ -64,7 +69,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 		require.Equal(t, int64(1), req.GetCollectionId())
 		require.Equal(t, "v1", req.GetVchannel())
 		require.Equal(t, []int64{10}, req.GetPartitionIds())
-		require.Equal(t, uint64(5), req.GetLoadInfoVersion())
+		require.Zero(t, req.GetLoadInfoVersion())
 		resp := &datapb.GetStreamingNodeQueryViewResourcesResponse{Status: merr.Success(), CollectionId: 1, Vchannel: "v1", DataVersion: req.GetDataVersion()}
 		if req.GetDataVersion().GetStreamingVersion() >= 11 {
 			resp.Bm25Resources = []*datapb.StreamingNodeBM25Resource{resource}
@@ -81,12 +86,15 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	defer runtime.Close()
 	current := qviews.DataVersion{StreamingVersion: 10}
 	next := qviews.DataVersion{StreamingVersion: 11}
-	snapshot := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, PartitionIDs: []int64{10}, LoadInfoVersion: 5, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: current, Segments: []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{Binlogs: []*streamingpb.L1SegmentBinLogs{{Bm25Binlog: growingLogs}}}, InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}}}}}}
-	require.NoError(t, runtime.Prepare(ctx, snapshot))
-	require.NoError(t, runtime.Prepare(ctx, snapshot))
+	snapshot := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, PartitionIDs: []int64{10}, LoadInfoVersion: 5, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: current, Segments: []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{Binlogs: []*streamingpb.L1SegmentBinLogs{{Bm25Binlog: growingLogs}}}, InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}}}}}}
+	binding, err := prepareTestView(t, runtime, snapshot)
+	require.NoError(t, err)
+	require.NoError(t, binding.Prepare(ctx, nil))
 	query := &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}}
 	check := func(version qviews.DataVersion, avg float64) {
-		ids, actual, err := runtime.BuildIDF(ctx, version, 102, query)
+		result, err := binding.BuildIDFBatch(ctx, []queryresource.IDFRequest{{FieldID: 102, TFs: query}})
+		require.NoError(t, err)
+		ids, actual := result[0].Vectors, result[0].Avgdl
 		require.NoError(t, err)
 		require.Len(t, ids, 1)
 		require.Equal(t, avg, actual)
@@ -97,7 +105,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	flush := message.NewFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.FlushMessageHeader{CollectionId: 1, PartitionId: 10, SegmentId: 20}).WithBody(&message.FlushMessageBody{}).MustBuildMutable().WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(11))
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: flush})
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: next}})
-	require.Eventually(t, func() bool { return runtime.oracle.PrepareDataVersion(ctx, next) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return binding.fields[0].oracle.PrepareDataVersion(ctx, next) == nil }, time.Second, time.Millisecond)
 	check(next, 4)
 	check(current, 4)
 	// A segment created after both versions were prepared belongs to both.
@@ -108,13 +116,13 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	check(next, 5)
 	check(next, 5)
 	check(current, 5)
-	require.NotContains(t, runtime.oracle.growingStore.segments, int64(20))
+	require.NotContains(t, binding.fields[0].oracle.growingStore.segments, int64(20))
 	target := qviews.DataVersion{StreamingVersion: 12}
-	require.Eventually(t, func() bool { return runtime.oracle.PrepareDataVersion(ctx, target) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return binding.fields[0].oracle.PrepareDataVersion(ctx, target) == nil }, time.Second, time.Millisecond)
 	check(current, 5)
 	check(target, 5)
 	runtime.Close()
 	runtime.Close()
 	require.ErrorIs(t, runtime.Prepare(ctx, snapshot), context.Canceled)
-	require.Error(t, runtime.PrepareDataVersion(ctx, target))
+	require.Error(t, binding.advance(ctx, target))
 }

@@ -19,4 +19,9 @@ func TestQueryBarrierAdvancesBothFrontiers(t *testing.T) {
 	r.ApplyLiveEvent(t.Context(), event)
 	require.EqualValues(t, 100, r.AppliedGrowingTimeTick())
 	require.EqualValues(t, 100, r.AppliedTransformTimeTick())
+	// Partition refresh must replay a barrier that arrived after its snapshot.
+	refresh := &partitionRefresh{timeTick: 50}
+	require.True(t, refresh.includes(event))
+	refresh.timeTick = 100
+	require.False(t, refresh.includes(event))
 }

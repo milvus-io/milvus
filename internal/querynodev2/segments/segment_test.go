@@ -47,6 +47,7 @@ type SegmentSuite struct {
 
 func (suite *SegmentSuite) SetupSuite() {
 	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
 }
 
 func (suite *SegmentSuite) SetupTest() {
@@ -284,14 +285,14 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 			101: {FieldID: 101, MemorySize: 200},
 		},
 	}
-	segment := &baseSegment{
+	segment := &LocalSegment{baseSegment: baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
 		segmentType:        SegmentTypeSealed,
 		loadInfo:           atomic.NewPointer(loadInfo),
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
-	}
+	}}
 
-	segment.compactLoadInfoForRuntime()
+	FinalizeLoad(segment)
 
 	assert.Empty(t, segment.LoadInfo().GetBinlogPaths())
 	assert.Nil(t, segment.LoadInfo().GetStats())

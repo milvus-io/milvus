@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -69,6 +70,7 @@ func (s *Server) Stop() {
 	mlog.Info(context.TODO(), "stopping streamingnode server...")
 	mlog.Info(context.TODO(), "close wal manager...")
 	s.walManager.Close()
+	expr.CloseXGBoostModels()
 	fileresource.CloseAnalyzerResourceManager()
 	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()

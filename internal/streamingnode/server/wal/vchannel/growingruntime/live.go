@@ -14,6 +14,18 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 	if r == nil {
 		return
 	}
+	r.eventMu.Lock()
+	defer r.eventMu.Unlock()
+	for r.refresh != nil && r.refresh.err == nil && len(r.refresh.pending) >= 1024 {
+		r.eventCond.Wait()
+	}
+	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
+		stage.pending = append(stage.pending, event)
+	}
+	r.applyEvent(ctx, event)
+}
+
+func (r *Runtime) applyEvent(ctx context.Context, event walview.VChannelResourceEvent) {
 	if event.QueryBarrier != nil {
 		r.markGrowingTimeTick(event.QueryBarrier.TimeTick)
 		r.markTransformTimeTick(event.QueryBarrier.TimeTick)

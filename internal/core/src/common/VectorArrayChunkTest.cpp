@@ -372,6 +372,79 @@ TEST_F(VectorArrayChunkTest, TestEmptyVectorArray) {
     EXPECT_EQ(vector_array_chunk->RowNums(), 0);
 }
 
+// Builds the element-nullable example documented above VectorArrayChunk:
+// FloatVector, dim=2, rows [[1, 2], null, [3, 4]], null, [], [null], [[5, 6]].
+static std::vector<char>
+ElementNullableVectorArrayChunkExample() {
+    std::vector<char> buffer;
+    auto append = [&buffer](const void* src, size_t bytes) {
+        const auto* begin = static_cast<const char*>(src);
+        buffer.insert(buffer.end(), begin, begin + bytes);
+    };
+    const uint8_t row_bitmap = 0xFD;
+    const uint32_t offsets_lens[] = {66, 2, 82, 0, 82, 0, 82, 0, 82, 1, 90};
+    const uint32_t logical_lengths[] = {3, 0, 0, 1, 1};
+    const uint8_t element_bitmap = 0x15;
+    const float payload[] = {1, 2, 3, 4, 5, 6};
+    const char padding = 0;
+    append(&row_bitmap, sizeof(row_bitmap));
+    append(offsets_lens, sizeof(offsets_lens));
+    append(logical_lengths, sizeof(logical_lengths));
+    append(&element_bitmap, sizeof(element_bitmap));
+    append(payload, sizeof(payload));
+    append(&padding, sizeof(padding));
+    return buffer;
+}
+
+TEST_F(VectorArrayChunkTest, TruncatedChunkThrowsDataFormatBroken) {
+    auto buffer = ElementNullableVectorArrayChunkExample();
+    ASSERT_EQ(buffer.size(), 91);
+    VectorArrayChunk chunk(2,
+                           5,
+                           buffer.data(),
+                           buffer.size(),
+                           DataType::VECTOR_FLOAT,
+                           nullptr,
+                           true,
+                           true);
+    EXPECT_EQ(chunk.Offsets()[5], 3);
+
+    // Each size cuts one region: the offsets, the logical lengths, the
+    // element bitmap and the payload.
+    for (uint64_t size :
+         {uint64_t{20}, uint64_t{50}, uint64_t{65}, uint64_t{80}}) {
+        try {
+            VectorArrayChunk truncated(2,
+                                       5,
+                                       buffer.data(),
+                                       size,
+                                       DataType::VECTOR_FLOAT,
+                                       nullptr,
+                                       true,
+                                       true);
+            FAIL() << "size " << size << " was accepted";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken)
+                << "size " << size;
+        }
+    }
+
+    // An element bitmap that runs into the payload is rejected even when the
+    // chunk is long enough.
+    auto* logical_lengths =
+        reinterpret_cast<uint32_t*>(buffer.data() + 1 + 11 * sizeof(uint32_t));
+    logical_lengths[4] = 100;
+    EXPECT_THROW(VectorArrayChunk(2,
+                                  5,
+                                  buffer.data(),
+                                  buffer.size(),
+                                  DataType::VECTOR_FLOAT,
+                                  nullptr,
+                                  true,
+                                  true),
+                 SegcoreError);
+}
+
 struct VectorArrayTestParam {
     DataType data_type;
     int64_t dim;

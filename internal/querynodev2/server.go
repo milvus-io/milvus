@@ -36,9 +36,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -109,6 +110,8 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
+	queryViewSegments     atomic.Pointer[qnview.SegmentResourceManager]
+	queryViewHandler      atomic.Pointer[qnview.QNQueryViewHandler]
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager
@@ -343,12 +346,8 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			// A hook configured both ways is a contradiction in the
-			// deployment, not an optional plug-in that is absent: refuse to
-			// start whatever autoIndex.enable says. Any other failure keeps
-			// the old rule - auto index cannot work without a hook, so it is
-			// fatal only when auto index is on.
-			if hookInitIsFatal(err) {
+			// auto index cannot work if hook init failed
+			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
@@ -502,14 +501,37 @@ func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
 		mlog.Info(node.ctx, "Query node stop...")
+		migrationCtx, cancelMigration := context.WithTimeout(context.WithoutCancel(node.ctx),
+			paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+		defer cancelMigration()
 		err := node.session.GoingStop()
+		canMigrate := err == nil && util.MustSelectWALName() != message.WALNameRocksmq
+		if !canMigrate {
+			cancelMigration()
+		}
+		handler := node.queryViewHandler.Load()
+		queryViewClosed := make(chan struct{})
+		if handler == nil {
+			close(queryViewClosed)
+		} else {
+			// Share the migration deadline with the legacy path. The handler owns
+			// preparation rejection, migration waiting, and physical resource drain.
+			go func() {
+				defer close(queryViewClosed)
+				if err := handler.Close(migrationCtx); err != nil {
+					mlog.Info(node.ctx, "query view graceful close interrupted, waiting for local cleanup", mlog.Err(err))
+					// Cancellation ends migration, not native ownership. Join the
+					// same cleanup before allowing segcore to be destroyed.
+					_ = handler.Close(context.WithoutCancel(node.ctx))
+				}
+			}()
+		}
 		if err != nil {
 			mlog.Warn(node.ctx, "session fail to go stopping state", mlog.Err(err))
-		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
+		} else if canMigrate { // rocksmq cannot migrate because it uses local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
-			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
 			migrateTimeout := paramtable.Get().QueryNodeCfg.MigrateDataTimeout.GetAsDurationByParse()
 			migrateDeadline := time.Now().Add(migrateTimeout)
 
@@ -552,12 +574,13 @@ func (node *QueryNode) Stop() error {
 							})),
 							mlog.Int("channelNum", channelNum),
 						)
+						cancelMigration()
 						break outer
 					}
 				}
 
 				select {
-				case <-timeoutCh:
+				case <-migrationCtx.Done():
 					mlog.Warn(node.ctx, "migrate data timed out", mlog.Int64("ServerID", node.GetNodeID()),
 						mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
@@ -588,6 +611,9 @@ func (node *QueryNode) Stop() error {
 			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(0)
 		}
 
+		// Legacy resources may be empty while QueryViews are still migrating.
+		// Let Close finish with the original deadline before stopping queries.
+		<-queryViewClosed
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		if node.scheduler != nil {
@@ -638,39 +664,20 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// errQueryHookConflict is returned when a compiled-in query hook and
-// queryNode.soPath are both configured. A hook that fails to load is an
-// optional plug-in that may be absent, but this is a contradiction in the
-// deployment, so Init refuses to start on it whatever autoIndex.enable says.
-var errQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
-
-// hookInitIsFatal reports whether an initHook error must stop the QueryNode.
-// A queryNode.soPath configured beside a compiled-in hook is a contradiction
-// and is always fatal; any other failure - no path at all, a plug-in that
-// does not load - is fatal only when auto index is on, because that is the
-// only feature that needs a hook.
-func hookInitIsFatal(err error) bool {
-	return errors.Is(err, errQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
-}
-
 // initHook installs the parameter tuning hook: the one compiled into this
 // binary if a distribution installed one, otherwise the plug-in at
 // queryNode.soPath.
 //
-// A compiled-in hook is used in preference to the plug-in, and a deployment
-// that configures both is refused (errQueryHookConflict): both would tune
-// every search, and picking silently would make which one wins depend on
-// start-up order rather than on the deployment. It is otherwise treated
-// exactly as the plug-in is: the same two Init calls with the autoIndex
-// configuration, the same watchers.
+// A compiled-in hook is used and queryNode.soPath is ignored. The compiled-in
+// hook is otherwise treated exactly as the plug-in is: the same two Init calls
+// with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 
 	if compiled := extension.InstalledQueryHook(); compiled != nil {
 		if path != "" {
-			return merr.Wrapf(errQueryHookConflict,
-				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
-					"both tune every search, and only one can", path)
+			mlog.Warn(node.ctx, "queryNode.soPath is ignored, a query hook is compiled into this binary",
+				mlog.String("so_path", path))
 		}
 		return node.useQueryHook(compiled)
 	}
