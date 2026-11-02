@@ -3268,8 +3268,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
-				"no vector field found in schema")
+			return nil, merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", request.GetCollectionName())
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",

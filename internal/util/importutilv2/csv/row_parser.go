@@ -145,6 +145,26 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 				fmt.Sprintf("value of field is missed: '%s'", field.GetName()))
 		}
 	}
+
+	// A header that names no field of the collection cannot carry a row. The
+	// dynamic field column and struct array columns count; a header made of
+	// unknown columns only is rejected up front instead of producing rows of
+	// nulls and defaults. A vector field used to make this impossible.
+	provided := 0
+	for _, name := range header {
+		if _, ok := name2Field[name]; ok {
+			provided++
+		} else if _, ok := name2StructField[name]; ok {
+			provided++
+		} else if dynamicField != nil && name == dynamicField.GetName() {
+			provided++
+		} else if name == pkField.GetName() {
+			provided++
+		}
+	}
+	if provided == 0 {
+		return nil, merr.WrapErrImportFailed("the csv header provides no field of the collection")
+	}
 	return &rowParser{
 		nullkey:              nullkey,
 		name2Dim:             name2Dim,

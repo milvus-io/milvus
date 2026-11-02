@@ -51,6 +51,13 @@ func newPartitionSegmentManager(
 	return m
 }
 
+// withCollectionInfo attaches the collection info the partition belongs to, so
+// that new segments are sized from the collection's schema.
+func (m *partitionManager) withCollectionInfo(info *CollectionInfo) *partitionManager {
+	m.collection = info
+	return m
+}
+
 // partitionManager is a assign manager of determined partition on determined vchannel.
 type partitionManager struct {
 	mlog.Binder
@@ -66,6 +73,7 @@ type partitionManager struct {
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
 	metrics              *metricsutil.SegmentAssignMetrics
+	collection           *CollectionInfo // shared with the shard manager; nil in tests that build a bare partition manager
 }
 
 // AddSegment adds a segment to the partition segment manager.

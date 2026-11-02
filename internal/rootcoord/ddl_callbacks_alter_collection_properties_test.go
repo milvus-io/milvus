@@ -935,6 +935,33 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 }
 
 func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
+	createCollectionForTestWithFields(t, ctx, core, dbName, collectionName, []*schemapb.FieldSchema{
+		{
+			Name:     "field1",
+			DataType: schemapb.DataType_Int64,
+		},
+	}, properties...)
+}
+
+// createCollectionWithVectorForTest creates the test collection with a vector
+// field as well. A collection created without a vector field cannot gain one,
+// so tests that add a vector-output function or a struct vector sub-field
+// start from this one.
+func createCollectionWithVectorForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
+	createCollectionForTestWithFields(t, ctx, core, dbName, collectionName, []*schemapb.FieldSchema{
+		{
+			Name:     "field1",
+			DataType: schemapb.DataType_Int64,
+		},
+		{
+			Name:       "fixture_vector",
+			DataType:   schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		},
+	}, properties...)
+}
+
+func createCollectionForTestWithFields(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, fields []*schemapb.FieldSchema, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -943,12 +970,7 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 		Name:        collectionName,
 		Description: "description",
 		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
-			{
-				Name:     "field1",
-				DataType: schemapb.DataType_Int64,
-			},
-		},
+		Fields:      fields,
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)

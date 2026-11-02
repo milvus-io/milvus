@@ -770,7 +770,8 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 			continue
 		}
 
-		// each collection must contains at least one vector field, there must be one field that row number is not 0
+		// any field that carries rows decides the row count; readers reject a
+		// file that provides no field of the collection, so at least one does
 		if fd.RowNum() != 0 {
 			return fd.RowNum(), fieldID
 		}

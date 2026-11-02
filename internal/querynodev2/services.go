@@ -202,8 +202,8 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	}
 	defer node.lifetime.Done()
 
-	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// check index; a collection with no vector field has nothing that needs one
+	if len(req.GetIndexInfoList()) == 0 && typeutil.HasVectorField(req.GetSchema()) {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
@@ -493,8 +493,8 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	}
 	defer node.lifetime.Done()
 
-	// check index
-	if len(req.GetIndexInfoList()) == 0 {
+	// check index; a collection with no vector field has nothing that needs one
+	if len(req.GetIndexInfoList()) == 0 && typeutil.HasVectorField(req.GetSchema()) {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
 	}
