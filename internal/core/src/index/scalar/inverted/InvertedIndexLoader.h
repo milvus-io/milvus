@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -29,6 +30,9 @@
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+template <typename T>
+struct InvertedIndexStorage;
 
 /**
  * @brief Loads inverted readers from legacy or packed V3 artifacts.
@@ -61,13 +65,23 @@ class InvertedIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     InvertedIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    template <typename T>
+    IndexPtr
+    CreateCached(const IndexCacheConfig& cache, milvus::OpContext* context);
+
+    template <typename T>
+    static folly::coro::Task<std::unique_ptr<InvertedIndexStorage<T>>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
 
     /**
      * @brief Materialize Tantivy files and attach null and JSON projection

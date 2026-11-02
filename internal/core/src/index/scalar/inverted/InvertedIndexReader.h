@@ -21,6 +21,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
@@ -116,17 +118,28 @@ class InvertedIndex final
                   bool mmap,
                   size_t engine_bytes,
                   size_t engine_path_bytes);
+    explicit InvertedIndex(
+        std::shared_ptr<const InvertedIndexStorage<T>> storage);
+    InvertedIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<InvertedIndexStorage<T>>> slot,
+        IndexMetadata metadata);
     IndexMetadata
     Metadata() const override;
     IIndexReaderBasePtr
     CreateReader(milvus::OpContext* op_ctx) const override;
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class InvertedIndexReader<T>;
-    InvertedIndexStorage<T> storage_;
+    std::shared_ptr<const InvertedIndexStorage<T>>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<InvertedIndexStorage<T>>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const InvertedIndexStorage<T>>, CachedStorage>
+        storage_;
 };
 
 template <typename T>
@@ -199,10 +212,17 @@ class InvertedIndexReader final
     PatternMatchImpl(std::string_view pattern, PatternOp op) const;
 
     TargetBitmap
-    PatternQuery(std::string_view pattern) const;
+    PatternQuery(const InvertedIndexStorage<T>& storage,
+                 std::string_view pattern) const;
 
     void
-    ApplyValidityMask(TargetBitmap& bitset) const;
+    ApplyValidityMask(const InvertedIndexStorage<T>& storage,
+                      TargetBitmap& bitset) const;
+
+    TargetBitmap
+    InStorage(const InvertedIndexStorage<T>& storage,
+              size_t n,
+              const T* values) const;
 
     std::shared_ptr<const InvertedIndex<T>> index_;
     milvus::OpContext* const op_ctx_;

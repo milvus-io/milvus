@@ -209,3 +209,5 @@ RTree 同样把整份 Boost 树和 validity 数据作为一个缓存 cell，由�
 Sorted 的数值和字符串索引均直接缓存各自的 `SortedIndexStorage<T>`，包括排序数据、validity 和反向坐标表。请求 Reader 的查询及 Gather 回调在同一次 storage pin 内完成；返回的 Lookup 值仍然拥有自己的数据。已解析的计数和能力保留在 Index 上，CreateReader 与元数据访问不加载 cell。JSON projection 暂留原加载路径，后续随 sidecar 一起迁移。
 
 Bitmap 保持 Roaring 与 Bitset 两种具体 posting 表示，分别使用 `BitmapPostingStorage<T, Posting>` 作为缓存 cell。In、NotIn、Range、字符串匹配及 Gather 在一次 pin 内完成；内部辅助函数接收本次已固定的 Storage，避免重复 pin。加载器继续按已解析的基数选择表示，冻结 Roaring 的临时映射清理和取消检查保持在加载事务内。
+
+Inverted 使用 `InvertedIndexStorage<T>` 保存 Tantivy engine、validity 和映射目录，并在每次谓词或模式查询中持有同一个 pin。普通标量索引优先使用加载参数中已知的行数；缺少该元数据时，Count 通过加载 Storage 得到。嵌套索引的元素计数不能使用 segment 行数代替，因此也保留加载后的计数。JSON projection 仍等待 sidecar 迁移。
