@@ -1386,7 +1386,13 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 		for key, value := range common.KeyValuePairs(definition.IndexParams).ToMap() {
 			expectedParams[key] = value
 		}
-		if entry.IndexType != meta.GetIndexType(definition.IndexParams) || !maps.Equal(entry.Properties, expectedParams) {
+		info := copied[entry.BuildID]
+		expectedType := meta.GetIndexType(definition.IndexParams)
+		if info.GetIndexType() != "" {
+			expectedType = info.GetIndexType()
+			expectedParams[common.IndexTypeKey] = expectedType
+		}
+		if entry.IndexType != expectedType || !maps.Equal(entry.Properties, expectedParams) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"copied manifest index %d has changed target parameters; retry the restore", entry.IndexID)
 		}
@@ -1394,7 +1400,6 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.Wrapf(merr.ErrDataIntegrity,
 				"copied manifest of segment %d has an invalid artifact path for build %d", result.GetSegmentId(), entry.BuildID)
 		}
-		info := copied[entry.BuildID]
 		if info == nil || info.GetIndexName() != entry.IndexName || info.GetFieldId() != entry.FieldID ||
 			info.GetVersion() != entry.IndexVersion || info.GetIndexStorePathVersion() != entry.IndexStorePathVersion ||
 			!slices.Equal(slices.Sorted(slices.Values(info.GetIndexFilePaths())), slices.Sorted(slices.Values(entry.IndexFileKeys))) {
@@ -1645,6 +1650,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			PartitionID:               partitionID,
 			IndexID:                   targetIndexID,
 			BuildID:                   indexInfo.GetBuildId(),
+			IndexType:                 indexInfo.GetIndexType(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),

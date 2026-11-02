@@ -54,6 +54,10 @@ const (
 )
 
 var (
+	manifestSchemaOnce sync.Once
+	manifestSchema     avro.Schema
+	manifestSchemaErr  error
+
 	manifestSchemaV1Once sync.Once
 	manifestSchemaV1     avro.Schema
 	manifestSchemaV1Err  error
@@ -75,9 +79,16 @@ var (
 	manifestSchemaV5Err  error
 )
 
-// ManifestSchema returns the current Avro schema for snapshot segment manifests.
+// ManifestSchema returns the OCF writer schema; historical raw schemas stay unchanged.
 func ManifestSchema() (avro.Schema, error) {
-	return ManifestSchemaV5()
+	manifestSchemaOnce.Do(func() {
+		schema := strings.Replace(AvroSchemaV5(),
+			`{"name": "index_store_path_version", "type": "int", "default": 0}`,
+			`{"name": "index_store_path_version", "type": "int", "default": 0},
+			{"name": "index_type", "type": "string", "default": ""}`, 1)
+		manifestSchema, manifestSchemaErr = avro.Parse(schema)
+	})
+	return manifestSchema, manifestSchemaErr
 }
 
 // ManifestSchemaV1 returns the Avro schema used by legacy snapshot manifests.
@@ -112,7 +123,7 @@ func ManifestSchemaV4() (avro.Schema, error) {
 	return manifestSchemaV4, manifestSchemaV4Err
 }
 
-// ManifestSchemaV5 returns the Avro schema used by current snapshot manifests.
+// ManifestSchemaV5 returns the historical version-5 raw binary schema.
 func ManifestSchemaV5() (avro.Schema, error) {
 	manifestSchemaV5Once.Do(func() {
 		manifestSchemaV5, manifestSchemaV5Err = avro.Parse(AvroSchemaV5())
@@ -211,6 +222,7 @@ type AvroBinlog struct {
 
 // AvroIndexFilePathInfo represents indexpb.IndexFilePathInfo in Avro-compatible format.
 type AvroIndexFilePathInfo struct {
+	IndexType                 string             `avro:"index_type"`
 	SegmentID                 int64              `avro:"segment_id"`
 	FieldID                   int64              `avro:"field_id"`
 	IndexID                   int64              `avro:"index_id"`
@@ -517,6 +529,7 @@ func AvroToFieldBinlog(avroFB AvroFieldBinlog) *datapb.FieldBinlog {
 // IndexFilePathInfoToAvro converts protobuf IndexFilePathInfo to Avro format.
 func IndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathInfo {
 	avroInfo := AvroIndexFilePathInfo{
+		IndexType:                 info.GetIndexType(),
 		SegmentID:                 info.GetSegmentID(),
 		FieldID:                   info.GetFieldID(),
 		IndexID:                   info.GetIndexID(),
@@ -544,6 +557,7 @@ func IndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathI
 // AvroToIndexFilePathInfo converts Avro IndexFilePathInfo back to protobuf format.
 func AvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.IndexFilePathInfo {
 	info := &indexpb.IndexFilePathInfo{
+		IndexType:                 avroInfo.IndexType,
 		SegmentID:                 avroInfo.SegmentID,
 		FieldID:                   avroInfo.FieldID,
 		IndexID:                   avroInfo.IndexID,
