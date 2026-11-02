@@ -784,7 +784,7 @@ func TestShardSplitPreparingFailures(t *testing.T) {
 
 	t.Run("a callback that lands during the broadcast is not dragged back", func(t *testing.T) {
 		manager, coordinator, _ := newPreparingCase(t)
-		svr := &Server{meta: manager.meta, shardSplitTasks: manager.store}
+		svr := &Server{meta: manager.meta, shardSplitTasks: manager.store, broker: splitTestBroker(t)}
 		svr.UpdateStateCode(commonpb.StateCode_Healthy)
 		coordinator.onIssue = func(task *datapb.SplitShardTask) {
 			status, err := svr.CommitShardSplit(context.Background(), &datapb.CommitShardSplitRequest{
