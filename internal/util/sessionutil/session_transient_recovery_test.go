@@ -93,10 +93,10 @@ func (t *appliedRegistrationTxn) Commit() (*clientv3.TxnResponse, error) {
 	t.kv.txnCalls++
 	for _, cmp := range t.cmps {
 		version := int64(0)
-		if kv := t.kv.kvs[string(cmp.Key)]; kv != nil {
+		if kv := t.kv.kvs[string(cmp.KeyBytes())]; kv != nil {
 			version = kv.Version
 		}
-		if version != (*etcdserverpb.Compare)(&cmp).GetVersion() {
+		if version != cmp.GetCompare().GetVersion() {
 			resp := &clientv3.TxnResponse{Header: &etcdserverpb.ResponseHeader{Revision: 20}}
 			for _, op := range t.elseOps {
 				rangeResp, err := t.kv.Get(t.ctx, string(op.KeyBytes()))
