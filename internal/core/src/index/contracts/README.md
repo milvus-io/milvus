@@ -9,6 +9,15 @@ implementations are in [`index/growing/README.md`](../growing/README.md). `query
 `milvus::index`. The loader and builder registries are defined in `Registry.h` and `Registry.cpp`
 at the root of this directory.
 
+## Index/request-reader migration
+
+`IIndex.h` introduces long-lived Index ownership and request-bound reader
+creation. Bitmap currently supports this split for its prepared engine; legacy
+loader factories still return a reader until the load boundary is migrated.
+The rest of this document describes the existing loader/cache contracts during
+that transition. See the [migration design](../../../../../docs/design-docs/design_docs/20261102-index-and-request-reader.md)
+for the final ownership and cache boundaries.
+
 ## Lifecycle and ownership
 
 | Object | Responsibility | Ownership and lifetime |

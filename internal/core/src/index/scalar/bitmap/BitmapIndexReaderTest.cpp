@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "index/contracts/query/INullReader.h"
+#include "index/scalar/bitmap/BitmapIndexReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
@@ -32,6 +33,63 @@
 
 namespace milvus::index::test {
 namespace {
+
+TEST(BitmapIndexOwnershipTest, RequestViewsShareKeysAndRetainTheIndex) {
+    BitmapRoaringPostingMap<std::string> postings;
+    postings["first"].add(0);
+    postings["second"].add(1);
+    TargetBitmap validity(3, true);
+    validity.reset(2);
+    auto index = CreateBitmapIndex<std::string>(
+        std::move(postings),
+        BitmapReaderOptions{.valid_bitset = std::move(validity),
+                            .total_num_rows = 3,
+                            .value_type = DataType::VARCHAR,
+                            .offset_cache = true});
+    std::weak_ptr<IIndex> index_lifetime = index;
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    ASSERT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 3);
+    EXPECT_TRUE(index->Metadata().caps.cheap_value_lookup);
+    index.reset();
+    EXPECT_FALSE(index_lifetime.expired());
+
+    const auto* first_values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(first.get());
+    const auto* second_values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(second.get());
+    ASSERT_NE(first_values, nullptr);
+    ASSERT_NE(second_values, nullptr);
+    const int64_t offset = 1;
+    const char* first_key = nullptr;
+    first_values->Gather(
+        &offset, 1, [&](int64_t, const std::string_view* value, bool valid) {
+            ASSERT_TRUE(valid);
+            ASSERT_NE(value, nullptr);
+            first_key = value->data();
+        });
+    second_values->Gather(
+        &offset, 1, [&](int64_t, const std::string_view* value, bool valid) {
+            ASSERT_TRUE(valid);
+            ASSERT_NE(value, nullptr);
+            EXPECT_EQ(value->data(), first_key);
+            EXPECT_EQ(*value, "second");
+        });
+    auto owned = first_values->Lookup(offset);
+    first.reset();
+    EXPECT_FALSE(index_lifetime.expired());
+    const auto* predicates =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            second.get());
+    ASSERT_NE(predicates, nullptr);
+    const std::string_view key = "first";
+    EXPECT_EQ(predicates->NotIn(1, &key).count(), 1);
+    EXPECT_EQ(predicates->Range(key, CompareOp::Equal).count(), 1);
+    second.reset();
+    EXPECT_TRUE(index_lifetime.expired());
+    EXPECT_EQ(owned, "second");
+}
 
 template <typename T>
 void
