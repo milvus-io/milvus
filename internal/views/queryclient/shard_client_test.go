@@ -165,7 +165,8 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	request.SerializedExprPlan = []byte("filter plan")
 	plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
 	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
-	qviews.OmitUnchangedQueryPayloads(plan, &viewpb.GetQueryPlanRequest{
+	planResponse := &viewpb.GetQueryPlanResponse{Plan: plan}
+	qviews.OmitUnchangedQueryPayloads(planResponse, &viewpb.GetQueryPlanRequest{
 		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: request},
 	})
 	plan.WorkNodes = []*viewpb.QueryPlanWorkNode{
@@ -190,7 +191,7 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	planClient := &fakeQueryPlanClient{plan: plan}
+	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
 	streams, shardPlan, err := client.SearchStreams(context.Background(), &ShardSearchRequest{
@@ -239,7 +240,8 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: rightNode.ID}}},
 		},
 	}
-	qviews.OmitUnchangedQueryPayloads(plan, &viewpb.GetQueryPlanRequest{
+	planResponse := &viewpb.GetQueryPlanResponse{Plan: plan}
+	qviews.OmitUnchangedQueryPayloads(planResponse, &viewpb.GetQueryPlanRequest{
 		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: request},
 	})
 	leftChunk := newTestQueryChunk([]int64{1, 3})
@@ -260,7 +262,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 			}
 		},
 	}
-	planClient := &fakeQueryPlanClient{plan: plan}
+	planClient := &fakeQueryPlanClient{plan: plan, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
 	// Size two complete protobuf Units, excluding result metadata.
@@ -380,6 +382,7 @@ func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
 
 type fakeQueryPlanClient struct {
 	QueryPlanClient
+	clientOptimizeInfo    *viewpb.QueryPlanClientOptimizeInfo
 	executionSummary      *viewpb.ExecutionSummary
 	growingInlineResponse *viewpb.GrowingInlineResponse
 	plan                  *viewpb.QueryPlan
@@ -393,7 +396,7 @@ type fakeQueryPlanClient struct {
 func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	f.planReqCount++
 	f.planReq = proto.Clone(req).(*viewpb.GetQueryPlanRequest)
-	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary, ClientOptimizeInfo: f.clientOptimizeInfo}, nil
 }
 
 func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
