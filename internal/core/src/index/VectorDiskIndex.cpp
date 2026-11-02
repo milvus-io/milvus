@@ -501,7 +501,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                                      empty_offsets_path,
                                      GetDim(),
                                      empty_emb_list_offsets_);
-        file_manager_->AddFile(empty_offsets_path);
+        file_manager_->AddFileOrThrow(empty_offsets_path);
     };
     const auto disk_valid_data_all_null =
         disk_valid_data.found &&
@@ -514,7 +514,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
             SetDim(ResolveDatasetOrConfigDim(
                 id_map_dataset, build_config, "build all-null disk index"));
             build_metadata_id_map(id_map_dataset, "all-null disk id map");
-            file_manager_->AddFile(valid_data_path);
+            file_manager_->AddFileOrThrow(valid_data_path);
             file_manager_->RemoveRawDataFiles();
             LOG_INFO("build all-null nullable disk index done, build_id: {}",
                      config.value("build_id", "unknown"));
@@ -536,7 +536,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                 write_empty_emb_list_metadata({0});
                 build_metadata_id_map(id_map_dataset,
                                       "all-null emb-list disk id map");
-                file_manager_->AddFile(valid_data_path);
+                file_manager_->AddFileOrThrow(valid_data_path);
                 file_manager_->RemoveRawDataFiles();
                 LOG_INFO(
                     "build all-null emb_list disk index done, build_id: {}",
@@ -556,7 +556,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
             if (id_map_dataset != nullptr) {
                 build_metadata_id_map(id_map_dataset,
                                       "empty emb-list disk id map");
-                file_manager_->AddFile(valid_data_path);
+                file_manager_->AddFileOrThrow(valid_data_path);
             }
             file_manager_->RemoveRawDataFiles();
             LOG_INFO("build all-empty emb_list disk index done, build_id: {}",
@@ -591,7 +591,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     // Add valid_data file to index if it was created (nullable vector field)
     if (local_chunk_manager->Exist(valid_data_path)) {
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
     }
 
     file_manager_->RemoveRawDataFiles();
@@ -642,7 +642,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                          empty_offsets_path,
                                          GetDim(),
                                          empty_emb_list_offsets_);
-            file_manager_->AddFile(empty_offsets_path);
+            file_manager_->AddFileOrThrow(empty_offsets_path);
         }
         auto stat = index_.Build(dataset, build_config, true, build_options);
         if (stat != knowhere::Status::success) {
@@ -652,7 +652,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         }
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(local_chunk_manager, valid_data_path, index_);
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
         file_manager_->RemoveRawDataFiles();
         return;
     }
@@ -718,7 +718,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(local_chunk_manager, valid_data_path, index_);
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
     }
 
     file_manager_->RemoveRawDataFiles();

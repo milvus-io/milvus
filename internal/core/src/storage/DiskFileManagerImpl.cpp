@@ -303,17 +303,15 @@ DiskFileManagerImpl::CloseAndRemoveLocalDir(const std::string& dir) noexcept {
     }
 }
 
-bool
-DiskFileManagerImpl::AddFileInternal(
+void
+DiskFileManagerImpl::UploadFileInternal(
     const std::string& file,
     const std::function<std::string(const std::string&, int)>&
-        get_remote_path) noexcept {
+        get_remote_path) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local file {} not exists", file);
-        return false;
+        ThrowInfo(ErrorCode::PathNotExist, "local file {} not exists", file);
     }
 
     // record local file path
@@ -352,11 +350,20 @@ DiskFileManagerImpl::AddFileInternal(
         AddBatchIndexFiles(
             file, local_file_offsets, batch_remote_files, remote_file_sizes);
     }
+}
+
+bool
+DiskFileManagerImpl::AddFileInternal(
+    const std::string& file,
+    const std::function<std::string(const std::string&, int)>&
+        get_remote_path) noexcept {
+    FILEMANAGER_TRY
+    UploadFileInternal(file, get_remote_path);
     FILEMANAGER_CATCH
     FILEMANAGER_END
 
     return true;
-}  // namespace knowhere
+}
 
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
@@ -364,6 +371,14 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
                            [this](const std::string& file_name, int slice_num) {
                                return GetRemoteIndexPath(file_name, slice_num);
                            });
+}
+
+void
+DiskFileManagerImpl::AddFileOrThrow(const std::string& file) {
+    UploadFileInternal(file,
+                       [this](const std::string& file_name, int slice_num) {
+                           return GetRemoteIndexPath(file_name, slice_num);
+                       });
 }
 
 bool

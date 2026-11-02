@@ -75,6 +75,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    // Upload a local file like AddFile, but let a failure propagate with the
+    // original exception. AddFile logs the exception and returns false, which
+    // loses its error code, so a transient storage error (throttling, timeout)
+    // could no longer be told apart from a permanent one.
+    void
+    AddFileOrThrow(const std::string& filename);
+
     bool
     AddFileMeta(const FileMeta& file_meta) override;
 
@@ -266,6 +273,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::shared_ptr<LocalDirState>
     GetOrCreateLocalDirState(const std::string& dir);
+
+    void
+    UploadFileInternal(const std::string& file_name,
+                       const std::function<std::string(const std::string&,
+                                                       int)>& get_remote_path);
 
     bool
     AddFileInternal(const std::string& file_name,
