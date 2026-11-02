@@ -95,7 +95,9 @@ progress.
   reuses `createHandlerAfterStreamingNodeReady` for assignment discovery, error
   reporting and backoff until the caller context ends. Field attempts copy the
   request with the latest assignment. Inline attempts have no PChannel and use
-  the ready-connection picker. Unsupported RPCs return Unimplemented immediately.
+  the ready-connection picker. Unsupported RPCs return Unimplemented immediately. Transport message-size
+  failures also return immediately with their original ResourceExhausted status;
+  transient resource pressure and streaming rate-limit errors retain retries.
 - Analyzer failures (file-resource preparation, parameters, schema admission,
   runner availability and execution) use Milvus Status in the response.
   HandlerClient forwards these responses without retrying or converting them to
