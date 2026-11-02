@@ -1428,6 +1428,12 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 // Returns the maximum of the two constraints to ensure sufficient resources
 func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	job := importMeta.GetJob(context.TODO(), task.GetJobID())
+	if job == nil {
+		// The scheduler skips finalized tasks before calculating their slots.
+		// Keep this accessor safe for other callers holding an older snapshot,
+		// matching the V3 task accessors' minimum-slot fallback.
+		return 1
+	}
 
 	// Calculate CPU-based slots
 	fileNumPerSlot := paramtable.Get().DataCoordCfg.ImportFileNumPerSlot.GetAsInt()

@@ -342,7 +342,7 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, s.globalScheduler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
 		rollbackImport:      s.broadcastRollbackImportMessage,
 		assignImportIDRange: s.broadcastUpdateImportMessage,
