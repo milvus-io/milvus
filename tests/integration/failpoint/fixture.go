@@ -47,6 +47,7 @@ func Run(m *testing.M) int {
 		defer os.RemoveAll(fixture)
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
+		// #nosec G204 G702 -- The test runner selects the trusted checkout; the output is a private temporary directory, not request input.
 		cmd := exec.CommandContext(ctx, "bash", filepath.Join(root, "scripts/build_failpoint_fixture.sh"), fixture)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -54,6 +55,7 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
+	// #nosec G703 -- The fixture is a runner-provided build directory or our private temporary directory, not request input.
 	if _, err := os.Stat(filepath.Join(fixture, "failpoint-fixture")); err != nil {
 		fmt.Fprintln(os.Stderr, "instrumented fixture required:", err)
 		return 1
