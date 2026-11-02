@@ -757,3 +757,67 @@ func TestNewFieldData_NullableVectorCap(t *testing.T) {
 		c.check(t, fd, 1000)
 	}
 }
+
+// A nullable vector stores only valid rows physically. Copying into an existing
+// column must preserve logical order across nulls and repeated source rows.
+func TestFloatVectorFieldDataCopyFrom(t *testing.T) {
+	src := &FloatVectorFieldData{
+		Dim: 2, Nullable: true,
+		Data:      []float32{10, 11, 20, 21},
+		ValidData: []bool{true, false, true},
+	}
+	dst := &FloatVectorFieldData{Dim: 2, Nullable: true}
+	require.NoError(t, dst.AppendRow([]float32{1, 2}))
+	require.NoError(t, dst.CopyFrom(src, nil))
+	require.Equal(t, 1, dst.RowNum())
+
+	require.NoError(t, dst.CopyFrom(src, []int{2, 1, 0, 2}))
+	want := []any{[]float32{1, 2}, []float32{20, 21}, nil, []float32{10, 11}, []float32{20, 21}}
+	require.Equal(t, len(want), dst.RowNum())
+	for i, row := range want {
+		require.Equal(t, row, dst.GetRow(i), "row %d", i)
+	}
+	require.Equal(t, []bool{true, true, false, true, true}, dst.ValidData)
+
+	dst.Data[2] = 99
+	dst.ValidData[1] = false
+	require.Equal(t, []float32{10, 11, 20, 21}, src.Data)
+	require.Equal(t, []bool{true, false, true}, src.ValidData)
+}
+
+func TestFieldDataCopyFromSourceValidation(t *testing.T) {
+	for _, tc := range []struct {
+		target    FieldData
+		nilSource FieldData
+	}{
+		{&BoolFieldData{}, (*BoolFieldData)(nil)},
+		{&Int8FieldData{}, (*Int8FieldData)(nil)},
+		{&Int16FieldData{}, (*Int16FieldData)(nil)},
+		{&Int32FieldData{}, (*Int32FieldData)(nil)},
+		{&Int64FieldData{}, (*Int64FieldData)(nil)},
+		{&FloatFieldData{}, (*FloatFieldData)(nil)},
+		{&DoubleFieldData{}, (*DoubleFieldData)(nil)},
+		{&TimestamptzFieldData{}, (*TimestamptzFieldData)(nil)},
+		{&StringFieldData{}, (*StringFieldData)(nil)},
+		{&ArrayFieldData{}, (*ArrayFieldData)(nil)},
+		{&JSONFieldData{}, (*JSONFieldData)(nil)},
+		{&GeometryFieldData{}, (*GeometryFieldData)(nil)},
+		{&BinaryVectorFieldData{}, (*BinaryVectorFieldData)(nil)},
+		{&FloatVectorFieldData{}, (*FloatVectorFieldData)(nil)},
+		{&Float16VectorFieldData{}, (*Float16VectorFieldData)(nil)},
+		{&BFloat16VectorFieldData{}, (*BFloat16VectorFieldData)(nil)},
+		{&SparseFloatVectorFieldData{}, (*SparseFloatVectorFieldData)(nil)},
+		{&Int8VectorFieldData{}, (*Int8VectorFieldData)(nil)},
+		{&VectorArrayFieldData{}, (*VectorArrayFieldData)(nil)},
+	} {
+		require.NoError(t, tc.target.CopyFrom(nil, nil))
+		require.NoError(t, tc.target.CopyFrom(tc.nilSource, []int{}))
+		require.ErrorIs(t, tc.target.CopyFrom(nil, []int{0}), merr.ErrServiceInternal)
+		require.ErrorIs(t, tc.target.CopyFrom(tc.nilSource, []int{0}), merr.ErrServiceInternal)
+		var wrongType FieldData = &BoolFieldData{}
+		if _, ok := tc.target.(*BoolFieldData); ok {
+			wrongType = &Int64FieldData{}
+		}
+		require.ErrorIs(t, tc.target.CopyFrom(wrongType, []int{0}), merr.ErrServiceInternal)
+	}
+}

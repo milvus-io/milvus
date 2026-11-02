@@ -163,6 +163,34 @@ func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	return nil
 }
 
+// CopyFrom appends the selected source rows column by column in indices order.
+// Indices must refer to valid source rows. Nil or empty indices append nothing.
+func (i *InsertData) CopyFrom(src *InsertData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	for fieldID, source := range src.Data {
+		target, ok := i.Data[fieldID]
+		if !ok {
+			return merr.WrapErrServiceInternalMsg("missing field when appending row, got %d", fieldID)
+		}
+		// Preserve AppendRow's value-level compatibility and error behavior
+		// for mismatched source columns instead of panicking on an assertion.
+		if source.GetDataType() != target.GetDataType() || source.GetNullable() != target.GetNullable() {
+			for _, i := range indices {
+				if err := target.AppendRow(source.GetRow(i)); err != nil {
+					return merr.Wrapf(err, "append data for field %d failed", fieldID)
+				}
+			}
+			continue
+		}
+		if err := target.CopyFrom(source, indices); err != nil {
+			return merr.Wrapf(err, "copy data for field %d failed", fieldID)
+		}
+	}
+	return nil
+}
+
 func (i *InsertData) GetRow(idx int) map[FieldID]interface{} {
 	res := make(map[FieldID]interface{})
 	for field, data := range i.Data {
@@ -191,6 +219,11 @@ type FieldData interface {
 	AppendRows(dataRows interface{}, validDataRows interface{}) error
 	AppendDataRows(rows interface{}) error
 	AppendValidDataRows(rows interface{}) error
+
+	// CopyFrom appends the selected source rows in indices order.
+	// Source and destination must have matching types and nullability, and
+	// indices must refer to valid source rows. Nil or empty indices append nothing.
+	CopyFrom(src FieldData, indices []int) error
 	GetDataType() schemapb.DataType
 	GetNullable() bool
 	GetValidData() []bool
@@ -892,6 +925,23 @@ func (data *BoolFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *BoolFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*BoolFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("bool CopyFrom requires a non-nil BoolFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *Int8FieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([]int8, 1)...)
@@ -906,6 +956,23 @@ func (data *Int8FieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *Int8FieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Int8FieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Int8FieldData.CopyFrom requires a non-nil Int8FieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
 	return nil
 }
 
@@ -926,6 +993,23 @@ func (data *Int16FieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *Int16FieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Int16FieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Int16FieldData.CopyFrom requires a non-nil Int16FieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *Int32FieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([]int32, 1)...)
@@ -940,6 +1024,23 @@ func (data *Int32FieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *Int32FieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Int32FieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Int32FieldData.CopyFrom requires a non-nil Int32FieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
 	return nil
 }
 
@@ -960,6 +1061,23 @@ func (data *Int64FieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *Int64FieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Int64FieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Int64FieldData.CopyFrom requires a non-nil Int64FieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *FloatFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([]float32, 1)...)
@@ -974,6 +1092,23 @@ func (data *FloatFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *FloatFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*FloatFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("FloatFieldData.CopyFrom requires a non-nil FloatFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
 	return nil
 }
 
@@ -994,6 +1129,23 @@ func (data *DoubleFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *DoubleFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*DoubleFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("DoubleFieldData.CopyFrom requires a non-nil DoubleFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *TimestamptzFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([]int64, 1)...)
@@ -1011,6 +1163,23 @@ func (data *TimestamptzFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *TimestamptzFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*TimestamptzFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("TimestamptzFieldData.CopyFrom requires a non-nil TimestamptzFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *StringFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([]string, 1)...)
@@ -1025,6 +1194,23 @@ func (data *StringFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *StringFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*StringFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("StringFieldData.CopyFrom requires a non-nil StringFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
 	return nil
 }
 
@@ -1047,6 +1233,23 @@ func (data *ArrayFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *ArrayFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*ArrayFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("ArrayFieldData.CopyFrom requires a non-nil ArrayFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *JSONFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([][]byte, 1)...)
@@ -1061,6 +1264,23 @@ func (data *JSONFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, true)
 	}
 	data.Data = append(data.Data, v)
+	return nil
+}
+
+func (data *JSONFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*JSONFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("JSONFieldData.CopyFrom requires a non-nil JSONFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
 	return nil
 }
 
@@ -1084,6 +1304,23 @@ func (data *GeometryFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *GeometryFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*GeometryFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("GeometryFieldData.CopyFrom requires a non-nil GeometryFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
+	}
+	return nil
+}
+
 func (data *BinaryVectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
@@ -1098,6 +1335,30 @@ func (data *BinaryVectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() {
 		data.L2PMapping.Build([]bool{true}, len(data.ValidData), 1)
 		data.ValidData = append(data.ValidData, true)
+	}
+	return nil
+}
+
+func (data *BinaryVectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*BinaryVectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("BinaryVectorFieldData.CopyFrom requires a non-nil BinaryVectorFieldData source")
+	}
+	rowWidth := data.Dim / 8
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		data.Data = append(data.Data, source.Data[i*rowWidth:(i+1)*rowWidth]...)
 	}
 	return nil
 }
@@ -1120,6 +1381,30 @@ func (data *FloatVectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *FloatVectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*FloatVectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("FloatVectorFieldData.CopyFrom requires a non-nil FloatVectorFieldData source")
+	}
+	rowWidth := data.Dim
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		data.Data = append(data.Data, source.Data[i*rowWidth:(i+1)*rowWidth]...)
+	}
+	return nil
+}
+
 func (data *Float16VectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
@@ -1138,6 +1423,30 @@ func (data *Float16VectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *Float16VectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Float16VectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Float16VectorFieldData.CopyFrom requires a non-nil Float16VectorFieldData source")
+	}
+	rowWidth := data.Dim * 2
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		data.Data = append(data.Data, source.Data[i*rowWidth:(i+1)*rowWidth]...)
+	}
+	return nil
+}
+
 func (data *BFloat16VectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
@@ -1152,6 +1461,30 @@ func (data *BFloat16VectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() {
 		data.L2PMapping.Build([]bool{true}, len(data.ValidData), 1)
 		data.ValidData = append(data.ValidData, true)
+	}
+	return nil
+}
+
+func (data *BFloat16VectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*BFloat16VectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("BFloat16VectorFieldData.CopyFrom requires a non-nil BFloat16VectorFieldData source")
+	}
+	rowWidth := data.Dim * 2
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		data.Data = append(data.Data, source.Data[i*rowWidth:(i+1)*rowWidth]...)
 	}
 	return nil
 }
@@ -1181,6 +1514,33 @@ func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+func (data *SparseFloatVectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*SparseFloatVectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("SparseFloatVectorFieldData.CopyFrom requires a non-nil SparseFloatVectorFieldData source")
+	}
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		row := source.Contents[i]
+		data.Contents = append(data.Contents, row)
+		if dim := typeutil.SparseFloatRowDim(row); data.Dim < dim {
+			data.Dim = dim
+		}
+	}
+	return nil
+}
+
 func (data *Int8VectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
 		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
@@ -1195,6 +1555,30 @@ func (data *Int8VectorFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() {
 		data.L2PMapping.Build([]bool{true}, len(data.ValidData), 1)
 		data.ValidData = append(data.ValidData, true)
+	}
+	return nil
+}
+
+func (data *Int8VectorFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*Int8VectorFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("Int8VectorFieldData.CopyFrom requires a non-nil Int8VectorFieldData source")
+	}
+	rowWidth := data.Dim
+	for _, i := range indices {
+		if data.Nullable {
+			valid := source.ValidData[i]
+			data.L2PMapping.Build([]bool{valid}, len(data.ValidData), 1)
+			data.ValidData = append(data.ValidData, valid)
+			if !valid {
+				continue
+			}
+			i = getNullableVectorPhysicalOffset(source.ValidData, &source.L2PMapping, i)
+		}
+		data.Data = append(data.Data, source.Data[i*rowWidth:(i+1)*rowWidth]...)
 	}
 	return nil
 }
@@ -1214,6 +1598,23 @@ func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
 
 	if data.GetNullable() {
 		data.ValidData = append(data.ValidData, true)
+	}
+	return nil
+}
+
+func (data *VectorArrayFieldData) CopyFrom(src FieldData, indices []int) error {
+	if len(indices) == 0 {
+		return nil
+	}
+	source, ok := src.(*VectorArrayFieldData)
+	if !ok || source == nil {
+		return merr.WrapErrServiceInternalMsg("VectorArrayFieldData.CopyFrom requires a non-nil VectorArrayFieldData source")
+	}
+	for _, i := range indices {
+		data.Data = append(data.Data, source.Data[i])
+		if data.Nullable {
+			data.ValidData = append(data.ValidData, source.ValidData[i])
+		}
 	}
 	return nil
 }
