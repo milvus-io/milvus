@@ -100,13 +100,11 @@ type nodeScheduler struct {
 }
 
 type taskEntry struct {
-	task       Task
-	ctx        context.Context
-	cancel     context.CancelFunc
-	done       chan struct{}
-	once       sync.Once
-	cancelTask func()
-	backoff    *backoff.ExponentialBackOff // Accessed only by the worker executing this entry.
+	task    Task
+	ctx     context.Context
+	cancel  context.CancelFunc
+	handle  *taskHandle
+	backoff *backoff.ExponentialBackOff // Accessed only by the worker executing this entry.
 	// nextRun is the earliest time a delayed (ErrDelay) requeue may execute
 	// again. Zero means the entry may run immediately.
 	nextRun   time.Time
@@ -115,30 +113,32 @@ type taskEntry struct {
 	queued    *list.Element
 }
 
-func (e *taskEntry) finish() {
-	e.once.Do(func() {
-		e.cancel()
-		close(e.done)
-	})
-}
-
 type taskHandle struct {
-	entry *taskEntry
+	done       chan struct{}
+	mu         sync.Mutex
+	cancelTask func()
 }
 
 func (h *taskHandle) Cancel() {
-	h.entry.cancelTask()
+	h.mu.Lock()
+	cancelTask := h.cancelTask
+	h.mu.Unlock()
+	// Do not hold the handle lock while taking the scheduler lock: completion
+	// clears this callback while holding the scheduler lock.
+	if cancelTask != nil {
+		cancelTask()
+	}
 }
 
 func (h *taskHandle) Wait(ctx context.Context) error {
 	select {
-	case <-h.entry.done:
+	case <-h.done:
 		return nil
 	default:
 	}
 
 	select {
-	case <-h.entry.done:
+	case <-h.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -191,21 +191,21 @@ func (s *nodeScheduler) resize(concurrency int) {
 func (s *nodeScheduler) Submit(task Task, opts ...Option) TaskHandle {
 	backoff := newTaskBackoff(opts...)
 	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
+	handle := &taskHandle{done: make(chan struct{})}
 	entry := &taskEntry{
 		task:      task,
 		ctx:       ctx,
 		cancel:    cancel,
-		done:      make(chan struct{}),
+		handle:    handle,
 		heapIndex: -1,
 		backoff:   backoff,
 	}
-	entry.cancelTask = func() { s.cancelTask(entry) }
-	handle := &taskHandle{entry: entry}
+	handle.cancelTask = func() { s.cancelTask(entry) }
 
 	s.mu.Lock()
 	if s.closed {
+		s.finishLocked(entry)
 		s.mu.Unlock()
-		entry.finish()
 		return handle
 	}
 	// The queue is intentionally unbounded: Submit must never wait for capacity.
@@ -227,14 +227,16 @@ func (s *nodeScheduler) Close() {
 	for element := s.queue.Front(); element != nil; element = element.Next() {
 		entry := element.Value.(*taskEntry)
 		entry.queued = nil
-		entry.finish()
+		s.finishLocked(entry)
 	}
 	s.queue.Init()
 	for len(s.delayed) > 0 {
-		heap.Pop(&s.delayed).(*taskEntry).finish()
+		s.finishLocked(heap.Pop(&s.delayed).(*taskEntry))
 	}
+	s.delayed = nil
 	if s.timer != nil {
 		s.timer.Stop()
+		s.timer = nil
 	}
 	s.cancel()
 	s.cond.Broadcast()
@@ -248,16 +250,45 @@ func (s *nodeScheduler) Close() {
 func (s *nodeScheduler) cancelTask(entry *taskEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Cancel may have copied its callback immediately before completion detached
+	// the handle. The entry is already finished in that case.
+	if entry.handle == nil {
+		return
+	}
 	entry.cancel()
 	if entry.queued != nil {
 		s.queue.Remove(entry.queued)
 		entry.queued = nil
-		entry.finish()
+		s.finishLocked(entry)
 	} else if entry.heapIndex >= 0 {
 		heap.Remove(&s.delayed, entry.heapIndex)
 		s.resetTimerLocked()
-		entry.finish()
+		s.finishLocked(entry)
 	}
+}
+
+func (s *nodeScheduler) finish(entry *taskEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishLocked(entry)
+}
+
+// finishLocked is called only after removal from the queue/heap, or by the
+// worker after Execute returns. Completion releases all execution references
+// before waking waiters, even when callers retain the handle indefinitely.
+func (s *nodeScheduler) finishLocked(entry *taskEntry) {
+	handle := entry.handle
+	entry.cancel()
+	entry.task = nil
+	entry.ctx = nil
+	entry.cancel = nil
+	entry.backoff = nil
+	entry.handle = nil
+	entry.nextRun = time.Time{}
+	handle.mu.Lock()
+	handle.cancelTask = nil
+	close(handle.done)
+	handle.mu.Unlock()
 }
 
 func (s *nodeScheduler) runWorker() {
@@ -268,7 +299,7 @@ func (s *nodeScheduler) runWorker() {
 			return
 		}
 		if entry.ctx.Err() != nil {
-			entry.finish()
+			s.finish(entry)
 			continue
 		}
 
@@ -281,7 +312,7 @@ func (s *nodeScheduler) runWorker() {
 			// is confined to the shutdown path (Submit handles are dropped,
 			// Cancel is never called) and must be drained by the owner before
 			// Close completes; see ViewConfig.Runtime.
-			entry.finish()
+			s.finish(entry)
 			continue
 		}
 		if errors.Is(err, ErrDelay) {
@@ -295,7 +326,7 @@ func (s *nodeScheduler) runWorker() {
 			if s.requeue(entry, nextRun) {
 				continue
 			}
-			entry.finish()
+			s.finish(entry)
 			continue
 		}
 		if err != nil {
@@ -303,7 +334,7 @@ func (s *nodeScheduler) runWorker() {
 				mlog.String("taskType", reflect.TypeOf(entry.task).String()),
 				mlog.Err(err))
 		}
-		entry.finish()
+		s.finish(entry)
 	}
 }
 
@@ -351,6 +382,7 @@ func (s *nodeScheduler) requeue(entry *taskEntry, nextRun time.Time) bool {
 // recheck deadlines under mu and never execute a task before its requested time.
 func (s *nodeScheduler) resetTimerLocked() {
 	if s.closed || len(s.delayed) == 0 {
+		s.delayed = nil
 		if s.timer != nil {
 			s.timer.Stop()
 		}

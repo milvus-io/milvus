@@ -158,7 +158,6 @@ func TestDefaultExponentialRetryBackoff(t *testing.T) {
 			require.Len(t, runs, 3)
 			require.GreaterOrEqual(t, runs[1].Sub(runs[0]), 10*time.Millisecond)
 			require.GreaterOrEqual(t, runs[2].Sub(runs[1]), 20*time.Millisecond)
-			require.Equal(t, 40*time.Millisecond, h.(*taskHandle).entry.backoff.NextBackOff())
 		})
 	}
 }

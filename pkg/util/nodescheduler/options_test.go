@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
@@ -93,16 +94,27 @@ func TestSubmitKeepsBackoffIndependentWhenTaskAndOptionAreReused(t *testing.T) {
 		}
 		return nil
 	})
-	var previous *taskEntry
+	var previous *backoff.ExponentialBackOff
 	for range 2 {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		scheduler.Submit(TaskFunc(func(context.Context) error {
+			close(started)
+			<-release
+			return nil
+		}))
+		<-started
 		handle := scheduler.Submit(task, option)
+		s.mu.Lock()
+		b := s.queue.Back().Value.(*taskEntry).backoff
+		s.mu.Unlock()
+		close(release)
 		require.NoError(t, handle.Wait(ctx))
-		entry := handle.(*taskHandle).entry
 		if previous != nil {
-			require.NotSame(t, previous.backoff, entry.backoff)
+			require.NotSame(t, previous, b)
 		}
-		require.Equal(t, 20*time.Millisecond, entry.backoff.NextBackOff())
-		previous = entry
+		require.Equal(t, 20*time.Millisecond, b.NextBackOff())
+		previous = b
 	}
 	require.Equal(t, 6, attempts)
 }
@@ -140,5 +152,4 @@ func TestDeadlineRetriesDoNotAdvanceOrResetBackoff(t *testing.T) {
 	require.False(t, runs[2].Before(deadline))
 	require.GreaterOrEqual(t, runs[3].Sub(runs[2]), 20*time.Millisecond)
 	require.GreaterOrEqual(t, runs[5].Sub(runs[4]), 40*time.Millisecond)
-	require.Equal(t, 80*time.Millisecond, handle.(*taskHandle).entry.backoff.NextBackOff())
 }
