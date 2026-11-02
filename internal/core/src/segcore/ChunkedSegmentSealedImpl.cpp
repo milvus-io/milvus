@@ -96,7 +96,7 @@
 #include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
-#include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/IIndexConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "segcore/json_stats/JsonKeyStats.h"
@@ -6148,7 +6148,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
             cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
     auto artifact =
         std::move(index::TextIndexBuilder(std::move(params))).Build(source);
-    auto reader = index::IReaderConvertible::FromArtifact(std::move(artifact));
+    auto reader = index::IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
     auto caps = reader->Caps();
     auto value_type = reader->ValueType();
     AssertInfo(caps.text_match,

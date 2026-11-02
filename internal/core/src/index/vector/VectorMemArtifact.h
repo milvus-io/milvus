@@ -19,7 +19,7 @@
 #include <memory>
 #include <vector>
 
-#include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/IIndexConvertible.h"
 #include "index/vector/KnowhereEngine.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
@@ -33,7 +33,7 @@
 namespace milvus::index {
 
 class VectorMemArtifact final : public storage::Artifact,
-                                public IReaderConvertible {
+                                public IIndexConvertible {
  public:
     explicit VectorMemArtifact(KnowhereEngine engine,
                                std::vector<size_t> empty_emb_list_offsets = {});
@@ -45,8 +45,8 @@ class VectorMemArtifact final : public storage::Artifact,
     void
     Serialize(storage::FileSink& sink) const override;
 
-    IIndexReaderBasePtr
-        IntoReader() &&
+    IndexPtr
+        IntoIndex() &&
         override;
 
  private:

@@ -233,7 +233,7 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         }
         const auto expected_caps =
             Loader(spec_.load_families.front()).derive_caps(params);
-        auto reader = IReaderConvertible::FromArtifact(std::move(artifact));
+        auto reader = IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
         ValidateReader(Name(), *this, expected_caps, reader);
         return reader;
     }

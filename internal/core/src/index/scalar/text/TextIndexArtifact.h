@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/IIndexConvertible.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
 
@@ -53,7 +53,7 @@ size_t
 TextIndexDirectoryBytes(const storage::LocalDirectory& directory);
 
 class TextIndexArtifact final : public storage::Artifact,
-                                public IReaderConvertible {
+                                public IIndexConvertible {
  public:
     TextIndexArtifact(
         std::shared_ptr<storage::LocalDirectory> directory,
@@ -71,8 +71,8 @@ class TextIndexArtifact final : public storage::Artifact,
     void
     Serialize(storage::IndexEntryWriter& writer) const override;
 
-    IIndexReaderBasePtr
-        IntoReader() &&
+    IndexPtr
+        IntoIndex() &&
         override;
 
  private:

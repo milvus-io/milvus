@@ -19,47 +19,47 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::index {
 
 // Optional consuming capability for a completed artifact whose state can
-// directly become a query reader without a storage round trip. A capability
+// directly become an index owner without a storage round trip. A capability
 // pointer obtained from an artifact is borrowed; conversion must go through
-// FromArtifact so the artifact shell stays alive. Once IntoReader is invoked,
+// FromArtifact so the artifact shell stays alive. Once IntoIndex is invoked,
 // neither conversion nor serialization may be retried.
-class IReaderConvertible {
+class IIndexConvertible {
  public:
-    virtual ~IReaderConvertible() = default;
+    virtual ~IIndexConvertible() = default;
 
     // Takes ownership before checking the optional capability and destroys the
     // artifact shell on success, Unsupported, or conversion failure. Callers
     // that also need persistence must Serialize before entering. Missing
     // capability never triggers an implicit serialize/load or other IO fallback.
-    static IIndexReaderBasePtr
+    static IndexPtr
     FromArtifact(storage::ArtifactPtr artifact) {
         if (artifact == nullptr) {
             ThrowInfo(UnexpectedError, "cannot consume a null index artifact");
         }
 
-        auto* convertible = dynamic_cast<IReaderConvertible*>(artifact.get());
+        auto* convertible = dynamic_cast<IIndexConvertible*>(artifact.get());
         if (convertible == nullptr) {
             ThrowInfo(
                 Unsupported,
-                "artifact does not support conversion to an index reader");
+                "artifact does not support conversion to an index");
         }
 
-        auto reader = std::move(*convertible).IntoReader();
-        if (reader == nullptr) {
+        auto index = std::move(*convertible).IntoIndex();
+        if (index == nullptr) {
             ThrowInfo(UnexpectedError,
-                      "artifact conversion returned a null index reader");
+                      "artifact conversion returned a null index");
         }
-        return reader;
+        return index;
     }
 
-    virtual IIndexReaderBasePtr
-    IntoReader() && = 0;
+    virtual IndexPtr
+    IntoIndex() && = 0;
 };
 
 }  // namespace milvus::index

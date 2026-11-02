@@ -143,8 +143,8 @@ up the concrete loader.
 sink; the sink is responsible for transport, slicing, naming, and publication metadata, and upload
 orchestration belongs to the caller. The existence of the interface does not mean that every
 Artifact state supports every storage generation; unsupported combinations must fail explicitly.
-`IReaderConvertible` is an optional consuming capability: `FromArtifact` takes over the Artifact,
-checks the capability, and calls `IntoReader() &&`, without implicitly performing serialize/load or
+`IIndexConvertible` is an optional consuming capability: `FromArtifact` takes over the Artifact,
+checks the capability, and calls `IntoIndex() &&`, without implicitly performing serialize/load or
 any other IO. A caller that needs both persistence and direct queries must finish persisting before
 consuming the Artifact.
 

@@ -194,7 +194,7 @@ source, and the in-memory transport data have all left local scope, so the retur
 own the state it needs for queries.
 For loaders that need local files, the source writes them atomically to its own temporary location.
 
-The `Consume` path hands the `ArtifactPtr` to `IReaderConvertible::FromArtifact` without
+The `Consume` path hands the `ArtifactPtr` to `IIndexConvertible::FromArtifact` without
 serialization; the returned Reader takes over the artifact state it needs to stay alive. This path
 verifies RAM/consumable Artifacts rather than simulating a persisted load.
 

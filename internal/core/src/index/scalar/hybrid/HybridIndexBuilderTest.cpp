@@ -34,7 +34,7 @@
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
-#include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/IIndexConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IJsonIndexReader.h"
@@ -478,7 +478,7 @@ HybridLifecycleCases() {
                      input.View(), {.row_count = data.values.size()});
                  ExpectSegcoreError(ErrorCode::Unsupported, [&] {
                      static_cast<void>(
-                         IReaderConvertible::FromArtifact(std::move(artifact)));
+                         IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr));
                  });
              }},
     };

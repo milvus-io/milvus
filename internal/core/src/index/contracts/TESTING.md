@@ -53,7 +53,7 @@ only checking that a call returned.
 |---|---|
 | `BuilderRegistry`, `LoaderRegistry`, `LoaderEntry` | Typed lookup, unknown and duplicate keys, metadata only caps, independent create/load, parameter forwarding, and factory errors |
 | `IArtifactBuilder`, scalar/vector input | Complete borrowed input, multiple and empty batches, null validity, one shot artifact ownership, serialization after caller input dies, and invalid input rejection |
-| `IReaderConvertible` | Optional consuming conversion, no implicit I/O, shell destruction, failure propagation, and reader dependency lifetime |
+| `IIndexConvertible` | Optional consuming conversion, no implicit I/O, shell destruction, failure propagation, and reader dependency lifetime |
 | `IIndexReaderBase`, `ReaderCaps` | Count in declared coordinate domain, type, capability/mixin agreement, resource values, and metadata derived caps matching the opened reader |
 | `IScalarPredicateReader` | IN, NOT IN, all comparison and interval bounds, duplicates, empty keys, null exclusion, bit count, nested element offsets |
 | `INullReader` | Exact complementary masks, all valid/all null, packed boundaries, empty batches, independent returned bitmap, and own coordinate domain |
@@ -88,7 +88,7 @@ only checking that a call returned.
 | `LoaderEntry`, `LoaderRegistry` | Empty/partial/full entry, metadata only `derive_caps`, unknown/duplicate registration, synchronous and asynchronous load, create error/null loader/load error with preserved classification |
 | `BuilderRegistry<Input>` | Unknown and duplicate family, separate tables for different input types, same family with distinct input shape, unchanged typed parameters, independent instances, null/throwing factory, concurrent registration and lookup |
 | `IArtifactBuilder<Input>::InputSpec`, `Build` | Stable side input declaration; borrowed values survive multiple/empty batches and input destruction; all-null, explicit all-valid, omitted-validity, scalar/array/vector shapes; invalid non-nullable input and invalid prepared-file path rejection |
-| `IReaderConvertible::FromArtifact`, `IntoReader` | Null artifact, absent capability, successful ownership transfer, conversion throw/null result, non-convertible real artifact, direct RAM conversion, persistence before consumption |
+| `IIndexConvertible::FromArtifact`, `IntoIndex` | Null artifact, absent capability, successful ownership transfer, conversion throw/null result, non-convertible real artifact, direct RAM conversion, persistence before consumption |
 
 Invalid scalar lookup offsets, empty scalar builder input, and NaN order have no
 uniform expectation in the interfaces or across the registered reader profiles.

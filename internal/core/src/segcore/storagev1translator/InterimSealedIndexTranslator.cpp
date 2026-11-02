@@ -18,7 +18,7 @@
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/IIndexConvertible.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorTypeUtils.h"
 #include "knowhere/operands.h"
@@ -103,7 +103,7 @@ BuildInterimReader(
         .parent_validity = validity,
     };
     auto artifact = std::move(builder).Build(input);
-    auto reader = index::IReaderConvertible::FromArtifact(std::move(artifact));
+    auto reader = index::IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
     AssertInfo(reader->ValueType() == value_type,
                "interim vector reader type {} disagrees with field type {}",
                reader->ValueType(),
