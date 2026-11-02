@@ -61,6 +61,122 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func TestSearchTaskHybridBoostValidation(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	schema := newSchemaInfo(&schemapb.CollectionSchema{
+		Name: "boost_validation",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+		},
+	})
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{make([]byte, 16)}}},
+	})
+	require.NoError(t, err)
+	function := func(name string, params ...*commonpb.KeyValuePair) *schemapb.FunctionSchema {
+		return &schemapb.FunctionSchema{
+			Type:   schemapb.FunctionType_Rerank,
+			Params: append([]*commonpb.KeyValuePair{{Key: "reranker", Value: name}}, params...),
+		}
+	}
+	boost := function("boost", &commonpb.KeyValuePair{Key: "filter", Value: "id > 500"}, &commonpb.KeyValuePair{Key: "weight", Value: "2"})
+	rrf := function("rrf")
+	weighted := function("weighted", &commonpb.KeyValuePair{Key: "weights", Value: "[0.5,0.5]"})
+	searchRequest := func() *milvuspb.SearchRequest {
+		return &milvuspb.SearchRequest{
+			CollectionName: "boost_validation", Nq: 1,
+			SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+			SearchParams: []*commonpb.KeyValuePair{
+				{Key: AnnsFieldKey, Value: "vector"},
+				{Key: TopKKey, Value: "10"},
+				{Key: "metric_type", Value: "L2"},
+				{Key: ParamsKey, Value: "{}"},
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		score    *schemapb.FunctionScore
+		params   []*commonpb.KeyValuePair
+		errMsg   string
+		rankName string
+		hasBoost bool
+	}{
+		{name: "boost", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost}}, errMsg: "boost must be combined with a fusion ranker"},
+		{name: "case insensitive boost", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{function("Boost")}}, errMsg: "boost must be combined with a fusion ranker"},
+		{name: "boost with rrf", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{rrf, boost}}, rankName: "rrf", hasBoost: true},
+		{name: "boost before rrf", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost, rrf}}, rankName: "rrf", hasBoost: true},
+		{name: "boost with weighted", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{weighted, boost}}, rankName: "weighted", hasBoost: true},
+		{name: "multiple boosts", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost, boost}}, errMsg: "boost must be combined with a fusion ranker"},
+		{name: "empty function score", score: &schemapb.FunctionScore{}, errMsg: "hybrid search requires a fusion ranker"},
+		{name: "legacy boost", params: []*commonpb.KeyValuePair{{Key: "strategy", Value: "boost"}, {Key: "params", Value: `{"weight":2}`}}, errMsg: "unsupported rank type boost"},
+		{name: "default rrf", rankName: "rrf"},
+		{name: "explicit rrf", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{rrf}}, rankName: "rrf"},
+		{name: "weighted", score: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{weighted}}, rankName: "weighted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &milvuspb.HybridSearchRequest{
+				CollectionName: "boost_validation",
+				FunctionScore:  tc.score,
+				RankParams:     append([]*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}}, tc.params...),
+				Requests:       []*milvuspb.SearchRequest{searchRequest(), searchRequest()},
+			}
+			task := &searchTask{
+				ctx: ctx, schema: schema, request: convertHybridSearchToSearch(request),
+				SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{}},
+			}
+			err := task.initAdvancedSearchRequest(ctx)
+			if tc.errMsg != "" {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorContains(t, err, tc.errMsg)
+				status := merr.Status(err)
+				require.Equal(t, merr.Code(merr.ErrParameterInvalid), status.GetCode())
+				require.False(t, status.GetRetriable())
+				require.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, task.functionScore)
+			require.Equal(t, tc.rankName, task.functionScore.RerankName())
+			require.Len(t, task.SubReqs, 2)
+			for _, subReq := range task.SubReqs {
+				plan := &planpb.PlanNode{}
+				require.NoError(t, proto.Unmarshal(subReq.GetSerializedExprPlan(), plan))
+				if !tc.hasBoost {
+					require.Empty(t, plan.GetScorers())
+					continue
+				}
+				require.Len(t, plan.GetScorers(), 1)
+				scorer := plan.GetScorers()[0]
+				require.Equal(t, float32(2), scorer.GetWeight())
+				filter := scorer.GetFilter().GetUnaryRangeExpr()
+				require.NotNil(t, filter)
+				require.Equal(t, int64(100), filter.GetColumnInfo().GetFieldId())
+				require.Equal(t, planpb.OpType_GreaterThan, filter.GetOp())
+				require.Equal(t, int64(500), filter.GetValue().GetInt64Val())
+			}
+		})
+	}
+
+	t.Run("ordinary search preserves boost scorer", func(t *testing.T) {
+		request := searchRequest()
+		request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost}}
+		task := &searchTask{
+			ctx: ctx, schema: schema, request: request,
+			SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{}, Nq: 1},
+		}
+		require.NoError(t, task.initSearchRequest(ctx))
+		require.Nil(t, task.functionScore)
+		plan := &planpb.PlanNode{}
+		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+		require.Len(t, plan.GetScorers(), 1)
+		require.Equal(t, float32(2), plan.GetScorers()[0].GetWeight())
+		require.NotNil(t, plan.GetScorers()[0].GetFilter())
+	})
+}
+
 func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 	mockey.PatchConvey("TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter", t, func() {
 		globalMetaCache = &MetaCache{}

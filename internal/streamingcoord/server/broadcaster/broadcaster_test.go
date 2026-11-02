@@ -158,7 +158,9 @@ func TestBroadcaster(t *testing.T) {
 }
 
 func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel string) {
-	for {
+	// Delayed ACK retries must not outlive their owning test.
+	ctx := t.Context()
+	for ctx.Err() == nil {
 		msg := message.NewDropCollectionMessageBuilderV1().
 			WithHeader(&message.DropCollectionMessageHeader{}).
 			WithBody(&msgpb.DropCollectionRequest{}).
@@ -170,7 +172,7 @@ func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel str
 			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
 			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
 
-		if err := broadcaster.Ack(context.Background(), msg); err == nil {
+		if err := broadcaster.Ack(ctx, msg); err == nil {
 			break
 		}
 	}

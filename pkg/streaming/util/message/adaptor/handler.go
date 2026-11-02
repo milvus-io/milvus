@@ -35,9 +35,11 @@ func (d ChanMessageHandler) Close() {
 
 // NewMsgPackAdaptorHandler create a new message pack adaptor handler.
 func NewMsgPackAdaptorHandler() *MsgPackAdaptorHandler {
+	base := NewBaseMsgPackAdaptorHandler()
+	base.deferDML = true
 	return &MsgPackAdaptorHandler{
 		channel: make(chan *msgstream.ConsumeMsgPack),
-		base:    NewBaseMsgPackAdaptorHandler(),
+		base:    base,
 	}
 }
 
@@ -116,6 +118,7 @@ type BaseMsgPackAdaptorHandler struct {
 	Logger         *log.MLogger
 	Pendings       []message.ImmutableMessage                          // pendings hold the vOld message which has same time tick.
 	PendingMsgPack *typeutil.MultipartQueue[*msgstream.ConsumeMsgPack] // pendingMsgPack hold unsent msgPack.
+	deferDML       bool                                                // only the dispatcher consumer defers DML decoding.
 }
 
 // GenerateMsgPack generate msgPack from message.
@@ -167,11 +170,21 @@ func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.Immuta
 			dedupMessages = append(dedupMessages, msg)
 		}
 	}
-	newPack, err := NewMsgPackFromMessage(dedupMessages...)
+	var newPack *msgstream.ConsumeMsgPack
+	var err error
+	if m.deferDML {
+		newPack, err = newConsumeMsgPackFromMessage(dedupMessages...)
+	} else {
+		var pack *msgstream.MsgPack
+		pack, err = NewMsgPackFromMessage(dedupMessages...)
+		if pack != nil {
+			newPack = msgstream.BuildConsumeMsgPack(pack)
+		}
+	}
 	if err != nil {
 		m.Logger.Warn("failed to convert message to msgpack", zap.Error(err))
 	}
 	if newPack != nil {
-		m.PendingMsgPack.AddOne(msgstream.BuildConsumeMsgPack(newPack))
+		m.PendingMsgPack.AddOne(newPack)
 	}
 }

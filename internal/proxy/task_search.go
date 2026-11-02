@@ -405,6 +405,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
 		}
+		if t.functionScore == nil {
+			// Empty and Boost-only FunctionScores cannot fuse hybrid search results.
+			// Boost combined with a proxy reranker is handled by the sub-search plans.
+			return merr.WrapErrParameterInvalidMsg("hybrid search requires a fusion ranker; boost must be combined with a fusion ranker")
+		}
 	} else {
 		if t.functionScore, err = rerank.NewFunctionScoreWithlegacy(t.schema.CollectionSchema, t.request.GetSearchParams()); err != nil {
 			log.Warn("Failed to create function by legacy info", zap.Error(err))

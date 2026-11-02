@@ -19,16 +19,35 @@ package rootcoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/idalloc"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -171,6 +190,105 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 		CollectionName: collectionName,
 	})
 	require.NoError(t, merr.CheckRPCCall(status, err))
+}
+
+// A WAL append is not proof that Flusher has consumed the preceding encrypted DML.
+// Keep the database non-droppable until every channel has acknowledged the drop.
+func TestDropCollectionWaitsForConsumingAck(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	dbName := "dropAckDB" + funcutil.RandomString(10)
+	collectionName := "dropAckCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+	require.NoError(t, err)
+
+	b, err := balance.GetWithContext(ctx)
+	require.NoError(t, err)
+	b.(*mock_balancer.MockBalancer).EXPECT().ReplicateRole().Return(replicateutil.RolePrimary)
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	catalog.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Once()
+	catalog.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mixCoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	mixCoord.Set(idalloc.NewMockRootCoordClient(t))
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptMixCoordClient(mixCoord))
+
+	// Use the real broadcaster, FastAck decision and RootCoord callback with
+	// mocked storage, while explicitly controlling consumer acknowledgements.
+	originalWAL := streaming.WAL()
+	controlChannel := originalWAL.ControlChannel()
+	wal := mock_streaming.NewMockWALAccesser(t)
+	wal.EXPECT().ControlChannel().Return(controlChannel)
+	channelCount := len(coll.VirtualChannelNames) + 1
+	appended := make(chan message.ImmutableMessage, channelCount)
+	matchers := make([]interface{}, channelCount)
+	for i := range matchers {
+		matchers[i] = mock.Anything
+	}
+	wal.EXPECT().AppendMessages(mock.Anything, matchers...).RunAndReturn(
+		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+			responses := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+			for i, msg := range msgs {
+				id := rmq.NewRmqID(int64(i + 1))
+				tt := tsoutil.ComposeTSByTime(time.Now(), 0)
+				responses.Responses[i].AppendResult = &types.AppendResult{
+					MessageID: id, LastConfirmedMessageID: id, TimeTick: tt,
+				}
+				appended <- msg.WithTimeTick(tt).WithLastConfirmed(id).IntoImmutableMessage(id)
+			}
+			return responses
+		}).Once()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(originalWAL)
+	bc, err := broadcaster.RecoverBroadcaster(ctx)
+	require.NoError(t, err)
+	broadcast.ResetBroadcaster()
+	broadcast.Register(bc)
+	defer broadcast.ResetBroadcaster()
+
+	dropped := make(chan error, 1)
+	go func() {
+		status, err := core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+			DbName: dbName, CollectionName: collectionName,
+		})
+		dropped <- merr.CheckRPCCall(status, err)
+	}()
+	messages := make([]message.ImmutableMessage, 0, channelCount)
+	for range channelCount {
+		select {
+		case msg := <-appended:
+			messages = append(messages, msg)
+		case <-ctx.Done():
+			t.Fatal("DropCollection did not reach WAL append")
+		}
+	}
+	assertPending := func() {
+		t.Helper()
+		select {
+		case err := <-dropped:
+			t.Fatalf("DropCollection completed before all consuming acknowledgements: %v", err)
+		case <-time.After(200 * time.Millisecond):
+		}
+		_, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp)
+		require.NoError(t, err)
+		// DropDatabase checks this before RemoveEZByDBProperties.
+		require.Error(t, core.meta.CheckIfDatabaseDroppable(ctx, &milvuspb.DropDatabaseRequest{DbName: dbName}))
+	}
+	assertPending()
+	for i, msg := range messages {
+		require.NoError(t, bc.Ack(ctx, msg))
+		if i < len(messages)-1 {
+			assertPending()
+		}
+	}
+	select {
+	case err := <-dropped:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("DropCollection did not finish after all consuming acknowledgements")
+	}
+	require.NoError(t, core.meta.CheckIfDatabaseDroppable(ctx, &milvuspb.DropDatabaseRequest{DbName: dbName}))
 }
 
 func TestCreatePartitionAckCallbackSyncsLoadedPartition(t *testing.T) {
