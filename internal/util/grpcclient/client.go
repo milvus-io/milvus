@@ -97,6 +97,7 @@ type GrpcClient[T GrpcComponent] interface {
 // connectionAttempt publishes one dial result to all concurrent waiters.
 type connectionAttempt[T GrpcComponent] struct {
 	done    chan struct{}
+	cancel  context.CancelFunc
 	wrapper *clientConnWrapper[T]
 	err     error
 }
@@ -241,30 +242,43 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 	if c.closedCh == nil {
 		c.closedCh = make(chan struct{})
 	}
-	if pending := c.connecting; pending != nil {
-		closedCh := c.closedCh
-		c.grpcClientMtx.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-closedCh:
-			return nil, grpc.ErrClientConnClosing
-		case <-pending.done:
-			c.grpcClientMtx.RLock()
-			closed := c.closed
-			c.grpcClientMtx.RUnlock()
-			if closed {
-				return nil, grpc.ErrClientConnClosing
-			}
-			return pending.wrapper, pending.err
-		}
+	pending := c.connecting
+	if pending == nil {
+		// A connection is shared across requests, so its dial must outlive the
+		// caller that first noticed the missing connection. Keep context values
+		// for tracing, but give the dial its own cancellation lifetime.
+		dialCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		pending = &connectionAttempt[T]{done: make(chan struct{}), cancel: cancel}
+		c.connecting = pending
+		go c.finishConnectionAttempt(dialCtx, pending)
 	}
-	pending := &connectionAttempt[T]{done: make(chan struct{})}
-	c.connecting = pending
+	closedCh := c.closedCh
 	c.grpcClientMtx.Unlock()
 
-	// The dial must not hold the state lock: waiters have independent deadlines.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-closedCh:
+		return nil, grpc.ErrClientConnClosing
+	case <-pending.done:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c.grpcClientMtx.RLock()
+		closed := c.closed
+		c.grpcClientMtx.RUnlock()
+		if closed {
+			return nil, grpc.ErrClientConnClosing
+		}
+		return pending.wrapper, pending.err
+	}
+}
+
+func (c *ClientBase[T]) finishConnectionAttempt(ctx context.Context, pending *connectionAttempt[T]) {
+	// Network I/O stays outside the state lock, and every caller waits using
+	// its own context. Close cancels this shared dial.
 	err := c.connect(ctx)
+	pending.cancel()
 	c.grpcClientMtx.Lock()
 	if err == nil && c.grpcClient == nil {
 		// Close/reset may win after connect publishes but before we return.
@@ -272,11 +286,9 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 	}
 	pending.err = err
 	c.connecting = nil
-	wrapper := c.grpcClient
-	pending.wrapper = wrapper
+	pending.wrapper = c.grpcClient
 	close(pending.done)
 	c.grpcClientMtx.Unlock()
-	return wrapper, err
 }
 
 func (c *ClientBase[T]) resetConnection(wrapper *clientConnWrapper[T], forceReset bool) {
@@ -656,6 +668,9 @@ func (c *ClientBase[T]) Close() error {
 		close(c.closedCh)
 	}
 	c.closed = true
+	if c.connecting != nil && c.connecting.cancel != nil {
+		c.connecting.cancel()
+	}
 	wrapper := c.grpcClient
 	c.grpcClient = nil
 	c.grpcClientMtx.Unlock()

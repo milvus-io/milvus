@@ -21,11 +21,18 @@ so concurrent requests can wait beyond their own connection timeout.
    does not initiate another connection. Reset invalidates the connection;
    only the next attempt reconnects.
 2. Share an in-progress connection attempt. Do network I/O outside the state
-   mutex. Waiters select on the shared result or their own context. They share
-   a failed result instead of serially starting another dial. The initiating
-   caller owns the dial context; its cancellation can fail the shared attempt,
-   and a subsequent call may start a fresh attempt.
-3. Close prevents an in-flight dial from publishing a connection afterward.
+   mutex. Every caller, including the initiator, selects on the shared result,
+   its own context, or client closure. They share a failed result instead of
+   serially starting another dial. The dial runs in a goroutine under a context
+   detached from the initiator's cancellation, while retaining its context
+   values for tracing. `DialTimeout` still bounds the gRPC handshake. Canceling
+   the first request releases that request promptly without failing other
+   waiters or forcing a second dial. This shared connection setup is separate
+   from the request's QueryNode RPC, which continues to use the request context.
+3. Close cancels the shared dial, releases all callers, and prevents an
+   in-flight dial from publishing a connection afterward. The address lookup
+   callback has no context parameter, so an address lookup that itself blocks
+   cannot be interrupted; Close still releases its callers immediately.
 4. SearchSegments, QuerySegments and QueryStreamSegments use one worker attempt.
    A failed connection on this one-attempt path returns immediately, without
    consulting the possibly stale session. Proxy owns replica failover. Normal
@@ -36,6 +43,16 @@ so concurrent requests can wait beyond their own connection timeout.
 No protobuf or merr wire projection changes are included. ErrConnect remains
 an internal transport sentinel and flows through the existing Status boundary.
 Consequently existing master channel-blacklist behavior remains in force.
+
+The cancellation design in
+[List Running Requests and Cancel a Request by ID](20260916-running-request-list-and-cancel.md)
+requires each canceled request and its QueryNode sub-RPCs to stop together.
+This remains true: callers stop waiting as soon as their own context is canceled,
+and the eventual RPC still uses that context. Only the shared connection setup
+can continue for other callers. The draft also uses `context.WithoutCancel` for
+shared QueryNode work when one member cancels. No reviewed design document found
+for this client requires an initiator's cancellation to abort other callers'
+connection setup.
 
 ## Further design
 
@@ -59,6 +76,11 @@ Proxy change; this patch retains existing retry intervals.
   the node session still exists; three attempts perform at most three dials.
 - Closing/mismatched connections return without resolving/dialing again.
 - Concurrent waiters can cancel while a dial is blocked; waiters share failure.
+- Cancel the initiating request during an in-flight dial, then make the worker
+  available: the initiator returns `context.Canceled` promptly and a live
+  waiter receives the same dial's successful connection.
+- Close cancels a blocked gRPC handshake promptly, rather than merely releasing
+  callers while the dial continues until `DialTimeout`.
 - Close during dial cannot resurrect the client.
 - Trace transport failure through QueryNode Status and Proxy LB to a different
   leader, under a 4-second request deadline. Verify the final response succeeds.
@@ -71,9 +93,10 @@ Proxy change; this patch retains existing retry intervals.
 
 - `internal/util/grpcclient` full suite passed with `-race`,
   `-tags dynamic,test`, and `-gcflags='all=-N -l'`. It covers one dial per
-  attempt, a shared failed dial, independently canceled waiters, Close racing
-  with a dial, connection-closing and NodeID-mismatch fast exits, and a
-  one-attempt retriable Status without backoff.
+  attempt, a shared failed dial, independently canceled waiters, an initiator
+  canceled before a live waiter's dial succeeds, Close canceling the shared
+  dial, Close racing with a dial, connection-closing and NodeID-mismatch fast
+  exits, and a one-attempt retriable Status without backoff.
 - Delegator `TestSearch`, `TestQuery`, and `TestQueryStream` passed with the
   required tags and flags. Each asserts that the actual worker call receives
   a one-attempt context.
