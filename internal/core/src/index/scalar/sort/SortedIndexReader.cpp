@@ -381,10 +381,12 @@ PrefixRange(const SortedStringLayout& layout, std::string_view prefix) {
 
 void
 SetNumericRow(TargetBitmap& result, size_t row, bool value) {
-    AssertInfo(row < result.size(),
-               "sorted numeric row {} exceeds count {}",
-               row,
-               result.size());
+    if (row >= result.size()) {
+        ThrowInfo(DataFormatBroken,
+                  "sorted numeric row {} exceeds count {}",
+                  row,
+                  result.size());
+    }
     result[row] = value;
 }
 
@@ -392,10 +394,12 @@ void
 SetPosting(TargetBitmap& result, const SortedStringPostingView& posting) {
     for (size_t i = 0; i < posting.size; ++i) {
         const auto row = posting.At(i);
-        AssertInfo(static_cast<size_t>(row) < result.size(),
-                   "sorted string row {} exceeds count {}",
-                   row,
-                   result.size());
+        if (static_cast<size_t>(row) >= result.size()) {
+            ThrowInfo(DataFormatBroken,
+                      "sorted string row {} exceeds count {}",
+                      row,
+                      result.size());
+        }
         result.set(row);
     }
 }
@@ -404,10 +408,12 @@ void
 ClearPosting(TargetBitmap& result, const SortedStringPostingView& posting) {
     for (size_t i = 0; i < posting.size; ++i) {
         const auto row = posting.At(i);
-        AssertInfo(static_cast<size_t>(row) < result.size(),
-                   "sorted string row {} exceeds count {}",
-                   row,
-                   result.size());
+        if (static_cast<size_t>(row) >= result.size()) {
+            ThrowInfo(DataFormatBroken,
+                      "sorted string row {} exceeds count {}",
+                      row,
+                      result.size());
+        }
         result.reset(row);
     }
 }
@@ -860,10 +866,12 @@ SortedIndexReader<T>::Lookup(int64_t offset) const {
                "sorted offset map does not cover row {}",
                row);
     const auto index = state_.idx_to_offsets[row];
-    AssertInfo(storage_.ValidReverseIndex(index),
-               "sorted value offset {} is invalid for row {}",
-               index,
-               row);
+    if (!storage_.ValidReverseIndex(index)) {
+        ThrowInfo(DataFormatBroken,
+                  "sorted value offset {} is invalid for row {}",
+                  index,
+                  row);
+    }
     return owned_t<T>(storage_.ValueAt(static_cast<size_t>(index)));
 }
 
@@ -896,10 +904,12 @@ SortedIndexReader<T>::Gather(
                    "sorted offset map does not cover row {}",
                    row);
         const auto index = state_.idx_to_offsets[coordinate];
-        AssertInfo(storage_.ValidReverseIndex(index),
-                   "sorted value offset {} is invalid for row {}",
-                   index,
-                   row);
+        if (!storage_.ValidReverseIndex(index)) {
+            ThrowInfo(DataFormatBroken,
+                      "sorted value offset {} is invalid for row {}",
+                      index,
+                      row);
+        }
         const auto value = storage_.ValueAt(static_cast<size_t>(index));
         out(i, &value, true);
     }

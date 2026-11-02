@@ -2013,6 +2013,86 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshManager_FailurePublication(t *testing.T) {
+	ctx := context.Background()
+	for _, initialState := range []indexpb.JobState{
+		indexpb.JobState_JobStateInit,
+		indexpb.JobState_JobStateRetry,
+		indexpb.JobState_JobStateInProgress,
+	} {
+		t.Run(initialState.String(), func(t *testing.T) {
+			job := &datapb.ExternalCollectionRefreshJob{
+				JobId: 1, CollectionId: 100, State: initialState, Progress: 20,
+			}
+			refreshMeta := createTestRefreshMetaWithJobs(t,
+				[]*datapb.ExternalCollectionRefreshJob{job},
+				[]*datapb.ExternalCollectionRefreshTask{
+					{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFailed, Progress: 40, FailReason: "invalid sparse vector encoding"},
+					{TaskId: 1002, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
+				})
+			manager := &externalCollectionRefreshManager{refreshMeta: refreshMeta}
+			checker := newRefreshChecker(ctx, nil, refreshMeta, make(chan struct{}), nil, nil, nil, nil, nil)
+			persisted := proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+			failStateWrite := true
+			failureWrites := 0
+			save := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).To(
+				func(_ *stubCatalog, _ context.Context, updated *datapb.ExternalCollectionRefreshJob) error {
+					if updated.GetState() == indexpb.JobState_JobStateFailed {
+						failureWrites++
+						if failStateWrite {
+							return merr.WrapErrServiceUnavailable("metadata store unavailable")
+						}
+					}
+					persisted = proto.Clone(updated).(*datapb.ExternalCollectionRefreshJob)
+					return nil
+				}).Build()
+			defer save.UnPatch()
+
+			assertPublishedSnapshot := func() {
+				t.Helper()
+				got, err := manager.GetJobProgress(ctx, job.GetJobId())
+				require.NoError(t, err)
+				assert.True(t, proto.Equal(persisted, got), "GetJobProgress: want %v, got %v", persisted, got)
+				for _, collectionID := range []int64{job.GetCollectionId(), 0} {
+					jobs, err := manager.ListJobs(ctx, collectionID)
+					require.NoError(t, err)
+					require.Len(t, jobs, 1)
+					assert.True(t, proto.Equal(persisted, jobs[0]), "ListJobs(%d): want %v, got %v", collectionID, persisted, jobs[0])
+				}
+				assert.True(t, proto.Equal(persisted, refreshMeta.GetJob(job.GetJobId())), "reads must not mutate metadata")
+			}
+
+			// A failed task must not publish a terminal job before the checker.
+			assertPublishedSnapshot()
+			assert.Zero(t, failureWrites)
+
+			// The progress write succeeds, but the terminal-state write fails.
+			// Both read APIs must keep the latest nonterminal job snapshot.
+			checker.aggregateJobState(refreshMeta.GetJob(job.GetJobId()))
+			require.Equal(t, 1, failureWrites)
+			require.Equal(t, initialState, persisted.GetState())
+			require.EqualValues(t, 70, persisted.GetProgress())
+			require.Empty(t, persisted.GetFailReason())
+			require.Zero(t, persisted.GetEndTime())
+			assertPublishedSnapshot()
+
+			// Retry publishes the failure state, reason and end time together.
+			failStateWrite = false
+			checker.aggregateJobState(refreshMeta.GetJob(job.GetJobId()))
+			require.Equal(t, 2, failureWrites)
+			require.Equal(t, indexpb.JobState_JobStateFailed, persisted.GetState())
+			require.Equal(t, "invalid sparse vector encoding", persisted.GetFailReason())
+			require.NotZero(t, persisted.GetEndTime())
+			assertPublishedSnapshot()
+
+			// A stale checker snapshot must not overwrite the committed failure.
+			checker.aggregateJobState(job)
+			require.Equal(t, 2, failureWrites)
+			assertPublishedSnapshot()
+		})
+	}
+}
+
 func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 	ctx := context.Background()
 
