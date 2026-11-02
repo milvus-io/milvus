@@ -426,16 +426,17 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		if !exist {
 			return merr.WrapErrParameterMissingMsg("IndexType not specified")
 		}
-		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
-		if paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
-			var err error
-			indexParamsMap, err = paramtable.Get().KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
+		// Fill legacy DiskANN settings before generic defaults so their precedence is preserved.
+		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
+			err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap)
 			if err != nil {
 				return err
 			}
 		}
-		if vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) {
-			err := indexparams.FillDiskIndexParams(paramtable.Get(), indexParamsMap)
+		//  index parameters defined in the YAML file are merged with the user-provided parameters during create stage
+		if paramtable.Get().KnowhereConfig.Enable.GetAsBool() {
+			var err error
+			indexParamsMap, err = paramtable.Get().KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParamsMap)
 			if err != nil {
 				return err
 			}

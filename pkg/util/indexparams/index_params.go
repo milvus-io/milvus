@@ -195,7 +195,12 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	} else {
 		maxDegree = params.CommonCfg.MaxDegree.GetValue()
 		searchListSize = params.CommonCfg.SearchListSize.GetValue()
-		pqCodeBudgetGBRatio = params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+		// Keep an explicit PQ budget ratio; server settings provide the default.
+		if ratio, ok := indexParams[PQCodeBudgetRatioKey]; ok {
+			pqCodeBudgetGBRatio = ratio
+		} else {
+			pqCodeBudgetGBRatio = params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+		}
 		buildNumThreadsRatio = params.CommonCfg.BuildNumThreadsRatio.GetValue()
 		searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
 	}

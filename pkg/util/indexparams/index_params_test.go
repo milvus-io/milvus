@@ -72,7 +72,7 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 
-		indexParams = make(map[string]string)
+		indexParams = map[string]string{PQCodeBudgetRatioKey: "0.0625"}
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
@@ -580,6 +580,55 @@ func TestBigDataIndex_parse(t *testing.T) {
 		_, err := NewBigDataExtraParamsFromJSON(jsonStr)
 		assert.Error(t, err)
 	})
+}
+
+func TestDiskIndexPQBudgetOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		requestRatio  string
+		knowhereRatio string
+		wantRatio     string
+	}{
+		{"server fallback", "", "", "0.1875"},
+		{"explicit request", "0.0625", "", "0.0625"},
+		{"legacy server default takes precedence", "", "0.25", "0.1875"},
+		{"request overrides both server defaults", "0.0625", "0.25", "0.0625"},
+		{"invalid request is not replaced", "invalid", "", "invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var params paramtable.ComponentParam
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+			params.Save(params.AutoIndexConfig.Enable.Key, "false")
+			params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.1875")
+			// Isolate the legacy fallback from defaults in the repository YAML.
+			key := params.KnowhereConfig.IndexParam.KeyPrefix + "DISKANN.build." + PQCodeBudgetRatioKey
+			params.Remove(key)
+			if tc.knowhereRatio != "" {
+				params.Save(key, tc.knowhereRatio)
+			}
+
+			indexParams := map[string]string{MaxDegreeKey: "1"}
+			if tc.requestRatio != "" {
+				indexParams[PQCodeBudgetRatioKey] = tc.requestRatio
+			}
+			assert.NoError(t, FillDiskIndexParams(&params, indexParams))
+			indexParams, err := params.KnowhereConfig.MergeIndexParams("DISKANN", paramtable.BuildStage, indexParams)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wantRatio, indexParams[PQCodeBudgetRatioKey])
+			assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), indexParams[MaxDegreeKey])
+
+			// Verify the chosen ratio reaches the actual per-segment build budget.
+			err = SetDiskIndexBuildParams(indexParams, 4<<30)
+			if tc.wantRatio == "invalid" {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			ratio, err := strconv.ParseFloat(tc.wantRatio, 64)
+			assert.NoError(t, err)
+			assert.Equal(t, fmt.Sprintf("%f", 4*ratio), indexParams[PQCodeBudgetKey])
+		})
+	}
 }
 
 func TestAppendPrepareInfo_parse(t *testing.T) {
