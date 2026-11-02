@@ -24,6 +24,7 @@
 
 #include "index/contracts/query/INullReader.h"
 #include "index/scalar/bitmap/BitmapIndexReader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
@@ -33,6 +34,109 @@
 
 namespace milvus::index::test {
 namespace {
+
+template <typename Posting>
+void
+CheckBitmapCache(bool offset_cache) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<
+            std::unique_ptr<BitmapPostingStorage<std::string, Posting>>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        BitmapPostingMap<std::string, Posting> postings;
+        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+            postings["apple"].add(0);
+        } else {
+            auto posting = TargetBitmap(2, false);
+            posting.set(0);
+            postings.emplace("apple", std::move(posting));
+        }
+        auto validity = TargetBitmap(2, false);
+        validity.set(0);
+        co_return std::make_unique<BitmapPostingStorage<std::string, Posting>>(
+            std::move(postings),
+            BitmapReaderOptions{.valid_bitset = std::move(validity),
+                                .total_num_rows = 2,
+                                .value_type = DataType::VARCHAR,
+                                .offset_cache = offset_cache});
+    };
+    IndexCacheConfig cache{
+        "bitmap-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        0};
+    auto slot = std::make_shared<
+        cachinglayer::CacheSlot<BitmapPostingStorage<std::string, Posting>>>(
+        std::make_unique<SingleCellIndexStorageTranslator<
+            BitmapPostingStorage<std::string, Posting>>>(cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = CreateBitmapIndex<std::string, Posting>(
+        slot,
+        IndexMetadata{ReaderCaps{.predicate = true,
+                                 .pattern_match = true,
+                                 .value_lookup = true,
+                                 .cheap_value_lookup = offset_cache},
+                      Domain::Row,
+                      DataType::VARCHAR,
+                      2});
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(first.get());
+    ASSERT_NE(values, nullptr);
+    const int64_t rows[] = {0, 1};
+    values->Gather(
+        rows, 2, [&](int64_t i, const std::string_view* value, bool valid) {
+            EXPECT_FALSE(slot->ManualEvict(0));
+            EXPECT_EQ(valid, i == 0);
+            if (valid)
+                EXPECT_EQ(*value, "apple");
+        });
+    EXPECT_EQ(values->Lookup(0), "apple");
+    const auto* predicates =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            first.get());
+    ASSERT_NE(predicates, nullptr);
+    const std::string_view key = "apple";
+    EXPECT_EQ(predicates->In(1, &key).count(), 1);
+    EXPECT_EQ(predicates->NotIn(1, &key).count(), 0);
+    EXPECT_EQ(predicates->Range(key, CompareOp::NotEqual).count(), 0);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    first.reset();
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 1);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
+TEST(BitmapIndexCacheTest, GatherRetainsPinAndReloadUsesReadersContext) {
+    for (const bool offset_cache : {false, true}) {
+        CheckBitmapCache<roaring::Roaring>(offset_cache);
+        CheckBitmapCache<TargetBitmap>(offset_cache);
+    }
+}
 
 TEST(BitmapIndexOwnershipTest, RequestViewsShareKeysAndRetainTheIndex) {
     BitmapRoaringPostingMap<std::string> postings;

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -29,6 +30,9 @@
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+template <typename T, typename Posting>
+struct BitmapPostingStorage;
 
 /**
  * @brief Loads bitmap indexes from legacy or packed V3 artifacts.
@@ -65,7 +69,7 @@ class BitmapIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -74,6 +78,36 @@ class BitmapIndexLoader final : public IndexLoader {
     /** @brief Reusable metadata, without per-load payload ownership. */
     struct PreparedState;
     std::unique_ptr<PreparedState> state_;
+
+    template <typename T, typename Posting>
+    IndexPtr
+    CreateCached(const IndexCacheConfig& cache, milvus::OpContext* context);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                const PreparedState& prepared,
+                milvus::OpContext* context);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<IndexPtr>
+    LoadLegacyIndex(storage::FileSource& source,
+                    const storage::LoadOptions& opts,
+                    const PreparedState& prepared,
+                    bool use_async);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<IndexPtr>
+    FinishPackedIndex(IndexLoadPlan& plan,
+                      const storage::LoadOptions& opts,
+                      bool use_async);
 
     /**
      * @brief Decode postings using retained metadata, then attach JSON

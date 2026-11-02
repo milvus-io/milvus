@@ -23,6 +23,7 @@
 #include <string_view>
 #include <type_traits>
 #include <vector>
+#include "cachinglayer/CacheSlot.h"
 
 #include <roaring/roaring.hh>
 
@@ -143,6 +144,17 @@ template <typename T>
 IndexPtr
 CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
                   BitmapReaderOptions options);
+
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(std::unique_ptr<BitmapPostingStorage<T, Posting>> storage);
+
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, Posting>>>
+        slot,
+    IndexMetadata metadata);
 
 // Transitional loader factories; removed when IndexLoader returns Index.
 template <typename T>
