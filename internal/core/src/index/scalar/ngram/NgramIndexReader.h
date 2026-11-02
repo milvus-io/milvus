@@ -21,6 +21,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
@@ -103,17 +105,32 @@ class NgramIndex final : public IIndex,
                size_t avg_row_size,
                bool mmap,
                size_t engine_bytes);
+    explicit NgramIndex(std::shared_ptr<const NgramIndexStorage> storage);
+    NgramIndex(std::shared_ptr<cachinglayer::CacheSlot<NgramIndexStorage>> slot,
+               IndexMetadata metadata,
+               uintptr_t min_gram,
+               uintptr_t max_gram);
     IndexMetadata
     Metadata() const override;
     IIndexReaderBasePtr
     CreateReader(milvus::OpContext* op_ctx) const override;
     void
-    CancelWarmup() const override {
-    }
+    CancelWarmup() const override;
 
  private:
     friend class NgramIndexReader;
-    NgramIndexStorage storage_;
+    std::shared_ptr<const NgramIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    std::pair<uintptr_t, uintptr_t>
+    GramBounds() const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<NgramIndexStorage>> slot;
+        IndexMetadata metadata;
+        uintptr_t min_gram;
+        uintptr_t max_gram;
+    };
+    std::variant<std::shared_ptr<const NgramIndexStorage>, CachedStorage>
+        storage_;
 };
 
 class NgramIndexReader final : public IIndexReaderBase,
@@ -186,15 +203,18 @@ class NgramIndexReader final : public IIndexReaderBase,
     // Cost policy: for a very selective pre-filter, tokenize and intersect
     // iteratively instead of running the full ngram match query.
     bool
-    ShouldUseBatchStrategy(double pre_filter_hit_rate) const;
+    ShouldUseBatchStrategy(const NgramIndexStorage& storage,
+                           double pre_filter_hit_rate) const;
 
     // AND-merges every literal's candidates using the cost policy above.
     void
-    ApplyLiterals(const std::vector<std::string>& literals,
+    ApplyLiterals(const NgramIndexStorage& storage,
+                  const std::vector<std::string>& literals,
                   TargetBitmap& candidates) const;
 
     void
-    ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,
+    ApplyIterativeNgramFilter(const NgramIndexStorage& storage,
+                              const std::vector<std::string>& sorted_terms,
                               size_t total_count,
                               TargetBitmap& bitset) const;
 

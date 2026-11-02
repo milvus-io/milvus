@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -30,12 +31,14 @@
 
 namespace milvus::index {
 
+struct NgramIndexStorage;
+
 /**
  * @brief Loads ngram readers from legacy or packed V3 artifacts.
  *
  * Historical artifacts omit gram bounds and JSON path/type; runtime options
  * supply these values and Create validates them. Owns the opened source and
- * fixed load options; each Load creates a new reader.
+ * fixed load options. Cached construction transfers the source to the cache slot.
  */
 class NgramIndexLoader final : public IndexLoader {
  public:
@@ -63,13 +66,23 @@ class NgramIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     NgramIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    static folly::coro::Task<std::unique_ptr<NgramIndexStorage>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<NgramIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Materialize Tantivy files with gram bounds and JSON projection

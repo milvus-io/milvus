@@ -1690,7 +1690,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
          translator->Family() == index::families::kRTree ||
          translator->Family() == index::families::kSort ||
          translator->Family() == index::families::kBitmap ||
-         translator->Family() == index::families::kInverted) &&
+         translator->Family() == index::families::kInverted ||
+         translator->Family() == index::families::kNgram) &&
         !translator->Caps().json_paths) {
         load_index_info->index = translator->CreateIndex(op_ctx);
     } else {
