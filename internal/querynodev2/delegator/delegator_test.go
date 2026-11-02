@@ -540,7 +540,7 @@ func (s *DelegatorSuite) TestSearch() {
 			Run(func(ctx context.Context, req *querypb.SearchRequest) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -556,7 +556,7 @@ func (s *DelegatorSuite) TestSearch() {
 			Run(func(ctx context.Context, req *querypb.SearchRequest) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
@@ -833,7 +833,7 @@ func (s *DelegatorSuite) TestQuery() {
 			Run(func(ctx context.Context, req *querypb.QueryRequest) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -849,7 +849,7 @@ func (s *DelegatorSuite) TestQuery() {
 			Run(func(ctx context.Context, req *querypb.QueryRequest) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
@@ -1037,7 +1037,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
 
 				if req.GetScope() == querypb.DataScope_Streaming {
@@ -1063,7 +1063,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				attempts, ok := retry.MaxAttemptsFromContext(ctx)
 				s.True(ok)
-				s.Equal(uint(1), attempts)
+				s.Equal(uint(2), attempts)
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
 
 				s.Equal(querypb.DataScope_Historical, req.GetScope())

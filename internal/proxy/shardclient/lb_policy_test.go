@@ -18,6 +18,7 @@ package shardclient
 
 import (
 	"context"
+	"net"
 	"reflect"
 	"testing"
 	"time"
@@ -28,6 +29,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -1573,7 +1577,8 @@ func (s *LBPolicySuite) TestDeadWorkerConnectionFailsOverBeforeDeadline() {
 			if node == 2 {
 				return nil
 			}
-			_, err := base.Call(retry.WithMaxAttemptsContext(ctx, 1), func(*mocks.MockQueryNodeClient) (any, error) {
+			readCtx := grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+			_, err := base.Call(readCtx, func(*mocks.MockQueryNodeClient) (any, error) {
 				s.Fail("dead worker must not execute RPC")
 				return nil, nil
 			})
@@ -1588,4 +1593,48 @@ func (s *LBPolicySuite) TestDeadWorkerConnectionFailsOverBeforeDeadline() {
 	s.Equal([]int64{1, 2}, visited)
 	s.NoError(ctx.Err())
 	s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+func (s *LBPolicySuite) TestTransientWorkerRPCDoesNotBlacklistReplica() {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	s.Require().NoError(err)
+	server := grpc.NewServer()
+	go server.Serve(listener)
+	defer server.Stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: listener.Addr().String(), Serviceable: true}}
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+	base := grpcclient.NewClientBase[*mocks.MockQueryNodeClient](&paramtable.Get().QueryNodeGrpcClientCfg, "test")
+	base.SetGetAddrFunc(func() (string, error) { return listener.Addr().String(), nil })
+	base.SetNewGrpcClientFunc(func(*grpc.ClientConn) *mocks.MockQueryNodeClient { return s.qn })
+	defer base.Close()
+	rpcCalls := 0
+	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Channel: channel, Nq: 1,
+		Exec: func(ctx context.Context, node UniqueID, _ types.QueryNodeClient, _ string) error {
+			s.Equal(int64(1), node)
+			readCtx := grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+			_, err := base.Call(readCtx, func(*mocks.MockQueryNodeClient) (any, error) {
+				rpcCalls++
+				if rpcCalls == 1 {
+					return nil, status.Error(codes.Unavailable, "transient worker error")
+				}
+				return merr.Status(nil), nil
+			})
+			return err
+		},
+	})
+	s.NoError(err)
+	s.Equal(2, rpcCalls)
+	s.Empty(s.lbPolicy.blacklist.GetBlacklistedNodes(channel))
 }

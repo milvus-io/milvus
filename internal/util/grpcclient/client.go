@@ -94,6 +94,15 @@ type GrpcClient[T GrpcComponent] interface {
 	SetSession(sess *sessionutil.Session)
 }
 
+type failFastOnConnectionErrorKey struct{}
+
+// WithFailFastOnConnectionError lets a caller retry an established RPC while
+// returning immediately if a connection cannot be acquired. Pinned worker
+// reads use this so Proxy can try another replica after a failed dial.
+func WithFailFastOnConnectionError(ctx context.Context) context.Context {
+	return context.WithValue(ctx, failFastOnConnectionErrorKey{}, true)
+}
+
 // connectionAttempt publishes one dial result to all concurrent waiters.
 type connectionAttempt[T GrpcComponent] struct {
 	done    chan struct{}
@@ -552,14 +561,19 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	log := mlog.With(mlog.String("client_role", c.GetRole()))
 	var ret any
 	attempts := retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))
+	failFastOnConnectionError, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
+	var attempt uint
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	err := retry.Handle(ctx, func() (bool, error) {
+		attempt++
+		// The scoped worker policy must not sleep after its final failed RPC.
+		canRetry := attempts != 1 && (!failFastOnConnectionError || attempts == 0 || attempt < attempts)
 		// Connection acquisition belongs to this attempt, including the first dial.
 		wrapper, clientErr := c.GetGrpcClient(ctx)
 		if clientErr != nil {
 			log.Warn(ctx, "fail to get grpc client", mlog.Err(clientErr))
-			if ctx.Err() != nil || attempts == 1 || IsConnectionClosingErr(clientErr) {
+			if ctx.Err() != nil || !canRetry || failFastOnConnectionError || IsConnectionClosingErr(clientErr) {
 				return false, clientErr
 			}
 			if !c.checkNodeSessionExist(ctx) {
@@ -579,7 +593,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 			if needReset {
 				log.Warn(ctx, "start to reset connection because of specific reasons", mlog.Err(err))
 				c.resetConnection(wrapper, forceReset)
-			} else if needRetry && attempts != 1 {
+			} else if needRetry && canRetry && !failFastOnConnectionError {
 				// err occurs but no need to reset connection, try to verify session
 				err := c.verifySession(ctx)
 				if err != nil {
@@ -587,7 +601,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 					c.resetConnection(wrapper, forceReset)
 				}
 			}
-			return needRetry && attempts != 1, err
+			return needRetry && canRetry, err
 		}
 		// reset counter
 		c.ctxCounter.Store(0)
@@ -614,7 +628,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 
 		err = merr.Error(status)
 		if err != nil && merr.IsRetryableErr(err) {
-			return attempts != 1, err
+			return canRetry, err
 		}
 		return false, nil
 	}, retry.Attempts(attempts),

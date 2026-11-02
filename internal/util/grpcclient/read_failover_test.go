@@ -65,6 +65,62 @@ func TestConnectionAttemptBudget(t *testing.T) {
 	}
 }
 
+func TestReadFailFastOnConnectionError(t *testing.T) {
+	base := &ClientBase[*mockClient]{MaxAttempts: 10, isNode: true, role: "querynode-1906"}
+	base.sess = sessionutil.NewMockSession(t) // A failed dial must not block on etcd.
+	dials := 0
+	base.SetGetAddrFunc(func() (string, error) {
+		dials++
+		return "", wrapErrConnect("dead-worker", context.DeadlineExceeded)
+	})
+	ctx := WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(context.Background(), 2))
+	_, err := base.Call(ctx, func(*mockClient) (any, error) {
+		t.Fatal("RPC must not run after a failed dial")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, ErrConnect)
+	require.Equal(t, 1, dials)
+}
+
+func TestReadRetriesTransientRPCError(t *testing.T) {
+	base := &ClientBase[*mockClient]{MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
+		minResetInterval: time.Hour, isNode: true}
+	base.lastReset.Store(time.Now()) // Keep the established connection for the retry.
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+	calls := 0
+	ctx := WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(context.Background(), 2))
+	_, err := base.Call(ctx, func(*mockClient) (any, error) {
+		calls++
+		if calls == 1 {
+			return nil, status.Error(codes.Unavailable, "transient worker error")
+		}
+		return merr.Status(nil), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+}
+
+func TestReadFailedReconnectReturnsAfterOneRPC(t *testing.T) {
+	base := &ClientBase[*mockClient]{MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
+		isNode: true, role: "querynode-1906"}
+	base.sess = sessionutil.NewMockSession(t)
+	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
+	dials := 0
+	base.SetGetAddrFunc(func() (string, error) {
+		dials++
+		return "", wrapErrConnect("dead-worker", context.DeadlineExceeded)
+	})
+	calls := 0
+	ctx := WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(context.Background(), 2))
+	_, err := base.Call(ctx, func(*mockClient) (any, error) {
+		calls++
+		return nil, status.Error(codes.Unavailable, "worker exited")
+	})
+	require.ErrorIs(t, err, ErrConnect)
+	require.Equal(t, 1, calls)
+	require.Equal(t, 1, dials)
+}
+
 func TestFastFailDoesNotReconnect(t *testing.T) {
 	base := &ClientBase[*mockClient]{MaxAttempts: 3}
 	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
@@ -292,6 +348,7 @@ func TestClosedClientDoesNotReturnCompletedConnection(t *testing.T) {
 func TestConcurrentConnectionFailureIsShared(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	calls := 0
+	const waiters = 32
 	base := &ClientBase[*mockClient]{}
 	base.SetGetAddrFunc(func() (string, error) {
 		calls++
@@ -299,15 +356,18 @@ func TestConcurrentConnectionFailureIsShared(t *testing.T) {
 		<-release
 		return "", wrapErrConnect("dead-worker", context.DeadlineExceeded)
 	})
-	done := make(chan error, 2)
+	done := make(chan error, waiters+1)
 	go func() { _, err := base.GetGrpcClient(context.Background()); done <- err }()
 	<-started
-	ctx := &connectionWaitContext{Context: context.Background(), entered: make(chan struct{})}
-	go func() { _, err := base.GetGrpcClient(ctx); done <- err }()
-	<-ctx.entered
+	for range waiters {
+		ctx := &connectionWaitContext{Context: context.Background(), entered: make(chan struct{})}
+		go func() { _, err := base.GetGrpcClient(ctx); done <- err }()
+		<-ctx.entered
+	}
 	close(release)
-	require.ErrorIs(t, <-done, ErrConnect)
-	require.ErrorIs(t, <-done, ErrConnect)
+	for range waiters + 1 {
+		require.ErrorIs(t, <-done, ErrConnect)
+	}
 	require.Equal(t, 1, calls)
 }
 
