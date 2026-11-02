@@ -659,7 +659,7 @@ clear_bit_if_present(BitsetType& bitset, FieldId field_id) {
 }
 
 static inline void
-cancel_warmup(const IndexInventory::RootSlot& slot) {
+cancel_warmup(const std::shared_ptr<IndexInventory::Entry>& slot) {
     if (slot) {
         slot->CancelWarmup();
     }
@@ -687,11 +687,11 @@ is_text_registration(const IndexRegistration& entry) {
 }
 
 template <typename Predicate>
-std::vector<IndexInventory::RootSlot>
+std::vector<std::shared_ptr<IndexInventory::Entry>>
 erase_index_entries(IndexInventory& inventory,
                     FieldId field_id,
                     Predicate&& predicate) {
-    std::vector<IndexInventory::RootSlot> retired;
+    std::vector<std::shared_ptr<IndexInventory::Entry>> retired;
     auto entries = inventory.Entries(field_id);
     retired.reserve(entries.size());
     for (const auto& entry : entries) {
@@ -708,17 +708,18 @@ erase_index_entries(IndexInventory& inventory,
 
 std::shared_ptr<IndexInventory::Entry>
 make_persisted_index_entry(LoadIndexInfo& info) {
-    AssertInfo(
-        info.cache_index != nullptr || info.lazy_index_factory != nullptr,
-        "loaded index for field {} has no cache slot",
-        info.field_id);
+    AssertInfo(std::visit([](const auto& value) { return value != nullptr; },
+                          info.index) ||
+                   info.lazy_index_factory != nullptr,
+               "loaded index for field {} has no index owner",
+               info.field_id);
     if (info.lazy_index_factory != nullptr) {
         return std::make_shared<IndexInventory::Entry>(
             MakeSealedIndexRegistration(info),
             std::move(info.lazy_index_factory));
     }
     return std::make_shared<IndexInventory::Entry>(
-        MakeSealedIndexCapability(info), std::move(info.cache_index));
+        MakeSealedIndexCapability(info), std::move(info.index));
 }
 
 // Installs an already completed local artifact into the ordinary one-cell
@@ -1181,7 +1182,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(
         NormalizePublishedState(*staged_state);
     } else {
         auto next_runtime = CloneRuntimeResourceState(snapshot->runtime);
-        std::vector<IndexInventory::RootSlot> retired_indexings;
+        std::vector<std::shared_ptr<IndexInventory::Entry>> retired_indexings;
         if (drop_existing) {
             retired_indexings = erase_index_entries(
                 next_runtime->indexes, field_id, is_vector_registration);
@@ -1221,18 +1222,19 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(
 
     RuntimeResourceState* target_runtime = runtime;
     std::shared_ptr<RuntimeResourceState> owned_runtime;
-    std::vector<IndexInventory::RootSlot> retired_indexings;
+    std::vector<std::shared_ptr<IndexInventory::Entry>> retired_indexings;
 
-    auto retire_indexing = [&](IndexInventory::RootSlot indexing) {
-        if (indexing == nullptr) {
-            return;
-        }
-        if (committer != nullptr) {
-            committer->RetireCacheIndexingLocked(std::move(indexing));
-        } else if (owned_runtime != nullptr) {
-            retired_indexings.push_back(std::move(indexing));
-        }
-    };
+    auto retire_indexing =
+        [&](std::shared_ptr<IndexInventory::Entry> indexing) {
+            if (indexing == nullptr) {
+                return;
+            }
+            if (committer != nullptr) {
+                committer->RetireCacheIndexingLocked(std::move(indexing));
+            } else if (owned_runtime != nullptr) {
+                retired_indexings.push_back(std::move(indexing));
+            }
+        };
 
     auto cancel_retired_indexings = [&] {
         for (auto& indexing : retired_indexings) {
@@ -1851,7 +1853,7 @@ ChunkedSegmentSealedImpl::PinVectorIndex(
                            : IndexPin{};
 }
 
-std::vector<IndexInventory::RootSlot>
+std::vector<std::shared_ptr<IndexInventory::Entry>>
 ChunkedSegmentSealedImpl::EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
                                                  FieldId field_id,
                                                  std::string_view nested_path) {
@@ -5775,9 +5777,10 @@ void
 ChunkedSegmentSealedImpl::ClearData() {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto runtime_snapshot = CaptureRuntimeResourceState();
-    auto retired_indexings = runtime_snapshot != nullptr
-                                 ? runtime_snapshot->indexes.Slots()
-                                 : std::vector<IndexInventory::RootSlot>{};
+    auto retired_indexings =
+        runtime_snapshot != nullptr
+            ? runtime_snapshot->indexes.SnapshotEntries()
+            : std::vector<std::shared_ptr<IndexInventory::Entry>>{};
     {
         std::unique_lock lck(mutex_);
         stats_.mem_size = 0;
@@ -6291,10 +6294,10 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
     IndexInventory::ResolvedData resolved{translator->Family(),
                                           translator->ValueType(),
                                           translator->Caps(),
-                                          nullptr};
-    resolved.slot = milvus::cachinglayer::Manager::GetInstance()
-                        .CreateCacheSlot<index::IIndexReaderBase>(
-                            std::move(translator), op_ctx);
+                                          IndexInventory::RootSlot{}};
+    resolved.index = milvus::cachinglayer::Manager::GetInstance()
+                         .CreateCacheSlot<index::IIndexReaderBase>(
+                             std::move(translator), op_ctx);
 
     CheckCancellation(op_ctx,
                       segment_id,
@@ -6334,7 +6337,7 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
         meta.value_type = resolved.value_type;
         meta.caps = resolved.caps;
         return std::make_shared<IndexInventory::Entry>(
-            std::move(meta), std::move(resolved.slot));
+            std::move(meta), std::move(resolved.index));
     }
     auto metadata =
         std::make_shared<proto::indexcgo::LoadTextIndexInfo>(*info_proto);

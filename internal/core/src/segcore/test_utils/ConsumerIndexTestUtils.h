@@ -208,7 +208,7 @@ MakeLoadIndexInfo(OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.cache_index = CreateReaderCache(std::move(opened.reader));
+    info.index = CreateReaderCache(std::move(opened.reader));
     return info;
 }
 

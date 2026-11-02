@@ -335,7 +335,7 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         AssertInfo(load_index_info != nullptr, "load index info is null");
-        load_index_info->cache_index.reset();
+        load_index_info->index = milvus::segcore::IndexInventory::RootSlot{};
         load_index_info->lazy_index_factory = nullptr;
         return milvus::SuccessCStatus();
     }

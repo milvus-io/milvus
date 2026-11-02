@@ -55,7 +55,8 @@ class VectorMemLoader final : public IndexLoader {
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    Load(milvus::OpContext* context = nullptr,
+         const IndexCacheConfig* cache = nullptr) override;
 
  private:
     LegacyIndexSource source_;

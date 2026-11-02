@@ -486,7 +486,10 @@ InvertedIndexLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-InvertedIndexLoader::Load(milvus::OpContext* context) {
+InvertedIndexLoader::Load(milvus::OpContext* context,
+                          const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
             *packed, options_, &PlanPacked, &FinishPacked, context);

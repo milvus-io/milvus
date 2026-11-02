@@ -30,6 +30,8 @@
 
 namespace milvus::index {
 
+struct MarisaIndexStorage;
+
 /**
  * @brief Loads MARISA trie readers from legacy or packed V3 artifacts.
  *
@@ -55,18 +57,30 @@ class MarisaIndexLoader final : public IndexLoader {
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    Load(milvus::OpContext* context = nullptr,
+         const IndexCacheConfig* cache = nullptr) override;
 
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     MarisaIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    // Loads the concrete cell, including validation, inside the load transaction.
+    static folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Load the trie and row mapping, then attach JSON projection state.

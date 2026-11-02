@@ -115,7 +115,7 @@ class TimestamptzCompareCorrectnessTest : public ::testing::Test {
         load_index_info.index_params =
             GenIndexParams(scalar_index.get(), "sort");
         SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-        load_index_info.cache_index = milvus::CreateTestCacheIndex(
+        load_index_info.index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));
         sealed_->LoadIndex(load_index_info);
         ASSERT_TRUE(sealed_->HasIndex(fid));

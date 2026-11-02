@@ -850,7 +850,10 @@ SortedIndexLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-SortedIndexLoader::Load(milvus::OpContext* context) {
+SortedIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
             *packed,

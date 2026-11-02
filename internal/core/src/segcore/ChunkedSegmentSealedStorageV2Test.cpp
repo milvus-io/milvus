@@ -807,7 +807,7 @@ LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
     for (const auto& entry : inventory.Entries(field)) {
         if (entry.kind == IndexKind::Vector) {
             auto copy = inventory;
-            return copy.Drop(entry.key);
+            return copy.Drop(entry.key)->Peek();
         }
     }
     return nullptr;

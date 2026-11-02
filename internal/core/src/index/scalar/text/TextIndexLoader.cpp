@@ -453,7 +453,10 @@ TextIndexLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-TextIndexLoader::Load(milvus::OpContext* context) {
+TextIndexLoader::Load(milvus::OpContext* context,
+                      const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
         return RunPackedIndexLoad(
             *packed, options_, &PlanPacked, &FinishPacked, context);

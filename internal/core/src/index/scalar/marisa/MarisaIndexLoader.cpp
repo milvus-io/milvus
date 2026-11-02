@@ -19,6 +19,8 @@
 #include "storage/LocalFileIOPool.h"
 #include "common/OpContext.h"
 #include "index/scalar/marisa/MarisaIndexLoader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
 #include "index/scalar/marisa/MarisaIndexParams.h"
@@ -300,7 +302,7 @@ AddObservedBytes(size_t& total, size_t value) {
 
 // Load a legacy trie and row IDs; rebuild CSR and retain staging only for
 // mmap readers.
-folly::coro::Task<std::shared_ptr<const MarisaIndexStorage>>
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
@@ -347,7 +349,7 @@ LoadState(bool use_async,
             local_io();
         }
     }
-    auto storage = std::make_shared<MarisaIndexStorage>();
+    auto storage = std::make_unique<MarisaIndexStorage>();
     storage->value_type = value_type;
 
     std::string trie_path;
@@ -418,6 +420,7 @@ LoadState(bool use_async,
         storage->str_ids_size = storage->str_ids_owner->size();
         storage->csr_index = storage->csr_index_owner->data();
         storage->csr_offsets = storage->csr_offsets_owner->data();
+        storage->Validate();
         co_return storage;
     }
 
@@ -469,6 +472,7 @@ LoadState(bool use_async,
     storage->csr_index = csr_index;
     storage->csr_offsets = csr_offsets;
     storage->file_backed_bytes = observed_bytes;
+    storage->Validate();
     co_return storage;
 }
 
@@ -534,13 +538,76 @@ MarisaIndexLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-MarisaIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
+MarisaIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig* cache) {
+    AssertInfo(source_.has_value(),
+               "cached Marisa construction consumed this loader");
+    if (cache) {
+        AssertInfo(
+            !DeriveCaps(options_.params).json_paths,
+            "JSON projection cache migration is separate from Marisa storage");
+        std::optional<int64_t> count;
+        if (const auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+            const auto bytes =
+                packed->Directory().At(MARISA_STR_IDS).plaintext_size;
+            if (bytes % sizeof(int64_t) != 0) {
+                ThrowInfo(DataFormatBroken, "invalid marisa row id entry size");
+            }
+            count = static_cast<int64_t>(bytes / sizeof(int64_t));
+        } else {
+            const auto rows = GetValueFromConfig<int64_t>(options_.params,
+                                                          INDEX_NUM_ROWS_KEY);
+            // Legacy LoadInfo uses zero for both missing counts and empty segments.
+            if (rows && *rows > 0) {
+                count = *rows;
+            }
+        }
+        const auto value_type = ParseValueType(options_.params);
+        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+        const bool use_async =
+            legacy ? legacy->use_async
+                   : std::holds_alternative<
+                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                         std::get<PackedIndexSource>(*source_).reader);
+        auto source = std::move(*source_);
+        source_.reset();
+        auto load = [source = std::move(source),
+                     options = options_](OpContext* ctx) mutable {
+            return LoadStorage(source, options, ctx);
+        };
+        auto slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<MarisaIndexStorage>(
+                    std::make_unique<
+                        SingleCellIndexStorageTranslator<MarisaIndexStorage>>(
+                        *cache, use_async, std::move(load)),
+                    context);
+        co_return std::make_shared<MarisaIndex>(
+            std::move(slot), value_type, count);
+    }
+    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+        co_return co_await RunPackedIndexLoad(
             *packed, options_, &PlanPacked, &FinishPacked, context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    co_return co_await RunLegacyLoad(
+        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+}
+
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+MarisaIndexLoader::LoadStorage(OpenedIndexSource& source,
+                               const storage::LoadOptions& options,
+                               milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<MarisaIndexStorage>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
+    }
+    return RunLegacyLoad<std::unique_ptr<MarisaIndexStorage>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [](storage::FileSource& source,
+           const storage::LoadOptions& opts,
+           bool use_async) { return LoadState(use_async, source, opts); },
+        context);
 }
 
 ReaderCaps
@@ -695,10 +762,10 @@ MarisaIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IndexPtr>
-MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+MarisaIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -709,7 +776,7 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
     AssertInfo(state != nullptr, "marisa packed load context is null");
     // Context retains the directory until the trie and both mapping guards
     // have either transferred to the reader or unwound on failure.
-    auto result = std::make_shared<MarisaIndexStorage>();
+    auto result = std::make_unique<MarisaIndexStorage>();
     result->value_type = state->value_type;
     storage::MappedRegionGuard ids_mapping;
     storage::MappedRegionGuard csr_mapping;
@@ -788,9 +855,21 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
         AddObservedBytes(result->file_backed_bytes, state->str_ids_bytes);
         AddObservedBytes(result->file_backed_bytes, csr_bytes);
     }
+    result->Validate();
+    co_return result;
+}
+
+folly::coro::Task<IndexPtr>
+MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
+                                const storage::LoadOptions& opts,
+                                bool use_async) {
+    auto storage = co_await FinishPackedStorage(plan, opts, use_async);
+    const auto& state =
+        std::any_cast<const std::shared_ptr<PackedMarisaState>&>(
+            plan.load_context);
     co_return FinishPackedJsonProjectedOpen(
         std::move(state->projection),
-        std::make_shared<MarisaIndex>(std::move(result)));
+        std::make_shared<MarisaIndex>(std::move(storage)));
 }
 
 namespace {

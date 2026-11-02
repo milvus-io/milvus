@@ -303,7 +303,9 @@ FmIndexLoader::Create(OpenedIndexSource source, storage::LoadOptions options) {
 }
 
 folly::coro::Task<IndexPtr>
-FmIndexLoader::Load(milvus::OpContext* context) {
+FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     return RunPackedIndexLoad(
         source_, options_, &PlanPacked, &FinishPacked, context);
 }

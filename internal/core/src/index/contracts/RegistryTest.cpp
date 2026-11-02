@@ -144,7 +144,7 @@ struct LoaderProbeA : IndexLoader {
         co_return result;
     }
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext*) override {
+    Load(milvus::OpContext*, const IndexCacheConfig*) override {
         load_thread = std::this_thread::get_id();
         co_return std::make_shared<EmptyIndex>(DeriveCaps(options_.params));
     }
@@ -174,7 +174,7 @@ struct LoaderFailureProbe : IndexLoader {
     }
 
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext*) override {
+    Load(milvus::OpContext*, const IndexCacheConfig*) override {
         if (mode == "load_error") {
             ThrowInfo(DataFormatBroken, "reader loading failed");
         }

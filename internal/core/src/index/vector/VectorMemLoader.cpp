@@ -485,7 +485,10 @@ VectorMemLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-VectorMemLoader::Load(milvus::OpContext* context) {
+VectorMemLoader::Load(milvus::OpContext* context,
+                      const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     return RunLegacyLoad(source_, options_, &LoadLegacy, context);
 }
 

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include "index/IndexCacheConfig.h"
 #include <variant>
 #include <vector>
 #include "storage/AsyncIndexEntryReader.h"
@@ -112,6 +114,7 @@ using OpenedIndexSource = std::variant<LegacyIndexSource, PackedIndexSource>;
 struct IndexLoadRequest {
     std::variant<IndexFiles, OpenedIndexSource> source;
     storage::LoadOptions options;
+    std::optional<IndexCacheConfig> cache;
 };
 
 }  // namespace milvus::index

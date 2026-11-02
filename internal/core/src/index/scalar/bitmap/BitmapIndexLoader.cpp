@@ -1094,7 +1094,10 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-BitmapIndexLoader::Load(milvus::OpContext* context) {
+BitmapIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     const auto operation_token =
         context ? context->cancellation_token : folly::CancellationToken{};
     const auto token = folly::cancellation_token_merge(

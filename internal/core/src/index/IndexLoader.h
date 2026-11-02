@@ -25,6 +25,8 @@ class OpContext;
 
 namespace milvus::index {
 
+struct IndexCacheConfig;
+
 /**
  * @brief Family-internal contract for prepared state that can create index owners.
  *
@@ -33,7 +35,7 @@ namespace milvus::index {
  * exposes no storage-format properties or partially completed source-opening
  * steps.
  * External loading consumers use LoaderEntry::Load instead of this interface.
- * @note Load calls on one instance must be sequential. Keep the instance alive
+ * @note Resident Load calls on one instance must be sequential. Keep the instance alive
  * until its task finishes. A returned index owns its resources independently.
  */
 class IndexLoader {
@@ -44,15 +46,18 @@ class IndexLoader {
      * @brief Materialize a new index from the already-opened index.
      * @param context Borrowed for this call only; nullptr uses default priority
      * and inherited coroutine cancellation. Keep it alive through completion.
-     * @return A fully initialized index owning its resources.
+     * @param cache Optional storage cache policy; cached construction consumes
+     * the prepared loader source, including on failure. Do not reuse it afterward.
+     * @return An index owning resident storage or its cache and reload source.
      * @note On failure, issued I/O drains and temporary targets are cleaned up
-     * before the exception propagates. A later call may retry.
+     * before the exception propagates. Resident Load calls may retry.
      * @note A Task does not imply a thread hop. Synchronous transport executes
      * on the calling thread; asynchronous implementations preserve I/O
      * scheduling.
      */
     virtual folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr) = 0;
+    Load(milvus::OpContext* context = nullptr,
+         const IndexCacheConfig* cache = nullptr) = 0;
 };
 
 }  // namespace milvus::index

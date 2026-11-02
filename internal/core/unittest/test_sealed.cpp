@@ -342,7 +342,7 @@ TestIndexSlot(const IndexInventory& inventory,
             // Drop from a copied inventory exposes the exact retained slot
             // without pinning a cold reader or changing the tested snapshot.
             auto copy = inventory;
-            return copy.Drop(entry.key);
+            return copy.Drop(entry.key)->Peek();
         }
     }
     return nullptr;
@@ -840,7 +840,9 @@ TEST(SealedLazyIndexSlot,
         ASSERT_NO_THROW(sealed->LoadIndex(info));
         EXPECT_TRUE(info.index_family.empty());
         EXPECT_EQ(info.index_value_type, DataType::NONE);
-        EXPECT_EQ(info.cache_index, nullptr);
+        EXPECT_EQ(
+            std::get<milvus::segcore::IndexInventory::RootSlot>(info.index),
+            nullptr);
 
         const auto registrations = sealed->IndexRegistrations(json);
         ASSERT_EQ(registrations.size(), 1);
@@ -874,7 +876,8 @@ TEST(SealedLazyIndexSlot, CleanLoadedIndexClearsLazyFactory) {
     ASSERT_TRUE(info.lazy_index_factory);
     const auto status = CleanLoadedIndex(static_cast<CLoadIndexInfo>(&info));
     ASSERT_EQ(status.error_code, milvus::Success);
-    EXPECT_EQ(info.cache_index, nullptr);
+    EXPECT_EQ(std::get<milvus::segcore::IndexInventory::RootSlot>(info.index),
+              nullptr);
     EXPECT_FALSE(info.lazy_index_factory);
 }
 
@@ -1677,7 +1680,7 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     load_info.field_type = DataType::VARCHAR;
     load_info.index_params = GenIndexParams(scalar_index.get());
     SetTestIndexMetadata(load_info, *scalar_index, index::families::kSort);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("nullable-text", std::move(scalar_index));
 
     auto dataset = DataGen(schema, values.size());
@@ -1795,7 +1798,7 @@ TEST(Sealed, without_predicate) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -1872,7 +1875,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -1976,7 +1979,7 @@ TEST(Sealed, with_predicate) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -2053,8 +2056,7 @@ TEST(Sealed, with_predicate_filter_all) {
     load_info.index_params = GenIndexParams(ivf_indexing.get());
     SetTestIndexMetadata(load_info, *ivf_indexing, index::families::kVectorMem);
     load_info.field_type = ivf_indexing->ValueType();
-    load_info.cache_index =
-        CreateTestCacheIndex("test", std::move(ivf_indexing));
+    load_info.index = CreateTestCacheIndex("test", std::move(ivf_indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -2093,7 +2095,7 @@ TEST(Sealed, with_predicate_filter_all) {
     SetTestIndexMetadata(
         hnsw_load_info, *hnsw_indexing, index::families::kVectorMem);
     hnsw_load_info.field_type = hnsw_indexing->ValueType();
-    hnsw_load_info.cache_index =
+    hnsw_load_info.index =
         CreateTestCacheIndex("test", std::move(hnsw_indexing));
     hnsw_load_info.index_params["metric_type"] = "L2";
 
@@ -2146,7 +2148,7 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
 
@@ -2199,7 +2201,7 @@ TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
 
@@ -2294,7 +2296,7 @@ TEST(Sealed, LoadFieldData) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2437,7 +2439,7 @@ TEST(Sealed, ClearData) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2525,7 +2527,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2569,7 +2571,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     auto index = GenScalarIndexing<int64_t>(N, pk_data.data());
     pk_index.index_params = GenIndexParams(index.get());
     SetTestIndexMetadata(pk_index, *index, index::families::kSort);
-    pk_index.cache_index = CreateTestCacheIndex("test", std::move(index));
+    pk_index.index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(pk_index);
 }
 
@@ -2619,7 +2621,7 @@ TEST(Sealed, LoadScalarIndex) {
     vec_info.field_type = DataType::VECTOR_FLOAT;
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2631,7 +2633,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto index = GenScalarIndexing<int64_t>(N, counter_data.data());
     counter_index.index_params = GenIndexParams(index.get());
     SetTestIndexMetadata(counter_index, *index, index::families::kSort);
-    counter_index.cache_index = CreateTestCacheIndex("test", std::move(index));
+    counter_index.index = CreateTestCacheIndex("test", std::move(index));
     segment->LoadIndex(counter_index);
 
     LoadIndexInfo double_index{};
@@ -2642,7 +2644,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto temp1 = GenScalarIndexing<double>(N, double_data.data());
     double_index.index_params = GenIndexParams(temp1.get());
     SetTestIndexMetadata(double_index, *temp1, index::families::kSort);
-    double_index.cache_index = CreateTestCacheIndex("test", std::move(temp1));
+    double_index.index = CreateTestCacheIndex("test", std::move(temp1));
     segment->LoadIndex(double_index);
 
     LoadIndexInfo nothing_index{};
@@ -2653,7 +2655,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto temp2 = GenScalarIndexing<int32_t>(N, nothing_data.data());
     nothing_index.index_params = GenIndexParams(temp2.get());
     SetTestIndexMetadata(nothing_index, *temp2, index::families::kSort);
-    nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
+    nothing_index.index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
     auto sr = segment->Search(plan.get(),
@@ -2692,7 +2694,7 @@ TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
     load_info.load_resource_request.emplace();
     load_info.load_resource_request->has_raw_data = false;
     SetTestIndexMetadata(load_info, *index, index::families::kInverted);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(index), &observed_ctx);
     segment->LoadIndex(load_info);
     ASSERT_TRUE(segment->HasIndex(double_id));
@@ -3240,7 +3242,7 @@ TEST(Sealed, GetVector) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment_sealed->LoadIndex(vec_info);
 
@@ -3327,7 +3329,7 @@ TEST(Sealed, LoadArrayFieldDataWhenIndexHasRawData) {
     request.has_raw_data = true;
     array_index.load_resource_request = request;
     SetTestIndexMetadata(array_index, *indexing, index::families::kSort);
-    array_index.cache_index =
+    array_index.index =
         CreateTestCacheIndex("array_raw_index", std::move(indexing));
     segment->LoadIndex(array_index);
 
@@ -4061,7 +4063,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
         load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
         SetTestIndexMetadata(
             load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-        load_info.cache_index =
+        load_info.index =
             CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
         load_info.index_params["metric_type"] = metric_type;
 
@@ -4218,7 +4220,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = metric_type;
 
@@ -4416,7 +4418,7 @@ TEST(SealedVectorArrayNullable,
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
 
@@ -4543,7 +4545,7 @@ TEST(SealedVectorArrayNullable,
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
 
@@ -4673,7 +4675,7 @@ TEST(SealedVectorArrayFallback,
     load_info.index_params = index_params;
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_sq_index, index::families::kVectorMem);
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("test", std::move(emb_list_hnsw_sq_index));
 
     ASSERT_TRUE(segment->HasFieldData(array_vec));
@@ -4801,8 +4803,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
         GenIndexParams(loaded_index.get(), index::families::kVectorDisk);
     SetTestIndexMetadata(
         load_info, *loaded_index, index::families::kVectorDisk);
-    load_info.cache_index =
-        CreateTestCacheIndex("test", std::move(loaded_index));
+    load_info.index = CreateTestCacheIndex("test", std::move(loaded_index));
     load_info.index_params["metric_type"] = metric_type;
 
     segment->DropFieldData(array_vec);
@@ -5786,7 +5787,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     load_info.index_params["metric_type"] = knowhere::metric::L2;
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("staged-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
@@ -6513,7 +6514,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     load_info.index_params["metric_type"] = knowhere::metric::L2;
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.cache_index =
+    load_info.index =
         CreateTestCacheIndex("staged-real-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
@@ -6604,7 +6605,7 @@ TEST(SealedSegmentCowState,
     published_index.field_id = vec.get();
     published_index.index_params = std::move(published_index_params);
     published_index.index_params["metric_type"] = knowhere::metric::L2;
-    published_index.cache_index = published_cache_index;
+    published_index.index = published_cache_index;
     published_index.load_resource_request =
         LoadResourceRequest{0, 0, 0, 0, true};
     sealed->LoadIndex(published_index);
@@ -6627,7 +6628,7 @@ TEST(SealedSegmentCowState,
         SetTestIndexMetadata(
             replacement, *replacement_impl, index::families::kVectorMem);
         replacement.field_type = replacement_impl->ValueType();
-        replacement.cache_index = CreateTestCacheIndex(
+        replacement.index = CreateTestCacheIndex(
             fail_before_publish ? "rolled-back-vector" : "replacement-vector",
             std::move(replacement_impl));
         replacement.load_resource_request =
@@ -6705,9 +6706,9 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
                                                  payload_data.data());
     first_index.index_params = GenIndexParams(first_impl.get());
     SetTestIndexMetadata(first_index, *first_impl, index::families::kSort);
-    first_index.cache_index =
-        CreateTestCacheIndex("first", std::move(first_impl));
-    auto first_cache_index = first_index.cache_index;
+    first_index.index = CreateTestCacheIndex("first", std::move(first_impl));
+    auto first_cache_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(first_index.index);
     sealed->LoadIndex(first_index);
 
     auto before = sealed->TestGetPublishedStateSnapshot();
@@ -6733,9 +6734,11 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     replacement_index.index_params = GenIndexParams(replacement_impl.get());
     SetTestIndexMetadata(
         replacement_index, *replacement_impl, index::families::kSort);
-    replacement_index.cache_index =
+    replacement_index.index =
         CreateTestCacheIndex("replacement", std::move(replacement_impl));
-    auto replacement_cache_index = replacement_index.cache_index;
+    auto replacement_cache_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(
+            replacement_index.index);
 
     sealed->TestLoadIndex(replacement_index, true, runtime.get());
 
@@ -7011,9 +7014,9 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
         {JSON_CAST_TYPE, "DOUBLE"},
     };
     SetTestIndexMetadata(load_info, *indexing, index::families::kInverted);
-    load_info.cache_index =
-        CreateTestCacheIndex("json-runtime", std::move(indexing));
-    auto loaded_index = load_info.cache_index;
+    load_info.index = CreateTestCacheIndex("json-runtime", std::move(indexing));
+    auto loaded_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(load_info.index);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_TRUE(TestIndexEntries(
@@ -7105,17 +7108,18 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
             info,
             *indexing,
             is_ngram ? index::families::kNgram : index::families::kInverted);
-        info.cache_index =
-            CreateTestCacheIndex(std::move(key), std::move(indexing));
+        info.index = CreateTestCacheIndex(std::move(key), std::move(indexing));
         return info;
     };
 
     auto sibling = make_load_info("json-scalar-b", "b", false);
-    auto sibling_index = sibling.cache_index;
+    auto sibling_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(sibling.index);
     sealed->LoadIndex(sibling);
 
     auto original = make_load_info("json-scalar-a", "a", false);
-    auto original_index = original.cache_index;
+    auto original_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(original.index);
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
@@ -7137,7 +7141,8 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     auto replacement = make_load_info("json-ngram-a", "a", true);
-    auto replacement_index = replacement.cache_index;
+    auto replacement_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(replacement.index);
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
@@ -7262,17 +7267,18 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
             info,
             *indexing,
             is_ngram ? index::families::kNgram : index::families::kInverted);
-        info.cache_index =
-            CreateTestCacheIndex(std::move(key), std::move(indexing));
+        info.index = CreateTestCacheIndex(std::move(key), std::move(indexing));
         return info;
     };
 
     auto sibling = make_load_info("json-scalar-b", "b", false);
-    auto sibling_index = sibling.cache_index;
+    auto sibling_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(sibling.index);
     sealed->LoadIndex(sibling);
 
     auto original = make_load_info("json-ngram-a", "a", true);
-    auto original_index = original.cache_index;
+    auto original_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(original.index);
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
@@ -7299,7 +7305,8 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     auto replacement = make_load_info("json-scalar-a", "a", false);
-    auto replacement_index = replacement.cache_index;
+    auto replacement_index =
+        std::get<milvus::segcore::IndexInventory::RootSlot>(replacement.index);
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;

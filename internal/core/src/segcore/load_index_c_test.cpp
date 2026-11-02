@@ -465,7 +465,7 @@ TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {
     // Both owned generations leave with the cache; the independently held
     // sibling generation must survive the C API cleanup.
     index->KeepGenerationAlive(std::move(cache_index));
-    load_index_info.cache_index = CreateReaderCache(std::move(index));
+    load_index_info.index = CreateReaderCache(std::move(index));
     ASSERT_TRUE(local_chunk_manager->Exist(index_file));
     ASSERT_TRUE(local_chunk_manager->Exist(cache_index_file));
     ASSERT_NE(sibling_index, nullptr);

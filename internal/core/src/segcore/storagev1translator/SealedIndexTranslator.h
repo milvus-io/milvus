@@ -41,6 +41,10 @@ class SealedIndexTranslator : public IndexReaderTranslator {
         milvus::storage::FileManagerContext file_manager_context,
         Config config,
         milvus::OpContext* op_ctx = nullptr);
+    // Creates an Index whose concrete implementation owns its storage cache.
+    index::IndexPtr
+    CreateIndex(milvus::OpContext* ctx);
+
     ~SealedIndexTranslator() override = default;
     size_t
     num_cells() const override;
@@ -71,6 +75,9 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     }
 
  private:
+    index::IndexPtr
+    LoadIndex(milvus::OpContext* ctx, bool cache_storage);
+
     struct IndexLoadInfo {
         bool enable_mmap;
         std::string mmap_dir_path;

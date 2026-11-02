@@ -1564,7 +1564,7 @@ PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
     auto metadata = std::make_shared<LoadIndexInfo>(load_index_info);
     // The decision and policy belong to this generation, even after a config refresh.
     metadata->warmup_policy = "disable";
-    load_index_info.cache_index.reset();
+    load_index_info.index = IndexInventory::RootSlot{};
     load_index_info.lazy_index_factory =
         [metadata = std::move(metadata)](milvus::OpContext* op_ctx) {
             CheckCancellation(op_ctx,
@@ -1582,7 +1582,7 @@ PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
             return IndexInventory::ResolvedData{std::move(attempt.index_family),
                                                 attempt.index_value_type,
                                                 attempt.index_caps,
-                                                std::move(attempt.cache_index)};
+                                                std::move(attempt.index)};
         };
 }
 
@@ -1685,10 +1685,14 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();
 
-    load_index_info->cache_index =
-        milvus::cachinglayer::Manager::GetInstance()
-            .CreateCacheSlot<index::IIndexReaderBase>(std::move(translator),
-                                                      op_ctx);
+    if (translator->Family() == index::families::kMarisa &&
+        !translator->Caps().json_paths) {
+        load_index_info->index = translator->CreateIndex(op_ctx);
+    } else {
+        load_index_info->index = milvus::cachinglayer::Manager::GetInstance()
+                                     .CreateCacheSlot<index::IIndexReaderBase>(
+                                         std::move(translator), op_ctx);
+    }
 }
 
 FieldDataPtr

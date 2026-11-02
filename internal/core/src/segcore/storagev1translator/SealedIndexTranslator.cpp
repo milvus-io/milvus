@@ -361,10 +361,24 @@ SealedIndexTranslator::key() const {
     return index_key_;
 }
 
+index::IndexPtr
+SealedIndexTranslator::CreateIndex(milvus::OpContext* ctx) {
+    return LoadIndex(ctx, true);
+}
+
 std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IIndexReaderBase>>>
 SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                  const std::vector<cid_t>& cids) {
+    auto index = LoadIndex(ctx, false);
+    std::vector<std::pair<cid_t, std::unique_ptr<index::IIndexReaderBase>>>
+        result;
+    result.emplace_back(0, index->CreateReader(nullptr));
+    return result;
+}
+
+index::IndexPtr
+SealedIndexTranslator::LoadIndex(milvus::OpContext* ctx, bool cache_storage) {
     // Release preparation metadata after this attempt, including early failure.
     auto prepared_source = std::move(prepared_legacy_source_);
     int64_t segment_id = std::stoll(index_load_info_.segment_id);
@@ -413,42 +427,51 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                Family());
     LOG_DEBUG(
         "load index family {} with configs: {}", Family(), config_.dump());
-    index::IIndexReaderBasePtr reader;
+    std::optional<index::IndexCacheConfig> cache;
+    if (cache_storage) {
+        const auto [loaded, overhead] = estimated_byte_size_of_cell(0);
+        cache.emplace(index::IndexCacheConfig{
+            index_key_,
+            meta_,
+            loaded,
+            overhead,
+            cells_storage_bytes({0}),
+            index::GetValueFromConfig<int32_t>(config_, "load_priority")
+                .value_or(0)});
+    }
+    index::IndexPtr index;
     if (packed_v3) {
         AssertInfo(index_load_info_.index_files.size() == 1,
                    "Packed scalar index requires one file");
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::IndexFiles{file_manager_context_,
                                {index_load_info_.index_files.front()},
                                index::PackedIndexStorageConfig{
                                    storage::ArtifactStorageNamespace::Index}},
-             options})->CreateReader(nullptr);
+             options,
+             cache});
     } else if (prepared_source) {
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::OpenedIndexSource{
                  index::LegacyIndexSource{std::move(prepared_source), true}},
-             options})->CreateReader(nullptr);
+             options,
+             cache});
     } else {
         const auto layout = UsesV1DiskLayout(source_family_)
                                 ? storage::V1SourceLayout::DiskFiles
                                 : storage::V1SourceLayout::MemoryEntries;
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::IndexFiles{
                  file_manager_context_,
                  index_load_info_.index_files,
                  index::LegacyIndexStorageConfig{
                      layout, storage::ArtifactStorageNamespace::Index}},
-             options})->CreateReader(nullptr);
+             options,
+             cache});
     }
-    AssertInfo(reader != nullptr,
-               "index loader for family {} returned a null reader",
-               Family());
-
-    std::vector<
-        std::pair<cid_t, std::unique_ptr<milvus::index::IIndexReaderBase>>>
-        result;
-    result.emplace_back(std::make_pair(0, std::move(reader)));
-    return result;
+    AssertInfo(
+        index != nullptr, "index loader for family {} returned null", Family());
+    return index;
 }
 
 milvus::cachinglayer::Meta*

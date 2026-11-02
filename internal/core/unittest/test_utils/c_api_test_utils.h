@@ -471,7 +471,7 @@ CreateTestLoadIndexInfo(index::IIndexReaderBasePtr indexing,
                      .family;
     }
     SetTestIndexMetadata(info, *indexing, family);
-    info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    info.index = CreateTestCacheIndex("test", std::move(indexing));
     return info;
 }
 

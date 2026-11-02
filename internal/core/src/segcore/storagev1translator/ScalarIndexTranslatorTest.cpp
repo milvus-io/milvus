@@ -198,6 +198,54 @@ TEST_F(ScalarIndexTranslatorTest,
     }
 }
 
+TEST_F(ScalarIndexTranslatorTest,
+       MarisaCreatesIndexBeforeLoadingRequestStorage) {
+    const std::vector<std::string_view> values{
+        "alpha", "beta", "beta", "gamma"};
+    const index::ScalarBuildBatch<std::string_view> batch{values, {}};
+    const Config params{{"field_type", DataType::VARCHAR},
+                        {"value_type", DataType::VARCHAR},
+                        {"nullable", false}};
+    auto builder = index::BuilderRegistry<
+                       index::ScalarBuildInput<std::string_view>>::Instance()
+                       .Create(index::families::kMarisa, params);
+    auto artifact = std::move(*builder).Build({std::span(&batch, 1)});
+    storage::MemFileManagerImpl manager(context_);
+    const auto name =
+        index::PackedScalarIndexFileName(index::ScalarIndexType::MARISA);
+    auto writer = manager.CreateIndexEntryWriterUnified(name);
+    artifact->Serialize(*writer);
+    writer->Finish();
+    auto info = Info();
+    info.field_type = DataType::VARCHAR;
+    info.element_type = DataType::NONE;
+    info.index_params[index::INDEX_TYPE] = index::MARISA_TRIE;
+    info.index_files = {manager.GetRemoteIndexObjectPrefix() + "/" + name};
+    info.index_size = writer->GetTotalBytesWritten();
+    for (const bool async : {false, true}) {
+        context_.use_async_load = async;
+        auto translator = std::make_unique<SealedIndexTranslator>(
+            &info, tracer::TraceContext{}, context_, Config(info.index_params));
+        ASSERT_EQ(translator->Family(), index::families::kMarisa);
+        auto index = translator->CreateIndex(nullptr);
+        translator.reset();
+        EXPECT_EQ(index->Metadata().count, 4);
+        OpContext context;
+        auto reader = index->CreateReader(&context);
+        index.reset();
+        const auto* predicate = dynamic_cast<
+            const index::IScalarPredicateReader<std::string_view>*>(
+            reader.get());
+        ASSERT_NE(predicate, nullptr);
+        const std::string_view key = "beta";
+        const auto hits = predicate->In(1, &key);
+        EXPECT_EQ(hits.size(), 4);
+        EXPECT_EQ(hits.count(), 2);
+        EXPECT_TRUE(hits[1]);
+        EXPECT_TRUE(hits[2]);
+    }
+}
+
 TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
     for (const auto type : {DataType::INT16,
                             DataType::INT32,

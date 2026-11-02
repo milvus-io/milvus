@@ -39,8 +39,11 @@ namespace {
 
 class InventoryTestReader final : public index::IIndexReaderBase {
  public:
-    explicit InventoryTestReader(index::ReaderCaps caps, int64_t count = 1)
-        : caps_(caps), count_(count) {
+    explicit InventoryTestReader(
+        index::ReaderCaps caps,
+        int64_t count = 1,
+        std::shared_ptr<const index::IIndex> owner = {})
+        : owner_(std::move(owner)), caps_(caps), count_(count) {
     }
 
     index::ReaderCaps
@@ -74,8 +77,31 @@ class InventoryTestReader final : public index::IIndexReaderBase {
     }
 
  private:
+    std::shared_ptr<const index::IIndex> owner_;
     index::ReaderCaps caps_;
     int64_t count_;
+};
+
+class InventoryTestIndex final
+    : public index::IIndex,
+      public std::enable_shared_from_this<InventoryTestIndex> {
+ public:
+    index::IndexMetadata
+    Metadata() const override {
+        return {{.predicate = true}, index::Domain::Row, DataType::INT64, 1};
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        contexts.push_back(ctx);
+        return std::make_unique<InventoryTestReader>(
+            Metadata().caps, 1, shared_from_this());
+    }
+    void
+    CancelWarmup() const override {
+        ++cancellations;
+    }
+    mutable std::vector<OpContext*> contexts;
+    mutable std::atomic<int> cancellations{0};
 };
 
 IndexCapabilityEntry
@@ -149,7 +175,7 @@ TEST(IndexInventoryTest, LifecycleReadsDoNotResolveLazyEntry) {
     EXPECT_EQ(calls.load(), 0);
 
     auto dropped_snapshot = inventory;
-    EXPECT_EQ(dropped_snapshot.Drop(entry.key), nullptr);
+    EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
     EXPECT_TRUE(dropped_snapshot.Entries().empty());
     EXPECT_EQ(calls.load(), 0);
 
@@ -163,6 +189,41 @@ TEST(IndexInventoryTest, LifecycleReadsDoNotResolveLazyEntry) {
     EXPECT_TRUE(pin);
     EXPECT_EQ(calls.load(), 1);
     ASSERT_EQ(inventory.Slots().size(), 1);
+}
+
+TEST(IndexInventoryTest,
+     RetiredLazyIndexStillCreatesIndependentRequestReaders) {
+    IndexInventory snapshot;
+    const auto meta = TestEntry();
+    auto index = std::make_shared<InventoryTestIndex>();
+    int calls = 0;
+    snapshot.Register(LazyEntry(meta, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{
+            meta.family, meta.value_type, meta.caps, index};
+    }));
+    auto live = snapshot;
+    auto retired = live.Drop(meta.key);
+    ASSERT_NE(retired, nullptr);
+    retired->CancelWarmup();
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(index->cancellations, 0);
+    OpContext first_context;
+    OpContext second_context;
+    auto first = snapshot.PinIndex(&first_context, meta.key);
+    auto second = snapshot.PinIndex(&second_context, meta.key);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(index->cancellations, 1);
+    EXPECT_EQ(index->contexts,
+              (std::vector<OpContext*>{&first_context, &second_context}));
+    const auto* reader = first.get();
+    auto lifetime = std::move(first).IntoSharedLifetime();
+    snapshot = {};
+    retired.reset();
+    EXPECT_EQ(reader->Count(), 1);
 }
 
 TEST(IndexInventoryTest, FieldLookupResolvesOnlyRequestedField) {
@@ -229,15 +290,17 @@ TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
 
     EXPECT_EQ(inventory.Drop(TestEntry(FieldId(10), 3).key), nullptr);
     const auto replacement = TestSlot("inventory-field-mutation-replacement");
-    EXPECT_EQ(inventory.Register(
-                  std::make_shared<IndexInventory::Entry>(first, replacement)),
+    EXPECT_EQ(inventory
+                  .Register(std::make_shared<IndexInventory::Entry>(
+                      first, replacement))
+                  ->Peek(),
               first_slot);
-    EXPECT_EQ(inventory.Drop(second.key), second_slot);
+    EXPECT_EQ(inventory.Drop(second.key)->Peek(), second_slot);
     const auto remaining = inventory.Entries(first.key.field_id);
     ASSERT_EQ(remaining.size(), 1);
     EXPECT_EQ(remaining.front().key, first.key);
 
-    EXPECT_EQ(inventory.Drop(first.key), replacement);
+    EXPECT_EQ(inventory.Drop(first.key)->Peek(), replacement);
     EXPECT_TRUE(inventory.Entries(first.key.field_id).empty());
     EXPECT_TRUE(
         inventory.ResolveCapability(nullptr, first.key.field_id).empty());
@@ -256,9 +319,9 @@ TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
     EXPECT_EQ(snapshot.Entries(first.key.field_id).size(), 2);
     EXPECT_EQ(snapshot.Entries().size(), 3);
     EXPECT_EQ(snapshot.Slots().size(), 3);
-    EXPECT_EQ(snapshot.Drop(first.key), first_slot);
-    EXPECT_EQ(snapshot.Drop(second.key), second_slot);
-    EXPECT_EQ(snapshot.Drop(other.key), other_slot);
+    EXPECT_EQ(snapshot.Drop(first.key)->Peek(), first_slot);
+    EXPECT_EQ(snapshot.Drop(second.key)->Peek(), second_slot);
+    EXPECT_EQ(snapshot.Drop(other.key)->Peek(), other_slot);
     EXPECT_TRUE(snapshot.Entries().empty());
     EXPECT_TRUE(snapshot.Slots().empty());
     EXPECT_EQ(inventory.Entries().size(), 2);
@@ -526,7 +589,7 @@ TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
     }));
 
     auto dropped_snapshot = old_snapshot;
-    EXPECT_EQ(dropped_snapshot.Drop(entry.key), nullptr);
+    EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
     EXPECT_TRUE(dropped_snapshot.PinIndex(nullptr, entry.key).empty());
     auto old_pin = old_snapshot.PinIndex(nullptr, entry.key);
     ASSERT_TRUE(old_pin);
@@ -578,8 +641,10 @@ TEST(IndexInventoryTest, LifecycleOperationsDoNotWaitForLazyFactory) {
         const auto retired_replace =
             replaced.Register(std::make_shared<IndexInventory::Entry>(
                 entry, TestSlot("inventory-blocked-replacement")));
-        return slots.empty() && retired_drop == nullptr &&
-               retired_replace == nullptr;
+        retired_drop->CancelWarmup();
+        retired_replace->CancelWarmup();
+        return slots.empty() && retired_drop != nullptr &&
+               retired_replace != nullptr;
     });
     const auto status = lifecycle.wait_for(5s);
     release.set_value();

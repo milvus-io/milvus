@@ -356,7 +356,7 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
         }
         index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
         SetTestIndexMetadata(index_info, *scalar_index, "sort");
-        index_info.cache_index = CreateTestCacheIndex(
+        index_info.index = CreateTestCacheIndex(
             counting ? "roaring-counting-index" : "roaring-stl-index",
             std::move(scalar_index));
         segment->LoadIndex(index_info);
@@ -379,8 +379,8 @@ class RoaringFilterExprEvalTest : public ::testing::Test {
         EXPECT_FALSE(bitmap_index->Caps().cheap_value_lookup);
         index_info.index_params = GenIndexParams(bitmap_index.get(), "bitmap");
         SetTestIndexMetadata(index_info, *bitmap_index, "bitmap");
-        index_info.cache_index = CreateTestCacheIndex("roaring-bitmap-index",
-                                                      std::move(bitmap_index));
+        index_info.index = CreateTestCacheIndex("roaring-bitmap-index",
+                                                std::move(bitmap_index));
         segment->LoadIndex(index_info);
         EXPECT_FALSE(segment->HasFieldData(i64_fid_));
         EXPECT_TRUE(segment->HasIndex(i64_fid_));
@@ -509,7 +509,7 @@ TEST_F(RoaringFilterExprEvalTest,
         "sort", N, i64_values_.data(), validity_.data());
     index_info.index_params = GenIndexParams(index.get(), "sort");
     SetTestIndexMetadata(index_info, *index, "sort");
-    index_info.cache_index =
+    index_info.index =
         CreateTestCacheIndex("roaring-raw-path", std::move(index));
     sealed->LoadIndex(index_info);
     ASSERT_TRUE(sealed->HasFieldData(i64_fid_));

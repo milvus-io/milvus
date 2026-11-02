@@ -751,7 +751,7 @@ TEST(BoostScoreRunnerTest, NativeFilterExprSetReuseOnScalarIndexPath) {
     load_index_info.field_type = DataType::INT64;
     load_index_info.index_params = GenIndexParams(age_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *age_index, "sort");
-    load_index_info.cache_index =
+    load_index_info.index =
         CreateTestCacheIndex("test_age_index", std::move(age_index));
     segment->LoadIndex(load_index_info);
 

@@ -343,7 +343,7 @@ MakeNullableIndexLoadInfo(test::consumer::OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.cache_index =
+    info.index =
         CreateTestCacheIndex("nullable-vector-" + std::to_string(info.index_id),
                              std::move(opened.reader),
                              observed_ctx);
@@ -820,7 +820,7 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     auto load_info = MakeNullableIndexLoadInfo(
         std::move(index_base), vector_field, total_count);
-    auto cache_index = load_info.cache_index;
+    auto cache_index = std::get<IndexInventory::RootSlot>(load_info.index);
     auto segment =
         BuildIndexSearchSegment(schema, vector_field, total_count, load_info);
 

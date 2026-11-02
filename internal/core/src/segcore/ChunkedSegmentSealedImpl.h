@@ -1622,7 +1622,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                    milvus::OpContext* op_ctx,
                    FieldId field_id) const;
 
-    static std::vector<IndexInventory::RootSlot>
+    static std::vector<std::shared_ptr<IndexInventory::Entry>>
     EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
                            FieldId field_id,
                            std::string_view nested_path);
@@ -1724,7 +1724,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                                  *staged_state_->load_info,
                                                  *runtime_,
                                                  op_ctx);
-            std::vector<IndexInventory::RootSlot> retired_indexings;
+            std::vector<std::shared_ptr<IndexInventory::Entry>>
+                retired_indexings;
             std::shared_ptr<PublishedSegmentState> next;
             int64_t memory_size_delta = 0;
             {
@@ -1749,7 +1750,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
 
         void
-        RetireCacheIndexingLocked(IndexInventory::RootSlot indexing) {
+        RetireCacheIndexingLocked(
+            std::shared_ptr<IndexInventory::Entry> indexing) {
             if (indexing != nullptr) {
                 retired_indexings_.push_back(std::move(indexing));
             }
@@ -1769,7 +1771,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         ChunkedSegmentSealedImpl& segment_;
         RuntimeResourceState* runtime_;
         PublishedSegmentState* staged_state_;
-        std::vector<IndexInventory::RootSlot> retired_indexings_;
+        std::vector<std::shared_ptr<IndexInventory::Entry>> retired_indexings_;
         int64_t memory_size_delta_ = 0;
         std::mutex mutex_;
     };

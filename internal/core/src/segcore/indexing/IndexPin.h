@@ -26,8 +26,7 @@ namespace milvus::segcore {
 
 class IndexInventory;
 
-// Retains one sealed cache accessor and exposes only the reader borrowed from
-// its uniquely owned cell. Keep the pin alive while using reader-owned views.
+// Retains a request reader, or a legacy cache accessor during migration. Keep the pin alive while using reader-owned views.
 class IndexPin {
  public:
     IndexPin() = default;
@@ -37,19 +36,19 @@ class IndexPin {
     operator=(const IndexPin&) = delete;
 
     IndexPin(IndexPin&& other) noexcept
-        : accessor_(std::move(other.accessor_)),
+        : lifetime_(std::move(other.lifetime_)),
           reader_(std::exchange(other.reader_, nullptr)) {
-        other.accessor_.reset();
+        other.lifetime_.reset();
     }
 
     IndexPin&
     operator=(IndexPin&& other) noexcept {
         if (this != &other) {
             reader_ = nullptr;
-            accessor_.reset();
-            accessor_ = std::move(other.accessor_);
+            lifetime_.reset();
+            lifetime_ = std::move(other.lifetime_);
             reader_ = std::exchange(other.reader_, nullptr);
-            other.accessor_.reset();
+            other.lifetime_.reset();
         }
         return *this;
     }
@@ -75,27 +74,24 @@ class IndexPin {
         return reader_;
     }
 
-    // Deferred iterators receive the same accessor control block. The reader
-    // remains uniquely owned by its cache cell.
+    // Deferred operations retain the request reader or legacy cache accessor.
     std::shared_ptr<void>
     IntoSharedLifetime() && {
         reader_ = nullptr;
-        auto accessor = std::move(accessor_);
-        accessor_.reset();
+        auto accessor = std::move(lifetime_);
+        lifetime_.reset();
         return std::shared_ptr<void>(std::move(accessor));
     }
 
  private:
     friend class IndexInventory;
 
-    IndexPin(std::shared_ptr<
-                 cachinglayer::CellAccessor<index::IIndexReaderBase>> accessor,
+    IndexPin(std::shared_ptr<void> accessor,
              const index::IIndexReaderBase* reader)
-        : accessor_(std::move(accessor)), reader_(reader) {
+        : lifetime_(std::move(accessor)), reader_(reader) {
     }
 
-    std::shared_ptr<cachinglayer::CellAccessor<index::IIndexReaderBase>>
-        accessor_;
+    std::shared_ptr<void> lifetime_;
     const index::IIndexReaderBase* reader_{nullptr};
 };
 

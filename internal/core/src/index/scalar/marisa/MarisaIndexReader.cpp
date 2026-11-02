@@ -27,25 +27,23 @@
 #include "common/Utils.h"
 
 namespace milvus::index {
-namespace {
-
 void
-ValidateStorage(const MarisaIndexStorage& storage) {
-    AssertInfo(storage.trie != nullptr, "marisa reader requires a trie");
-    AssertInfo(storage.csr_num_keys == storage.trie->num_keys(),
+MarisaIndexStorage::Validate() const {
+    AssertInfo(trie != nullptr, "marisa reader requires a trie");
+    AssertInfo(csr_num_keys == trie->num_keys(),
                "marisa reader CSR key count mismatch");
-    AssertInfo(storage.str_ids_size == 0 || storage.str_ids != nullptr,
+    AssertInfo(str_ids_size == 0 || str_ids != nullptr,
                "marisa reader is missing row ids");
-    AssertInfo(storage.csr_index != nullptr,
-               "marisa reader is missing CSR index");
-    AssertInfo(storage.csr_index[storage.csr_num_keys] == 0 ||
-                   storage.csr_offsets != nullptr,
+    AssertInfo(csr_index != nullptr, "marisa reader is missing CSR index");
+    AssertInfo(csr_index[csr_num_keys] == 0 || csr_offsets != nullptr,
                "marisa reader is missing CSR offsets");
-    AssertInfo(storage.value_type == DataType::STRING ||
-                   storage.value_type == DataType::VARCHAR ||
-                   storage.value_type == DataType::TEXT,
+    AssertInfo(value_type == DataType::STRING ||
+                   value_type == DataType::VARCHAR ||
+                   value_type == DataType::TEXT,
                "marisa reader requires STRING, VARCHAR, or TEXT");
 }
+
+namespace {
 
 size_t
 LookupKeyId(const MarisaIndexStorage& storage, std::string_view value) {
@@ -178,7 +176,7 @@ MarisaMmapOwner::Csr() const {
 MarisaIndex::MarisaIndex(std::shared_ptr<const MarisaIndexStorage> storage)
     : storage_(storage) {
     AssertInfo(storage != nullptr, "marisa reader requires shared storage");
-    ValidateStorage(*storage);
+    storage->Validate();
 }
 
 MarisaIndex::MarisaIndex(
@@ -212,7 +210,7 @@ MarisaIndex::PinStorage(milvus::OpContext* op_ctx) const {
         storage = {std::move(pin), cell};
     }
     AssertInfo(storage != nullptr, "marisa cache returned null storage");
-    ValidateStorage(*storage);
+    storage->Validate();
     AssertInfo(storage->value_type == cached.value_type &&
                    (!cached.count || *cached.count == storage->str_ids_size),
                "marisa storage disagrees with index metadata");

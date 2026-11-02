@@ -244,6 +244,20 @@ LoaderEntry::Load(IndexLoadRequest request) const {
                          std::get<PackedIndexSource>(opened_source).reader);
     }
     const auto priority = Priority(request.options.op_ctx);
+    if (request.cache) {
+        auto* context = request.options.op_ctx;
+        auto cache = std::move(*request.cache);
+        auto prepare = CreateIndexLoader(*this, std::move(request));
+        auto loader =
+            use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor({}, priority),
+                            std::move(prepare)))
+                      : folly::coro::blockingWait(std::move(prepare));
+        // Synchronous warmup must not block the executor that loads its cells.
+        return folly::coro::blockingWait(folly::coro::co_withCancellation(
+            OperationCancellationToken(context),
+            loader->Load(context, &cache)));
+    }
     auto task = LoadIndexAsync(*this, std::move(request));
     if (!use_async)
         return folly::coro::blockingWait(std::move(task));

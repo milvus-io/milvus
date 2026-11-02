@@ -174,14 +174,26 @@ alone does not verify the later cache and publication changes.
 
 Loader migration status: family loaders and `LoaderEntry::Load` now return
 `IndexPtr`. JSON path indexes own the child Index and share path/existence
-metadata across request readers. Segment translators still create a reader at
-their existing cache boundary as a transitional adapter; the segment inventory
-and concrete storage caches have not switched yet.
+metadata across request readers. The segment inventory accepts Index owners
+and creates request readers. Reader cache slots remain temporarily supported
+for families that have not yet migrated their concrete storage loading.
 
 Marisa now supports resident storage or a typed `CacheSlot<MarisaIndexStorage>`.
 Its request reader pins storage once per operation, including the complete
 `Gather` callback scope. Known count/type/capabilities remain available without
 loading; an unknown count is read from storage with the request context. A
-permanently resident slot uses the cache's borrow fast path. This implements the
-query-side boundary; production loader and segment construction of these slots
-is still pending, so existing loads continue to use resident Marisa storage.
+permanently resident slot uses the cache's borrow fast path. Non-JSON Marisa
+loads now create this typed storage cache through the production loading path.
+The cache retains the source and fixed options, not the construction context.
+Synchronous warmup runs outside the executor used to load storage, so it cannot
+block that executor waiting for its own submitted task.
+
+`SingleCellIndexStorageTranslator` is an optional adapter for loading a whole
+storage object as one cache cell. Neither Index nor Reader depends on it.
+Indexes with native lazy loading or their own slice caches use those mechanisms
+directly. The adapter does not define a mandatory layer for all index storage.
+
+Retirement retains the inventory entry rather than only an already-created
+slot. If a lazy factory finishes after retirement, its Index receives warmup
+cancellation too; existing snapshots can still create readers and demand-load
+storage.

@@ -84,6 +84,10 @@ class MarisaMmapOwner final {
 // Immutable owner/view bundle shared by readers. Owner fields precede the trie
 // so the trie is destroyed before mapped paths are removed by MarisaMmapOwner.
 struct MarisaIndexStorage final {
+    /** @brief Validate loaded trie and row/CSR views before publication. */
+    void
+    Validate() const;
+
     cachinglayer::ResourceUsage
     CellByteSize() const;
 

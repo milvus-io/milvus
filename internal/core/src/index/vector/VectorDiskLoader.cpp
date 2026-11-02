@@ -520,7 +520,10 @@ VectorDiskLoader::Create(OpenedIndexSource source,
 }
 
 folly::coro::Task<IndexPtr>
-VectorDiskLoader::Load(milvus::OpContext* context) {
+VectorDiskLoader::Load(milvus::OpContext* context,
+                       const IndexCacheConfig* cache) {
+    AssertInfo(cache == nullptr,
+               "cached loading is not yet migrated for this family");
     return RunLegacyLoad(source_, options_, &LoadLegacy, context);
 }
 

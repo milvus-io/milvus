@@ -316,7 +316,7 @@ InstallIndex(segcore::SegmentSealed& segment,
     std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
         translator = std::make_unique<ReaderTranslator>(
             std::move(opened.reader), observed);
-    info.cache_index = cachinglayer::Manager::GetInstance().CreateCacheSlot(
+    info.index = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator));
     // Consumer tests retain a raw column for refinement/fallback. The fixture
     // supplies the load estimate explicitly, as the production boundary does.
