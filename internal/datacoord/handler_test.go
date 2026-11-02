@@ -2868,49 +2868,65 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 }
 
 func TestServerHandler_GetCollectionRetry(t *testing.T) {
-	newHandler := func(b broker.Broker) *ServerHandler {
-		m := &meta{metaStore: metacache.NewMetaStore(nil)}
-		return newServerHandler(&Server{broker: b, meta: m})
+	for _, tc := range []struct {
+		name          string
+		describeErr   error
+		describeCalls int
+		dropAfterLoad bool
+		wantErr       error
+	}{
+		{
+			name: "dropped collection is not retried", describeErr: merr.ErrCollectionNotFound,
+			describeCalls: 1, wantErr: merr.ErrCollectionNotFound,
+		},
+		{
+			name: "transient error is retried", describeErr: merr.ErrServiceUnavailable,
+			describeCalls: 2,
+		},
+		{
+			name: "collection gone from the cache after load", dropAfterLoad: true,
+			describeCalls: 1, wantErr: merr.ErrCollectionNotFound,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey(tc.name, t, func() {
+				b := &broker.MockBroker{}
+				m := &meta{metaStore: metacache.NewMetaStore(nil)}
+				handler := newServerHandler(&Server{broker: b, meta: m})
+				public := mockey.Mock((*broker.MockBroker).HasCollection).Return(false, nil).Build()
+				resp := &milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), CollectionID: 1,
+				}
+				describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).
+					Return(resp, tc.describeErr).Build()
+				if tc.describeCalls == 2 {
+					describe.Return(mockey.Sequence(nil, tc.describeErr).Then(resp, nil))
+				}
+				partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).
+					Return([]int64{10}, nil).Build()
+				if tc.dropAfterLoad {
+					// GC drops the collection between the load and the read.
+					mockey.Mock((*meta).AddCollection).Return().Build()
+				}
+
+				coll, err := handler.GetCollection(t.Context(), 1)
+				if tc.wantErr != nil {
+					require.ErrorIs(t, err, tc.wantErr)
+					assert.Nil(t, coll)
+				} else {
+					require.NoError(t, err)
+					require.NotNil(t, coll)
+					assert.Equal(t, int64(1), coll.ID)
+					assert.Equal(t, []int64{10}, coll.Partitions)
+				}
+				assert.Equal(t, tc.describeCalls, describe.Times())
+				if tc.describeErr == merr.ErrCollectionNotFound {
+					assert.Zero(t, partitions.Times())
+				} else {
+					assert.Equal(t, 1, partitions.Times())
+				}
+				assert.Zero(t, public.Times(), "public visibility must not gate internal metadata loading")
+			})
+		})
 	}
-
-	t.Run("dropped collection is not retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
-
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
-		assert.Nil(t, coll)
-	})
-
-	t.Run("transient error is retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
-
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1), coll.ID)
-	})
-
-	t.Run("collection gone from the cache after load", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
-		// GC drops the collection between the load and the read.
-		dropAfterAdd := mockey.Mock((*meta).AddCollection).Return().Build()
-		defer dropAfterAdd.UnPatch()
-
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
-		assert.Nil(t, coll)
-	})
 }
