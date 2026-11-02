@@ -197,7 +197,7 @@ var (
 
 	LevelPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
-		case datapb.CompactionType_Level0DeleteCompaction:
+		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			return 1
 		case datapb.CompactionType_MixCompaction:
 			return 10
@@ -212,7 +212,7 @@ var (
 
 	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
-		case datapb.CompactionType_Level0DeleteCompaction:
+		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:
 			return 1

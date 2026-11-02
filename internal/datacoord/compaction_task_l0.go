@@ -45,8 +45,9 @@ var _ CompactionTask = (*l0CompactionTask)(nil)
 type l0CompactionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
 
-	allocator allocator.Allocator
-	meta      CompactionMeta
+	allocator   allocator.Allocator
+	meta        CompactionMeta
+	restoreJobs CopySegmentMeta
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
@@ -320,7 +321,7 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	var flushedSegments []*SegmentInfo
-	if taskProto.GetRestoreJobId() != 0 {
+	if taskProto.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
 		var err error
 		flushedSegments, err = t.restoreTargets()
 		if err != nil {
@@ -371,7 +372,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	plan := &datapb.CompactionPlan{
 		PlanID:        taskProto.GetPlanID(),
 		StartTime:     taskProto.GetStartTime(),
-		Type:          taskProto.GetType(),
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		Channel:       taskProto.GetChannel(),
 		CollectionTtl: taskProto.GetCollectionTtl(),
 		TotalRows:     taskProto.GetTotalRows(),
@@ -491,16 +492,17 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
-	if t.GetTaskProto().GetRestoreJobId() != 0 {
+	if t.GetTaskProto().GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
 		if t.restoreMutationApplied() {
 			return nil
 		}
-		if _, err := t.restoreTargets(); err != nil {
+		targets, err := t.restoreTargets()
+		if err != nil {
 			return err
 		}
-		allowed := make(map[int64]struct{}, len(t.GetTaskProto().GetRestoreTargetSegments()))
-		for _, id := range t.GetTaskProto().GetRestoreTargetSegments() {
-			allowed[id] = struct{}{}
+		allowed := make(map[int64]struct{}, len(targets))
+		for _, segment := range targets {
+			allowed[segment.GetID()] = struct{}{}
 		}
 		for _, output := range outputSegs {
 			if _, ok := allowed[output.GetSegmentID()]; !ok {

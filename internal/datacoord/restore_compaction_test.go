@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -84,15 +83,19 @@ func TestRestoreL0MaterializationResumesFixedPlans(t *testing.T) {
 		plans := m.GetCompactionTasksByTriggerID(ctx, 100)
 		require.Len(t, plans, 2)
 		for _, plan := range plans {
-			if plan.PartitionID == -1 {
-				require.Equal(t, []int64{2, 3}, plan.RestoreTargetSegments)
-			} else {
-				require.Equal(t, []int64{2}, plan.RestoreTargetSegments)
-			}
 			task := newL0CompactionTask(plan, nil, m)
+			task.restoreJobs = copies
 			targets, binlogs, err := task.selectFlushedSegment()
 			require.NoError(t, err)
-			require.Len(t, targets, len(plan.RestoreTargetSegments))
+			ids := make([]int64, 0, len(targets))
+			for _, segment := range targets {
+				ids = append(ids, segment.GetID())
+			}
+			if plan.PartitionID == -1 {
+				require.ElementsMatch(t, []int64{2, 3}, ids)
+			} else {
+				require.Equal(t, []int64{2}, ids)
+			}
 			require.EqualValues(t, 300, binlogs[0].CommitTimestamp)
 		}
 		// Restart between submission and completion: no duplicate plan allocation.
@@ -178,7 +181,7 @@ func TestRestoreL0RequiresSuccessfulTerminalState(t *testing.T) {
 				job.RestoreCompactionPlans = map[string]int64{"v1/-1": 77}
 				require.NoError(t, copies.AddJob(ctx, job))
 				m.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 200, InsertChannel: "v1", PartitionID: -1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, IsImporting: true}))
-				require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, State: test.state, TerminalState: test.terminal}))
+				require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, State: test.state, TerminalState: test.terminal}))
 				mockey.Mock(loadCopySnapshot).Return(&snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{}}, nil).Build()
 				submit := mockey.Mock((*compactionInspector).enqueueCompaction).To(func(_ *compactionInspector, plan *datapb.CompactionTask) error {
 					require.EqualValues(t, 77, plan.GetPlanID())
@@ -203,7 +206,7 @@ func TestRestoreL0CommitAndTaskSaveCrash(t *testing.T) {
 		store := metacache.NewMetaStore(nil)
 		m := &meta{metaStore: store, ctx: ctx, segments: NewSegmentsInfo(store)}
 		m.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{ID: 1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Dropped, Compacted: true, IsImporting: true}))
-		plan := &datapb.CompactionTask{PlanID: 5, RestoreJobId: 7, InputSegments: []int64{1}, RestoreTargetSegments: []int64{2}}
+		plan := &datapb.CompactionTask{PlanID: 5, TriggerID: 7, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, InputSegments: []int64{1}}
 		task := newL0CompactionTask(plan, nil, m)
 		mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
 		require.True(t, task.restoreMutationApplied())
@@ -237,14 +240,28 @@ func TestRestoreSegmentRetainsEffectiveInsertTime(t *testing.T) {
 }
 
 func TestRestoreL0RejectsMissingAndForeignTargets(t *testing.T) {
-	store := metacache.NewMetaStore(nil)
-	m := &meta{metaStore: store, ctx: context.Background(), segments: NewSegmentsInfo(store)}
-	task := newL0CompactionTask(&datapb.CompactionTask{RestoreJobId: 7, CollectionID: 10, Channel: "v1", PartitionID: -1, RestoreTargetSegments: []int64{2}}, nil, m)
+	ctx := t.Context()
+	copies, m := newCopySegmentTaskTestMeta(t, createTestCopyTask(7, 2).(*copySegmentTask))
+	task := newL0CompactionTask(&datapb.CompactionTask{TriggerID: 7, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, CollectionID: 10, Channel: "v1", PartitionID: -1}, nil, m)
+	task.restoreJobs = copies
 	_, err := task.restoreTargets()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity, "a missing job cannot fall back to ordinary L0 selection")
+	job := newTestCopyJob(7, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+	job.CollectionId = 10
+	job.CreatesCollection = true
+	job.IdMappings = []*datapb.CopySegmentIDMapping{{TargetSegmentId: 2}}
+	require.NoError(t, copies.AddJob(ctx, job))
+	_, err = task.restoreTargets()
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	m.segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{ID: 2, CollectionID: 10, InsertChannel: "v1", Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, IsImporting: true}))
 	require.ErrorIs(t, task.saveSegmentMeta([]*datapb.CompactionSegment{{SegmentID: 3}}), merr.ErrDataIntegrity)
 	require.False(t, task.restoreMutationApplied())
+	m.segments.SetSegment(2, NewSegmentInfo(&datapb.SegmentInfo{ID: 2, CollectionID: 11, InsertChannel: "v1", Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed}))
+	_, err = task.restoreTargets()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity, "foreign metadata cannot become a restore target")
+	task.SetTask(task.ShadowClone(func(plan *datapb.CompactionTask) { plan.CollectionID = 11 }))
+	_, err = task.restoreTargets()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity, "the trigger job must own this collection")
 }
 
 func TestRestoreL0AdmissionRetry(t *testing.T) {

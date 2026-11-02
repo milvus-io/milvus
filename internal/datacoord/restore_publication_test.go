@@ -47,7 +47,7 @@ func TestRestorePublishesCompleteDataViewBeforeCollectionAndJob(t *testing.T) {
 		var err error
 		m.compactionTaskMeta, err = newCompactionTaskMeta(ctx, m.catalog)
 		require.NoError(t, err)
-		require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned}))
+		require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned}))
 		job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
 		job.CreatesCollection = true
 		job.IdMappings = task.GetIdMappings()
@@ -127,7 +127,7 @@ func TestRestoreCompactionProofSurvivesTaskGC(t *testing.T) {
 	var err error
 	m.compactionTaskMeta, err = newCompactionTaskMeta(ctx, m.catalog)
 	require.NoError(t, err)
-	task := &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned, EndTime: 1}
+	task := &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned, EndTime: 1}
 	require.NoError(t, m.SaveCompactionTask(ctx, task))
 	inspector := &compactionInspector{meta: m, restoreJobs: copies}
 	inspector.cleanCompactionTaskMeta()

@@ -46,23 +46,21 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 	}
 
 	groups := make(map[string]*datapb.CompactionTask)
-	targets := make([]*SegmentInfo, 0, len(job.GetIdMappings()))
 	for _, mapping := range job.GetIdMappings() {
 		segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId())
 		if segment == nil {
 			return false, merr.WrapErrDataIntegrityMsg("restore segment %d missing before delete materialization", mapping.GetTargetSegmentId())
 		}
 		if segment.GetLevel() != datapb.SegmentLevel_L0 {
-			targets = append(targets, segment)
 			continue
 		}
 		key := fmt.Sprintf("%s/%d", segment.GetInsertChannel(), segment.GetPartitionID())
 		plan := groups[key]
 		if plan == nil {
 			plan = &datapb.CompactionTask{
-				TriggerID: job.GetJobId(), RestoreJobId: job.GetJobId(), CollectionID: job.GetCollectionId(),
+				TriggerID: job.GetJobId(), CollectionID: job.GetCollectionId(),
 				PartitionID: segment.GetPartitionID(), Channel: segment.GetInsertChannel(),
-				Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
+				Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
 				NodeID: NullNodeID,
 			}
 			groups[key] = plan
@@ -84,13 +82,7 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 	for key, plan := range groups {
 		keys = append(keys, key)
 		plan.Schema = snapshot.Collection.GetSchema()
-		for _, segment := range targets {
-			if segment.GetInsertChannel() == plan.GetChannel() && (plan.GetPartitionID() == common.AllPartitionsID || segment.GetPartitionID() == plan.GetPartitionID()) {
-				plan.RestoreTargetSegments = append(plan.RestoreTargetSegments, segment.GetID())
-			}
-		}
 		sort.Slice(plan.InputSegments, func(i, j int) bool { return plan.InputSegments[i] < plan.InputSegments[j] })
-		sort.Slice(plan.RestoreTargetSegments, func(i, j int) bool { return plan.RestoreTargetSegments[i] < plan.RestoreTargetSegments[j] })
 	}
 	sort.Strings(keys)
 	if len(recipe.GetRestoreCompactionPlans()) == 0 {
@@ -147,7 +139,7 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 // A restore L0 transaction retires all inputs together with every target delta.
 // This closes the crash window between that commit and the task-state write.
 func (t *l0CompactionTask) restoreMutationApplied() bool {
-	if t.GetTaskProto().GetRestoreJobId() == 0 || len(t.GetTaskProto().GetInputSegments()) == 0 {
+	if t.GetTaskProto().GetType() != datapb.CompactionType_RestoreLevel0DeleteCompaction || len(t.GetTaskProto().GetInputSegments()) == 0 {
 		return false
 	}
 	for _, id := range t.GetTaskProto().GetInputSegments() {
@@ -161,13 +153,25 @@ func (t *l0CompactionTask) restoreMutationApplied() bool {
 
 func (t *l0CompactionTask) restoreTargets() ([]*SegmentInfo, error) {
 	plan := t.GetTaskProto()
-	targets := make([]*SegmentInfo, 0, len(plan.GetRestoreTargetSegments()))
-	for _, id := range plan.GetRestoreTargetSegments() {
-		segment := t.meta.GetSegment(t.context(), id)
-		if !isSegmentHealthy(segment) || !isFlushState(segment.GetState()) || segment.GetCollectionID() != plan.GetCollectionID() ||
-			segment.GetInsertChannel() != plan.GetChannel() || segment.GetLevel() == datapb.SegmentLevel_L0 ||
+	job := t.restoreJobs.GetJob(t.context(), plan.GetTriggerID())
+	if job == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("restore job %d missing for compaction plan %d", plan.GetTriggerID(), plan.GetPlanID())
+	}
+	if job.GetCollectionId() != plan.GetCollectionID() {
+		return nil, merr.WrapErrDataIntegrityMsg("restore job %d does not own compaction collection %d", plan.GetTriggerID(), plan.GetCollectionID())
+	}
+	targets := make([]*SegmentInfo, 0)
+	for _, mapping := range job.GetIdMappings() {
+		segment := t.meta.GetSegment(t.context(), mapping.GetTargetSegmentId())
+		if segment == nil {
+			return nil, merr.WrapErrDataIntegrityMsg("restore segment %d missing for compaction plan %d", mapping.GetTargetSegmentId(), plan.GetPlanID())
+		}
+		if segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetInsertChannel() != plan.GetChannel() ||
 			(plan.GetPartitionID() != common.AllPartitionsID && segment.GetPartitionID() != plan.GetPartitionID()) {
-			return nil, merr.WrapErrDataIntegrityMsg("restore compaction target %d is no longer valid", id)
+			continue
+		}
+		if !isSegmentHealthy(segment) || !isFlushState(segment.GetState()) || segment.GetCollectionID() != plan.GetCollectionID() {
+			return nil, merr.WrapErrDataIntegrityMsg("restore compaction target %d is no longer valid", segment.GetID())
 		}
 		targets = append(targets, segment)
 	}

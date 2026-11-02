@@ -2891,7 +2891,7 @@ func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
 	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
 	// So L0 delete compaction is outside the protection's concern and must not be blocked.
-	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+	if !isL0Compaction(t.GetType()) {
 		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
 		if m.isCollectionCompactionBlocked(t.GetCollectionID()) {
 			mlog.Info(m.ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",

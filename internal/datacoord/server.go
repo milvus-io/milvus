@@ -371,6 +371,12 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+	// Load copy jobs before compaction tasks so recovery can derive restore targets.
+	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
+	if err != nil {
+		return err
+	}
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -417,12 +423,6 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.fileResourceObserver.InitDataCoord(s.nodeManager)
 	}
 
-	// Initialize copy segment meta and components
-	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
-	if err != nil {
-		return err
-	}
-
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
 		s.ctx,
@@ -454,7 +454,6 @@ func (s *Server) initDataCoord() (initErr error) {
 	snapshotManager.collectionRestorer = s.restoreCollectionManager
 	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
 	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
-	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
@@ -821,6 +820,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.restoreJobs = s.copySegmentMeta
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
