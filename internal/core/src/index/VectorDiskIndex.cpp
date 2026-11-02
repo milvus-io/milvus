@@ -365,8 +365,11 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
     auto disk_valid_data =
         ReadDiskValidData(local_chunk_manager, valid_data_path);
-    const auto load_options = MakeNullableLoadInput(
-        disk_valid_data.View(), load_config, local_index_path_prefix);
+    const auto load_options =
+        MakeNullableLoadInput(disk_valid_data.View(),
+                              load_config,
+                              local_index_path_prefix,
+                              elem_type_ != DataType::NONE);
     const auto full_bytes = disk_valid_data.count / 8;
     const auto tail_bits = disk_valid_data.count % 8;
     const bool all_null_nullable =

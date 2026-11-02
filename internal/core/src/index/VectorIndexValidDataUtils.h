@@ -224,14 +224,16 @@ NullableMmapOptions(const Config& config, const std::string& prefix) {
 inline knowhere::LoadOptions
 MakeNullableLoadInput(const ValidDataView& valid_data,
                       const Config& config = {},
-                      const std::string& prefix = {}) {
+                      const std::string& prefix = {},
+                      bool embedding_list = false) {
     if (!valid_data.found) {
-        return {};
+        return {.embedding_list = embedding_list};
     }
     return {knowhere::ValidityView{valid_data.bitmap,
                                    GetValidDataBitmapSize(valid_data.count),
                                    static_cast<uint64_t>(valid_data.count)},
-            NullableMmapOptions(config, prefix)};
+            NullableMmapOptions(config, prefix),
+            embedding_list};
 }
 
 inline std::optional<knowhere::ValidityData>
