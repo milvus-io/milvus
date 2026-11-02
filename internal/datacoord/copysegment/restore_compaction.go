@@ -22,7 +22,6 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -46,23 +45,21 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 	}
 
 	groups := make(map[string]*datapb.CompactionTask)
-	targets := make([]*meta.SegmentInfo, 0, len(job.GetIdMappings()))
 	for _, mapping := range job.GetIdMappings() {
 		segment := c.Meta.GetSegment(c.Ctx, mapping.GetTargetSegmentId())
 		if segment == nil {
 			return false, merr.WrapErrDataIntegrityMsg("restore segment %d missing before delete materialization", mapping.GetTargetSegmentId())
 		}
 		if segment.GetLevel() != datapb.SegmentLevel_L0 {
-			targets = append(targets, segment)
 			continue
 		}
 		key := fmt.Sprintf("%s/%d", segment.GetInsertChannel(), segment.GetPartitionID())
 		plan := groups[key]
 		if plan == nil {
 			plan = &datapb.CompactionTask{
-				TriggerID: job.GetJobId(), RestoreJobId: job.GetJobId(), CollectionID: job.GetCollectionId(),
+				TriggerID: job.GetJobId(), CollectionID: job.GetCollectionId(),
 				PartitionID: segment.GetPartitionID(), Channel: segment.GetInsertChannel(),
-				Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
+				Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
 				NodeID: meta.NullNodeID,
 			}
 			groups[key] = plan
@@ -84,13 +81,7 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 	for key, plan := range groups {
 		keys = append(keys, key)
 		plan.Schema = snapshot.Collection.GetSchema()
-		for _, segment := range targets {
-			if segment.GetInsertChannel() == plan.GetChannel() && (plan.GetPartitionID() == common.AllPartitionsID || segment.GetPartitionID() == plan.GetPartitionID()) {
-				plan.RestoreTargetSegments = append(plan.RestoreTargetSegments, segment.GetID())
-			}
-		}
 		sort.Slice(plan.InputSegments, func(i, j int) bool { return plan.InputSegments[i] < plan.InputSegments[j] })
-		sort.Slice(plan.RestoreTargetSegments, func(i, j int) bool { return plan.RestoreTargetSegments[i] < plan.RestoreTargetSegments[j] })
 	}
 	sort.Strings(keys)
 	if len(recipe.GetRestoreCompactionPlans()) == 0 {

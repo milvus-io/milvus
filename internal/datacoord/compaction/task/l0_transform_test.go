@@ -147,7 +147,7 @@ func TestL0CompactionTransformCursorReadFailureAndRestore(t *testing.T) {
 	task.taskProto.Store(&datapb.CompactionTask{})
 	_, err = task.transformCursorUpdates(t.Context(), []*datapb.CompactionSegment{{SegmentID: 20}})
 	require.ErrorIs(t, err, failure)
-	task.taskProto.Store(&datapb.CompactionTask{RestoreJobId: 1})
+	task.taskProto.Store(&datapb.CompactionTask{Type: datapb.CompactionType_RestoreLevel0DeleteCompaction})
 	updates, err := task.transformCursorUpdates(t.Context(), []*datapb.CompactionSegment{{SegmentID: 20}})
 	require.NoError(t, err)
 	require.Empty(t, updates, "restore keeps target WAL coverage, not source L0 timestamps")

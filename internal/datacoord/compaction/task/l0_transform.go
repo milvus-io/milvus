@@ -31,7 +31,7 @@ import (
 // so neither that position nor the maximum selected Delete is a certificate.
 func (t *L0CompactionTask) transformCursorUpdates(ctx context.Context, outputs []*datapb.CompactionSegment) ([]meta.UpdateOperator, error) {
 	m, ok := t.meta.(*meta.Meta)
-	if !ok || m.StreamingNodeCatalog == nil || t.GetTaskProto().GetRestoreJobId() != 0 || len(outputs) == 0 {
+	if !ok || m.StreamingNodeCatalog == nil || t.GetTaskProto().GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction || len(outputs) == 0 {
 		// Legacy owners have no materialization certificate. Restore applies
 		// source-table Deletes and must retain the target WAL's restore cursor.
 		return nil, nil

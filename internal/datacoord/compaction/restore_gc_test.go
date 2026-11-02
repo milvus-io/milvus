@@ -20,12 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRestoreCompactionProofSurvivesTaskGC(t *testing.T) {
@@ -34,12 +35,16 @@ func TestRestoreCompactionProofSurvivesTaskGC(t *testing.T) {
 	catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	tasks, err := ctask.NewCompactionTaskMeta(ctx, catalog)
 	require.NoError(t, err)
-	plan := &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned, EndTime: 1}
+	plan := &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, TerminalState: datapb.CompactionTaskState_completed, State: datapb.CompactionTaskState_cleaned, EndTime: 1}
 	require.NoError(t, tasks.SaveCompactionTask(ctx, plan))
 	active := true
-	inspector := &Inspector{compactionTaskMeta: tasks, RestoreJobActive: func(_ context.Context, id int64) bool {
+	inspector := &Inspector{compactionTaskMeta: tasks, LookupRestoreJob: func(_ context.Context, id int64) *datapb.CopySegmentJob {
 		require.EqualValues(t, 100, id)
-		return active
+		state := datapb.CopySegmentJobState_CopySegmentJobExecuting
+		if !active {
+			state = datapb.CopySegmentJobState_CopySegmentJobCompleted
+		}
+		return &datapb.CopySegmentJob{JobId: id, State: state}
 	}}
 	inspector.cleanCompactionTaskMeta()
 	require.Len(t, tasks.GetCompactionTasksByTriggerID(100), 1)

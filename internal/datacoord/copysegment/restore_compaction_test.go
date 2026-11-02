@@ -17,6 +17,7 @@
 package copysegment
 
 import (
+	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -86,15 +87,21 @@ func TestRestoreL0MaterializationResumesFixedPlans(t *testing.T) {
 		plans := taskMeta.GetCompactionTasksByTriggerID(100)
 		require.Len(t, plans, 2)
 		for _, plan := range plans {
-			if plan.PartitionID == -1 {
-				require.Equal(t, []int64{2, 3}, plan.RestoreTargetSegments)
-			} else {
-				require.Equal(t, []int64{2}, plan.RestoreTargetSegments)
-			}
 			task := ctask.NewL0CompactionTask(plan, nil, m, taskMeta)
+			task.LookupRestoreJob = func(ctx context.Context, id int64) *datapb.CopySegmentJob {
+				return copies.GetJob(ctx, id).(*Job).CopySegmentJob
+			}
 			targets, binlogs, err := task.SelectFlushedSegment()
 			require.NoError(t, err)
-			require.Len(t, targets, len(plan.RestoreTargetSegments))
+			ids := make([]int64, 0, len(targets))
+			for _, segment := range targets {
+				ids = append(ids, segment.GetID())
+			}
+			if plan.PartitionID == -1 {
+				require.ElementsMatch(t, []int64{2, 3}, ids)
+			} else {
+				require.Equal(t, []int64{2}, ids)
+			}
 			require.EqualValues(t, 300, binlogs[0].CommitTimestamp)
 		}
 		// Restart between submission and completion: no duplicate plan allocation.
@@ -182,7 +189,7 @@ func TestRestoreL0RequiresSuccessfulTerminalState(t *testing.T) {
 				job.RestoreCompactionPlans = map[string]int64{"v1/-1": 77}
 				require.NoError(t, copies.AddJob(ctx, job))
 				m.Segments.SetSegment(1, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 200, InsertChannel: "v1", PartitionID: -1, Level: datapb.SegmentLevel_L0, State: commonpb.SegmentState_Flushed, IsImporting: true}))
-				require.NoError(t, taskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, RestoreJobId: 100, State: test.state, TerminalState: test.terminal}))
+				require.NoError(t, taskMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{PlanID: 77, TriggerID: 100, Type: datapb.CompactionType_RestoreLevel0DeleteCompaction, State: test.state, TerminalState: test.terminal}))
 				mockey.Mock(loadCopySnapshot).Return(&snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{}}, nil).Build()
 				submit := mockey.Mock((*compaction.Inspector).EnqueueCompaction).To(func(_ *compaction.Inspector, plan *datapb.CompactionTask) error {
 					require.EqualValues(t, 77, plan.GetPlanID())

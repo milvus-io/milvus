@@ -361,9 +361,13 @@ for the target collection to become available. Internal metadata recovery includ
 Restoring collections; public collection lookup excludes them. Their names and
 resources stay reserved. Copy results retain `IsImporting` until the restore
 owner has materialized every copied L0 into the restored L1/L2 bases. The Job
-persists stable compaction plan IDs per channel/partition; those plans name
-their exact target Segment IDs and bypass ordinary compaction's dynamic target
-selection. Ordinary compaction and DataView projection continue to exclude the
+persists stable compaction plan IDs per channel/partition. A coordinator-only
+`RestoreLevel0DeleteCompaction` task reuses `TriggerID` as the owning JobID and
+derives its exact target scope from the durable Job's source-to-target mappings,
+filtered by channel and partition. It bypasses ordinary compaction's dynamic
+target selection; worker requests and public status retain the ordinary L0 type.
+Copy jobs are recovered before compaction tasks so this scope is available on
+recovery. Ordinary compaction and DataView projection continue to exclude the
 importing bases. All-partition L0 inputs cover every matching restored partition.
 
 The existing L0 executor preserves source Delete timestamps and writes per-base
@@ -375,8 +379,8 @@ cross-cluster restoration; inlining a source Delete is not a clock translation.
 
 L0 input retirement and target delta publication form one metadata mutation.
 Retired importing inputs survive GC until Job completion, allowing recovery to
-recognize a committed mutation even before its task-state write. A durable task
-completion marker survives task cleanup, and task GC retains that proof while
+recognize a committed mutation even before its task-state write. The durable compaction `terminal_state=completed` survives task cleanup, and
+task GC retains that proof while
 the owning Job is unfinished. Duplicate completed copy responses do not replace
 the now-materialized base with the original copied manifest. Failed, cleaned
 compaction attempts retry their stable plan identity.

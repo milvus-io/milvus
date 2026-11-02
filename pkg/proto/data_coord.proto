@@ -794,6 +794,8 @@ enum CompactionType {
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
   BumpSchemaVersionCompaction = 12;
+  // Coordinator restore task; workers execute the ordinary L0 delete plan.
+  RestoreLevel0DeleteCompaction = 13;
 }
 
 message CompactionStateRequest {
@@ -1868,9 +1870,6 @@ message CompactionTask{
   // Preserve the task outcome after state advances to cleaned. Older cleaned
   // tasks leave this as unknown and are treated as successfully completed.
   CompactionTaskState terminal_state = 31;
-  // Nonzero only for L0 materialization before a restored collection is published.
-  int64 restore_job_id = 32;
-  repeated int64 restore_target_segments = 33;
 }
 
 message PartitionStatsInfo {

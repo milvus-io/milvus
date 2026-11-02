@@ -390,6 +390,16 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
+	// Load durable copy jobs before compaction recovery derives restore targets.
+	var snapshotSource copysegment.SnapshotSource
+	if s.snapshotMeta != nil {
+		snapshotSource = s.snapshotMeta
+	}
+	s.copySegmentMeta, err = copysegment.NewCopySegmentMeta(s.ctx, s.meta.Catalog, s.meta, s.indexMeta, snapshotSource, s.allocator)
+	if err != nil {
+		return err
+	}
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -436,16 +446,6 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.fileResourceObserver.InitDataCoord(s.nodeManager)
 	}
 
-	// Initialize copy segment meta and components
-	var snapshotSource copysegment.SnapshotSource
-	if s.snapshotMeta != nil {
-		snapshotSource = s.snapshotMeta
-	}
-	s.copySegmentMeta, err = copysegment.NewCopySegmentMeta(s.ctx, s.meta.Catalog, s.meta, s.indexMeta, snapshotSource, s.allocator)
-	if err != nil {
-		return err
-	}
-
 	s.importInspector = bulkimport.NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = copysegment.NewCopySegmentInspector(
 		s.ctx,
@@ -480,10 +480,6 @@ func (s *Server) initDataCoord() (initErr error) {
 	s.copySegmentChecker.(*copysegment.Checker).Compactions = s.compactionInspector.(*compaction.Inspector)
 	s.copySegmentChecker.(*copysegment.Checker).CompactionTasks = s.compactionTaskMeta
 	s.copySegmentChecker.(*copysegment.Checker).SnapshotSource = s.snapshotMeta
-	s.compactionInspector.(*compaction.Inspector).RestoreJobActive = func(ctx context.Context, id int64) bool {
-		job := s.copySegmentMeta.GetJob(ctx, id)
-		return job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed
-	}
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := snapshot.NewSnapshotExportMeta(s.ctx, s.meta.Catalog)
 	if err != nil {
@@ -974,6 +970,13 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 func (s *Server) initCompaction() {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, s.compactionTargetMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.LookupRestoreJob = func(ctx context.Context, id int64) *datapb.CopySegmentJob {
+		job := s.copySegmentMeta.GetJob(ctx, id)
+		if job == nil {
+			return nil
+		}
+		return job.(*copysegment.Job).CopySegmentJob
+	}
 	cph.LoadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.compactionTargetMeta, s.indexEngineVersionManager)
