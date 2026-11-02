@@ -30,6 +30,7 @@
 #include "common/RegexQuery.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/scalar/ngram/NgramRegex.h"
+#include "index/scalar/ngram/NgramIndexReader.h"
 #include "index/test_utils/AssertHelpers.h"
 #include "index/test_utils/CaseTestDriver.h"
 
@@ -262,6 +263,46 @@ TEST(NgramRegexPlanTest, AppliesBranchesAsUnionOfIntersections) {
                  Hits(rows.size(), {0, 4}));
     ExpectBitmap(run("foo|qux", std::vector<size_t>{}),
                  TargetBitmap(rows.size()));
+}
+
+TEST(NgramIndexOwnershipTest, ReadersRetainEngineAndBackingDirectory) {
+    auto directory = storage::LocalDirectory::CreateOwned(
+        TestLocalPath, "ngram-owner-XXXXXX", "ngram ownership test");
+    std::weak_ptr<storage::LocalDirectory> directory_lifetime = directory;
+    auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+        "ngram", directory->Path().c_str(), uintptr_t{2}, uintptr_t{4});
+    std::weak_ptr<milvus::tantivy::TantivyIndexWrapper> engine_lifetime =
+        engine;
+    const std::vector<std::string> values{"apple", "banana"};
+    engine->add_data<std::string>(values.data(), values.size(), 0);
+    engine->finish();
+    engine->create_reader(SetBitsetSealed);
+    auto index = std::make_shared<NgramIndex>(
+        std::move(directory),
+        std::move(engine),
+        std::make_shared<const std::vector<size_t>>(),
+        DataType::VARCHAR,
+        2,
+        4,
+        5,
+        true,
+        0);
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(directory_lifetime.expired());
+    EXPECT_FALSE(engine_lifetime.expired());
+    const auto* ngram = dynamic_cast<const INgramReader*>(second.get());
+    ASSERT_NE(ngram, nullptr);
+    TargetBitmap candidates(values.size(), true);
+    ngram->Candidates("app", PatternOp::InnerMatch, candidates);
+    EXPECT_TRUE(candidates[0]);
+    EXPECT_FALSE(candidates[1]);
+    second.reset();
+    EXPECT_TRUE(engine_lifetime.expired());
+    EXPECT_TRUE(directory_lifetime.expired());
 }
 
 TEST(NgramFfiBoundaryTest, EmbeddedNulCrossesFfiIntact) {

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -47,6 +48,86 @@ IsSupportedType(DataType type) {
 }
 
 }  // namespace inverted_params
+
+template <typename T>
+/** @brief Owns the Tantivy engine, validity and optional backing directory. */
+struct InvertedIndexStorage {
+    InvertedIndexStorage(
+        std::shared_ptr<storage::LocalDirectory> directory,
+        std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        DataType value_type,
+        bool nested,
+        bool mmap,
+        size_t engine_bytes,
+        size_t engine_path_bytes);
+    int64_t
+    MemoryUsage() const;
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
+    // The engine is destroyed before the directory owner, so mapped files stay
+    // alive through the Tantivy reader's entire lifetime.
+    std::shared_ptr<storage::LocalDirectory> directory_;
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
+    // Validity materialized once at open instead of replaying the null-offset
+    // vector on every call. A sealed index has an immutable null set, and
+    // IsNull/IsNotNull/NotIn are on the query hot path (profiled at 13.2% of
+    // query-cluster CPU on an inverted-index workload), so they now clone or
+    // AND a ready bitmap. The offset vector itself is not retained: it would
+    // duplicate the same information at 8 bytes per null row.
+    //
+    // `all_valid_` leaves valid_bitmap_ empty rather than allocating rows/8
+    // bytes of all-ones for a non-nullable field or a field with no nulls. A
+    // nested index is also all-valid in its own (element) domain: a null row
+    // emits no element, so every indexed element is valid, and the persisted
+    // offsets are row offsets that only segment-level validity can apply.
+    bool all_valid_{false};
+    TargetBitmap valid_bitmap_;
+    DataType value_type_{DataType::NONE};
+    bool nested_{false};
+    bool mmap_{false};
+    // Exact staged file bytes on mmap, or the file payload bytes copied into
+    // Tantivy's RamDirectory. Tantivy exposes no measurement for its reader,
+    // hash-map, Arc, or allocator overhead; that narrow engine accounting gap
+    // is not replaced with an admission estimate here.
+    size_t engine_bytes_{0};
+    // Heap bytes for the path string copied into TantivyIndexWrapper. The
+    // wrapper exposes no accessor, so its source directory measures the copy
+    // before heap-mode staging is released.
+    size_t engine_path_bytes_{0};
+    uint32_t count_{0};
+};
+
+template <typename T>
+class InvertedIndexReader;
+
+template <typename T>
+/** @brief Shares one prepared storage version across request readers. */
+class InvertedIndex final
+    : public IIndex,
+      public std::enable_shared_from_this<InvertedIndex<T>> {
+ public:
+    InvertedIndex(std::shared_ptr<storage::LocalDirectory> directory,
+                  std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+                  std::shared_ptr<const std::vector<size_t>> null_offsets,
+                  DataType value_type,
+                  bool nested,
+                  bool mmap,
+                  size_t engine_bytes,
+                  size_t engine_path_bytes);
+    IndexMetadata
+    Metadata() const override;
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+    void
+    CancelWarmup() const override {
+    }
+
+ private:
+    friend class InvertedIndexReader<T>;
+    InvertedIndexStorage<T> storage_;
+};
 
 template <typename T>
 class InvertedIndexReader final
@@ -104,6 +185,10 @@ class InvertedIndexReader final
     IsNotNull() const override;
 
  private:
+    friend class InvertedIndex<T>;
+    InvertedIndexReader(std::shared_ptr<const InvertedIndex<T>> index,
+                        milvus::OpContext* op_ctx);
+
     template <typename Derived, typename U, bool DelegateShouldUseForOp>
     friend class PatternMatchReaderAdapter;
 
@@ -119,37 +204,8 @@ class InvertedIndexReader final
     void
     ApplyValidityMask(TargetBitmap& bitset) const;
 
-    // The engine is destroyed before the directory owner, so mapped files stay
-    // alive through the Tantivy reader's entire lifetime.
-    std::shared_ptr<storage::LocalDirectory> directory_;
-    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
-    // Validity materialized once at open instead of replaying the null-offset
-    // vector on every call. A sealed index has an immutable null set, and
-    // IsNull/IsNotNull/NotIn are on the query hot path (profiled at 13.2% of
-    // query-cluster CPU on an inverted-index workload), so they now clone or
-    // AND a ready bitmap. The offset vector itself is not retained: it would
-    // duplicate the same information at 8 bytes per null row.
-    //
-    // `all_valid_` leaves valid_bitmap_ empty rather than allocating rows/8
-    // bytes of all-ones for a non-nullable field or a field with no nulls. A
-    // nested index is also all-valid in its own (element) domain: a null row
-    // emits no element, so every indexed element is valid, and the persisted
-    // offsets are row offsets that only segment-level validity can apply.
-    bool all_valid_{false};
-    TargetBitmap valid_bitmap_;
-    DataType value_type_{DataType::NONE};
-    bool nested_{false};
-    bool mmap_{false};
-    // Exact staged file bytes on mmap, or the file payload bytes copied into
-    // Tantivy's RamDirectory. Tantivy exposes no measurement for its reader,
-    // hash-map, Arc, or allocator overhead; that narrow engine accounting gap
-    // is not replaced with an admission estimate here.
-    size_t engine_bytes_{0};
-    // Heap bytes for the path string copied into TantivyIndexWrapper. The
-    // wrapper exposes no accessor, so its source directory measures the copy
-    // before heap-mode staging is released.
-    size_t engine_path_bytes_{0};
-    uint32_t count_{0};
+    std::shared_ptr<const InvertedIndex<T>> index_;
+    milvus::OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index

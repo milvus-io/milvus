@@ -93,7 +93,7 @@ OwnString(std::string_view value) {
 
 }  // namespace
 
-NgramIndexReader::NgramIndexReader(
+NgramIndexStorage::NgramIndexStorage(
     std::shared_ptr<storage::LocalDirectory> directory,
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
     std::shared_ptr<const std::vector<size_t>> null_offsets,
@@ -150,32 +150,73 @@ NgramIndexReader::NgramIndexReader(
     }
 }
 
-NgramIndexReader::~NgramIndexReader() = default;
-
-ReaderCaps
-NgramIndexReader::Caps() const {
-    return ReaderCaps{.ngram_candidates = true, .exact = false};
+NgramIndex::NgramIndex(
+    std::shared_ptr<storage::LocalDirectory> directory,
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    DataType value_type,
+    uintptr_t min_gram,
+    uintptr_t max_gram,
+    size_t avg_row_size,
+    bool mmap,
+    size_t engine_bytes)
+    : storage_(std::move(directory),
+               std::move(engine),
+               std::move(null_offsets),
+               value_type,
+               min_gram,
+               max_gram,
+               avg_row_size,
+               mmap,
+               engine_bytes) {
 }
 
-Domain
-NgramIndexReader::CoordDomain() const {
-    return Domain::Row;
+IndexMetadata
+NgramIndex::Metadata() const {
+    return {ReaderCaps{.ngram_candidates = true, .exact = false},
+            Domain::Row,
+            storage_.value_type_,
+            static_cast<int64_t>(storage_.count_)};
+}
+
+IIndexReaderBasePtr
+NgramIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new NgramIndexReader(this->shared_from_this(), op_ctx));
+}
+
+NgramIndexReader::NgramIndexReader(
+    std::shared_ptr<storage::LocalDirectory> directory,
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    DataType value_type,
+    uintptr_t min_gram,
+    uintptr_t max_gram,
+    size_t avg_row_size,
+    bool mmap,
+    size_t engine_bytes)
+    : NgramIndexReader(std::make_shared<NgramIndex>(std::move(directory),
+                                                    std::move(engine),
+                                                    std::move(null_offsets),
+                                                    value_type,
+                                                    min_gram,
+                                                    max_gram,
+                                                    avg_row_size,
+                                                    mmap,
+                                                    engine_bytes),
+                       nullptr) {
+}
+
+NgramIndexReader::NgramIndexReader(std::shared_ptr<const NgramIndex> index,
+                                   milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
 int64_t
-NgramIndexReader::Count() const {
-    return static_cast<int64_t>(count_);
-}
-
-DataType
-NgramIndexReader::ValueType() const {
-    return value_type_;
-}
-
-int64_t
-NgramIndexReader::MemoryUsage() const {
+NgramIndexStorage::MemoryUsage() const {
     constexpr size_t kKnownMetadataBytes =
-        sizeof(NgramIndexReader) + sizeof(milvus::tantivy::TantivyIndexWrapper);
+        sizeof(NgramIndexStorage) +
+        sizeof(milvus::tantivy::TantivyIndexWrapper);
     const auto validity_bytes = valid_bitmap_.size_in_bytes();
     if (validity_bytes >
         std::numeric_limits<size_t>::max() - kKnownMetadataBytes) {
@@ -199,8 +240,40 @@ NgramIndexReader::MemoryUsage() const {
 }
 
 cachinglayer::ResourceUsage
-NgramIndexReader::CellByteSize() const {
+NgramIndexStorage::CellByteSize() const {
     return {MemoryUsage(), mmap_ ? ToUsageBytes(engine_bytes_) : 0};
+}
+
+NgramIndexReader::~NgramIndexReader() = default;
+
+ReaderCaps
+NgramIndexReader::Caps() const {
+    return index_->Metadata().caps;
+}
+
+Domain
+NgramIndexReader::CoordDomain() const {
+    return Domain::Row;
+}
+
+int64_t
+NgramIndexReader::Count() const {
+    return static_cast<int64_t>(index_->storage_.count_);
+}
+
+DataType
+NgramIndexReader::ValueType() const {
+    return index_->storage_.value_type_;
+}
+
+int64_t
+NgramIndexReader::MemoryUsage() const {
+    return index_->storage_.MemoryUsage();
+}
+
+cachinglayer::ResourceUsage
+NgramIndexReader::CellByteSize() const {
+    return index_->storage_.CellByteSize();
 }
 
 bool
@@ -214,18 +287,19 @@ NgramIndexReader::CanHandle(std::string_view literal, PatternOp op) const {
             }
             return std::all_of(
                 literals.begin(), literals.end(), [this](const auto& part) {
-                    return Utf8LiteralLength(part) >= min_gram_;
+                    return Utf8LiteralLength(part) >=
+                           index_->storage_.min_gram_;
                 });
         }
         case PatternOp::RegexMatch:
             // The plan is TRUE when the pattern, or any OR branch of it, has
             // no literal of min_gram characters (including empty-match and
             // over-budget patterns); the executor then scans instead.
-            return !PlanNgramRegex(owned, min_gram_).IsTrue();
+            return !PlanNgramRegex(owned, index_->storage_.min_gram_).IsTrue();
         case PatternOp::InnerMatch:
         case PatternOp::PrefixMatch:
         case PatternOp::PostfixMatch:
-            return Utf8LiteralLength(owned) >= min_gram_;
+            return Utf8LiteralLength(owned) >= index_->storage_.min_gram_;
     }
     return false;
 }
@@ -239,18 +313,19 @@ NgramIndexReader::CandidatesAreExact(std::string_view literal,
     // Both Rust candidate strategies query the complete, case-sensitive gram
     // in this range. Count UTF-8 characters, matching the indexed tokenizer.
     const auto length = Utf8CharCount(literal.data(), literal.size());
-    return length >= min_gram_ && length <= max_gram_;
+    return length >= index_->storage_.min_gram_ &&
+           length <= index_->storage_.max_gram_;
 }
 
 void
 NgramIndexReader::Candidates(std::string_view literal,
                              PatternOp op,
                              TargetBitmap& candidates) const {
-    AssertInfo(candidates.size() == count_,
+    AssertInfo(candidates.size() == index_->storage_.count_,
                "NGRAM candidates size {} disagrees with count {}",
                candidates.size(),
-               count_);
-    if (count_ == 0 || candidates.none()) {
+               index_->storage_.count_);
+    if (index_->storage_.count_ == 0 || candidates.none()) {
         return;
     }
 
@@ -258,7 +333,7 @@ NgramIndexReader::Candidates(std::string_view literal,
     if (op == PatternOp::RegexMatch) {
         // AND the literals inside each branch, union the OR branches. Every
         // candidate is rechecked with the canonical RE2 matcher in phase 2.
-        const auto plan = PlanNgramRegex(owned, min_gram_);
+        const auto plan = PlanNgramRegex(owned, index_->storage_.min_gram_);
         AssertInfo(!plan.IsTrue(),
                    "NGRAM cannot handle the requested literal and operation");
         ApplyNgramRegexPlan(
@@ -275,7 +350,8 @@ NgramIndexReader::Candidates(std::string_view literal,
             literals = split_by_wildcard(owned);
             if (std::any_of(
                     literals.begin(), literals.end(), [this](const auto& part) {
-                        return Utf8LiteralLength(part) < min_gram_;
+                        return Utf8LiteralLength(part) <
+                               index_->storage_.min_gram_;
                     })) {
                 literals.clear();
             }
@@ -285,7 +361,7 @@ NgramIndexReader::Candidates(std::string_view literal,
         case PatternOp::InnerMatch:
         case PatternOp::PrefixMatch:
         case PatternOp::PostfixMatch:
-            if (Utf8LiteralLength(owned) >= min_gram_) {
+            if (Utf8LiteralLength(owned) >= index_->storage_.min_gram_) {
                 literals.push_back(owned);
             }
             break;
@@ -303,11 +379,16 @@ NgramIndexReader::ApplyLiterals(const std::vector<std::string>& literals,
     }
     const auto pre_count = candidates.count();
     const auto pre_filter_hit_rate =
-        static_cast<double>(pre_count) / static_cast<double>(count_);
+        static_cast<double>(pre_count) /
+        static_cast<double>(index_->storage_.count_);
     if (ShouldUseBatchStrategy(pre_filter_hit_rate)) {
         for (const auto& part : literals) {
-            TargetBitmap hits(count_);
-            engine_->ngram_match_query(part, min_gram_, max_gram_, &hits);
+            TargetBitmap hits(index_->storage_.count_);
+            index_->storage_.engine_->ngram_match_query(
+                part,
+                index_->storage_.min_gram_,
+                index_->storage_.max_gram_,
+                &hits);
             candidates &= hits;
             if (candidates.none()) {
                 return;
@@ -316,34 +397,35 @@ NgramIndexReader::ApplyLiterals(const std::vector<std::string>& literals,
         return;
     }
 
-    const auto terms = engine_->ngram_tokenize(literals, min_gram_, max_gram_);
+    const auto terms = index_->storage_.engine_->ngram_tokenize(
+        literals, index_->storage_.min_gram_, index_->storage_.max_gram_);
     AssertInfo(!terms.empty(),
                "NGRAM tokenizer returned no terms for a usable literal");
-    ApplyIterativeNgramFilter(terms, count_, candidates);
+    ApplyIterativeNgramFilter(terms, index_->storage_.count_, candidates);
 }
 
 TargetBitmap
 NgramIndexReader::IsNull() const {
-    if (all_valid_) {
-        return TargetBitmap(count_);
+    if (index_->storage_.all_valid_) {
+        return TargetBitmap(index_->storage_.count_);
     }
-    auto result = valid_bitmap_.clone();
+    auto result = index_->storage_.valid_bitmap_.clone();
     result.flip();
     return result;
 }
 
 TargetBitmap
 NgramIndexReader::IsNotNull() const {
-    if (all_valid_) {
-        return TargetBitmap(count_, true);
+    if (index_->storage_.all_valid_) {
+        return TargetBitmap(index_->storage_.count_, true);
     }
-    return valid_bitmap_.clone();
+    return index_->storage_.valid_bitmap_.clone();
 }
 
 bool
 NgramIndexReader::ShouldUseBatchStrategy(double pre_filter_hit_rate) const {
-    return avg_row_size_ >= kLargeRowThreshold ||
-           (avg_row_size_ >= kMediumRowThreshold &&
+    return index_->storage_.avg_row_size_ >= kLargeRowThreshold ||
+           (index_->storage_.avg_row_size_ >= kMediumRowThreshold &&
             pre_filter_hit_rate > kPreFilterHitRateThreshold);
 }
 
@@ -353,22 +435,23 @@ NgramIndexReader::ApplyIterativeNgramFilter(
     size_t total_count,
     TargetBitmap& bitset) const {
     auto max_iterations = kMaxIterations;
-    if (avg_row_size_ < kSmallRowThreshold) {
+    if (index_->storage_.avg_row_size_ < kSmallRowThreshold) {
         max_iterations = kMaxIterationsForSmallRow;
-    } else if (avg_row_size_ < kMediumRowThreshold) {
+    } else if (index_->storage_.avg_row_size_ < kMediumRowThreshold) {
         max_iterations = kMaxIterationsForMediumRow;
     }
 
     const auto iterations = std::min(sorted_terms.size(), max_iterations);
     for (size_t i = 0; i < iterations; ++i) {
         TargetBitmap term_bitset(total_count);
-        engine_->ngram_term_posting_list(sorted_terms[i], &term_bitset);
+        index_->storage_.engine_->ngram_term_posting_list(sorted_terms[i],
+                                                          &term_bitset);
         bitset &= term_bitset;
 
         const auto current_hit_rate = static_cast<double>(bitset.count()) /
                                       static_cast<double>(total_count);
         if (current_hit_rate < kBreakThreshold ||
-            (avg_row_size_ < kSmallRowThreshold &&
+            (index_->storage_.avg_row_size_ < kSmallRowThreshold &&
              current_hit_rate < kBreakThresholdForSmallRow)) {
             break;
         }
