@@ -609,12 +609,14 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task.meta.segments.SetSegment(5, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        5,
+				State:     commonpb.SegmentState_Importing,
 				NumOfRows: 100,
 			},
 		})
 		task.meta.segments.SetSegment(6, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        6,
+				State:     commonpb.SegmentState_Importing,
 				NumOfRows: 100,
 			},
 		})
@@ -645,6 +647,74 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		seg6Stats := task.meta.segments.GetSegment(6).GetStats()
 		assert.EqualValues(t, 7777, seg6Stats.GetInsertBinlogSize())
 		assert.EqualValues(t, 333, seg6Stats.GetStatsBinlogSize())
+	})
+
+	// DropCollection marks the preallocated import segments Dropped while the
+	// task is still running on the DataNode. The late result must fail the
+	// job instead of writing the segments back to Flushed.
+	t.Run("completed result for dropped segments fails the job", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+		require.NoError(t, err)
+		require.NoError(t, im.AddJob(context.TODO(), &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID: 1,
+				State: internalpb.ImportJobState_Importing,
+			},
+		}))
+
+		taskProto := &datapb.ImportTaskV2{
+			JobID:        1,
+			TaskID:       2,
+			CollectionID: 3,
+			SegmentIDs:   []int64{5},
+			NodeID:       7,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		}
+		task := &importTask{
+			meta: &meta{
+				catalog:     catalog,
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+				segments:    NewSegmentsInfo(),
+			},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
+		}
+		task.task.Store(taskProto)
+		require.NoError(t, im.AddTask(context.TODO(), task))
+
+		task.meta.segments.SetSegment(5, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:           5,
+				CollectionID: 3,
+				State:        commonpb.SegmentState_Dropped,
+				IsImporting:  true,
+			},
+		})
+
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
+			State: datapb.ImportTaskStateV2_Completed,
+			ImportSegmentsInfo: []*datapb.ImportSegmentInfo{
+				{SegmentID: 5, ImportedRows: 100},
+			},
+		}, nil)
+
+		task.QueryTaskOnWorker(cluster)
+
+		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+		assert.Equal(t, internalpb.ImportJobState_Failed, im.GetJob(context.TODO(), 1).GetState())
+		assert.Equal(t, commonpb.SegmentState_Dropped, task.meta.segments.GetSegment(5).GetState())
 	})
 
 	// Replaces the removed TestExtractTimestampFromBinlogs coverage. The
@@ -700,6 +770,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task.meta.segments.SetSegment(42, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        42,
+				State:     commonpb.SegmentState_Importing,
 				NumOfRows: 0,
 			},
 		})
@@ -787,6 +858,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task.meta.segments.SetSegment(43, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:        43,
+				State:     commonpb.SegmentState_Importing,
 				NumOfRows: 0,
 				Level:     datapb.SegmentLevel_L0,
 			},
