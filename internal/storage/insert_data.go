@@ -574,6 +574,17 @@ func (m *LogicalToPhysicalMapping) Build(validData []bool, startLogical, totalCo
 	m.validCount = physicalIdx
 }
 
+// countSelectedValidRows counts non-null rows in the selection, including repeated indices.
+func countSelectedValidRows(validData []bool, indices []int) int {
+	count := 0
+	for _, i := range indices {
+		if validData[i] {
+			count++
+		}
+	}
+	return count
+}
+
 func getNullableVectorPhysicalOffset(validData []bool, mapping *LogicalToPhysicalMapping, logicalOffset int) int {
 	if mapping != nil && mapping.l2pMap != nil {
 		return mapping.GetPhysicalOffset(logicalOffset)
@@ -1348,6 +1359,15 @@ func (data *BinaryVectorFieldData) CopyFrom(src FieldData, indices []int) error 
 		return merr.WrapErrServiceInternalMsg("BinaryVectorFieldData.CopyFrom requires a non-nil BinaryVectorFieldData source")
 	}
 	rowWidth := data.Dim / 8
+	if data.Nullable {
+		validCount := countSelectedValidRows(source.ValidData, indices)
+		// Reserve only the selected non-null vectors, preserving existing data.
+		if required := len(data.Data) + validCount*rowWidth; required > cap(data.Data) {
+			values := make([]byte, len(data.Data), required)
+			copy(values, data.Data)
+			data.Data = values
+		}
+	}
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
@@ -1390,6 +1410,15 @@ func (data *FloatVectorFieldData) CopyFrom(src FieldData, indices []int) error {
 		return merr.WrapErrServiceInternalMsg("FloatVectorFieldData.CopyFrom requires a non-nil FloatVectorFieldData source")
 	}
 	rowWidth := data.Dim
+	if data.Nullable {
+		validCount := countSelectedValidRows(source.ValidData, indices)
+		// Reserve only the selected non-null vectors, preserving existing data.
+		if required := len(data.Data) + validCount*rowWidth; required > cap(data.Data) {
+			values := make([]float32, len(data.Data), required)
+			copy(values, data.Data)
+			data.Data = values
+		}
+	}
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
@@ -1432,6 +1461,15 @@ func (data *Float16VectorFieldData) CopyFrom(src FieldData, indices []int) error
 		return merr.WrapErrServiceInternalMsg("Float16VectorFieldData.CopyFrom requires a non-nil Float16VectorFieldData source")
 	}
 	rowWidth := data.Dim * 2
+	if data.Nullable {
+		validCount := countSelectedValidRows(source.ValidData, indices)
+		// Reserve only the selected non-null vectors, preserving existing data.
+		if required := len(data.Data) + validCount*rowWidth; required > cap(data.Data) {
+			values := make([]byte, len(data.Data), required)
+			copy(values, data.Data)
+			data.Data = values
+		}
+	}
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
@@ -1474,6 +1512,15 @@ func (data *BFloat16VectorFieldData) CopyFrom(src FieldData, indices []int) erro
 		return merr.WrapErrServiceInternalMsg("BFloat16VectorFieldData.CopyFrom requires a non-nil BFloat16VectorFieldData source")
 	}
 	rowWidth := data.Dim * 2
+	if data.Nullable {
+		validCount := countSelectedValidRows(source.ValidData, indices)
+		// Reserve only the selected non-null vectors, preserving existing data.
+		if required := len(data.Data) + validCount*rowWidth; required > cap(data.Data) {
+			values := make([]byte, len(data.Data), required)
+			copy(values, data.Data)
+			data.Data = values
+		}
+	}
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
@@ -1568,6 +1615,15 @@ func (data *Int8VectorFieldData) CopyFrom(src FieldData, indices []int) error {
 		return merr.WrapErrServiceInternalMsg("Int8VectorFieldData.CopyFrom requires a non-nil Int8VectorFieldData source")
 	}
 	rowWidth := data.Dim
+	if data.Nullable {
+		validCount := countSelectedValidRows(source.ValidData, indices)
+		// Reserve only the selected non-null vectors, preserving existing data.
+		if required := len(data.Data) + validCount*rowWidth; required > cap(data.Data) {
+			values := make([]int8, len(data.Data), required)
+			copy(values, data.Data)
+			data.Data = values
+		}
+	}
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
