@@ -458,7 +458,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     // SetSnapshot; the recorder is owned by the plan and outlives the task.
     // Default no-op for expressions that do not choose an execution path.
     virtual void
-    SetFeatureRecorder(FeatureRecorder* recorder) {
+    SetFeatureRecorder(FeatureRecorder* recorder, const Schema& schema) {
     }
 
  protected:
@@ -515,13 +515,12 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto field_meta = segment_->get_field_meta(field_id_);
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
+        has_nullable_array_element_ = field_meta.has_nullable_array_element();
 
-        if (schema->get_primary_field_id().has_value() &&
-            schema->get_primary_field_id().value() == field_id_ &&
+        if (segment_->is_primary_field(field_id_) &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -583,12 +582,12 @@ class SegmentExpr : public Expr {
     // predicate the plan parser merges in (MergeExprWithNamespace) are not
     // user filters, so an expression on either field records nothing.
     void
-    SetFeatureRecorder(FeatureRecorder* recorder) override {
+    SetFeatureRecorder(FeatureRecorder* recorder,
+                       const Schema& schema) override {
         if (recorder == nullptr) {
             feature_recorder_ = nullptr;
             return;
         }
-        const auto& schema = *segment_->get_schema_snapshot();
         auto ttl_field = schema.get_ttl_field_id();
         auto namespace_field = schema.get_namespace_field_id();
         const bool internal =
@@ -3180,8 +3179,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -3248,8 +3247,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -3902,6 +3901,12 @@ class SegmentExpr : public Expr {
             // an exception escape can leave pthread_once active on this runtime,
             // so cleanup's second call would wait forever after prefetch fails.
             try {
+                if (IsElementLevelExpression() && has_nullable_array_element_) {
+                    ThrowInfo(ErrorCode::NotImplemented,
+                              "element-level expressions on element-nullable "
+                              "array field {} are not supported yet",
+                              field_id_.get());
+                }
                 auto self = const_cast<SegmentExpr*>(this);
                 self->DetermineExecPath();
                 self->RecordExecPath();
@@ -4279,6 +4284,7 @@ class SegmentExpr : public Expr {
     // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
     // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
     bool is_nullable_{false};
+    bool has_nullable_array_element_{false};
     // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.

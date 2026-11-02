@@ -864,9 +864,18 @@ func TestDDLCallbacksAlterCollectionSchemaAddRejectsStructFieldNameConflicts(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
-	for _, fieldName := range []string{"profile", "profile[ints]", storedRootStructSubFieldName("profile", "profile[ints]")} {
-		t.Run(fieldName, func(t *testing.T) {
-			resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldReq(dbName, collectionName, fieldName, false))
+	// A top-level name can clash with the struct; a name s[b] is a sub-field
+	// add and clashes with an existing sub-field of s.
+	subField := &schemapb.FieldSchema{
+		Name: "profile[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	for _, req := range []*milvuspb.AlterCollectionSchemaRequest{
+		buildAlterSchemaAddFieldReq(dbName, collectionName, "profile", false),
+		buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, subField, false),
+	} {
+		t.Run(req.GetAction().GetAddRequest().GetFieldInfos()[0].GetFieldSchema().GetName(), func(t *testing.T) {
+			resp, err := core.AlterCollectionSchema(ctx, req)
 			require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 			require.Contains(t, resp.GetAlterStatus().GetReason(), "field already exists")
 			assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
@@ -1921,4 +1930,452 @@ func TestApplyBoundFieldIndexesInline(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorContains(t, err, "failed to apply bound field index")
 	})
+}
+
+func rootStructSubFieldTestCollection(nullable bool) *model.Collection {
+	return &model.Collection{
+		Name:          "test_coll",
+		SchemaVersion: 2,
+		Fields: []*model.Field{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "base_vec", DataType: schemapb.DataType_FloatVector},
+		},
+		StructArrayFields: []*model.StructArrayField{{
+			FieldID: 102, Name: "items", Nullable: nullable,
+			Fields: []*model.Field{{
+				FieldID: 103, Name: "items[old]", DataType: schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64, Nullable: nullable,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			}},
+		}},
+		Properties: []*commonpb.KeyValuePair{{Key: common.MaxFieldIDKey, Value: "103"}},
+	}
+}
+
+func TestPrepareAndBuildAlterSchemaAddStructSubField(t *testing.T) {
+	newNestedField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "items[nested]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+			ElementNullable: true,
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable:   true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+	}
+	for _, nullable := range []bool{false, true} {
+		for _, tc := range []struct {
+			name  string
+			field *schemapb.FieldSchema
+		}{
+			{"scalar", &schemapb.FieldSchema{Name: "items[scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}},
+			{"vector", &schemapb.FieldSchema{Name: "items[vector]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}, {Key: common.DimKey, Value: "8"}}}},
+			{"nested", newNestedField()},
+		} {
+			t.Run(tc.name+"_parent_nullable="+strconv.FormatBool(nullable), func(t *testing.T) {
+				coll := rootStructSubFieldTestCollection(nullable)
+				field := proto.Clone(tc.field).(*schemapb.FieldSchema)
+				field.FieldID = 9999 // Client-supplied IDs must be ignored.
+				plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+				require.NoError(t, prepareAlterSchemaAddStructSubField(coll, plan))
+				schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
+				require.NoError(t, err)
+				require.NoError(t, validateSchemaEvolution(coll, schema))
+				require.Equal(t, int32(3), schema.GetVersion())
+				require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2)
+				require.Len(t, schema.GetFields(), 2)
+				added := schema.GetStructArrayFields()[0].GetFields()[1]
+				require.Equal(t, int64(104), added.GetFieldID())
+				require.Equal(t, "items["+tc.name+"]", added.GetName())
+				require.Equal(t, nullable, added.GetNullable())
+				maxFieldID, found := funcutil.TryGetAttrByKeyFromRepeatedKV(common.MaxFieldIDKey, properties)
+				require.True(t, found)
+				require.Equal(t, "104", maxFieldID)
+				if tc.name == "nested" {
+					require.Equal(t, nullable, added.GetTypeSchema().GetNullable())
+					require.True(t, added.GetTypeSchema().GetArrayElement().GetNullable())
+				}
+				// Preparing and building must not change the original collection.
+				require.Len(t, coll.StructArrayFields[0].Fields, 1)
+			})
+		}
+	}
+}
+
+func TestPrepareAlterSchemaAddStructSubFieldRejectsInvalid(t *testing.T) {
+	validField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "added", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+		}
+	}
+	for _, tc := range []struct {
+		name, path, want string
+		change           func(*schemapb.FieldSchema)
+	}{
+		{"missing struct", "absent", `struct field "absent" not found`, nil},
+		{"element nullable required", "items", `must set element_nullable=true`, func(f *schemapb.FieldSchema) { f.ElementNullable = false }},
+		{"default value", "items", "default value is not supported for struct field", func(f *schemapb.FieldSchema) {
+			f.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 1}}
+		}},
+		{"protected role", "items", "primary key is not supported for struct field", func(f *schemapb.FieldSchema) { f.IsPrimaryKey = true }},
+		{"auto ID", "items", "autoID is not supported for struct field", func(f *schemapb.FieldSchema) { f.AutoID = true }},
+		{"partition key", "items", "partition key is not supported for struct field", func(f *schemapb.FieldSchema) { f.IsPartitionKey = true }},
+		{"clustering key", "items", "clustering key is not supported for struct field", func(f *schemapb.FieldSchema) { f.IsClusteringKey = true }},
+		{"function output", "items", "function output is not supported for struct field", func(f *schemapb.FieldSchema) { f.IsFunctionOutput = true }},
+		{"dynamic role", "items", "dynamic field is not supported for struct field", func(f *schemapb.FieldSchema) { f.IsDynamic = true }},
+		{"external", "items", "does not support external field mapping", func(f *schemapb.FieldSchema) { f.ExternalField = "source" }},
+		{"invalid local format", "items", "invalid local_format", func(f *schemapb.FieldSchema) {
+			f.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{Key: common.LocalFormatKey, Value: "bogus"})
+		}},
+		{"vortex vector", "items", "local_format vortex is not supported for vector field", func(f *schemapb.FieldSchema) {
+			f.DataType, f.ElementType = schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector
+			f.TypeParams = append(f.TypeParams,
+				&commonpb.KeyValuePair{Key: common.DimKey, Value: "4"},
+				&commonpb.KeyValuePair{Key: common.LocalFormatKey, Value: common.LocalFormatVortex})
+		}},
+		{"capacity mismatch", "items", "same max_capacity", func(f *schemapb.FieldSchema) { f.TypeParams[0].Value = "8" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := validField()
+			if tc.change != nil {
+				tc.change(field)
+			}
+			field.Name = tc.path + "[added]"
+			plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: tc.path, Field: field}
+			err := prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+		DbName: dbName, CollectionName: collectionName,
+		StructArrayFieldSchema: newRootAddStructFieldSchema("profile"),
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	add := func(field *schemapb.FieldSchema) error {
+		req := buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, field, false)
+		resp, err := core.AlterCollectionSchema(ctx, req)
+		return merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	}
+	newScalar := func(name string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: name, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+		}
+	}
+
+	require.NoError(t, add(newScalar("profile[new_scalar]")))
+	require.NoError(t, add(&schemapb.FieldSchema{
+		Name: "profile[new_vector]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}, {Key: common.DimKey, Value: "8"}},
+	}))
+	require.NoError(t, add(&schemapb.FieldSchema{
+		Name: "profile[new_nested]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+		ElementNullable: true,
+		TypeSchema: &schemapb.TypeSchema{
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+				Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+				}},
+			}},
+		},
+	}))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, int32(4), coll.SchemaVersion)
+	require.Len(t, coll.StructArrayFields, 1)
+	subFields := coll.StructArrayFields[0].Fields
+	require.Len(t, subFields, 5)
+	for i, name := range []string{"profile[new_scalar]", "profile[new_vector]", "profile[new_nested]"} {
+		require.Equal(t, name, subFields[i+2].Name)
+		require.Equal(t, int64(104+i), subFields[i+2].FieldID)
+		require.True(t, subFields[i+2].Nullable)
+		require.True(t, subFields[i+2].ElementNullable)
+	}
+	require.True(t, subFields[4].TypeSchema.GetNullable())
+	require.True(t, subFields[4].TypeSchema.GetArrayElement().GetNullable())
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 106)
+
+	for _, tc := range []struct {
+		field *schemapb.FieldSchema
+		want  string
+	}{
+		{newScalar("missing[another]"), `struct field "missing" not found`},
+		{newScalar("profile[inner][another]"), "nested struct is not supported"},
+		{newScalar("profile[]"), "invalid struct sub-field name"},
+		{newScalar("[another]"), "invalid struct sub-field name"},
+		{newScalar("profile[another"), "invalid struct sub-field name"},
+		{newScalar("profile[ints]"), "field already exists"},
+		{&schemapb.FieldSchema{Name: "profile[not_nullable]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}, "must set element_nullable=true"},
+		{func() *schemapb.FieldSchema {
+			f := newScalar("profile[defaulted]")
+			f.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 1}}
+			return f
+		}(), "default value is not supported"},
+	} {
+		err := add(tc.field)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.field.GetName())
+		require.ErrorContains(t, err, tc.want, tc.field.GetName())
+	}
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 4)
+
+	dropByName := &milvuspb.AlterCollectionSchemaRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+				DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+					Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: "profile[new_scalar]"},
+				},
+			},
+		},
+	}
+	alterResp, err := core.AlterCollectionSchema(ctx, dropByName)
+	require.NoError(t, merr.CheckRPCCall(alterResp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
+	dropByID := proto.Clone(dropByName).(*milvuspb.AlterCollectionSchemaRequest)
+	dropByID.GetAction().Op = &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+		DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+			Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: 105},
+		},
+	}
+	alterResp, err = core.AlterCollectionSchema(ctx, dropByID)
+	require.NoError(t, merr.CheckRPCCall(alterResp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Len(t, coll.StructArrayFields[0].Fields, 3)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 106)
+
+	// A sub-field name equal to a top-level field or to the struct itself
+	// is valid, since the sub-field is stored as profile[x].
+	require.NoError(t, add(newScalar("profile[field1]")))
+	require.NoError(t, add(newScalar("profile[profile]")))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	subFields = coll.StructArrayFields[0].Fields
+	require.Equal(t, "profile[field1]", subFields[len(subFields)-2].Name)
+	require.Equal(t, "profile[profile]", subFields[len(subFields)-1].Name)
+}
+
+func TestBuildSchemaForDropStructSubField(t *testing.T) {
+	newCollection := func() *model.Collection {
+		coll := rootStructSubFieldTestCollection(false)
+		coll.StructArrayFields[0].Fields = append(coll.StructArrayFields[0].Fields,
+			&model.Field{FieldID: 104, Name: "middle", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			&model.Field{FieldID: 105, Name: "items[vector]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
+		)
+		return coll
+	}
+	for _, tc := range []struct {
+		name      string
+		fieldName string
+		fieldID   int64
+		wantID    int64
+	}{
+		{"first by stored name", "items[old]", 0, 103},
+		{"middle legacy raw name by stored name", "items[middle]", 0, 104},
+		{"middle by id", "", 104, 104},
+		{"vector by id", "", 105, 105},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coll := newCollection()
+			schema, properties, droppedIDs, err := buildSchemaForDropField(coll, tc.fieldName, tc.fieldID)
+			require.NoError(t, err)
+			require.Equal(t, []int64{tc.wantID}, droppedIDs)
+			require.Equal(t, int32(3), schema.GetVersion())
+			require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2)
+			require.Len(t, coll.StructArrayFields[0].Fields, 3)
+			for _, field := range schema.GetStructArrayFields()[0].GetFields() {
+				require.NotEqual(t, tc.wantID, field.GetFieldID())
+			}
+			maxFieldID, found := funcutil.TryGetAttrByKeyFromRepeatedKV(common.MaxFieldIDKey, properties)
+			require.True(t, found)
+			require.Equal(t, "105", maxFieldID)
+		})
+	}
+
+	_, _, _, err := buildSchemaForDropField(newCollection(), "middle", 0)
+	require.ErrorContains(t, err, "field not found: middle")
+
+	lastChild := newCollection()
+	lastChild.StructArrayFields[0].Fields = lastChild.StructArrayFields[0].Fields[:1]
+	_, _, _, err = buildSchemaForDropField(lastChild, "items[old]", 0)
+	require.ErrorContains(t, err, `cannot drop the last sub-field "items[old]" of struct field "items"`)
+
+	for _, tc := range []struct {
+		name    string
+		protect func(*model.Field)
+	}{
+		{"primary key", func(f *model.Field) { f.IsPrimaryKey = true }},
+		{"auto ID", func(f *model.Field) { f.AutoID = true }},
+		{"partition key", func(f *model.Field) { f.IsPartitionKey = true }},
+		{"clustering key", func(f *model.Field) { f.IsClusteringKey = true }},
+		{"dynamic", func(f *model.Field) { f.IsDynamic = true }},
+		{"function output", func(f *model.Field) { f.IsFunctionOutput = true }},
+		{"external", func(f *model.Field) { f.ExternalField = "source" }},
+	} {
+		t.Run("protected "+tc.name, func(t *testing.T) {
+			coll := newCollection()
+			tc.protect(coll.StructArrayFields[0].Fields[1])
+			_, _, _, err := buildSchemaForDropField(coll, "items[middle]", 0)
+			require.ErrorContains(t, err, "with a protected role")
+		})
+	}
+
+	lastVector := newCollection()
+	lastVector.Fields = lastVector.Fields[:1]
+	_, _, _, err = buildSchemaForDropField(lastVector, "items[vector]", 0)
+	require.ErrorContains(t, err, "would leave no vector field")
+
+	for _, role := range []string{"input", "output"} {
+		t.Run("function "+role, func(t *testing.T) {
+			coll := newCollection()
+			fn := &model.Function{Name: "fn"}
+			if role == "input" {
+				fn.InputFieldNames = []string{"items[middle]"}
+			} else {
+				fn.OutputFieldNames = []string{"items[middle]"}
+			}
+			coll.Functions = []*model.Function{fn}
+			_, _, _, err := buildSchemaForDropField(coll, "items[middle]", 0)
+			require.ErrorContains(t, err, "referenced by function fn as "+role)
+		})
+	}
+}
+
+// A sub-field added to an existing struct is marked, and a struct must keep
+// an original (unmarked) sub-field: dropping the last original one would
+// leave segments written before the add without a stored sibling for the
+// added sub-field.
+func TestAlterCollectionSchemaDropKeepsOriginalStructSubField(t *testing.T) {
+	coll := rootStructSubFieldTestCollection(true)
+	field := &schemapb.FieldSchema{
+		Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+	require.NoError(t, prepareAlterSchemaAddStructSubField(coll, plan))
+	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(coll, schema))
+	subFields := schema.GetStructArrayFields()[0].GetFields()
+	require.False(t, schemautil.IsAddedStructSubField(subFields[0]))
+	require.True(t, schemautil.IsAddedStructSubField(subFields[1]))
+
+	afterAdd := coll.Clone()
+	afterAdd.SchemaVersion = schema.GetVersion()
+	afterAdd.Properties = properties
+	afterAdd.StructArrayFields[0].Fields = append(afterAdd.StructArrayFields[0].Fields, model.UnmarshalFieldModel(subFields[1]))
+
+	// Dropping the original sub-field passes the drop builder, which only
+	// rejects the last sub-field, and is then rejected by schema evolution.
+	dropped, _, _, err := buildSchemaForDropField(afterAdd, "items[old]", 0)
+	require.NoError(t, err)
+	err = validateSchemaEvolution(afterAdd, dropped)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `cannot drop sub-field "items[old]" of struct field "items"`)
+
+	// Dropping the added sub-field keeps the original one.
+	dropped, _, _, err = buildSchemaForDropField(afterAdd, "items[added]", 0)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(afterAdd, dropped))
+
+	// Dropping the whole struct is always allowed.
+	dropped, _, _, err = buildSchemaForDropField(afterAdd, "items", 0)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(afterAdd, dropped))
+}
+
+// Users cannot supply the internal origin marker when they create a
+// collection, add a field, a struct or a struct sub-field, or alter a field.
+func TestRootCoordRejectsStructSubFieldOriginMarker(t *testing.T) {
+	marked := func(field *schemapb.FieldSchema) *schemapb.FieldSchema {
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+		return field
+	}
+
+	err := checkFieldSchema([]*schemapb.FieldSchema{marked(&schemapb.FieldSchema{Name: "f", DataType: schemapb.DataType_Int64})})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "is reserved")
+
+	structs := []*schemapb.StructArrayFieldSchema{newRootAddStructFieldSchema("profile")}
+	require.NoError(t, rejectStructSubFieldOriginMarkers(structs))
+	marked(structs[0].Fields[0])
+	require.ErrorIs(t, rejectStructSubFieldOriginMarkers(structs), merr.ErrParameterInvalid)
+
+	field := marked(&schemapb.FieldSchema{
+		Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	})
+	plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+	err = prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(true), plan)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "is reserved")
+}
+
+func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testing.T) {
+	// Install the real callback dispatch and WAL control channel used by the
+	// inline index cascade, then capture the synthetic DropIndex callback.
+	initStreamingSystemAndCore(t)
+	registry.ResetRegistration()
+	var droppedIndexIDs []int64
+	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+		droppedIndexIDs = append(droppedIndexIDs, result.Message.Header().IndexIds...)
+		return nil
+	})
+
+	meta := &mockMetaTable{}
+	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		return nil
+	}
+	mixc := imocks.NewMixCoord(t)
+	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+		Status: merr.Success(),
+		IndexInfos: []*indexpb.IndexInfo{
+			{FieldID: 104, IndexID: 201, IndexName: "items_middle_idx"},
+			{FieldID: 200, IndexID: 202, IndexName: "other_idx"},
+		},
+	}, nil)
+	core := newTestCore(withMeta(meta), withMixCoord(mixc), withBroker(newValidMockBroker()))
+	controlChannel := funcutil.GetControlChannel("test")
+	raw := message.NewAlterCollectionMessageBuilderV2().
+		WithHeader(&messagespb.AlterCollectionMessageHeader{
+			CollectionId:     1,
+			UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}},
+			CacheExpirations: &messagespb.CacheExpirations{},
+			DroppedFieldIds:  []int64{104},
+		}).
+		WithBody(&messagespb.AlterCollectionMessageBody{
+			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Schema: &schemapb.CollectionSchema{Name: "test", Version: 2},
+			},
+		}).
+		WithBroadcast([]string{controlChannel}).
+		MustBuildBroadcast()
+	cb := &DDLCallback{Core: core}
+	require.NoError(t, cb.alterCollectionV2AckCallback(context.Background(), message.BroadcastResultAlterCollectionMessageV2{
+		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
+		Results: map[string]*message.AppendResult{controlChannel: {TimeTick: 100}},
+	}))
+	require.Equal(t, []int64{201}, droppedIndexIDs)
 }

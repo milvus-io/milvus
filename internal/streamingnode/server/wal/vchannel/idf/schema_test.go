@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -261,7 +260,7 @@ func TestViewBindingUsesRequiredFieldAndPartitionScope(t *testing.T) {
 		if fail {
 			return nil, merr.WrapErrServiceNotReadyMsg("load info pending")
 		}
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, PartitionIDs: []int64{10}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 104}}}, nil
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, PartitionIDs: []int64{10}, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}, LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 104}}}, nil
 	}).Build()
 	defer rpc.UnPatch()
 	resources := mockey.Mock((*Provider).getSealedBM25Resources).To(func(_ *Provider, _ context.Context, _ int64, _ string, _ qviews.DataVersion, partitions []int64, _ uint64) ([]*datapb.StreamingNodeBM25Resource, error) {

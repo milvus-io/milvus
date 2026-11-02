@@ -1061,14 +1061,14 @@ LoadExternalTextColumnForTesting(ChunkedSegmentSealedImpl* segment,
     auto runtime = segment->TestCloneMutableRuntimeResourceState();
 
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
-    initial_delta.schema = current->schema;
+    initial_delta.fields = current->fields;
     initial_delta.load_info = current->load_info;
     initial_delta.runtime = segment->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
     auto staged = segment->TestBuildNextPublishedState(current, initial_delta);
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
-    final_delta.schema = current->schema;
+    final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
     final_delta.commit_ts = current->commit_ts;
 

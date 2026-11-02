@@ -272,7 +272,7 @@ CheckProjectedArrayIndexes(std::string_view type_name,
                         dynamic_cast<const INullReader*>(resolved.get());
                     ASSERT_NE(nulls, nullptr);
                     ExpectHits(nulls->IsNotNull(), raw.size(), {0, 1, 2, 6, 7});
-                    ExpectHits(nulls->IsNull(), raw.size(), {3, 4, 5});
+                    ExpectHits(nulls->IsNull(), raw.size(), {3, 4, 5, 8});
                     ExpectHits(
                         predicate->NotIn(1, &first), raw.size(), {1, 2, 7});
                 }
@@ -283,6 +283,8 @@ CheckProjectedArrayIndexes(std::string_view type_name,
 
 TEST(JsonProjectedHybridIndexBuilderTest,
      ArrayCastsSelectBitmapAndSortWithParentRows) {
+    // The last row is valid but its stored bytes are empty: it has no
+    // document, so no array either.
     CheckProjectedArrayIndexes<bool>("Bool",
                                      DataType::BOOL,
                                      "ARRAY_BOOL",
@@ -293,7 +295,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
                                       R"({"a":null})",
                                       R"({"a":3})",
                                       R"({"a":[false,3,"ignored",null,{}]})",
-                                      R"({"a":[null,{},[]]})"},
+                                      R"({"a":[null,{},[]]})",
+                                      ""},
                                      false,
                                      true);
     CheckProjectedArrayIndexes<double>(
@@ -307,7 +310,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
          R"({"a":null})",
          R"({"a":true})",
          R"({"a":[1.0,false,"ignored",null,{}]})",
-         R"({"a":[null,{},[]]})"},
+         R"({"a":[null,{},[]]})",
+         ""},
         1,
         100);
     CheckProjectedArrayIndexes<std::string_view>(
@@ -321,7 +325,8 @@ TEST(JsonProjectedHybridIndexBuilderTest,
          R"({"a":null})",
          R"({"a":true})",
          R"({"a":["a",false,3,null,{}]})",
-         R"({"a":[null,{},[]]})"},
+         R"({"a":[null,{},[]]})",
+         ""},
         "a",
         "z");
 }

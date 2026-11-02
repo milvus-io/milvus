@@ -284,6 +284,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         entity_ttl_physical_time_us_);
 
     // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_schema(read_schema_);
     query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
     // Set op context to query context
@@ -438,6 +439,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
                 entity_ttl_physical_time_us_);
 
             // Pin the sealed published snapshot exactly once for this request.
+            query_context->set_read_schema(read_schema_);
             query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
             if (enable_expr_cache_) {
@@ -498,6 +500,7 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
         entity_ttl_physical_time_us_);
 
     // Pin the sealed published snapshot exactly once for this request.
+    query_context->set_read_schema(read_schema_);
     query_context->set_read_snapshot(segment->CaptureReadSnapshot());
 
     query_context->set_search_info(node.search_info_);

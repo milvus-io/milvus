@@ -214,7 +214,21 @@ case "${unameOut}" in
     export CMAKE_CXX_COMPILER_LAUNCHER=ccache
     echo "Using CXX: $CXX"
     echo "Using CC: $CC"
-    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20 -u"
+    # Match Linux CI: do not refresh every recipe revision during a normal build.
+    # An upstream recipe revision can change transitive requirements without a
+    # Milvus source change, making a previously valid dependency graph fail.
+    CONAN_ARGS="--output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=20"
+
+    # Recover caches updated by the old -u behavior. This Conan Center recipe
+    # requires aws-c-common/0.14.5, conflicting with the SDK's 0.14.0 graph.
+    # Remove only the known-bad revision; the internal remote has a compatible
+    # revision, so no unrelated Conan packages or binaries are discarded.
+    bad_event_stream_revision=7efb08d7203c90891cc0a2a36d38f4ce
+    bad_event_stream_ref="aws-c-event-stream/0.7.1#${bad_event_stream_revision}"
+    if "$CONAN" list "$bad_event_stream_ref" -c -f json | grep -Fq "\"${bad_event_stream_revision}\":"; then
+        echo "Removing incompatible cached Conan recipe: ${bad_event_stream_ref}"
+        "$CONAN" remove "$bad_event_stream_ref" --confirm
+    fi
 
     # On macOS, Conan packages with shared libraries (protobuf, grpc) produce
     # binaries (protoc, grpc_cpp_plugin) whose install rpaths don't include

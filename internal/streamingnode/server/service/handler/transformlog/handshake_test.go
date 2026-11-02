@@ -26,7 +26,7 @@ func TestCreateSubscribeServerAcknowledgesAcquiredStream(t *testing.T) {
 			md, ok := metadata.FromOutgoingContext(ctx)
 			require.True(t, ok)
 			wire := newFakeSubscribeTransformServer(metadata.NewIncomingContext(ctx, md))
-			stream := walsummary.NewStream(walsummary.NewManager(walsummary.ManagerConfig{}))
+			stream := walsummary.NewDispatchStream(walsummary.NewManager(walsummary.ManagerConfig{}))
 			defer stream.Close()
 			accessor := wal.NewTransformLogErrorAccesser(nil)
 			mockey.Mock((*mock_walmanager.MockManager).GetAvailableWAL).Return(&mock_wal.MockWAL{}, nil).Build()

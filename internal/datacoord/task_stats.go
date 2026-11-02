@@ -693,7 +693,6 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
 		return err
 	}
-
 	// Update segment manifest version so subsequent stats tasks use the latest version.
 	if manifest := result.GetManifest(); manifest != "" &&
 		st.GetSubJobType() != indexpb.StatsSubJob_TextIndexJob &&

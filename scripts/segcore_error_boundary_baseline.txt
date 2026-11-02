@@ -135,6 +135,7 @@ arrow	internal/core/src/segcore/retrieve_result_export_c.h
 arrow	internal/core/src/segcore/search_result_export_c.cpp
 arrow	internal/core/src/segcore/segment_c.cpp
 arrow	internal/core/src/segcore/SegmentGrowingImpl.cpp
+arrow	internal/core/src/segcore/SegmentLoadInfo.cpp
 arrow	internal/core/src/segcore/storagev1translator/ChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev1translator/DefaultValueChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.cpp

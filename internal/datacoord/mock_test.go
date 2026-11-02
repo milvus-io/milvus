@@ -54,6 +54,14 @@ import (
 
 var _ kv.MetaKv = &metaMemoryKV{}
 
+func (*mockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
+}
+
+func (*mockMixCoord) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}
+
 type metaMemoryKV struct {
 	memkv.MemoryKV
 }
@@ -1162,14 +1170,6 @@ func (h *mockHandler) GetDataVChanPositions(channel RWChannel, partitionID Uniqu
 		CollectionID: channel.GetCollectionID(),
 		ChannelName:  channel.GetName(),
 	}
-}
-
-func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
-	return false
-}
-
-func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) error {
-	return nil
 }
 
 func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {

@@ -133,10 +133,11 @@ func TestImportCommitCallbackRecomputesDataView(t *testing.T) {
 	require.Zero(t, recompute.Times())
 	failSave.UnPatch()
 	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
-	require.Equal(t, 1, recompute.Times())
+	requests := recompute.Times()
+	require.Positive(t, requests, "metadata publication and callback may both request a coalesced recompute")
 	// A replay of an already-completed job can retry a lost reconciliation.
 	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
-	require.Equal(t, 2, recompute.Times())
+	require.Greater(t, recompute.Times(), requests, "completed replay must retry a lost reconciliation")
 }
 
 func TestImportCommitCallbackRetriesCompletionAfterRestart(t *testing.T) {

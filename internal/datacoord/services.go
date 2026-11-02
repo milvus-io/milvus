@@ -3080,9 +3080,14 @@ func (s *Server) ListSnapshots(ctx context.Context, req *datapb.ListSnapshotsReq
 		}, nil
 	}
 
+	names := make([]string, len(snapshots))
+	for i, snapshot := range snapshots {
+		names[i] = snapshot.GetName()
+	}
 	return &datapb.ListSnapshotsResponse{
-		Status:    merr.Success(),
-		Snapshots: snapshots,
+		Status:            merr.Success(),
+		Snapshots:         names,
+		SnapshotSummaries: snapshots,
 	}, nil
 }
 

@@ -89,7 +89,9 @@ func TestProtoContract_FieldDescriptorsPinned(t *testing.T) {
 		// feature_bits (21) is a varint scalar decoded directly.
 		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, "b44a0fef5dc74453366b7f2e0da7e4e35c67f0babe20b369efa60ce7cc38f2cc"},
 		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, "a334da7b112573d379549d8c81c1afcf0a8526488947c4868b6ff4d9413b29a7"},
-		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, "a0fc2a36ce1d4f67f0d73a4c7faabbf0d7c76b522ce8acc851c149f311c78d50"},
+		// write_condition (14) is a non-oneof message preserved by upsertRequest's
+		// protoMerge fallback; the equivalence tests exercise its nested fields.
+		{"milvuspb.UpsertRequest", &milvuspb.UpsertRequest{}, "78a3eb0bb86e516743f59b6ba0e1bc4aa453b464fe1f097c5531b6ad7d6d95f1"},
 		{"msgpb.InsertRequest", &msgpb.InsertRequest{}, "c98eeac7deeace0770cdafbb910aec8fb2a1de9e152f99821bb260afdd19c44d"},
 		{"schemapb.SearchResultData", &schemapb.SearchResultData{}, "f17c51046b4baf17f67a48938a244aaa0a5ca50fbfe649fd0e88e03af8c53ecd"},
 		// nested hand-decoded types (oneof-bearing — highest divergence risk)

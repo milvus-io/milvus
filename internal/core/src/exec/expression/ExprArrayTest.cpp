@@ -45,6 +45,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -749,6 +750,25 @@ TEST(Expr, TestArrayElementPredicateWithoutNestedPathThrows) {
             (void)vec;
         }) << name;
     }
+}
+
+TEST(Expr, ElementNullableStructChildRejectsElementLevelExpression) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto child = schema->AddDebugArrayField(
+        "items[child]", DataType::INT64, false, true);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+
+    auto column = expr::ColumnInfo(child, DataType::ARRAY, DataType::INT64);
+    column.element_level_ = true;
+    auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column, proto::plan::OpType::Equal, Int64Value(1));
+    exec::PhyUnaryRangeFilterExpr physical(
+        {}, logical, "element-nullable child", nullptr, growing, 0, 64, 0);
+    EXPECT_THROW((void)physical.GetExecPath(), SegcoreError);
 }
 
 TEST(Expr, TestArrayRange) {

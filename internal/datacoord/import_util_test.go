@@ -56,6 +56,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
+func TestCalculateTaskSlotMissingJob(t *testing.T) {
+	meta := &importMeta{jobs: map[int64]ImportJob{}}
+	pre := &preImportTask{importMeta: meta}
+	pre.task.Store(&datapb.PreImportTask{JobID: 1})
+	imp := &importTask{importMeta: meta}
+	imp.task.Store(&datapb.ImportTaskV2{JobID: 1})
+	require.EqualValues(t, 1, pre.GetTaskSlot())
+	require.EqualValues(t, 1, imp.GetTaskSlot())
+}
+
 func TestCalculateTaskSlotSnapshotBudgets(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()

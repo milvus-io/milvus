@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -31,6 +32,10 @@ namespace milvus {
 
 class ArrayValue;
 class ColumnarArrayChunk;
+
+// Count logical leaf elements in one scalar ARRAY row, including null leaves.
+size_t
+GetLeafElementCount(const ScalarFieldProto& row, DataType data_type);
 
 // Copy native-list rows directly into owning ArrayValues without materializing
 // intermediate ScalarFieldProto rows.
