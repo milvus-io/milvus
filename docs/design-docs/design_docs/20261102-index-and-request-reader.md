@@ -215,3 +215,5 @@ Inverted 使用 `InvertedIndexStorage<T>` 保存 Tantivy engine、validity 和�
 Ngram 使用 `NgramIndexStorage` 保存 engine、gram 范围、平均行大小和 validity。每次候选查询只 pin 一次，正则分支与迭代过滤复用该 Storage。CanHandle 和 CandidatesAreExact 只读取 Index 保存的 gram 范围，不触发加载。已知行数直接用于元数据访问，旧记录缺少行数时通过加载 Storage 获取；加载器在发布缓存前校验已知行数。候选过滤算法与平均行大小 sidecar 保持原有行为。
 
 Text 的文件加载入口直接创建 `TextIndex`，由它持有 `TextIndexStorage` 或对应的缓存 slot。Match、Phrase、Fuzzy 查询各自在一次 storage pin 内完成；返回 validity 的共享句柄保留该 pin。Growing 快照仍共享原有 validity 完整字，保留私有尾字。加载器继续在原来的事务内初始化 analyzer、校验 null offsets 和行数，并保留异步加载失败时的目录清理。
+
+JSON flat 直接缓存 `JsonFlatIndexStorage`。根路径和已知行数保留在 Index 上，创建根 Reader 与 CastTypesOf 不加载 Storage。Resolve 是访问索引的一次操作，返回的路径 Reader 持有具体 Storage 的 pin，覆盖后续多次谓词查询；释放路径 Reader 后该 cell 可以被淘汰。Exists 与字段 null 查询只在本次操作期间持有 pin。

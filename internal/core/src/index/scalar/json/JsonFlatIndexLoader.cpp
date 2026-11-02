@@ -21,6 +21,8 @@
 #include "index/scalar/json/JsonFlatIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -324,7 +326,7 @@ RamPayloadBytes(milvus::tantivy::TantivyIndexWrapper& engine) {
 
 // Open staged Tantivy files and retain their directory only when the reader
 // is file-backed.
-folly::coro::Task<std::shared_ptr<const JsonFlatIndexReaderState>>
+folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
@@ -410,14 +412,27 @@ LoadState(bool use_async,
                                                   count));
     const auto engine_bytes =
         effective.mmap ? mapped_bytes : RamPayloadBytes(*engine);
-    co_return JsonFlatIndexReaderState::Create(
-        effective.mmap ? directory : nullptr,
-        engine,
-        params.nested_path,
-        std::move(null_offsets),
-        effective.mmap,
-        engine_bytes,
-        directory->PathHeapBytes());
+    co_return JsonFlatIndexStorage::Create(effective.mmap ? directory : nullptr,
+                                           engine,
+                                           params.nested_path,
+                                           std::move(null_offsets),
+                                           effective.mmap,
+                                           engine_bytes,
+                                           directory->PathHeapBytes());
+}
+
+std::unique_ptr<JsonFlatIndexStorage>
+ValidateStorage(std::unique_ptr<JsonFlatIndexStorage> storage,
+                const storage::LoadOptions& opts) {
+    const auto rows =
+        GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0 && *rows != storage->Count()) {
+        ThrowInfo(DataFormatBroken,
+                  "JSON flat index count {} disagrees with metadata count {}",
+                  storage->Count(),
+                  *rows);
+    }
+    return storage;
 }
 
 /**
@@ -437,7 +452,8 @@ JsonFlatIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<JsonFlatIndexLoader>(
         new JsonFlatIndexLoader(std::move(source), std::move(options)));
     (void)DeriveCaps(loader->options_.params);
-    if (const auto* legacy = std::get_if<LegacyIndexSource>(&loader->source_)) {
+    if (const auto* legacy =
+            std::get_if<LegacyIndexSource>(&*loader->source_)) {
         (void)ReadPersistedEntries(*legacy->source);
     }
     co_return loader;
@@ -446,14 +462,58 @@ JsonFlatIndexLoader::Create(OpenedIndexSource source,
 folly::coro::Task<IndexPtr>
 JsonFlatIndexLoader::Load(milvus::OpContext* context,
                           const IndexCacheConfig* cache) {
-    AssertInfo(cache == nullptr,
-               "cached loading is not yet migrated for this family");
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
+    AssertInfo(source_.has_value(),
+               "cached JSON flat construction consumed this loader");
+    if (cache) {
+        std::optional<int64_t> count;
+        const auto rows =
+            GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+        if (rows && *rows > 0)
+            count = *rows;
+        const auto runtime = ParseRuntimeParams(options_.params);
+        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+        const bool use_async =
+            legacy ? legacy->use_async
+                   : std::holds_alternative<
+                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                         std::get<PackedIndexSource>(*source_).reader);
+        auto source = std::move(*source_);
+        source_.reset();
+        auto load = [source = std::move(source),
+                     options = options_](OpContext* ctx) mutable {
+            return LoadStorage(source, options, ctx);
+        };
+        auto slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<JsonFlatIndexStorage>(
+                    std::make_unique<
+                        SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
+                        *cache, use_async, std::move(load)),
+                    context);
+        co_return std::make_shared<JsonFlatIndex>(
+            std::move(slot), count, runtime.nested_path);
+    }
+    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+        co_return co_await RunPackedIndexLoad(
             *packed, options_, &PlanPacked, &FinishPacked, context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    co_return co_await RunLegacyLoad(
+        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+}
+
+folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+JsonFlatIndexLoader::LoadStorage(OpenedIndexSource& source,
+                                 const storage::LoadOptions& options,
+                                 milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<JsonFlatIndexStorage>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
+    }
+    return RunLegacyLoad<std::unique_ptr<JsonFlatIndexStorage>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        &LoadLegacyStorage,
+        context);
 }
 
 ReaderCaps
@@ -462,12 +522,20 @@ JsonFlatIndexLoader::DeriveCaps(const Config& index_meta) {
     return ReaderCaps{.json_paths = true, .exact = true};
 }
 
+folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+JsonFlatIndexLoader::LoadLegacyStorage(storage::FileSource& source,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
+    co_return ValidateStorage(co_await LoadState(use_async, source, opts),
+                              opts);
+}
+
 folly::coro::Task<IndexPtr>
 JsonFlatIndexLoader::LoadLegacy(storage::FileSource& source,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
     co_return std::make_shared<JsonFlatIndex>(
-        (co_await LoadState(use_async, source, opts)));
+        co_await LoadLegacyStorage(source, opts, use_async));
 }
 
 IndexLoadPlan
@@ -492,10 +560,10 @@ JsonFlatIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IndexPtr>
-JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                  const storage::LoadOptions& opts,
-                                  bool use_async) {
+folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+JsonFlatIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                         const storage::LoadOptions& opts,
+                                         bool use_async) {
     const auto& state =
         std::any_cast<const std::shared_ptr<PackedJsonFlatState>&>(
             plan.load_context);
@@ -528,15 +596,23 @@ JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
         state->targets, static_cast<size_t>(engine->count()));
     const auto bytes =
         state->effective.mmap ? materialized_bytes : RamPayloadBytes(*engine);
+    co_return ValidateStorage(JsonFlatIndexStorage::Create(
+                                  state->effective.mmap ? directory : nullptr,
+                                  engine,
+                                  state->runtime.nested_path,
+                                  null_offsets,
+                                  state->effective.mmap,
+                                  bytes,
+                                  directory->PathHeapBytes()),
+                              opts);
+}
+
+folly::coro::Task<IndexPtr>
+JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
+                                  const storage::LoadOptions& opts,
+                                  bool use_async) {
     co_return std::make_shared<JsonFlatIndex>(
-        JsonFlatIndexReaderState::Create(
-            state->effective.mmap ? directory : nullptr,
-            engine,
-            state->runtime.nested_path,
-            null_offsets,
-            state->effective.mmap,
-            bytes,
-            directory->PathHeapBytes()));
+        co_await FinishPackedStorage(plan, opts, use_async));
 }
 
 namespace {

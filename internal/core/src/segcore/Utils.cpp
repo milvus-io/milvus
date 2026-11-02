@@ -1685,14 +1685,15 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();
 
-    if ((translator->Family() == index::families::kMarisa ||
-         translator->Family() == index::families::kFmIndex ||
-         translator->Family() == index::families::kRTree ||
-         translator->Family() == index::families::kSort ||
-         translator->Family() == index::families::kBitmap ||
-         translator->Family() == index::families::kInverted ||
-         translator->Family() == index::families::kNgram) &&
-        !translator->Caps().json_paths) {
+    if (translator->Family() == index::families::kJsonFlat ||
+        ((translator->Family() == index::families::kMarisa ||
+          translator->Family() == index::families::kFmIndex ||
+          translator->Family() == index::families::kRTree ||
+          translator->Family() == index::families::kSort ||
+          translator->Family() == index::families::kBitmap ||
+          translator->Family() == index::families::kInverted ||
+          translator->Family() == index::families::kNgram) &&
+         !translator->Caps().json_paths)) {
         load_index_info->index = translator->CreateIndex(op_ctx);
     } else {
         load_index_info->index = milvus::cachinglayer::Manager::GetInstance()

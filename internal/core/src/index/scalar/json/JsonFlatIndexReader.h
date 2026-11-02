@@ -22,6 +22,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
@@ -46,9 +48,9 @@ namespace milvus::index {
 // Immutable family state shared by root and path readers. Directory precedes
 // engine so a mapped Tantivy reader is destroyed before its owned staging
 // files. RAM states deliberately retain no directory.
-class JsonFlatIndexReaderState final {
+class JsonFlatIndexStorage final {
  public:
-    static std::shared_ptr<const JsonFlatIndexReaderState>
+    static std::unique_ptr<JsonFlatIndexStorage>
     Create(std::shared_ptr<storage::LocalDirectory> directory,
            std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
            std::string field_path_prefix,
@@ -82,7 +84,7 @@ class JsonFlatIndexReaderState final {
     FieldIsNotNull() const;
 
  private:
-    JsonFlatIndexReaderState(
+    JsonFlatIndexStorage(
         std::shared_ptr<storage::LocalDirectory> directory,
         std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
         std::string field_path_prefix,
@@ -114,7 +116,11 @@ class JsonFlatIndexReaderState final {
 class JsonFlatIndex final : public IIndex,
                             public std::enable_shared_from_this<JsonFlatIndex> {
  public:
-    explicit JsonFlatIndex(std::shared_ptr<const JsonFlatIndexReaderState> state);
+    explicit JsonFlatIndex(std::shared_ptr<const JsonFlatIndexStorage> storage);
+    JsonFlatIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot,
+        std::optional<int64_t> count,
+        std::string root_path);
 
     IndexMetadata
     Metadata() const override;
@@ -127,7 +133,17 @@ class JsonFlatIndex final : public IIndex,
 
  private:
     friend class JsonFlatIndexReader;
-    std::shared_ptr<const JsonFlatIndexReaderState> state_;
+    std::shared_ptr<const JsonFlatIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    const std::string&
+    RootPath() const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot;
+        std::optional<int64_t> count;
+        std::string root_path;
+    };
+    std::variant<std::shared_ptr<const JsonFlatIndexStorage>, CachedStorage>
+        storage_;
 };
 
 class JsonFlatIndexReader final : public IIndexReaderBase,
@@ -135,7 +151,7 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
                                   public INullReader {
  public:
     explicit JsonFlatIndexReader(
-        std::shared_ptr<const JsonFlatIndexReaderState> state);
+        std::shared_ptr<const JsonFlatIndexStorage> state);
 
     ~JsonFlatIndexReader() override;
 

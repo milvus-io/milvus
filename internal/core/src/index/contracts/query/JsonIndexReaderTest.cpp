@@ -30,6 +30,8 @@
 
 #include "index/Families.h"
 #include "index/Meta.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "index/Utils.h"
 #include "index/scalar/json/JsonFlatIndexReader.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
@@ -47,6 +49,271 @@
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
+void
+CheckCachedJsonFlat() {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("JsonFlatV7");
+    ScalarTestData<std::string_view> data({R"({"flag":false})",
+                                           R"({"flag":true})",
+                                           R"({"flag":true})",
+                                           R"({"flag":false})"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact =
+        backend.Build(input.View(), {.row_count = data.values.size()});
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "jsonflat-cache-XXXXXX",
+                        "JsonFlat cache test");
+                    const auto persisted = packed ? SerializeV3(*artifact)
+                                                  : SerializeV1V2(*artifact);
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 4});
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (known_count)
+                        EXPECT_EQ(reader->Count(), 4);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* nulls =
+                        dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)nulls->IsNull(); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 4);
+                    nulls = dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    const auto result = nulls->IsNull();
+                    EXPECT_EQ(result.count(), 1);
+                    EXPECT_TRUE(result[3]);
+                    const auto* json =
+                        dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    auto path = json->Resolve("/flag",
+                                              JsonCastType::FromString("BOOL"));
+                    const auto* predicate =
+                        dynamic_cast<const IScalarPredicateReader<bool>*>(
+                            path.get());
+                    ASSERT_NE(predicate, nullptr);
+                    const bool value = true;
+                    ExpectBitmap(predicate->In(1, &value), Hits(4, {1, 2}));
+                    ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {0}));
+                }
+            }
+        }
+    }
+}
+
+TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    CheckCachedJsonFlat();
+}
+
+TEST(JsonFlatIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("JsonFlatV7");
+    ScalarTestData<std::string_view> data({R"({"flag":false})",
+                                           R"({"flag":true})",
+                                           R"({"flag":true})",
+                                           R"({"flag":false})"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    for (const bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "jsonflat-bad-count-XXXXXX",
+            "jsonflat count test");
+        const auto persisted =
+            packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+        auto source = [&]() -> OpenedIndexSource {
+            if (!packed)
+                return LegacyIndexSource{
+                    std::make_shared<TestArtifactSource>(
+                        persisted, storage::Generation::V1V2),
+                    false};
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(persisted)));
+            return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                storage::IndexEntryReader::Open(input, input->Size()))};
+        }();
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 4});
+        options.params[INDEX_NUM_ROWS_KEY] = 3;
+        options.enable_mmap = true;
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            (void)LoaderRegistry::Instance()
+                .Lookup(backend.Family())
+                .Load({std::move(source), options, cache});
+        });
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
+
+TEST(JsonFlatIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto directory = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "jsonflat-pin-XXXXXX",
+            "jsonflat pin test");
+        auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+            "json",
+            TantivyDataType::JSON,
+            directory->Path().c_str(),
+            TANTIVY_INDEX_LATEST_VERSION,
+            false,
+            false);
+        const std::vector<Json> values{
+            Json(std::string_view(R"({"flag":true})")),
+            Json(std::string_view(R"({"flag":false})"))};
+        engine->add_json_data(values.data(), values.size(), 0);
+        engine->finish();
+        engine->create_reader(SetBitsetSealed);
+        co_return JsonFlatIndexStorage::Create(
+            std::move(directory),
+            std::move(engine),
+            "",
+            std::make_shared<const std::vector<size_t>>(),
+            true,
+            0,
+            0);
+    };
+    IndexCacheConfig cache{
+        "jsonflat-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        0};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<JsonFlatIndexStorage>>(
+        std::make_unique<
+            SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = std::make_shared<JsonFlatIndex>(slot, 2, "");
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* json = dynamic_cast<const IJsonIndexReader*>(first.get());
+    ASSERT_NE(json, nullptr);
+    EXPECT_FALSE(json->CastTypesOf("/flag").empty());
+    EXPECT_TRUE(priorities.empty());
+    auto path = json->Resolve("/flag", JsonCastType::FromString("BOOL"));
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<bool>*>(path.get());
+    ASSERT_NE(predicate, nullptr);
+    const bool value = true;
+    ExpectBitmap(predicate->In(1, &value), Hits(2, {0}));
+    EXPECT_FALSE(slot->ManualEvict(0));
+    path = {};
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    first.reset();
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 0);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
 TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
     auto directory = storage::LocalDirectory::CreateOwned(
         TestLocalPath, "json-owner-XXXXXX", "JSON ownership test");
@@ -62,10 +329,16 @@ TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
     engine->add_json_data(values.data(), values.size(), 0);
     engine->finish();
     engine->create_reader(SetBitsetSealed);
-    auto state = JsonFlatIndexReaderState::Create(
-        std::move(directory), std::move(engine), "",
-        std::make_shared<const std::vector<size_t>>(), true, 0, 0);
-    std::weak_ptr<const JsonFlatIndexReaderState> lifetime = state;
+    std::shared_ptr<const JsonFlatIndexStorage> state =
+        JsonFlatIndexStorage::Create(
+            std::move(directory),
+            std::move(engine),
+            "",
+            std::make_shared<const std::vector<size_t>>(),
+            true,
+            0,
+            0);
+    std::weak_ptr<const JsonFlatIndexStorage> lifetime = state;
     auto index = std::make_shared<JsonFlatIndex>(std::move(state));
     EXPECT_EQ(index->Metadata().count, 2);
     auto first = index->CreateReader(nullptr);

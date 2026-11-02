@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -29,6 +30,8 @@
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+class JsonFlatIndexStorage;
 
 /**
  * @brief Loads flat JSON readers from legacy or packed V3 artifacts.
@@ -63,13 +66,28 @@ class JsonFlatIndexLoader final : public IndexLoader {
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
     JsonFlatIndexLoader(OpenedIndexSource source, storage::LoadOptions options)
         : source_(std::move(source)), options_(std::move(options)) {
     }
+
+    static folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                milvus::OpContext* context);
+
+    static folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+    LoadLegacyStorage(storage::FileSource& source,
+                      const storage::LoadOptions& opts,
+                      bool use_async);
+
+    static folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Materialize flat-JSON Tantivy files and construct the JSON reader.
