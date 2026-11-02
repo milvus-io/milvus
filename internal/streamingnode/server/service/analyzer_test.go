@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -107,7 +106,7 @@ func TestAnalyzerNativeTransport(t *testing.T) {
 	highlightReq := inlineAnalyzerRequest(`{"tokenizer":"standard"}`)
 	highlightReq.Placeholder = [][]byte{[]byte("missing"), []byte(strings.Repeat("z ", 2000))}
 	highlightReq.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
-		SearchTextNum: 1, CorpusTextNum: 1, Topks: []int64{1}, Options: &querypb.HighlightOptions{FragmentSize: 32, NumOfFragments: 1},
+		SearchTextNum: 1, CorpusTextNum: 1, Topks: []int64{1}, FragmentSize: 32, NumOfFragments: 1,
 	}}
 	highlighted, err := client.RunAnalyzer(ctx, highlightReq)
 	require.NoError(t, err)

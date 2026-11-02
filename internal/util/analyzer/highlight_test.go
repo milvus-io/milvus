@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -16,12 +15,16 @@ func TestHighlightOperation(t *testing.T) {
 	req := &streamingpb.StreamingNodeRunAnalyzerRequest{
 		Placeholder: [][]byte{[]byte("hello"), []byte("世界"), []byte("hello 世界 👋"), []byte("missing"), []byte("hello")},
 		Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
-			SearchTextNum: 1, CorpusTextNum: 3, Queries: []*querypb.HighlightQuery{{}}, Topks: []int64{3},
-			Options: &querypb.HighlightOptions{FragmentSize: 100, NumOfFragments: 5},
+			SearchTextNum: 1, CorpusTextNum: 3, QueryTextNum: 1, Topks: []int64{3},
+			FragmentSize: 100, NumOfFragments: 5,
 		}},
 	}
-	for _, scenario := range []string{"success", "native failure", "cancel", "malformed results", "bad shape"} {
+	for _, scenario := range []string{"success", "native failure", "cancel", "malformed results", "bad shape", "bad query count"} {
 		t.Run(scenario, func(t *testing.T) {
+			if scenario == "bad query count" {
+				req.GetHighlight().QueryTextNum = -1
+				defer func() { req.GetHighlight().QueryTextNum = 1 }()
+			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			bindings, released := 0, false

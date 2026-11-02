@@ -5,7 +5,6 @@ package milvus.proto.streaming;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb";
 
 import "data_coord.proto";
-import "query_coord.proto";
 import "view.proto";
 import "messages.proto";
 import "common.proto";
@@ -1272,10 +1271,22 @@ message CloseReplicaWatchStreamResponse {}
 message HighlightOptions {
     int64 search_text_num = 1;
     int64 corpus_text_num = 2;
-    repeated query.HighlightQuery queries = 3;
-    query.HighlightOptions options = 4;
-    repeated int64 topks = 5;
+    // All extra query texts currently use lexical token matching.
+    int64 query_text_num = 3;
+    int64 fragment_size = 4;
+    int64 fragment_offset = 5;
+    int64 num_of_fragments = 6;
+    repeated int64 topks = 7;
+}
+message HighlightFragment {
+    // Rune offsets in the original corpus text, not byte offsets.
+    int64 start_offset = 1;
+    int64 end_offset = 2;
+    repeated int64 offsets = 3;
+}
+message HighlightRowResult {
+    repeated HighlightFragment fragments = 1;
 }
 message HighlightResult {
-    repeated query.HighlightResult results = 1;
+    repeated HighlightRowResult results = 1;
 }

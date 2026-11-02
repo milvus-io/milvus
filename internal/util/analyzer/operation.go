@@ -44,9 +44,14 @@ func RunOperation(ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzer
 				return err
 			}
 			options := operation.Highlight
+			if options.GetQueryTextNum() < 0 || options.GetQueryTextNum() > int64(len(req.GetPlaceholder())) {
+				return merr.WrapErrServiceInternalMsg("highlight query text count does not match texts")
+			}
 			task := &querypb.HighlightTask{
 				SearchTextNum: options.GetSearchTextNum(), CorpusTextNum: options.GetCorpusTextNum(),
-				Queries: options.GetQueries(), Options: options.GetOptions(),
+				Queries: make([]*querypb.HighlightQuery, int(options.GetQueryTextNum())), Options: &querypb.HighlightOptions{
+					FragmentSize: options.GetFragmentSize(), FragmentOffset: options.GetFragmentOffset(), NumOfFragments: options.GetNumOfFragments(),
+				},
 				Texts: make([]string, len(req.GetPlaceholder())),
 			}
 			for i, text := range req.GetPlaceholder() {
@@ -63,7 +68,15 @@ func RunOperation(ctx context.Context, req *streamingpb.StreamingNodeRunAnalyzer
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			response.Result = &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: fragments}}
+			result := &streamingpb.HighlightResult{Results: make([]*streamingpb.HighlightRowResult, len(fragments))}
+			for i, row := range fragments {
+				converted := &streamingpb.HighlightRowResult{}
+				for _, fragment := range row.GetFragments() {
+					converted.Fragments = append(converted.Fragments, &streamingpb.HighlightFragment{StartOffset: fragment.GetStartOffset(), EndOffset: fragment.GetEndOffset(), Offsets: fragment.GetOffsets()})
+				}
+				result.Results[i] = converted
+			}
+			response.Result = &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: result}
 			return nil
 		})
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch:

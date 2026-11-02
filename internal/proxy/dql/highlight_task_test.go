@@ -174,9 +174,9 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 				if scenario == "business" || (scenario == "late business" && calls == 2) {
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 				}
-				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: []*querypb.HighlightResult{
-					{Fragments: []*querypb.HighlightFragment{{Offsets: []int64{0, 5}}}},
-					{Fragments: []*querypb.HighlightFragment{{Offsets: []int64{2, 4}}}},
+				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Highlight{Highlight: &streamingpb.HighlightResult{Results: []*streamingpb.HighlightRowResult{
+					{Fragments: []*streamingpb.HighlightFragment{{Offsets: []int64{0, 5}}}},
+					{Fragments: []*streamingpb.HighlightFragment{{Offsets: []int64{2, 4}}}},
 				}}}}
 				if scenario == "malformed" {
 					resp.GetHighlight().Results = resp.GetHighlight().Results[:1]
@@ -220,12 +220,12 @@ func mockPipelineAnalyzer(t *testing.T, expectedTexts []string) {
 	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{VChannels: []string{"p_1v0"}}, nil)
 	mockTestTo(t, (*highlightAnalyzer).RunAnalyzer, func(_ *highlightAnalyzer, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
 		texts := make([]string, len(req.GetPlaceholder()))
-		results := make([]*querypb.HighlightResult, req.GetHighlight().GetCorpusTextNum())
+		results := make([]*streamingpb.HighlightRowResult, req.GetHighlight().GetCorpusTextNum())
 		for i, text := range req.GetPlaceholder() {
 			texts[i] = string(text)
 		}
 		for i := range results {
-			results[i] = &querypb.HighlightResult{}
+			results[i] = &streamingpb.HighlightRowResult{}
 		}
 		require.NotNil(t, req.GetHighlight())
 		require.Equal(t, expectedTexts, texts)

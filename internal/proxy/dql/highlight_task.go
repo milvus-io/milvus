@@ -116,7 +116,8 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 			}},
 			Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
 				SearchTextNum: task.GetSearchTextNum(), CorpusTextNum: task.GetCorpusTextNum(),
-				Queries: task.GetQueries(), Options: task.GetOptions(), Topks: t.GetTopks(),
+				QueryTextNum: int64(len(task.GetQueries())), Topks: t.GetTopks(),
+				FragmentSize: task.GetOptions().GetFragmentSize(), FragmentOffset: task.GetOptions().GetFragmentOffset(), NumOfFragments: task.GetOptions().GetNumOfFragments(),
 			}},
 		})
 		if err != nil {
@@ -132,7 +133,13 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 		if int64(len(fragments)) != task.GetCorpusTextNum() {
 			return merr.WrapErrServiceInternalMsg("highlight result count does not match corpus count")
 		}
-		result.Results = append(result.Results, fragments...)
+		for _, row := range fragments {
+			converted := &querypb.HighlightResult{}
+			for _, fragment := range row.GetFragments() {
+				converted.Fragments = append(converted.Fragments, &querypb.HighlightFragment{StartOffset: fragment.GetStartOffset(), EndOffset: fragment.GetEndOffset(), Offsets: fragment.GetOffsets()})
+			}
+			result.Results = append(result.Results, converted)
+		}
 	}
 	t.result = result
 	return nil

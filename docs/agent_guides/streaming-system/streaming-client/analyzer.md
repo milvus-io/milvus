@@ -271,7 +271,10 @@ an unsupported new RPC surfaces as Unimplemented.
 
 After search field retrieval, Proxy sends search/query/corpus texts in the shared
 placeholder, with per-text analyzer names in the field source and layout/fragment
-parameters in `HighlightOptions`. The source retains the original CollectionID
+parameters in `HighlightOptions` (including the extra query-text count).
+Streaming defines its own fragment and row-result messages; the wire protocol
+does not import QueryCoord messages. A Go adapter reuses the existing fragment
+algorithm without changing the legacy GetHighlight API. The source retains the original CollectionID
 and exact search SchemaVersion, including zero. StreamingNode holds one analyzer
 and resource binding through tokenization and `highlight.BuildFragments`, then
 returns only `HighlightResult` fragments. Proxy inserts the display tags. The
