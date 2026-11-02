@@ -223,8 +223,7 @@ DefaultValueChunkTranslator::estimated_loading_usage(
     int64_t cell_bytes = 0;
     for (const auto cid : cids) {
         const auto rows_begin = meta_.num_rows_until_chunk_[cid];
-        const auto rows = meta_.num_rows_until_chunk_[cid + 1] -
-                          rows_begin;
+        const auto rows = meta_.num_rows_until_chunk_[cid + 1] - rows_begin;
         if (struct_offsets_) {
             std::vector<int32_t> starts(rows + 1);
             struct_offsets_->CopyRowElementStarts(

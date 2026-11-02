@@ -241,6 +241,15 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
         FieldDataInfo info(meta.get_id().get(), 3, getMmapDirPath());
         auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, meta, info, GetParam(), true, offsets);
+        const auto usage = translator->estimated_loading_usage({0});
+        const int64_t expected_bytes =
+            9 * sizeof(int64_t) + 1 + 5 * sizeof(Array);
+        EXPECT_EQ(
+            usage.resident,
+            (GetParam() ? cachinglayer::ResourceUsage{0, expected_bytes}
+                        : cachinglayer::ResourceUsage{expected_bytes, 0}));
+        EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
+        EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
         auto cells = translator->get_cells(nullptr, {0});
         ASSERT_EQ(cells.size(), 1);
         auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
@@ -268,6 +277,10 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
     FieldDataInfo info(1403, 3, getMmapDirPath());
     auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, vectors, info, GetParam(), true, offsets);
+    const auto usage = translator->estimated_loading_usage({0});
+    EXPECT_EQ(usage.resident,
+              (GetParam() ? cachinglayer::ResourceUsage{0, 78}
+                          : cachinglayer::ResourceUsage{78, 0}));
     auto cells = translator->get_cells(nullptr, {0});
     ASSERT_EQ(cells.size(), 1);
     auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
