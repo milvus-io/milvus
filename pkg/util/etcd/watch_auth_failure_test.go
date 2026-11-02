@@ -65,6 +65,7 @@ func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 		{"timeout due to connection lost", rpctypes.ErrGRPCTimeoutDueToConnectionLost},
 		{"unhealthy", rpctypes.ErrGRPCUnhealthy},
 		{"too many requests", rpctypes.ErrGRPCRequestTooManyRequests},
+		{"not supported for learner", rpctypes.ErrGRPCNotSupportedForLearner},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

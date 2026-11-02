@@ -53,25 +53,32 @@ func (c *recoveringSessionEtcd) Watch(_ context.Context, key string, opts ...cli
 
 func (c *recoveringSessionEtcd) Close() error { return nil }
 
-func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stub := &recoveringSessionEtcd{events: make(chan clientv3.WatchResponse)}
+func newRecoveringWatcher(ctx context.Context, t *testing.T, responses ...clientv3.WatchResponse) (*sessionWatcher, *recoveringSessionEtcd) {
+	stub := &recoveringSessionEtcd{events: make(chan clientv3.WatchResponse, len(responses))}
+	for _, response := range responses {
+		stub.events <- response
+	}
 	cli := clientv3.NewCtxClient(ctx)
 	cli.KV, cli.Watcher = stub, stub
-	defer cli.Close()
-
-	rewatched := false
-	w := &sessionWatcher{
+	t.Cleanup(func() { cli.Close() })
+	return &sessionWatcher{
 		s:       &Session{ctx: ctx, etcdCli: cli},
 		ctx:     ctx,
 		prefix:  "test",
 		eventCh: make(chan *SessionEvent),
-		rewatch: func(sessions map[string]*Session) error {
-			require.Equal(t, int64(200), sessions["test-200"].ServerID)
-			rewatched = true
-			return nil
-		},
+	}, stub
+}
+
+func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w, stub := newRecoveringWatcher(ctx, t, clientv3.WatchResponse{Created: true})
+
+	rewatched := false
+	w.rewatch = func(sessions map[string]*Session) error {
+		require.Equal(t, int64(200), sessions["test-200"].ServerID)
+		rewatched = true
+		return nil
 	}
 	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
 	require.Equal(t, 2, stub.getCalls)
@@ -88,4 +95,20 @@ func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 	require.Equal(t, 2, stub.getCalls, "permission denied must not retry")
 	_, open := <-w.eventCh
 	require.False(t, open)
+}
+
+func TestSessionWatcher_RejectedWatchRetriesWithoutReplay(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rejected := clientv3.WatchResponse{Canceled: true, CancelReason: rpctypes.ErrorDesc(rpctypes.ErrGRPCNotSupportedForLearner)}
+	w, stub := newRecoveringWatcher(ctx, t, rejected, clientv3.WatchResponse{Created: true})
+	replays := 0
+	w.rewatch = func(map[string]*Session) error {
+		replays++
+		return nil
+	}
+
+	require.NoError(t, w.handleWatchErr(rejected.Err()))
+	require.Equal(t, 3, stub.getCalls, "the leader change and the rejection each fail one attempt")
+	require.Equal(t, 1, replays, "only the created watch replays the sessions")
 }
