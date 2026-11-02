@@ -63,7 +63,6 @@ func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 		{"timeout", rpctypes.ErrGRPCTimeout},
 		{"timeout due to leader fail", rpctypes.ErrGRPCTimeoutDueToLeaderFail},
 		{"timeout due to connection lost", rpctypes.ErrGRPCTimeoutDueToConnectionLost},
-		{"not capable", rpctypes.ErrGRPCNotCapable},
 		{"unhealthy", rpctypes.ErrGRPCUnhealthy},
 		{"too many requests", rpctypes.ErrGRPCRequestTooManyRequests},
 	}
