@@ -1,8 +1,5 @@
 # Bound QueryNode read connection attempts
 
-Status: implementation and local verification complete; live eviction test pending.
-Base: origin/master 081a8c9bff (rebased 2026-10-30).
-
 ## Problem and evidence
 
 During the 2026-10-29 incident, worker 1906 exited while its session remained
@@ -15,7 +12,7 @@ retry.Handle and again inside a failed iteration. It also redials synchronously
 when checkGrpcErr says not to retry. GetGrpcClient holds its mutex during dial,
 so concurrent requests can wait beyond their own connection timeout.
 
-## First patch
+## Design
 
 1. Acquire a client once inside each retry iteration. A failed final iteration
    does not initiate another connection. Reset invalidates the connection;
@@ -33,16 +30,32 @@ so concurrent requests can wait beyond their own connection timeout.
    in-flight dial from publishing a connection afterward. The address lookup
    callback has no context parameter, so an address lookup that itself blocks
    cannot be interrupted; Close still releases its callers immediately.
-4. SearchSegments, QuerySegments and QueryStreamSegments use one worker attempt.
-   A failed connection on this one-attempt path returns immediately, without
-   consulting the possibly stale session. Proxy owns replica failover. Normal
-   query execution retains the parent request deadline; only connection setup
-   uses the existing dial timeout. Single-replica reads can now surface a
-   transient transport failure earlier; they retain Proxy's bounded retry path.
+4. SearchSegments, QuerySegments and QueryStreamSegments allow two attempts.
+   A failed connection acquisition returns immediately on either attempt,
+   without a session lookup or another dial. An RPC error on an established
+   connection can retry once; the second failure returns without an additional
+   backoff. For QueryStreamSegments, ClientBase can retry only stream creation;
+   it never replays a stream after it returns or after data is emitted. Proxy
+   owns replica failover. The parent request deadline still bounds RPC
+   execution, and the existing dial timeout bounds the gRPC handshake.
+
+The scoped read path no longer derives `ErrNodeNotFound` from a synchronous
+session lookup after either a failed dial or a retryable RPC error. Its previous
+`markSegmentOffline` side effect therefore does not run for those failures.
+A session lookup is rate limited but its duration is not bounded separately;
+doing it synchronously after a failed dial
+could spend the request's remaining failover budget on etcd. Server-reported
+`ErrNodeNotFound` and ServerID mismatch still mark segments offline. QueryCoord
+also removes unavailable workers through its own session and distribution
+recovery. A later change could restore this signal using a separately bounded
+or cached session check.
 
 No protobuf or merr wire projection changes are included. ErrConnect remains
 an internal transport sentinel and flows through the existing Status boundary.
 Consequently existing master channel-blacklist behavior remains in force.
+One transient worker RPC error is absorbed by the local retry and does not
+blacklist an otherwise healthy delegator. A second failure or a failed dial
+still reaches Proxy, which may blacklist that delegator for the channel.
 
 The cancellation design in
 [List Running Requests and Cancel a Request by ID](20260916-running-request-list-and-cancel.md)
@@ -72,8 +85,13 @@ Proxy change; this patch retains existing retry intervals.
 
 ## Verification
 
-- A failed dial with one attempt performs one address resolution/dial even when
-  the node session still exists; three attempts perform at most three dials.
+- A failed dial on the scoped worker read path performs one address
+  resolution/dial even when the node session still exists.
+- One gRPC `Unavailable` on an established unary connection gets one retry and
+  succeeds without Proxy blacklisting the delegator. If the retry requires a
+  new dial and that dial fails, return immediately for replica failover.
+- QueryStreamSegments retries only errors while creating the stream, never after
+  output has been emitted.
 - Closing/mismatched connections return without resolving/dialing again.
 - Concurrent waiters can cancel while a dial is blocked; waiters share failure.
 - Cancel the initiating request during an in-flight dial, then make the worker
@@ -88,34 +106,3 @@ Proxy change; this patch retains existing retry intervals.
   retry, delegator and shard-client tests with dynamic,test and disabled inlining.
 - A live multi-replica eviction experiment is required before claiming a
   production failover-latency bound; mock tests alone do not establish one.
-
-### Local results on the rebased branch
-
-- `internal/util/grpcclient` full suite passed with `-race`,
-  `-tags dynamic,test`, and `-gcflags='all=-N -l'`. It covers one dial per
-  attempt, a shared failed dial, independently canceled waiters, an initiator
-  canceled before a live waiter's dial succeeds, Close canceling the shared
-  dial, Close racing with a dial, connection-closing and NodeID-mismatch fast
-  exits, and a one-attempt retriable Status without backoff.
-- Delegator `TestSearch`, `TestQuery`, and `TestQueryStream` passed with the
-  required tags and flags. Each asserts that the actual worker call receives
-  a one-attempt context.
-- The Proxy `TestDeadWorkerConnectionFailsOverBeforeDeadline` passed. It uses
-  a real failed TCP dial through ClientBase, the existing Status round trip,
-  and the real LB policy: leader 1 is excluded and leader 2 succeeds while a
-  4-second parent context remains live. The full `LBPolicySuite` also passed.
-- Source trace: `remoteWorker.SearchSegments` and `QuerySegments` preserve
-  the client error; `executeSubTasks` preserves a single failure;
-  `QueryNode.Search` projects it with `merr.Status`; Proxy `searchShard` and
-  `queryShard` recover it with `merr.Error` and preserve the error through
-  wrapping; LB classifies it as a system failure and excludes that leader.
-  `ErrConnect` remains generic error code 65535 and non-retriable on the wire.
-
-These checks verify the failed-dial route. They do not measure a live
-eviction, a worker RPC that stalls after connection, or a stream that stalls
-after the initial QueryStreamSegments call.
-
-The existing `internal/distributed/querynode/client` package suite could not
-run in this environment: `Test_NewClient` creates a session against a local
-etcd server, which is absent. Setting `ETCD_USE_EMBED=true` alone is
-insufficient because that test does not initialize the embedded server.

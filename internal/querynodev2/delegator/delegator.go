@@ -461,8 +461,8 @@ func (sd *shardDelegator) executeSearchSubTasks(
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-			// Proxy owns replica failover; a dead worker must not consume its deadline.
-			ctx = retry.WithMaxAttemptsContext(ctx, 1)
+			// Retry one transient RPC error, but let Proxy fail over on a failed dial.
+			ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
 			resp, err := worker.SearchSegments(ctx, req)
 			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
@@ -808,7 +808,8 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 1)
+		// ClientBase only retries stream creation; it never replays received data.
+		ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
 		err := worker.QueryStreamSegments(ctx, req, srv)
 		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
@@ -940,7 +941,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	err := sd.withQuerySubTasks(ctx, req, func(tasks []subTask[*querypb.QueryRequest], sealedRowCount map[int64]int64, delegatorBits uint64) error {
 		var err error
 		results, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-			ctx = retry.WithMaxAttemptsContext(ctx, 1)
+			ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
 			resp, err := worker.QuerySegments(ctx, req)
 			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
