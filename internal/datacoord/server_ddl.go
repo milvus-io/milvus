@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 )
 
@@ -26,18 +27,18 @@ func RegisterDDLCallbacks(s *Server) {
 		s.ddl = newDDLCallbacks(s)
 	}
 	ddlCallback := s.ddl
-	ddlCallback.registerIndexCallbacks()
-	registry.RegisterFlushAllV2AckCallback(ddlCallback.flushAllV2AckCallback)
-	ddlCallback.registerSnapshotCallbacks()
-	ddlCallback.registerExternalCollectionCallbacks()
-	ddlCallback.registerImportCallbacks()
-	ddlCallback.registerBatchUpdateManifestCallbacks()
+	ddlCallback.RegisterIndexCallbacks()
+	registry.RegisterFlushAllV2AckCallback(ddlCallback.FlushAllV2AckCallback)
+	ddlCallback.RegisterSnapshotCallbacks()
+	ddlCallback.RegisterExternalCollectionCallbacks()
+	ddlCallback.RegisterImportCallbacks()
+	ddlCallback.RegisterBatchUpdateManifestCallbacks()
 }
 
 // newDDLCallbacks builds the DDL callbacks from the current fields of s.
 // Later changes to s fields are not seen; rebuild after changing them.
-func newDDLCallbacks(s *Server) *DDLCallbacks {
-	return &DDLCallbacks{DDLDeps: DDLDeps{
+func newDDLCallbacks(s *Server) *ddl.Callbacks {
+	return &ddl.Callbacks{Deps: ddl.Deps{
 		Meta:                             s.meta,
 		ImportMeta:                       s.importMeta,
 		IndexMeta:                        s.indexMeta,

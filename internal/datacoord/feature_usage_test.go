@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -36,8 +38,8 @@ import (
 func kvPair(k, v string) *commonpb.KeyValuePair { return &commonpb.KeyValuePair{Key: k, Value: v} }
 
 func TestIndexMeta_ListAllIndexes(t *testing.T) {
-	m := newSegmentIndexMeta(nil)
-	m.indexes[1] = map[UniqueID]*model.Index{
+	m := index.NewSegmentIndexMeta(nil)
+	m.Indexes[1] = map[UniqueID]*model.Index{
 		1: {
 			CollectionID: 1, IndexID: 1, FieldID: 101, IndexName: "a",
 			IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "HNSW"), kvPair(common.MetricTypeKey, "L2")},
@@ -47,7 +49,7 @@ func TestIndexMeta_ListAllIndexes(t *testing.T) {
 			IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "DISKANN"), kvPair(common.MetricTypeKey, "IP")},
 		},
 	}
-	m.indexes[2] = map[UniqueID]*model.Index{
+	m.Indexes[2] = map[UniqueID]*model.Index{
 		3: {
 			CollectionID: 2, IndexID: 3, FieldID: 101, IndexName: "b", IsAutoIndex: true,
 			IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "IVF_FLAT"), kvPair(common.MetricTypeKey, "IP")},
@@ -61,24 +63,24 @@ func TestIndexMeta_ListAllIndexes(t *testing.T) {
 	for _, idx := range got {
 		idx.IndexName = "mutated"
 	}
-	assert.Equal(t, "a", m.indexes[1][1].IndexName)
-	assert.Equal(t, "b", m.indexes[2][3].IndexName)
+	assert.Equal(t, "a", m.Indexes[1][1].IndexName)
+	assert.Equal(t, "b", m.Indexes[2][3].IndexName)
 
-	assert.Empty(t, newSegmentIndexMeta(nil).ListAllIndexes())
+	assert.Empty(t, index.NewSegmentIndexMeta(nil).ListAllIndexes())
 }
 
 func TestServer_FeatureUsageEntries(t *testing.T) {
 	assert.Nil(t, (&Server{}).FeatureUsageEntries(featureusage.CollectionContext{}))
-	assert.Nil(t, (&Server{meta: &meta{}}).FeatureUsageEntries(featureusage.CollectionContext{}))
+	assert.Nil(t, (&Server{meta: &meta.Meta{}}).FeatureUsageEntries(featureusage.CollectionContext{}))
 
-	m := newSegmentIndexMeta(nil)
-	m.indexes[1] = map[UniqueID]*model.Index{
+	m := index.NewSegmentIndexMeta(nil)
+	m.Indexes[1] = map[UniqueID]*model.Index{
 		1: {CollectionID: 1, IndexID: 1, IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "HNSW"), kvPair(common.MetricTypeKey, "L2")}},
 	}
-	m.indexes[2] = map[UniqueID]*model.Index{
+	m.Indexes[2] = map[UniqueID]*model.Index{
 		2: {CollectionID: 2, IndexID: 2, IsAutoIndex: true, IndexParams: []*commonpb.KeyValuePair{kvPair(common.IndexTypeKey, "HNSW"), kvPair(common.MetricTypeKey, "COSINE")}},
 	}
-	s := &Server{meta: &meta{}, domainMetas: domainMetas{indexMeta: m}}
+	s := &Server{meta: &meta.Meta{}, domainMetas: domainMetas{indexMeta: m}}
 	entries := s.FeatureUsageEntries(featureusage.CollectionContext{})
 
 	find := func(group, name string) *internalpb.FeatureEntry {
@@ -97,9 +99,9 @@ func TestServer_FeatureUsageEntries(t *testing.T) {
 }
 
 func TestServer_FeatureUsageEntries_Segments(t *testing.T) {
-	m := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil))}
-	m.segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, State: commonpb.SegmentState_Flushed, StorageVersion: 2, IsSorted: true}})
-	m.segments.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, State: commonpb.SegmentState_Dropped, StorageVersion: 7}})
+	m := &meta.Meta{Segments: meta.NewSegmentsInfo(metacache.NewMetaStore(nil))}
+	m.Segments.SetSegment(1, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, State: commonpb.SegmentState_Flushed, StorageVersion: 2, IsSorted: true}})
+	m.Segments.SetSegment(2, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, State: commonpb.SegmentState_Dropped, StorageVersion: 7}})
 	s := &Server{meta: m}
 	entries := s.FeatureUsageEntries(featureusage.CollectionContext{})
 	find := func(name string) *internalpb.FeatureEntry {

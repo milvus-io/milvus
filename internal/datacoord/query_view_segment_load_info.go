@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -30,7 +31,7 @@ func (s *Server) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID 
 		return nil, nil, nil
 	}
 
-	indexes, segmentIndexes := s.indexMeta.getQueryViewIndexSnapshot(collectionID, segmentIDs)
+	indexes, segmentIndexes := s.indexMeta.GetQueryViewIndexSnapshot(collectionID, segmentIDs)
 	indexInfos := packQueryViewCollectionIndexInfos(indexes)
 	results := make([]*querypb.QueryViewSegmentLoadInfoResult, 0, len(segmentIDs))
 	seen := make(map[int64]struct{}, len(segmentIDs))
@@ -143,7 +144,7 @@ func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segme
 			Key:   common.LoadPriorityKey,
 			Value: commonpb.LoadPriority_HIGH.String(),
 		})
-		filePaths, err := segmentIndexFilePaths(s.meta.chunkManager.RootPath(), segmentIndex, segment)
+		filePaths, err := meta.SegmentIndexFilePaths(s.meta.ChunkManager.RootPath(), segmentIndex, segment)
 		if err != nil {
 			return nil, merr.Wrap(err, "resolve query view index files")
 		}

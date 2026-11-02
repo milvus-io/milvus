@@ -10,6 +10,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -45,11 +47,11 @@ func TestQueryViewSegmentLoadInfoPreservesV3ResourceStatistics(t *testing.T) {
 }
 
 func TestQueryViewSegmentLoadInfoRejectsUnknownReplayCursor(t *testing.T) {
-	im := &indexMeta{}
-	m := &meta{indexCatalog: im}
-	patchIndexes := mockey.Mock((*indexMeta).getQueryViewIndexSnapshot).Return([]*model.Index(nil), map[int64]map[UniqueID]*model.SegmentIndex(nil)).Build()
+	im := &index.IndexMeta{}
+	m := &meta.Meta{IndexCatalog: im}
+	patchIndexes := mockey.Mock((*index.IndexMeta).GetQueryViewIndexSnapshot).Return([]*model.Index(nil), map[int64]map[UniqueID]*model.SegmentIndex(nil)).Build()
 	defer patchIndexes.UnPatch()
-	patchSegment := mockey.Mock((*meta).GetSegment).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 10, CollectionID: 1}}).Build()
+	patchSegment := mockey.Mock((*meta.Meta).GetSegment).Return(&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 10, CollectionID: 1}}).Build()
 	defer patchSegment.UnPatch()
 	s := &Server{meta: m, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -62,23 +64,23 @@ func TestQueryViewSegmentLoadInfoRejectsUnknownReplayCursor(t *testing.T) {
 }
 
 func TestQueryViewSegmentLoadInfoBatchIsolation(t *testing.T) {
-	patchIndexes := mockey.Mock((*indexMeta).getQueryViewIndexSnapshot).Return([]*model.Index{{CollectionID: 1, IndexID: 5}}, map[int64]map[UniqueID]*model.SegmentIndex(nil)).Build()
+	patchIndexes := mockey.Mock((*index.IndexMeta).GetQueryViewIndexSnapshot).Return([]*model.Index{{CollectionID: 1, IndexID: 5}}, map[int64]map[UniqueID]*model.SegmentIndex(nil)).Build()
 	defer patchIndexes.UnPatch()
-	patchSegment := mockey.Mock((*meta).GetSegment).To(func(_ *meta, _ context.Context, id int64) *SegmentInfo {
+	patchSegment := mockey.Mock((*meta.Meta).GetSegment).To(func(_ *meta.Meta, _ context.Context, id int64) *meta.SegmentInfo {
 		switch id {
 		case 1:
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 1, ManifestPath: "segment/_metadata/manifest-1.avro", TransformStartAfterTimetick: 100, Stats: &datapb.Statistics{InsertBinlogSize: 512}}}
+			return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 1, ManifestPath: "segment/_metadata/manifest-1.avro", TransformStartAfterTimetick: 100, Stats: &datapb.Statistics{InsertBinlogSize: 512}}}
 		case 2:
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 1}}
+			return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 1}}
 		case 3:
-			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 2, TransformStartAfterTimetick: 100}}
+			return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, CollectionID: 2, TransformStartAfterTimetick: 100}}
 		default:
 			return nil
 		}
 	}).Build()
 	defer patchSegment.UnPatch()
-	im := &indexMeta{}
-	s := &Server{meta: &meta{indexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
+	im := &index.IndexMeta{}
+	s := &Server{meta: &meta.Meta{IndexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{2, 3, 4, 1, 1})
 	require.NoError(t, err)
@@ -111,7 +113,7 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 		{"relocated_segment", indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, packed.MarshalManifestPath("legacy/other/segment", 7), "legacy/other/segment/_index/30/4"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &Server{meta: &meta{chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}}
+			s := &Server{meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}}
 			segment := &datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, ManifestPath: tc.manifest}
 			indexes := []*indexpb.IndexInfo{{CollectionID: 1, FieldID: 100, IndexID: 5}}
 			segmentIndexes := map[int64]*model.SegmentIndex{5: {
@@ -150,11 +152,11 @@ func TestQueryViewSegmentLoadInfoIndexPaths(t *testing.T) {
 
 func TestQueryViewSegmentLoadInfoManifestErrorIsolation(t *testing.T) {
 	manifests := []string{"invalid", "", packed.MarshalManifestPath("", 7), packed.MarshalManifestPath("legacy/other/segment", 7)}
-	segments := make(map[int64]*SegmentInfo, len(manifests))
+	segments := make(map[int64]*meta.SegmentInfo, len(manifests))
 	segmentIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(manifests))
 	for i, manifest := range manifests {
 		id := int64(i + 1)
-		segments[id] = &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		segments[id] = &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: id, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
 			ManifestPath: manifest, TransformStartAfterTimetick: 100,
 		}}
@@ -165,14 +167,14 @@ func TestQueryViewSegmentLoadInfoManifestErrorIsolation(t *testing.T) {
 			IndexFileKeys:         []string{"index.bin"},
 		}}
 	}
-	patchIndexes := mockey.Mock((*indexMeta).getQueryViewIndexSnapshot).Return([]*model.Index{{CollectionID: 1, FieldID: 100, IndexID: 5}}, segmentIndexes).Build()
+	patchIndexes := mockey.Mock((*index.IndexMeta).GetQueryViewIndexSnapshot).Return([]*model.Index{{CollectionID: 1, FieldID: 100, IndexID: 5}}, segmentIndexes).Build()
 	defer patchIndexes.UnPatch()
-	patchSegment := mockey.Mock((*meta).GetSegment).To(func(_ *meta, _ context.Context, id int64) *SegmentInfo {
+	patchSegment := mockey.Mock((*meta.Meta).GetSegment).To(func(_ *meta.Meta, _ context.Context, id int64) *meta.SegmentInfo {
 		return segments[id]
 	}).Build()
 	defer patchSegment.UnPatch()
-	im := &indexMeta{}
-	s := &Server{meta: &meta{indexCatalog: im, chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}, domainMetas: domainMetas{indexMeta: im}}
+	im := &index.IndexMeta{}
+	s := &Server{meta: &meta.Meta{IndexCatalog: im, ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files"))}, domainMetas: domainMetas{indexMeta: im}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	results, indexes, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{1, 2, 3, 4})
 	require.NoError(t, err)

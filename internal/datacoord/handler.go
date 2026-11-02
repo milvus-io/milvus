@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -61,7 +63,7 @@ func newServerHandler(s *Server) *ServerHandler {
 // flushend segmentIDs   ---> L1&L2, flushed segments
 // dropped segmentIDs    ---> dropped segments
 // level zero segmentIDs ---> L0 segments
-func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *ServerHandler) GetDataVChanPositions(channel meta.RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	mlog.Info(context.TODO(), "GetDataVChanPositions",
 		mlog.FieldCollectionID(channel.GetCollectionID()),
@@ -91,7 +93,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 			droppedIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
-		case isFlushState(s.GetState()):
+		case meta.IsFlushState(s.GetState()):
 			flushedIDs.Insert(s.GetID())
 		default:
 			unflushedIDs.Insert(s.GetID())
@@ -114,7 +116,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // flushend segmentIDs   ---> L1&L2, flushed segments, including indexed or unindexed
 // dropped segmentIDs    ---> dropped segments
 // level zero segmentIDs ---> L0 segments
-func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
+func (h *ServerHandler) GetQueryVChanPositions(channel meta.RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
@@ -145,11 +147,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// query view by construction. They must not fall into growingIDs — a staged
 	// import/copy segment has CreatedByCompaction=false, so the
 	// `IsInvisible && CreatedByCompaction` skip below would miss it.
-	aliveStaged := h.s.meta.aliveStagedMembers(h.s.ctx, channel.GetCollectionID())
+	aliveStaged := h.s.meta.AliveStagedMembers(h.s.ctx, channel.GetCollectionID())
 
-	validSegmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.indexMeta, false, segments...)
-	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
+	validSegmentInfos := make(map[int64]*meta.SegmentInfo)
+	indexedSegments := index.FilterInIndexedSegments(context.Background(), h, h.s.indexMeta, false, segments...)
+	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *meta.SegmentInfo, _ int) int64 { return segment.GetID() })...)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
@@ -176,7 +178,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		switch {
 		case s.GetState() == commonpb.SegmentState_Dropped:
 			droppedIDs.Insert(s.GetID())
-		case !isFlushState(s.GetState()) || s.GetIsInvisible():
+		case !meta.IsFlushState(s.GetState()) || s.GetIsInvisible():
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
 			levelZeroIDs.Insert(s.GetID())
@@ -232,7 +234,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 
 // isQueryRecoverableSegment is the metadata admission shared by query recovery
 // and index readiness. Fake segments and unfinished imports cannot be loaded.
-func isQueryRecoverableSegment(info *SegmentInfo) (bool, error) {
+func isQueryRecoverableSegment(info *meta.SegmentInfo) (bool, error) {
 	if info == nil || info.GetIsFake() {
 		return false, nil
 	}
@@ -249,7 +251,7 @@ func isQueryRecoverableSegment(info *SegmentInfo) (bool, error) {
 // retrieveQuerySegments applies the query-side index readiness policy to the
 // shared frontier selector. Small sorted leaves may be loaded without indexes,
 // but a compaction fallback still requires every parent to be indexed.
-func retrieveQuerySegments(validSegmentInfos map[int64]*SegmentInfo,
+func retrieveQuerySegments(validSegmentInfos map[int64]*meta.SegmentInfo,
 	flushedIDs, droppedIDs, indexed typeutil.UniqueSet,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
 	segmentIndexed := func(segID UniqueID) bool {
@@ -260,7 +262,7 @@ func retrieveQuerySegments(validSegmentInfos map[int64]*SegmentInfo,
 	return retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed, fallbackParentReady)
 }
 
-func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
+func retrieveSegment(validSegmentInfos map[int64]*meta.SegmentInfo,
 	flushedIDs, droppedIDs typeutil.UniqueSet,
 	segmentIndexed, fallbackParentReady func(segID UniqueID) bool,
 ) (typeutil.UniqueSet, typeutil.UniqueSet) {
@@ -498,7 +500,7 @@ func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
 	return finalFrontier, droppedIDs
 }
 
-func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
+func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel meta.RWChannel, partitionIDs ...UniqueID) *meta.SegmentsView {
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
@@ -521,9 +523,9 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 	// R10: staged (invisible) members of ALIVE groups are excluded from the
 	// segments view — they are unpublished by construction and must not leak
 	// into growingIDs.
-	aliveStaged := h.s.meta.aliveStagedMembers(ctx, channel.GetCollectionID())
+	aliveStaged := h.s.meta.AliveStagedMembers(ctx, channel.GetCollectionID())
 
-	validSegmentInfos := make(map[int64]*SegmentInfo)
+	validSegmentInfos := make(map[int64]*meta.SegmentInfo)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
@@ -574,7 +576,7 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 		mlog.Int("result L0", len(levelZeroIDs)),
 	)
 
-	return &SegmentsView{
+	return &meta.SegmentsView{
 		FlushedSegmentIDs:   flushedIDs.Collect(),
 		GrowingSegmentIDs:   growingIDs.Collect(),
 		DroppedSegmentIDs:   droppedIDs.Collect(),
@@ -586,7 +588,7 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 // firstCollectionIDOfSegments returns the first non-zero CollectionID among the
 // segments, or 0 when there are none. A channel is single-collection by
 // construction, so this scopes staged-member lookups correctly.
-func firstCollectionIDOfSegments(segments []*SegmentInfo) int64 {
+func firstCollectionIDOfSegments(segments []*meta.SegmentInfo) int64 {
 	for _, s := range segments {
 		if s != nil && s.GetCollectionID() > 0 {
 			return s.GetCollectionID()
@@ -601,14 +603,14 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 	var minPos *msgpb.MsgPosition
 	var minPosSegID int64
 	var minPosTs uint64
-	segments := h.s.meta.SelectSegments(context.TODO(), WithChannel(channel))
+	segments := h.s.meta.SelectSegments(context.TODO(), meta.WithChannel(channel))
 
 	// R10: a staged (invisible) segment's DML position must not pollute the
 	// channel-seek fallback — the seek would otherwise start before data the
 	// queries never see. Filter members of ALIVE groups, not all IsInvisible
 	// segments: sort-enabled flush segments use IsInvisible=true as the
 	// awaiting-sort marker and legitimately contribute their DML position.
-	aliveStaged := h.s.meta.aliveStagedMembers(context.TODO(), firstCollectionIDOfSegments(segments))
+	aliveStaged := h.s.meta.AliveStagedMembers(context.TODO(), firstCollectionIDOfSegments(segments))
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
@@ -650,7 +652,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 }
 
 // getCollectionStartPos returns collection start position.
-func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosition {
+func (h *ServerHandler) getCollectionStartPos(channel meta.RWChannel) *msgpb.MsgPosition {
 	log := mlog.With(mlog.String("channel", channel.GetName()))
 	if channel.GetStartPosition() != nil {
 		return channel.GetStartPosition()
@@ -658,7 +660,7 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 	// use collection start position when segment position is not found
 	collection, err := h.GetCollection(h.s.ctx, channel.GetCollectionID())
 	if collection != nil && err == nil {
-		startPosition := toMsgPosition(channel.GetName(), collection.StartPositions)
+		startPosition := meta.ToMsgPosition(channel.GetName(), collection.StartPositions)
 		// We should not set the timestamp to collectionInfo.CreatedAt
 		// because after enabling streaming arch, every shard has its own timetick, no comparison can be applied cross shards timetick.
 		// because when using the collection start position, we don't perform any sync operation of data,
@@ -678,7 +680,7 @@ func (h *ServerHandler) getCollectionStartPos(channel RWChannel) *msgpb.MsgPosit
 //  2. Segments earliest dml position;
 //  3. Collection start position;
 //     And would return if any position is valid.
-func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
+func (h *ServerHandler) GetChannelSeekPosition(channel meta.RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
 	log := mlog.With(mlog.String("channel", channel.GetName()))
 	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.GetName())
@@ -747,7 +749,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 }
 
 // GetCollection returns collection info with specified collection id
-func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
+func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*meta.CollectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
 		return coll, nil
@@ -786,7 +788,7 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 // hasCommittedManifest reports whether a Storage V3 manifest references
 // committed files. ManifestEarliest is only the placeholder assigned to a new
 // Growing segment before its first manifest commit.
-func hasCommittedManifest(info *SegmentInfo) (bool, error) {
+func hasCommittedManifest(info *meta.SegmentInfo) (bool, error) {
 	if info.GetStorageVersion() != storage.StorageV3 || info.GetManifestPath() == "" {
 		return false, nil
 	}
@@ -888,24 +890,24 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 	}
 
 	indexes := h.s.indexMeta.GetIndexesForCollection(collectionID, "")
-	indexInfos := lo.FilterMap(indexes, func(index *model.Index, _ int) (*indexpb.IndexInfo, bool) {
+	indexInfos := lo.FilterMap(indexes, func(idx *model.Index, _ int) (*indexpb.IndexInfo, bool) {
 		return &indexpb.IndexInfo{
-			IndexID:         index.IndexID,
-			CollectionID:    index.CollectionID,
-			FieldID:         index.FieldID,
-			IndexName:       index.IndexName,
-			TypeParams:      index.TypeParams,
-			IndexParams:     index.IndexParams,
-			IsAutoIndex:     index.IsAutoIndex,
-			UserIndexParams: index.UserIndexParams,
+			IndexID:         idx.IndexID,
+			CollectionID:    idx.CollectionID,
+			FieldID:         idx.FieldID,
+			IndexName:       idx.IndexName,
+			TypeParams:      idx.TypeParams,
+			IndexParams:     idx.IndexParams,
+			IsAutoIndex:     idx.IsAutoIndex,
+			UserIndexParams: idx.UserIndexParams,
 		}, true
 	})
 
 	// get segment info
-	candidateSegments := h.s.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+	candidateSegments := h.s.meta.SelectSegments(ctx, meta.WithCollection(collectionID), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
 		return info.GetState() != commonpb.SegmentState_Dropped && !info.GetIsImporting()
 	}))
-	segments := make([]*SegmentInfo, 0, len(candidateSegments))
+	segments := make([]*meta.SegmentInfo, 0, len(candidateSegments))
 	for _, info := range candidateSegments {
 		segmentHasData := len(info.GetBinlogs()) > 0 || len(info.GetDeltalogs()) > 0
 		if !segmentHasData {
@@ -924,7 +926,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 				"missing snapshot channel seek position for segment channel %s",
 				info.GetInsertChannel())
 		}
-		if segmentEffectiveTs(info.SegmentInfo) < seekTs {
+		if meta.SegmentEffectiveTs(info.SegmentInfo) < seekTs {
 			segments = append(segments, info)
 		}
 	}
@@ -935,7 +937,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			mlog.Uint64("snapshotTs", snapshotTs))
 	}
 
-	segmentInfos := lo.Map(segments, func(segment *SegmentInfo, _ int) *datapb.SegmentInfo {
+	segmentInfos := lo.Map(segments, func(segment *meta.SegmentInfo, _ int) *datapb.SegmentInfo {
 		return proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
 	})
 
@@ -1027,12 +1029,12 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
 	uncompressedJSONStats := proto.Clone(jsonStats).(*datapb.JsonKeyStats)
 	statsMap := map[int64]*datapb.JsonKeyStats{jsonStats.GetFieldID(): uncompressedJSONStats}
-	metautil.BuildJSONKeyStatsPaths(h.s.meta.chunkManager.RootPath(), segInfo, statsMap)
+	metautil.BuildJSONKeyStatsPaths(h.s.meta.ChunkManager.RootPath(), segInfo, statsMap)
 	return uncompressedJSONStats
 }
 
 func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
-	segIdxes := h.s.indexMeta.getSegmentIndexes(segment.GetCollectionID(), segment.GetID())
+	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
@@ -1041,7 +1043,7 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 
 			// Use the segment already selected for this snapshot, rather than
 			// looking it up again while metadata may be changing.
-			indexFilePaths, err := segmentIndexFilePaths(h.s.meta.chunkManager.RootPath(), segIdx, segment)
+			indexFilePaths, err := meta.SegmentIndexFilePaths(h.s.meta.ChunkManager.RootPath(), segIdx, segment)
 			if err != nil {
 				return nil, err
 			}
