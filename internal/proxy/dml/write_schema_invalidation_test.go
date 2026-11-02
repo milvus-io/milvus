@@ -17,37 +17,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
-func TestInvalidateWriteSchemaOnAnyShardMismatch(t *testing.T) {
-	cache := newTestCache()
-	var invalidated []int64
-	patch := mockey.Mock((*metacache.MetaCache).RemoveCollectionsByID).To(func(got *metacache.MetaCache, _ context.Context, id int64) []string {
-		require.Same(t, cache, got)
-		invalidated = append(invalidated, id)
-		return nil
-	}).Build()
-	defer patch.UnPatch()
-	for _, responses := range [][]streaming.AppendResponse{
-		{{}},
-		{{Error: status.NewOnShutdownError("not a schema error")}},
-	} {
-		invalidateMismatchedWriteSchema(t.Context(), cache, 10, streaming.AppendResponses{Responses: responses})
-	}
-	require.Empty(t, invalidated)
-	responses := streaming.AppendResponses{Responses: []streaming.AppendResponse{
-		{Error: status.NewOnShutdownError("first shard failed differently")},
-		{}, // A successful shard must never be replayed by cache invalidation.
-		{Error: status.NewSchemaVersionMismatch("write schema advanced")},
-		{Error: status.NewSchemaVersionMismatch("another shard advanced")},
-	}}
-	invalidateMismatchedWriteSchema(t.Context(), cache, 10, responses)
-	require.Equal(t, []int64{10}, invalidated)
-	require.Len(t, responses.Responses, 4)
-	require.NoError(t, responses.Responses[1].Error)
-}
-
 type invalidationTestWAL struct{ streaming.WALAccesser }
 
-func TestInsertAppendInvalidatesLaterShardWithoutReplay(t *testing.T) {
+func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	cache := newTestCache()
 	task := &InsertTask{
 		baseTask: baseTask{MetaCache: cache}, ctx: t.Context(), collectionID: 10,
@@ -78,6 +50,6 @@ func TestInsertAppendInvalidatesLaterShardWithoutReplay(t *testing.T) {
 	defer patch.UnPatch()
 	require.NoError(t, task.Execute(t.Context()))
 	require.Equal(t, 1, appends)
-	require.Equal(t, 1, invalidations)
+	require.Zero(t, invalidations)
 	require.Contains(t, task.result.GetStatus().GetReason(), "first shard shutting down")
 }

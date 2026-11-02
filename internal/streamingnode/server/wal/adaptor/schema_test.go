@@ -54,12 +54,10 @@ func TestWALSchemaSelectors(t *testing.T) {
 		resp, err := w.GetCollectionSchema(context.Background(), req)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, resp.Schema.Version)
-		require.EqualValues(t, 30, resp.EffectiveTimeTick)
 		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}
 		resp, err = w.GetCollectionSchema(context.Background(), req)
 		require.NoError(t, err)
 		require.Zero(t, resp.Schema.Version)
-		require.EqualValues(t, 10, resp.EffectiveTimeTick)
 		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 2}
 		_, err = w.GetCollectionSchema(context.Background(), req)
 		require.Error(t, err)

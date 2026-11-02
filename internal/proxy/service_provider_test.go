@@ -327,7 +327,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOne
 	cache, err := NewMetaCache(mixCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
-	assert.NoError(t, cache.SeedSchemaForTest(collectionID, &schemapb.CollectionSchema{Name: "foo"}))
+	assert.NoError(t, cache.SeedSchemaForTest(t, collectionID, &schemapb.CollectionSchema{Name: "foo"}))
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}
 	request := &milvuspb.DescribeCollectionRequest{CollectionID: collectionID}
 	interceptor := DatabaseInterceptor()

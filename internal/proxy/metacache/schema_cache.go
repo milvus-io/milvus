@@ -2,105 +2,71 @@ package metacache
 
 import (
 	"context"
-	"sync"
+	"maps"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type schemaIdentity struct {
-	collectionID int64
-	version      int32
+// GetCollectionInfo retains the original facade while resolving the body only
+// for this request. Metadata fills and write lookups never resolve a read body.
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database, name string, id int64) (*CollectionInfo, error) {
+	info, err := m.getCollectionMetadata(ctx, database, name, id)
+	if err != nil {
+		return nil, err
+	}
+	return m.collectionInfoWithSchema(ctx, info, false)
 }
 
-// The read selector belongs to CollectionInfo's published metadata. A write
-// selector is filled independently and expires with that same metadata entry.
-// Immutable bodies can be shared by both selectors; history GC is a TODO.
-type writeSchemaSelection struct {
-	mu     sync.Mutex
-	schema *SchemaInfo
+func (m *MetaCache) GetCollectionWriteInfo(ctx context.Context, database, name string, id int64) (*CollectionInfo, error) {
+	info, err := m.getCollectionMetadata(ctx, database, name, id)
+	if err != nil {
+		return nil, err
+	}
+	return m.collectionInfoWithSchema(ctx, info, true)
 }
 
-func fetchCollectionSchema(ctx context.Context, vchannel string, version *int32) (*streaming.SchemaSnapshot, error) {
+func (m *MetaCache) collectionInfoWithSchema(ctx context.Context, info *CollectionInfo, write bool) (*CollectionInfo, error) {
+	schema, err := resolveSchema(ctx, info, write)
+	if err != nil {
+		return nil, err
+	}
+	result := *info
+	result.Schema = schema
+	result.CollectionTTL = GetCollectionTTL(schema.GetProperties())
+	return &result, nil
+}
+
+func resolveSchema(ctx context.Context, info *CollectionInfo, write bool) (*SchemaInfo, error) {
+	if len(info.VChannels) == 0 {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d has no schema channel", info.CollID)
+	}
 	client := streaming.WAL().SchemaClient()
-	if version == nil {
-		return client.GetCurrentWriteSchema(ctx, streaming.GetCurrentWriteSchemaRequest{VChannel: vchannel})
+	var snapshot *streaming.SchemaSnapshot
+	var err error
+	if write {
+		snapshot, err = client.GetCurrentWriteSchema(ctx, streaming.GetCurrentWriteSchemaRequest{VChannel: info.VChannels[0]})
+	} else {
+		snapshot, err = client.GetSchemaVersion(ctx, streaming.GetSchemaVersionRequest{VChannel: info.VChannels[0], Version: info.ReadSchemaVersion})
 	}
-	return client.GetSchemaVersion(ctx, streaming.GetSchemaVersionRequest{VChannel: vchannel, Version: *version})
-}
-
-func (m *MetaCache) resolveCollectionSchema(ctx context.Context, collectionID int64, channels []string, version *int32) (*SchemaInfo, error) {
-	if version != nil {
-		if body, ok := m.schemaBodies.Load(schemaIdentity{collectionID, *version}); ok {
-			return body.(*SchemaInfo), nil
-		}
-	}
-	if len(channels) == 0 {
-		return nil, merr.WrapErrServiceNotReadyMsg("collection %d has no schema channel", collectionID)
-	}
-	response, err := fetchCollectionSchema(ctx, channels[0], version)
 	if err != nil {
 		return nil, err
 	}
-	if response.Schema == nil || (version != nil && response.Schema.GetVersion() != *version) {
-		return nil, merr.WrapErrServiceInternalMsg("streaming returned a mismatched collection schema")
-	}
-	// WAL schemas include RowID and Timestamp for segment encoding. Proxy
-	// validates client rows against the user projection, just as it did with
-	// DescribeCollection. Do not modify the immutable schema returned by SN.
-	schema := proto.Clone(response.Schema).(*schemapb.CollectionSchema)
-	fields := schema.Fields[:0]
-	for _, field := range schema.Fields {
-		if !common.IsSystemField(field.GetFieldID()) {
-			fields = append(fields, field)
-		}
-	}
-	schema.Fields = fields
-	body, err := NewSchemaInfo(schema)
+	schema, err := snapshot.UserSchema()
 	if err != nil {
 		return nil, err
 	}
-	stored, _ := m.schemaBodies.LoadOrStore(schemaIdentity{collectionID, body.GetVersion()}, body)
-	return stored.(*SchemaInfo), nil
+	return withCollectionMetadata(schema, info), nil
 }
 
-// GetCollectionWriteInfo resolves encoding/validation schema from the WAL write
-// frontier, without replacing the published read selector in the metadata cache.
-func (m *MetaCache) GetCollectionWriteInfo(ctx context.Context, database, name string, collectionID int64) (*CollectionInfo, error) {
-	info, err := m.GetCollectionInfo(ctx, database, name, collectionID)
-	if err != nil {
-		return nil, err
-	}
-	selection := info.writeSchema
-	selection.mu.Lock()
-	defer selection.mu.Unlock()
-	if selection.schema == nil {
-		body, err := m.resolveCollectionSchema(ctx, info.CollID, info.VChannels, nil)
-		if err != nil {
-			return nil, err
-		}
-		selection.schema, err = body.withCollectionMetadata(info.Schema.CollectionSchema, info.Properties)
-		if err != nil {
-			return nil, err
-		}
-	}
-	write := *info
-	write.Schema = selection.schema
-	write.CollectionTTL = GetCollectionTTL(selection.schema.GetProperties())
-	return &write, nil
-}
-
-// Collection metadata can change without a column/schema revision. Overlay it
-// on the request selector, never on the shared historical body. TTL remains
-// bound to the selected schema, including an unpublished write-side version.
-func (s *SchemaInfo) withCollectionMetadata(metadata *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) (*SchemaInfo, error) {
-	props := common.CloneKeyValuePairs(properties).ToMap()
-	versioned := common.CloneKeyValuePairs(s.GetProperties()).ToMap()
+// Only the small protobuf envelope and properties belong to this operation.
+// Reuse field nodes and derived indices; TTL remains bound to the selected
+// version while other properties (notably timezone) follow current metadata.
+func withCollectionMetadata(s *SchemaInfo, info *CollectionInfo) *SchemaInfo {
+	props := common.KeyValuePairs(info.Properties).ToMap()
+	versioned := common.KeyValuePairs(s.GetProperties()).ToMap()
 	for _, key := range []string{common.CollectionTTLConfigKey, common.CollectionTTLFieldKey} {
 		if value, ok := versioned[key]; ok {
 			props[key] = value
@@ -108,17 +74,19 @@ func (s *SchemaInfo) withCollectionMetadata(metadata *schemapb.CollectionSchema,
 			delete(props, key)
 		}
 	}
-	projected := common.NewKeyValuePairs(props)
-	if s.Name == metadata.GetName() && s.Description == metadata.GetDescription() &&
-		s.ExternalSource == metadata.GetExternalSource() && s.ExternalSpec == metadata.GetExternalSpec() &&
-		projected.Equal(s.GetProperties()) {
-		return s, nil
+	projected := s.GetProperties()
+	if !maps.Equal(props, versioned) {
+		projected = common.NewKeyValuePairs(props)
 	}
-	schema := proto.Clone(s.CollectionSchema).(*schemapb.CollectionSchema)
-	schema.Name = metadata.GetName()
-	schema.Description = metadata.GetDescription()
-	schema.ExternalSource = metadata.GetExternalSource()
-	schema.ExternalSpec = metadata.GetExternalSpec()
+	schema := schemautil.ShallowSchema(s.CollectionSchema)
+	schema.Name = info.Name
+	schema.DbName = info.DBName
+	schema.Description = info.Description
+	schema.ExternalSource = info.ExternalSource
+	schema.ExternalSpec = info.ExternalSpec
 	schema.Properties = projected
-	return NewSchemaInfo(schema)
+	view := *s
+	view.CollectionSchema = schema
+	view.SchemaHelper = s.SchemaHelper.WithMetadata(schema)
+	return &view
 }

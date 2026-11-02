@@ -151,8 +151,7 @@ func mockQueryViewSchemaClient(t *testing.T) *queryViewSchemaClient {
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
 		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
 			return &streaming.SchemaSnapshot{
-				Schema:            &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
-				EffectiveTimeTick: 9,
+				Schema: &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
@@ -241,13 +240,8 @@ func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 	paramtable.Init()
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
 		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
-			tick := uint64(900)
-			if req.VChannel == "p_1v1" {
-				tick = 1000
-			}
 			return &streaming.SchemaSnapshot{
-				Schema:            &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
-				EffectiveTimeTick: tick,
+				Schema: &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	defer patch.UnPatch()

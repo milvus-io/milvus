@@ -2963,7 +2963,7 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 	assert.NoError(t, err)
 	defer cache.Close()
 	for id := int64(1); id <= 2; id++ {
-		assert.NoError(t, cache.SeedSchemaForTest(id, &schemapb.CollectionSchema{Name: "collection"}))
+		assert.NoError(t, cache.SeedSchemaForTest(t, id, &schemapb.CollectionSchema{Name: "collection"}))
 	}
 
 	type result struct {
@@ -3183,7 +3183,7 @@ func metaCacheConsistencyViolations(cache *MetaCache) []string {
 			v = append(v, fmt.Sprintf("primary key %d != entry.CollID %d", id, e.CollID))
 		}
 		db := normalizeDBName(e.DBName)
-		name := e.Schema.GetName()
+		name := e.Name
 		if gotID, ok := snapshot.NameIdx[db][name]; !ok {
 			v = append(v, fmt.Sprintf("primary %q/%q (id %d) has no name hint", db, name, id))
 		} else if gotID != id {
@@ -3209,7 +3209,7 @@ func metaCacheConsistencyViolations(cache *MetaCache) []string {
 			if got := normalizeDBName(e.DBName); got != db {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry db is %q", db, name, id, got))
 			}
-			if got := e.Schema.GetName(); got != name {
+			if got := e.Name; got != name {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry real name is %q", db, name, id, got))
 			}
 		}
@@ -3572,7 +3572,7 @@ func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
 	assert.NoError(t, err)
 	defer cache.Close()
 	for id := int64(1); id <= 5; id++ {
-		assert.NoError(t, cache.SeedSchemaForTest(id, &schemapb.CollectionSchema{Name: fmt.Sprintf("coll%d", id)}))
+		assert.NoError(t, cache.SeedSchemaForTest(t, id, &schemapb.CollectionSchema{Name: fmt.Sprintf("coll%d", id)}))
 	}
 
 	var wg sync.WaitGroup

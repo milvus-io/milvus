@@ -152,3 +152,26 @@ def test_proxy_schema_ttl_duration_replaces_warm_cache(schema_access_client):
     assert snapshot(stub, name)[1] == 2
     time.sleep(2)
     assert ids(client, name) == []
+
+
+@pytest.mark.tags(CaseLabel.L1)
+def test_proxy_schema_add_field_after_warm_write(schema_access_client):
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    client.insert(name, row(1, 10), timeout=60)
+    assert ids(client, name) == [1]
+    collection_id, version = snapshot(stub, name)
+    client.add_collection_field(name, "added", DataType.INT64, nullable=True, timeout=60)
+    assert snapshot(stub, name) == (collection_id, version + 1)
+
+    # The first write after ALTER must see the field before local validation,
+    # without relying on a failed Append to invalidate an old write selector.
+    data = row(2, 20)
+    data["added"] = 7
+    client.insert(name, data, timeout=60)
+    client.upsert(name, {"id": 2, "added": 9}, partial_update=True, timeout=60)
+    result = client.query(
+        name, filter="id == 2", output_fields=["value", "added"], consistency_level="Strong", timeout=60
+    )
+    assert result[0]["value"] == 20
+    assert result[0]["added"] == 9

@@ -75,7 +75,7 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	defer conn.Close()
 	client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 	const vchannel = "schema-rpc_1v0"
-	created, err := w.Append(ctx, message.NewCreateCollectionMessageBuilderV1().WithVChannel(vchannel).
+	_, err = w.Append(ctx, message.NewCreateCollectionMessageBuilderV1().WithVChannel(vchannel).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{2}}).
 		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "schema_rpc", Version: 0}}).MustBuildMutable())
 	require.NoError(t, err)
@@ -87,13 +87,12 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	current, err := client.GetCollectionSchema(ctx, req)
 	require.NoError(t, err)
 	require.Zero(t, current.Schema.Version)
-	require.Equal(t, created.TimeTick, current.EffectiveTimeTick)
 	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}
 	require.Eventually(t, func() bool {
 		exact, err := client.GetCollectionSchema(ctx, req)
-		return err == nil && exact.Schema.Version == 0 && exact.EffectiveTimeTick == created.TimeTick
+		return err == nil && exact.Schema.Version == 0
 	}, 5*time.Second, time.Millisecond)
-	altered, err := w.Append(ctx, message.NewAlterCollectionMessageBuilderV2().WithVChannel(vchannel).
+	_, err = w.Append(ctx, message.NewAlterCollectionMessageBuilderV2().WithVChannel(vchannel).
 		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).
 		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{Name: "schema_rpc", Version: 1}}}).MustBuildMutable())
 	require.NoError(t, err)
@@ -101,11 +100,10 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	current, err = client.GetCollectionSchema(ctx, req)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, current.Schema.Version)
-	require.Equal(t, altered.TimeTick, current.EffectiveTimeTick)
 	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 1}
 	require.Eventually(t, func() bool {
 		exact, err := client.GetCollectionSchema(ctx, req)
-		return err == nil && exact.Schema.Version == 1 && exact.EffectiveTimeTick == altered.TimeTick
+		return err == nil && exact.Schema.Version == 1
 	}, 5*time.Second, time.Millisecond)
 	req.Pchannel.Term++
 	_, err = client.GetCollectionSchema(ctx, req)

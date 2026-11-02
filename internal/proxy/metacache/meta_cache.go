@@ -18,7 +18,6 @@ package metacache
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -50,7 +50,7 @@ type Cache interface {
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
-	// GetCollectionInfo get collection's information by name or collection id, such as Schema, and etc.
+	// GetCollectionInfo returns collection metadata and the published read schema.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*CollectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
@@ -107,25 +107,32 @@ type Cache interface {
 	Close()
 }
 
+// CollectionInfo is the compatible request view. Cache entries leave Schema nil;
+// getters attach a SchemaClient snapshot to a copy, never to the stored entry.
 type CollectionInfo struct {
-	writeSchema           *writeSchemaSelection
-	CollID                typeutil.UniqueID
-	DBID                  typeutil.UniqueID
-	DBName                string
-	Schema                *SchemaInfo
-	CreatedTimestamp      uint64
-	CreatedUtcTimestamp   uint64
-	ConsistencyLevel      commonpb.ConsistencyLevel
-	PartitionKeyIsolation bool
-	QueryMode             string
-	UpdateTimestamp       uint64
-	CollectionTTL         uint64
-	NumPartitions         int64
-	VChannels             []string
-	PChannels             []string
-	ShardsNum             int32
-	Aliases               []string
-	Properties            []*commonpb.KeyValuePair
+	Schema                   *SchemaInfo
+	CollID                   typeutil.UniqueID
+	DBID                     typeutil.UniqueID
+	DBName                   string
+	Name                     string
+	ReadSchemaVersion        int32
+	Description              string
+	ExternalSource           string
+	ExternalSpec             string
+	IsPartitionKeyCollection bool
+	CreatedTimestamp         uint64
+	CreatedUtcTimestamp      uint64
+	ConsistencyLevel         commonpb.ConsistencyLevel
+	PartitionKeyIsolation    bool
+	QueryMode                string
+	UpdateTimestamp          uint64
+	CollectionTTL            uint64
+	NumPartitions            int64
+	VChannels                []string
+	PChannels                []string
+	ShardsNum                int32
+	Aliases                  []string
+	Properties               []*commonpb.KeyValuePair
 }
 
 type DatabaseInfo struct {
@@ -134,205 +141,10 @@ type DatabaseInfo struct {
 	CreatedTimestamp uint64
 }
 
-// SchemaInfo is a helper function wraps *schemapb.CollectionSchema
-// with extra fields mapping and methods
-type SchemaInfo struct {
-	*schemapb.CollectionSchema
-	FieldMap              *typeutil.ConcurrentMap[string, int64] // field name to id mapping
-	HasPartitionKeyField  bool
-	PkField               *schemapb.FieldSchema
-	MultiAnalyzerFieldMap *typeutil.ConcurrentMap[int64, int64] // multi analzyer field id to dependent field id mapping
-	SchemaHelper          *typeutil.SchemaHelper
-}
+// SchemaInfo is a shared, immutable schema with reusable field indices.
+type SchemaInfo = schemautil.SchemaInfo
 
-func NewSchemaInfo(schema *schemapb.CollectionSchema) (*SchemaInfo, error) {
-	fieldMap := typeutil.NewConcurrentMap[string, int64]()
-	hasPartitionkey := false
-	var pkField *schemapb.FieldSchema
-	for _, field := range schema.GetFields() {
-		fieldMap.Insert(field.GetName(), field.GetFieldID())
-		if field.GetIsPartitionKey() {
-			hasPartitionkey = true
-		}
-		if field.GetIsPrimaryKey() {
-			pkField = field
-		}
-	}
-	for _, structField := range schema.GetStructArrayFields() {
-		fieldMap.Insert(structField.GetName(), structField.GetFieldID())
-		for _, field := range structField.GetFields() {
-			fieldMap.Insert(field.GetName(), field.GetFieldID())
-		}
-	}
-	// skip load fields logic for now
-	// partial load shall be processed as hint after tiered storage feature
-	// A malformed Schema (nil, duplicate field name/id, multiple primary keys)
-	// only reaches here on a RootCoord bug, so this is defensive; propagate it as
-	// a retriable internal error rather than leaving SchemaHelper nil for a later
-	// dereference to panic on.
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to create Schema helper")
-	}
-	return &SchemaInfo{
-		CollectionSchema:      schema,
-		FieldMap:              fieldMap,
-		HasPartitionKeyField:  hasPartitionkey,
-		PkField:               pkField,
-		MultiAnalyzerFieldMap: typeutil.NewConcurrentMap[int64, int64](),
-		SchemaHelper:          schemaHelper,
-	}, nil
-}
-
-func (s *SchemaInfo) MapFieldID(name string) (int64, bool) {
-	return s.FieldMap.Get(name)
-}
-
-func (s *SchemaInfo) IsPartitionKeyCollection() bool {
-	return s.HasPartitionKeyField
-}
-
-func (s *SchemaInfo) GetPkField() (*schemapb.FieldSchema, error) {
-	if s.PkField == nil {
-		return nil, merr.WrapErrFieldNotFound("pk field")
-	}
-	return s.PkField, nil
-}
-
-func (s *SchemaInfo) GetMultiAnalyzerNameFieldID(id int64) (int64, error) {
-	if id, ok := s.MultiAnalyzerFieldMap.Get(id); ok {
-		return id, nil
-	}
-
-	field, err := s.SchemaHelper.GetFieldFromID(id)
-	if err != nil {
-		return 0, err
-	}
-
-	helper := typeutil.CreateFieldSchemaHelper(field)
-
-	params, ok := helper.GetMultiAnalyzerParams()
-	if !ok {
-		s.MultiAnalyzerFieldMap.Insert(id, 0)
-		return 0, nil
-	}
-
-	var raw map[string]json.RawMessage
-	err = json.Unmarshal([]byte(params), &raw)
-	if err != nil {
-		return 0, err
-	}
-
-	jsonFieldID, ok := raw["by_field"]
-	if !ok {
-		return 0, merr.WrapErrServiceInternal("multi_analyzer_params missing required 'by_field' key")
-	}
-	var analyzerFieldName string
-	err = json.Unmarshal(jsonFieldID, &analyzerFieldName)
-	if err != nil {
-		return 0, err
-	}
-	analyzerField, err := s.SchemaHelper.GetFieldFromName(analyzerFieldName)
-	if err != nil {
-		return 0, err
-	}
-
-	s.MultiAnalyzerFieldMap.Insert(id, analyzerField.GetFieldID())
-	return analyzerField.GetFieldID(), nil
-}
-
-// GetLoadFieldIDs returns field id for load field list.
-// If input `loadFields` is empty, use collection Schema definition.
-// Otherwise, perform load field list constraint check then return field id.
-func (s *SchemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool) ([]int64, error) {
-	if len(loadFields) == 0 {
-		// skip check logic since create collection already did the rule check already
-		return common.GetCollectionLoadFields(s.CollectionSchema, skipDynamicField), nil
-	}
-
-	fieldIDs := typeutil.NewSet[int64]()
-	// fieldIDs := make([]int64, 0, len(loadFields))
-	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
-	for _, name := range loadFields {
-		// todo(SpadeA): check struct field
-		if structArrayField := s.SchemaHelper.GetStructArrayFieldFromName(name); structArrayField != nil {
-			for _, field := range structArrayField.GetFields() {
-				fields = append(fields, field)
-				fieldIDs.Insert(field.GetFieldID())
-			}
-			continue
-		}
-
-		fieldSchema, err := s.SchemaHelper.GetFieldFromName(name)
-		if err != nil {
-			return nil, err
-		}
-
-		fields = append(fields, fieldSchema)
-		fieldIDs.Insert(fieldSchema.GetFieldID())
-	}
-
-	// only append dynamic field when skipFlag == false
-	if !skipDynamicField {
-		// find dynamic field
-		dynamicField := lo.FindOrElse(s.Fields, nil, func(field *schemapb.FieldSchema) bool {
-			return field.IsDynamic
-		})
-
-		// if dynamic field not nil
-		if dynamicField != nil {
-			fieldIDs.Insert(dynamicField.GetFieldID())
-			fields = append(fields, dynamicField)
-		}
-	}
-
-	// validate load fields list
-	if err := s.validateLoadFields(loadFields, fields); err != nil {
-		return nil, err
-	}
-
-	return fieldIDs.Collect(), nil
-}
-
-func (s *SchemaInfo) validateLoadFields(names []string, fields []*schemapb.FieldSchema) error {
-	// ignore error if not found
-	partitionKeyField, _ := s.SchemaHelper.GetPartitionKeyField()
-	clusteringKeyField, _ := s.SchemaHelper.GetClusteringKeyField()
-
-	var hasPrimaryKey, hasPartitionKey, hasClusteringKey, hasVector bool
-	for _, field := range fields {
-		if field.GetFieldID() == s.PkField.GetFieldID() {
-			hasPrimaryKey = true
-		}
-		if typeutil.IsVectorType(field.GetDataType()) {
-			hasVector = true
-		}
-		if field.IsPartitionKey {
-			hasPartitionKey = true
-		}
-		if field.IsClusteringKey {
-			hasClusteringKey = true
-		}
-	}
-
-	if !hasPrimaryKey {
-		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain primary key field %s", names, s.PkField.GetName())
-	}
-	if !hasVector {
-		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain vector field", names)
-	}
-	if partitionKeyField != nil && !hasPartitionKey {
-		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain partition key field %s", names, partitionKeyField.GetName())
-	}
-	if clusteringKeyField != nil && !hasClusteringKey {
-		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clustering key field %s", names, clusteringKeyField.GetName())
-	}
-	return nil
-}
-
-func (s *SchemaInfo) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
-	return s.SchemaHelper.CanRetrieveRawFieldData(field)
-}
+var NewSchemaInfo = schemautil.NewSchemaInfo
 
 // PartitionInfos contains the cached collection partition informations.
 type PartitionInfos struct {
@@ -352,7 +164,7 @@ type PartitionInfo struct {
 }
 
 func (info *CollectionInfo) isCollectionCached() bool {
-	return info != nil && info.CollID != typeutil.UniqueID(0) && info.Schema != nil
+	return info != nil && info.CollID != typeutil.UniqueID(0)
 }
 
 // make sure MetaCache implements Cache.
@@ -360,8 +172,7 @@ var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
-	schemaBodies sync.Map // schemaIdentity -> immutable *SchemaInfo
-	mixCoord     types.MixCoordClient
+	mixCoord types.MixCoordClient
 
 	dbInfo map[string]*DatabaseInfo // database -> db_info
 
@@ -501,7 +312,7 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	if ids, ok := m.nameIdx[database]; ok {
 		if id, ok := ids[collectionName]; ok {
 			if entry, ok := m.liveLocked(id); ok &&
-				entry.Schema.GetName() == collectionName && normalizeDBName(entry.DBName) == database {
+				entry.Name == collectionName && normalizeDBName(entry.DBName) == database {
 				return entry, entry.isCollectionCached()
 			}
 		}
@@ -512,7 +323,7 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 			if ids, ok := m.nameIdx[database]; ok {
 				if id, ok := ids[target]; ok {
 					if entry, ok := m.liveLocked(id); ok &&
-						entry.Schema.GetName() == target && normalizeDBName(entry.DBName) == database {
+						entry.Name == target && normalizeDBName(entry.DBName) == database {
 						return entry, entry.isCollectionCached()
 					}
 				}
@@ -533,7 +344,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	realName := collection.Schema.GetName()
+	realName := collection.GetSchema().GetName()
 	// the caller may have addressed the collection by an alias; cache under the
 	// real name (the alias hint comes from the declared-Aliases loop below)
 	if collectionName == "" || (realName != "" && realName != collectionName) {
@@ -545,16 +356,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
 
-	schemaVersion := collection.GetSchema().GetVersion()
-	schemaInfo, err := m.resolveCollectionSchema(ctx, collection.GetCollectionID(), collection.GetVirtualChannelNames(), &schemaVersion)
-	if err != nil {
-		return nil, err
-	}
-	schemaInfo, err = schemaInfo.withCollectionMetadata(collection.GetSchema(), collection.GetProperties())
-	if err != nil {
-		return nil, err
-	}
-
 	bucketDB := collection.GetDbName()
 	if bucketDB == "" {
 		if collectionID != 0 {
@@ -564,13 +365,13 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			// the response uncached instead of inventing a compat mechanism for
 			// an upgrade-window-only entry class -- repeat lookups just
 			// re-describe until the rootcoords are upgraded.
-			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
+			return newCollectionInfo(collection, isolation, queryMode), nil
 		}
 		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
-	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode)
+	info := newCollectionInfo(collection, isolation, queryMode)
 	if info.DBName == "" {
 		info.DBName = bucketDB // authoritative for by-name fills
 	}
@@ -581,8 +382,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	// id re-fills under a new canonical (database, name) location. Delete the
 	// previous name hint when either coordinate changed so nothing dangles (no
 	// background GC exists to catch it later).
-	if prev, ok := m.collections[collection.GetCollectionID()]; ok && prev.Schema != nil {
-		prevName := prev.Schema.GetName()
+	if prev, ok := m.collections[collection.GetCollectionID()]; ok && prev.Name != "" {
+		prevName := prev.Name
 		prevDB := normalizeDBName(prev.DBName)
 		if prevName != "" && (prevDB != bucketDB || prevName != collectionName) {
 			if ids, ok := m.nameIdx[prevDB]; ok && ids[prevName] == collection.GetCollectionID() {
@@ -639,26 +440,30 @@ func NormalizeDBName(database string) string {
 // newCollectionInfo builds a CollectionInfo from a describe response. It does
 // not touch any cache map, so it is safe to use for entries that are returned
 // without being cached.
-func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *SchemaInfo, isolation bool, queryMode string) *CollectionInfo {
+func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, isolation bool, queryMode string) *CollectionInfo {
 	return &CollectionInfo{
-		writeSchema:           &writeSchemaSelection{},
-		CollID:                collection.CollectionID,
-		DBID:                  collection.GetDbId(),
-		DBName:                collection.GetDbName(),
-		Schema:                schemaInfo,
-		CreatedTimestamp:      collection.CreatedTimestamp,
-		CreatedUtcTimestamp:   collection.CreatedUtcTimestamp,
-		ConsistencyLevel:      collection.ConsistencyLevel,
-		PartitionKeyIsolation: isolation,
-		QueryMode:             queryMode,
-		UpdateTimestamp:       collection.UpdateTimestamp,
-		CollectionTTL:         GetCollectionTTL(schemaInfo.GetProperties()),
-		VChannels:             collection.VirtualChannelNames,
-		PChannels:             collection.PhysicalChannelNames,
-		NumPartitions:         collection.NumPartitions,
-		ShardsNum:             collection.ShardsNum,
-		Aliases:               collection.Aliases,
-		Properties:            collection.Properties,
+		CollID:                   collection.CollectionID,
+		DBID:                     collection.GetDbId(),
+		DBName:                   collection.GetDbName(),
+		Name:                     collection.GetSchema().GetName(),
+		ReadSchemaVersion:        collection.GetSchema().GetVersion(),
+		Description:              collection.GetSchema().GetDescription(),
+		ExternalSource:           collection.GetSchema().GetExternalSource(),
+		ExternalSpec:             collection.GetSchema().GetExternalSpec(),
+		IsPartitionKeyCollection: hasPartitionKey(collection.GetSchema()),
+		CreatedTimestamp:         collection.CreatedTimestamp,
+		CreatedUtcTimestamp:      collection.CreatedUtcTimestamp,
+		ConsistencyLevel:         collection.ConsistencyLevel,
+		PartitionKeyIsolation:    isolation,
+		QueryMode:                queryMode,
+		UpdateTimestamp:          collection.UpdateTimestamp,
+		CollectionTTL:            GetCollectionTTL(collection.GetProperties()),
+		VChannels:                collection.VirtualChannelNames,
+		PChannels:                collection.PhysicalChannelNames,
+		NumPartitions:            collection.NumPartitions,
+		ShardsNum:                collection.ShardsNum,
+		Aliases:                  collection.Aliases,
+		Properties:               collection.Properties,
 	}
 }
 
@@ -787,14 +592,16 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 		}
 
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.Schema.Name, nil
+		return collInfo.Name, nil
 	}
 	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 
-	return collInfo.Schema.Name, nil
+	return collInfo.Name, nil
 }
 
-func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*CollectionInfo, error) {
+// getCollectionMetadata returns a read-only cached snapshot without a schema
+// body. Routing and metadata-only Describe must not trigger a read-schema RPC.
+func (m *MetaCache) getCollectionMetadata(ctx context.Context, database string, collectionName string, collectionID int64) (*CollectionInfo, error) {
 	// Pass collectionID through so an id-only lookup (collectionName == "") hits
 	// the cluster-wide id index instead of probing id 0, which always misses and
 	// forces a needless UpdateByID/singleflight round plus a spurious cache-miss
@@ -829,27 +636,13 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 	return collInfo, nil
 }
 
+// GetCollectionSchema is a resolving facade; MetaCache retains no schema bodies.
 func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectionName string) (*SchemaInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, 0)
-
-	method := "GetCollectionSchema"
-	if !ok {
-		tr := timerecord.NewTimeRecorder("UpdateCache")
-		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
-
-		collInfo, err := m.UpdateByName(ctx, database, collectionName)
-		if err != nil {
-			return nil, err
-		}
-		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		mlog.Debug(ctx, "Reload collection from root coordinator ",
-			mlog.String("collectionName", collectionName),
-			mlog.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
-		return collInfo.Schema, nil
+	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
+	if err != nil {
+		return nil, err
 	}
-	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
-
-	return collInfo.Schema, nil
+	return info.Schema, nil
 }
 
 // setAliasLocked sets an alias hint (alias -> real name). Caller must hold m.mu
@@ -930,21 +723,21 @@ func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias stri
 // against the literal name and the task fails not-found later, as before.
 func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
 	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
-		if collInfo.Schema != nil && collInfo.Schema.GetName() != "" {
-			return collInfo.Schema.GetName(), nil
+		if collInfo.Name != "" {
+			return collInfo.Name, nil
 		}
 		return nameOrAlias, nil
 	}
 
-	info, err := m.GetCollectionInfo(ctx, database, nameOrAlias, 0)
+	info, err := m.getCollectionMetadata(ctx, database, nameOrAlias, 0)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrAliasNotFound) {
 			return nameOrAlias, nil
 		}
 		return "", err
 	}
-	if info.Schema != nil && info.Schema.GetName() != "" {
-		return info.Schema.GetName(), nil
+	if info.Name != "" {
+		return info.Name, nil
 	}
 	return nameOrAlias, nil
 }
@@ -990,7 +783,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 // entry itself so the partition fill can reuse its already-parsed schema rather
 // than describing the same collection a second time.
 func (m *MetaCache) resolvePartitionCollection(ctx context.Context, database, collectionName string) (*CollectionInfo, string, error) {
-	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
+	info, err := m.getCollectionMetadata(ctx, database, collectionName, 0)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1062,7 +855,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*PartitionInfos, error) {
 		// Partition-key status is fixed at creation, so the resolved schema answers
 		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
-		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
+		isPartitionKey := collection.IsPartitionKeyCollection
 		resp, err := m.showPartitions(ctx, rpcDB, "", collectionID)
 		if err != nil {
 			return nil, err
@@ -1131,13 +924,9 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	userFields := make([]*schemapb.FieldSchema, 0)
-	for _, field := range coll.Schema.Fields {
-		if field.FieldID >= common.StartOfUserFieldID {
-			userFields = append(userFields, field)
-		}
+	if coll.Schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("DescribeCollection returned no schema")
 	}
-	coll.Schema.Fields = userFields
 	return coll, nil
 }
 
@@ -1405,8 +1194,8 @@ func (m *MetaCache) evictCollectionEntryLocked(collectionID typeutil.UniqueID) (
 		return "", false
 	}
 	name := ""
-	if entry.Schema != nil {
-		name = entry.Schema.GetName()
+	if entry.Name != "" {
+		name = entry.Name
 	}
 	db := normalizeDBName(entry.DBName)
 	if Aliases, ok := m.aliasInfo[db]; ok {
@@ -1665,4 +1454,13 @@ func (m *MetaCache) Close() {
 	m.closeOnce.Do(func() {
 		close(m.stopCh)
 	})
+}
+
+func hasPartitionKey(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPartitionKey() {
+			return true
+		}
+	}
+	return false
 }

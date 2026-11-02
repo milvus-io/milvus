@@ -483,6 +483,21 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	return &schemaHelper, nil
 }
 
+// WithMetadata reuses immutable field indices while binding current collection
+// properties (including timezone) to an operation's schema envelope.
+func (helper *SchemaHelper) WithMetadata(schema *schemapb.CollectionSchema) *SchemaHelper {
+	copy := *helper
+	copy.schema = schema
+	copy.timezone = common.DefaultTimezone
+	for _, kv := range schema.GetProperties() {
+		if kv.Key == common.TimezoneKey {
+			copy.timezone = kv.Value
+			break
+		}
+	}
+	return &copy
+}
+
 // GetTimezone returns the timezone string associated with the schema.
 func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone

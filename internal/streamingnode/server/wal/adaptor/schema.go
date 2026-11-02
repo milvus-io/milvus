@@ -48,7 +48,7 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 		return nil, err
 	}
 	return &streamingpb.StreamingNodeGetCollectionSchemaResponse{
-		Schema: snapshot.GetSchema(), EffectiveTimeTick: snapshot.GetCheckpointTimeTick(),
+		Schema: snapshot.GetSchema(),
 	}, nil
 }
 

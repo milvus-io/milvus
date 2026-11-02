@@ -124,7 +124,7 @@ func (m *MetaCache) SeedCollectionForTest(db, name string, id typeutil.UniqueID,
 	info := &CollectionInfo{
 		CollID:  id,
 		DBName:  db,
-		Schema:  mustNewSchemaInfoForTest(name),
+		Name:    name,
 		Aliases: slices.Clone(aliases),
 	}
 	m.collections[id] = info
