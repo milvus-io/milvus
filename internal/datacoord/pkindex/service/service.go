@@ -141,6 +141,11 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	if req.GetCheckpointTimeTick() == 0 {
 		return merr.WrapErrServiceInternalMsg("checkpoint_time_tick must not be 0")
 	}
+	for _, s := range req.GetAddSsts() {
+		if s.GetId() <= 0 {
+			return merr.WrapErrServiceInternalMsg("sst ID must be positive, got %d", s.GetId())
+		}
+	}
 	return nil
 }
 
@@ -166,11 +171,16 @@ func validateTerm(term int64) error {
 }
 
 // toMerr translates a manifest error at the service boundary. A fenced caller
-// no longer owns the channel and gets a code that is not retryable. Every
+// no longer owns the channel and gets a code that is not retryable. A flush
+// that adds an SST that garbage collection may have deleted gets its own code,
+// because the caller must send new SST IDs instead of the same request. Every
 // other error translates by its pkindex error category.
 func toMerr(err error, channel string) error {
 	if errors.Is(err, manifest.ErrFenced) {
 		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(channel, "pchannel term is fenced"), err)
+	}
+	if errors.Is(err, manifest.ErrSSTReclaimed) {
+		return errors.WithSecondaryError(merr.WrapErrChannelPKIndexSSTReclaimed(channel, "flush adds an sst that may be reclaimed"), err)
 	}
 	return pkindex.ToMerr(err)
 }

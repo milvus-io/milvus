@@ -24,7 +24,7 @@ import (
 // The functions below build and parse the meta keys of the primary key index.
 // The keys are relative to the root path of the DataCoord meta kv:
 //
-//	pkindex-meta/manifest/<collectionID>/<vchannel>    ManifestPointer{version, body_key}
+//	pkindex-meta/manifest/<collectionID>/<vchannel>    ManifestPointer{version, body_key, max_reclaimed_sst_id}
 //
 // For example: pkindex-meta/manifest/449/by-dev-rootcoord-dml_0_449v0
 //

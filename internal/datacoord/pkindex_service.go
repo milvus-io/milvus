@@ -139,7 +139,8 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		RetainVersions: Params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt(),
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
 	}
-	gc, err := pkindexgc.New(meta, store, rootPath, cfg,
+	mgr := manifest.New(meta, store, rootPath)
+	gc, err := pkindexgc.New(meta, store, rootPath, cfg, mgr,
 		// TODO: pass the outputs of the in-flight compactions of the primary
 		// key index SSTs when that compaction exists.
 		// TODO: add to the live set the tables that a streaming node still
@@ -150,5 +151,5 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	} else {
 		s.pkindexGC = gc
 	}
-	s.pkindexService.SetManager(manifest.New(meta, store, rootPath))
+	s.pkindexService.SetManager(mgr)
 }

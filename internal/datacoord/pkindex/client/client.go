@@ -59,6 +59,11 @@ var _ Client = (*client)(nil)
 // that Client returns at the call site, not on an error chain that has other
 // errors in it. With retry.Do, the caller must pass
 // retry.RetryErr(merr.IsRetryableErr); else retry.Do retries a fenced call.
+//
+// A merr.ErrChannelPKIndexSSTReclaimed error (code 508) from CommitFlush means
+// that the flush did not take effect and garbage collection may have deleted
+// some of its SSTs. A retry with the same request fails again; the caller must
+// send the tables again under new SST IDs.
 type Client interface {
 	// CommitFlush commits a flush result to the manifest of a vchannel.
 	CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error)

@@ -46,6 +46,20 @@ type env struct {
 	gc       *GC
 	// inFlight is the in-flight compaction output hook of the GC; nil means none.
 	inFlight InFlightOutputs
+	// beforeReclaim, when set, runs after the GC selected SSTs and before it
+	// raises the reclaimed SST ID through mgr.
+	beforeReclaim func()
+}
+
+// reclaimer is the Reclaimer of the GC of an env: it runs beforeReclaim, then
+// calls the manager.
+type reclaimer struct{ e *env }
+
+func (r reclaimer) AdvanceMaxReclaimedSSTID(ctx context.Context, collectionID int64, vchannel string, pointer string, id int64) error {
+	if r.e.beforeReclaim != nil {
+		r.e.beforeReclaim()
+	}
+	return r.e.mgr.AdvanceMaxReclaimedSSTID(ctx, collectionID, vchannel, pointer, id)
 }
 
 func newEnv(t *testing.T, cfg Config) *env {
@@ -54,7 +68,7 @@ func newEnv(t *testing.T, cfg Config) *env {
 	e.store = manifest.NewFakeObjectStore()
 	e.store.Now = func() time.Time { return e.now }
 	e.mgr = manifest.New(e.pointers, e.store, testRoot)
-	g, err := New(e.pointers, e.store, testRoot, cfg, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
+	g, err := New(e.pointers, e.store, testRoot, cfg, reclaimer{e}, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
 		if e.inFlight == nil {
 			return nil, nil
 		}
@@ -260,24 +274,32 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	assert.False(t, e.has(sstKey("v", 2)))
 }
 
-func TestOrphanBodyAfterGrace(t *testing.T) {
+func TestBodyAboveCurrentVersionIsKeptUntilPassed(t *testing.T) {
 	e := newEnv(t, testConfig)
 	ctx := context.Background()
 	e.create(t, "v")
-	e.upload(t, "v", 9, 10)
-	// bodies of commits that never swapped the pointer
-	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "old")
-	e.writeBody(t, oldOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
-	e.now = e.now.Add(2 * time.Hour)
-	youngOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "young")
-	e.writeBody(t, youngOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(10)})
-	e.now = e.now.Add(10 * time.Minute)
+	e.upload(t, "v", 9)
+	// the body of a commit that has not swapped the pointer yet, or never will
+	orphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "orphan")
+	e.writeBody(t, orphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 
+	// far past the grace window it is still kept, with its SST: the commit
+	// that wrote it can still win the pointer write
+	e.now = e.now.Add(48 * time.Hour)
 	require.NoError(t, e.gc.RunOnce(ctx))
-	assert.False(t, e.has(oldOrphan))
+	assert.True(t, e.has(orphan))
+	assert.True(t, e.has(sstKey("v", 9)), "referenced by a retained body")
+
+	// once the current version passes it, it is outside RetainVersions and
+	// older than RetainDuration, so it and its SST go
+	for i, tick := range []uint64{10, 20, 30} {
+		e.flush(t, "v", tick)
+		require.EqualValues(t, i+2, e.pointer(t, "v").GetVersion())
+	}
+	e.now = e.now.Add(2 * time.Hour)
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.False(t, e.has(orphan))
 	assert.False(t, e.has(sstKey("v", 9)))
-	assert.True(t, e.has(youngOrphan))
-	assert.True(t, e.has(sstKey("v", 10)), "referenced by a body within the grace window")
 }
 
 func TestCompactionCommittedBetweenReads(t *testing.T) {
@@ -428,7 +450,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		"retain duration": {Interval: time.Minute, Grace: time.Hour, RetainDuration: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil)
+			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil, nil)
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}
@@ -436,7 +458,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 
 func TestNewAcceptsMinGrace(t *testing.T) {
 	_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot,
-		Config{Interval: time.Minute, Grace: MinGrace}, nil)
+		Config{Interval: time.Minute, Grace: MinGrace}, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -602,4 +624,77 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 
 	require.NoError(t, e.gc.RunOnce(ctx))
 	assert.False(t, e.has(sstKey("v", 9)))
+}
+
+// TestRetryCommitDuringSweepKeepsSST is the interleaving of the review of
+// #54170: GC selects an uncommitted SST older than the grace window; before
+// GC deletes it, the flush retry uploads the same SST again and commits it.
+func TestRetryCommitDuringSweepKeepsSST(t *testing.T) {
+	e := newEnv(t, testConfig)
+	ctx := context.Background()
+	e.create(t, "v")
+	e.upload(t, "v", 7)
+	e.now = e.now.Add(3 * time.Hour)
+
+	// another coordinator serves the retry, so the cache of e.mgr is stale
+	other := manifest.New(e.pointers, e.store, testRoot)
+	e.beforeReclaim = func() {
+		e.beforeReclaim = nil
+		e.upload(t, "v", 7)
+		flushWith(t, other, "v", 10, 7)
+	}
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.True(t, e.has(sstKey("v", 7)), "committed by the retry")
+	assert.Zero(t, e.pointer(t, "v").GetMaxReclaimedSstId())
+
+	// the next round sees 7 as live
+	e.now = e.now.Add(3 * time.Hour)
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.True(t, e.has(sstKey("v", 7)))
+}
+
+// TestFlushOfReclaimedSSTIsRejected covers a delete that comes first: after
+// GC raised the reclaimed SST ID and deleted the SST, a flush that adds it
+// fails, also after the SST is uploaded again; new IDs commit.
+func TestFlushOfReclaimedSSTIsRejected(t *testing.T) {
+	e := newEnv(t, testConfig)
+	ctx := context.Background()
+	e.create(t, "v")
+	e.upload(t, "v", 5, 7)
+	e.now = e.now.Add(3 * time.Hour)
+
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.False(t, e.has(sstKey("v", 5)))
+	assert.False(t, e.has(sstKey("v", 7)))
+	assert.EqualValues(t, 7, e.pointer(t, "v").GetMaxReclaimedSstId())
+
+	e.upload(t, "v", 7)
+	for _, m := range []*manifest.Manager{e.mgr, manifest.New(e.pointers, e.store, testRoot)} {
+		_, err := m.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
+			CollectionId: 1, Vchannel: "v", PchannelTerm: 1, AddSsts: refs(7), CheckpointTimeTick: 10,
+		})
+		assert.True(t, errors.Is(err, manifest.ErrSSTReclaimed), "%v", err)
+	}
+
+	e.upload(t, "v", 8)
+	e.flush(t, "v", 10, 8)
+	p := e.pointer(t, "v")
+	assert.EqualValues(t, 7, p.GetMaxReclaimedSstId(), "a commit keeps the reclaimed sst ID")
+	assert.EqualValues(t, 2, p.GetVersion())
+}
+
+func TestReclaimFailureSkipsSSTSweep(t *testing.T) {
+	e := newEnv(t, testConfig)
+	ctx := context.Background()
+	e.create(t, "v")
+	e.upload(t, "v", 7)
+	e.now = e.now.Add(3 * time.Hour)
+
+	e.pointers.WriteErr = errors.New("etcd down")
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.True(t, e.has(sstKey("v", 7)))
+
+	e.pointers.WriteErr = nil
+	require.NoError(t, e.gc.RunOnce(ctx))
+	assert.False(t, e.has(sstKey("v", 7)))
 }

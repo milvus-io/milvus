@@ -604,7 +604,7 @@ func TestTwoWriters(t *testing.T) {
 		go func(i int, mgr *Manager) {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				id := int64(i*1000 + j)
+				id := int64(i*1000 + j + 1)
 				tick := uint64(id + 10)
 				got, err := mgr.CommitFlush(ctx, flush(1, tick, id))
 				if err != nil {
@@ -724,7 +724,7 @@ func editFlush(term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequ
 
 // applyEditFlush applies a flush with SST base path "b".
 func applyEditFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
-	return applyFlush(cur, req, "b")
+	return applyFlush(cur, req, "b", 0)
 }
 
 func ssts(ids ...int64) []*pkindexpb.SSTRef {
@@ -1040,4 +1040,95 @@ func TestStoreFailureClassification(t *testing.T) {
 			assert.Equal(t, c.unavailable, merr.IsRetryableErr(got), "%v", got)
 		})
 	}
+}
+
+func TestFlushReclaimedSST(t *testing.T) {
+	base := &pkindexpb.Manifest{Version: 2, CheckpointTimeTick: 10, LastFlushTerm: 1, Ssts: ssts(3)}
+
+	_, err := applyFlush(base, editFlush(1, 20, 9, 5), "b", 5)
+	assert.True(t, errors.Is(err, ErrSSTReclaimed), "%v", err)
+
+	next, err := applyFlush(base, editFlush(1, 20, 9, 6), "b", 5)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{9, 6, 3}, sstIDs(next))
+
+	// a duplicate is a caller bug and keeps its own error
+	_, err = applyFlush(base, editFlush(1, 20, 3), "b", 5)
+	assert.True(t, errors.Is(err, ErrDuplicateSST), "%v", err)
+
+	// an applied retry is not checked: its SSTs are on the pointer chain
+	next, err = applyFlush(base, editFlush(1, 10, 1), "b", 5)
+	require.NoError(t, err)
+	assert.Nil(t, next)
+}
+
+func TestAdvanceMaxReclaimedSSTID(t *testing.T) {
+	ctx := context.Background()
+	m, p, _ := assigned(t, 1)
+	_, err := m.CommitFlush(ctx, flush(1, 10, 3))
+	require.NoError(t, err)
+	key := PointerKey(1, vch)
+	read, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+
+	require.NoError(t, m.AdvanceMaxReclaimedSSTID(ctx, 1, vch, read, 7))
+	raised, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+	ptr, err := decodePointer(key, raised)
+	require.NoError(t, err)
+	assert.EqualValues(t, 7, ptr.GetMaxReclaimedSstId())
+	assert.EqualValues(t, 1, ptr.GetVersion())
+
+	// the cache follows the raise: the next flush commits without a reload
+	// and keeps the value, and an applied retry still succeeds
+	_, err = m.CommitFlush(ctx, flush(1, 20, 6))
+	assert.True(t, errors.Is(err, ErrSSTReclaimed), "%v", err)
+	mf, err := m.CommitFlush(ctx, flush(1, 10, 3))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, mf.GetVersion())
+	mf, err = m.CommitFlush(ctx, flush(1, 20, 8))
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, mf.GetVersion())
+	cur, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+	ptr, err = decodePointer(key, cur)
+	require.NoError(t, err)
+	assert.EqualValues(t, 7, ptr.GetMaxReclaimedSstId())
+
+	// the pointer changed since the read: the raise fails and writes nothing
+	err = m.AdvanceMaxReclaimedSSTID(ctx, 1, vch, raised, 9)
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
+	after, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, cur, after)
+
+	// a value at or below the stored one writes nothing, even on a stale read
+	p.WriteErr = errors.New("must not write")
+	require.NoError(t, m.AdvanceMaxReclaimedSSTID(ctx, 1, vch, raised, 7))
+	p.WriteErr = nil
+}
+
+func TestAdvanceAndFlushOnTwoManagers(t *testing.T) {
+	ctx := context.Background()
+	gcMgr, p, s := assigned(t, 1)
+	_, err := gcMgr.CommitFlush(ctx, flush(1, 10))
+	require.NoError(t, err)
+	other := New(p, s, testRoot)
+	key := PointerKey(1, vch)
+	read, _, err := p.Load(ctx, key)
+	require.NoError(t, err)
+
+	// a flush on the other manager wins first: the raise fails
+	_, err = other.CommitFlush(ctx, flush(1, 20, 7))
+	require.NoError(t, err)
+	assert.Error(t, gcMgr.AdvanceMaxReclaimedSSTID(ctx, 1, vch, read, 7))
+
+	// the raise wins first: the flush on the other manager is rejected
+	read, _, err = p.Load(ctx, key)
+	require.NoError(t, err)
+	require.NoError(t, gcMgr.AdvanceMaxReclaimedSSTID(ctx, 1, vch, read, 8))
+	_, err = other.CommitFlush(ctx, flush(1, 30, 8))
+	assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "stale cache: %v", err)
+	_, err = other.CommitFlush(ctx, flush(1, 30, 8))
+	assert.True(t, errors.Is(err, ErrSSTReclaimed), "%v", err)
 }

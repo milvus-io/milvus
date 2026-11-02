@@ -84,15 +84,21 @@ var (
 	// of the manifest SST list, except an applied retry: no input is in the
 	// list and all outputs are in the list.
 	ErrStaleEdit = errors.New("compaction inputs are not in the manifest")
+	// ErrSSTReclaimed reports a flush that is not an applied retry and adds an
+	// SST ID that is not above the reclaimed SST ID of the pointer: garbage
+	// collection may have deleted that SST. The flush did not take effect.
+	ErrSSTReclaimed = errors.New("sst ID is not above the reclaimed sst ID")
 )
 
 var marshal = proto.MarshalOptions{Deterministic: true}
 
 // vchannelManifest is the current version of the manifest of one vchannel.
-// pointer is the pointer to it as it is stored in the meta store.
+// pointer is the pointer to it as it is stored in the meta store, and
+// maxReclaimed is the reclaimed SST ID of that pointer.
 type vchannelManifest struct {
-	pb      *pkindexpb.Manifest
-	pointer string
+	pb           *pkindexpb.Manifest
+	pointer      string
+	maxReclaimed int64
 }
 
 // Manager is the only writer of the manifests. It applies the edits of one
@@ -141,17 +147,59 @@ func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 		return nil, err
 	}
 	sstBasePath := pkindex.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetVchannel())
-	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), []predicates.Predicate{pchannelPred}, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
-		return applyFlush(cur, req, sstBasePath)
+	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), []predicates.Predicate{pchannelPred}, func(cur *pkindexpb.Manifest, maxReclaimed int64) (*pkindexpb.Manifest, error) {
+		return applyFlush(cur, req, sstBasePath, maxReclaimed)
 	})
 }
 
 // CommitCompaction applies a compaction (see applyCompaction) and returns the
 // resulting version.
 func (m *Manager) CommitCompaction(ctx context.Context, collectionID int64, vchannel string, c Compaction) (*pkindexpb.Manifest, error) {
-	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
+	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest, _ int64) (*pkindexpb.Manifest, error) {
 		return applyCompaction(cur, c)
 	})
+}
+
+// AdvanceMaxReclaimedSSTID raises the reclaimed SST ID of the pointer of a
+// vchannel to id, on the predicate that the stored pointer is still pointer.
+// Garbage collection calls it with the pointer it read and the highest SST ID
+// it is about to delete, and deletes only after a nil return. After that, no
+// flush can add one of those SSTs: a commit before the call changed the
+// pointer, so the call fails; a commit after the call gets ErrSSTReclaimed.
+// When the reclaimed SST ID of pointer is already at least id, it writes
+// nothing: no commit after the read can add an SST at or below id. An error
+// does not tell whether the write took effect.
+func (m *Manager) AdvanceMaxReclaimedSSTID(ctx context.Context, collectionID int64, vchannel string, pointer string, id int64) error {
+	key := PointerKey(collectionID, vchannel)
+	m.locks.Lock(key)
+	defer m.locks.Unlock(key)
+
+	p, err := decodePointer(key, pointer)
+	if err != nil {
+		return err
+	}
+	if p.GetMaxReclaimedSstId() >= id {
+		return nil
+	}
+	ptrBytes, err := marshal.Marshal(&pkindexpb.ManifestPointer{Version: p.GetVersion(), BodyKey: p.GetBodyKey(), MaxReclaimedSstId: id})
+	if err != nil {
+		return errors.Wrapf(err, "marshal manifest pointer of %s", vchannel)
+	}
+	next := string(ptrBytes)
+	if err := m.meta.Save(ctx, map[string]string{key: next}, predicates.ValueEqual(key, pointer)); err != nil {
+		m.forget(key)
+		return markUnavailable(err, "advance reclaimed sst ID of manifest pointer %s to %d", key, id)
+	}
+	m.mu.Lock()
+	if cur := m.manifests[key]; cur != nil {
+		if cur.pointer == pointer {
+			m.manifests[key] = &vchannelManifest{pb: cur.pb, pointer: next, maxReclaimed: id}
+		} else {
+			delete(m.manifests, key)
+		}
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 // Target names the manifest of one vchannel.
@@ -197,9 +245,10 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 // edit changes the manifest, commit writes the new body under a unique key, then
 // writes the pointer on the predicate that the stored pointer is still the
 // one it loaded, or does not exist for the first version. The same write also
-// requires preds; it does not write their keys.
+// requires preds; it does not write their keys. apply also gets the reclaimed
+// SST ID of the loaded pointer, and the new pointer keeps that value.
 func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, preds []predicates.Predicate,
-	apply func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error),
+	apply func(cur *pkindexpb.Manifest, maxReclaimed int64) (*pkindexpb.Manifest, error),
 ) (*pkindexpb.Manifest, error) {
 	key := PointerKey(collectionID, vchannel)
 	m.locks.Lock(key)
@@ -210,10 +259,12 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		return nil, err
 	}
 	var curManifest *pkindexpb.Manifest
+	var maxReclaimed int64
 	if cur != nil {
 		curManifest = cur.pb
+		maxReclaimed = cur.maxReclaimed
 	}
-	next, err := apply(curManifest)
+	next, err := apply(curManifest, maxReclaimed)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +280,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	if err := m.store.Write(ctx, bodyKey, body); err != nil {
 		return nil, markUnavailable(err, "write manifest body %s", bodyKey)
 	}
-	ptrBytes, err := marshal.Marshal(&pkindexpb.ManifestPointer{Version: next.GetVersion(), BodyKey: bodyKey})
+	ptrBytes, err := marshal.Marshal(&pkindexpb.ManifestPointer{Version: next.GetVersion(), BodyKey: bodyKey, MaxReclaimedSstId: maxReclaimed})
 	if err != nil {
 		return nil, errors.Wrapf(err, "marshal manifest pointer of %s", vchannel)
 	}
@@ -245,7 +296,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		m.forget(key)
 		return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
 	}
-	m.remember(key, &vchannelManifest{pb: next, pointer: ptr})
+	m.remember(key, &vchannelManifest{pb: next, pointer: ptr, maxReclaimed: maxReclaimed})
 	return next, nil
 }
 
@@ -280,7 +331,7 @@ func (m *Manager) load(ctx context.Context, key string) (*vchannelManifest, erro
 	if mf.GetVersion() != p.GetVersion() {
 		return nil, errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d", p.GetBodyKey(), mf.GetVersion(), p.GetVersion()), pkindex.ErrCorrupted)
 	}
-	cur = &vchannelManifest{pb: &mf, pointer: ptr}
+	cur = &vchannelManifest{pb: &mf, pointer: ptr, maxReclaimed: p.GetMaxReclaimedSstId()}
 	m.remember(key, cur)
 	return cur, nil
 }
@@ -354,9 +405,10 @@ type Compaction struct {
 // ErrCheckpointRegressed when the checkpoint does not move forward and the
 // flush term differs from the last flush term, and ErrDuplicateSST when the
 // checkpoint moves forward and an SST is already in cur or is listed twice in
-// the flush. It does not check the flush term against the pchannel meta. It
-// does not change cur.
-func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstBasePath string) (*pkindexpb.Manifest, error) {
+// the flush, and ErrSSTReclaimed when the checkpoint moves forward and an SST
+// ID is not above maxReclaimed, the reclaimed SST ID of the pointer. It does
+// not check the flush term against the pchannel meta. It does not change cur.
+func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstBasePath string, maxReclaimed int64) (*pkindexpb.Manifest, error) {
 	base := cur
 	if base == nil {
 		base = &pkindexpb.Manifest{
@@ -374,6 +426,11 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 	}
 	if err := checkNewSSTs(base.GetVchannel(), idSet(base.GetSsts()), req.GetAddSsts()); err != nil {
 		return nil, err
+	}
+	for _, s := range req.GetAddSsts() {
+		if s.GetId() <= maxReclaimed {
+			return nil, errors.Wrapf(ErrSSTReclaimed, "vchannel %s: sst %d, reclaimed sst ID %d", base.GetVchannel(), s.GetId(), maxReclaimed)
+		}
 	}
 	next := nextVersion(base)
 	next.LastFlushTerm = req.GetPchannelTerm()
