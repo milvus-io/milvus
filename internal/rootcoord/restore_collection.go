@@ -79,6 +79,12 @@ func (c *Core) PrepareRestoreCollection(ctx context.Context, req *milvuspb.Creat
 		cleanup()
 		return nil, nil, merr.WrapErrParameterInvalidMsg("snapshot partition count exceeds collection limit")
 	}
+	// Prepare checks only the default/partition-key partitions. Recheck the
+	// complete snapshot recipe before the caller can publish it.
+	if err := checkGeneralCapacity(ctx, 1, int64(len(task.body.PartitionIDs)), req.GetShardsNum(), c); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	return &messagespb.RestoreSnapshotMessageBody{CollectionHeader: task.header, Collection: task.body}, cleanup, nil
 }
 

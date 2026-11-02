@@ -186,7 +186,8 @@ type MetaTable struct {
 	fileResourceRefHolds  map[int64]map[int64]int                 // collection id -> file resource id -> pending alter reservation count
 	fileResourceVersion   uint64
 
-	generalCnt                   int // sum of product of partition number and shard number
+	generalCnt int // sum of product of partition number and shard number
+	// Admission counts include Created and Restoring collections, independently of public visibility.
 	availableCollectionCount     int
 	availableCollectionCountByDB map[int64]int
 
@@ -614,9 +615,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	if coll.Available() {
-		mt.increaseAvailableCollectionCountLocked(coll.DBID)
-	}
+	mt.increaseAvailableCollectionCountLocked(coll.DBID)
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -661,7 +660,6 @@ func (mt *MetaTable) CompleteRestoreCollection(ctx context.Context, collectionID
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
-	mt.increaseAvailableCollectionCountLocked(clone.DBID)
 	return nil
 }
 
@@ -721,7 +719,7 @@ func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID Un
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
-	if coll.Available() {
+	if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 		mt.decreaseAvailableCollectionCountLocked(coll.DBID)
 	}
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
@@ -1833,7 +1831,7 @@ func (mt *MetaTable) rebuildAvailableCollectionCountLocked() {
 		mt.availableCollectionCountByDB[db.ID] = 0
 	}
 	for _, coll := range mt.collID2Meta {
-		if !coll.Available() {
+		if !coll.Available() && coll.State != pb.CollectionState_CollectionRestoring {
 			continue
 		}
 		mt.increaseAvailableCollectionCountLocked(coll.DBID)
@@ -1869,6 +1867,8 @@ func (mt *MetaTable) moveAvailableCollectionCountLocked(fromDBID int64, toDBID i
 	mt.increaseAvailableCollectionCountLocked(toDBID)
 }
 
+// GetAvailableCollectionCount returns collection-count admission usage. Restoring
+// collections reserve capacity even though public lookups hide them.
 func (mt *MetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
