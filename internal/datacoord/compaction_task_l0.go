@@ -546,13 +546,10 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
-	// Retire the compacted L0 input segments in the same catalog transaction that
-	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
-	// either every target gains its deltalogs and every input turns
-	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
-	// one CommitSegmentManifests call (manifest pointer advance + these operators
-	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
-	// through UpdateSegmentsInfo.
+	// Retire inputs in the same catalog mutation as target deltalogs. Within
+	// the transaction limit the mutation is atomic; oversized results persist
+	// deltalogs and target records before retiring inputs. Restore recovery
+	// relies on this ordering to recognize an already-installed result.
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
@@ -587,15 +584,13 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 }
 
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
-// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
+// extraOperators — the L0 input-segment retirement — in one catalog mutation.
 // CommitSegmentManifests acquires all targets' manifest locks as a single atomic
 // operation, runs the loon transactions in parallel outside segMu (from the same
 // dataCoord.manifestCommitConcurrency executor), and lands every pointer
-// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
-// Folding the input drops in makes the whole L0 result atomic — the targets gain their
-// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
-// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
-// one catalog.Update each.
+// advance plus extraOperators through a single UpdateSegmentsInfo. The catalog
+// commits atomically within its transaction limit; larger mutations persist all
+// targets before input retirement.
 // A target dropped during the plan is skipped by the primitive itself as a benign
 // terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
 // manifest, manifest I/O error) is returned, failing the save so the scheduler retries.

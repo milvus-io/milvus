@@ -136,8 +136,8 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 	return false, nil
 }
 
-// A restore L0 transaction retires all inputs together with every target delta.
-// This closes the crash window between that commit and the task-state write.
+// Restore L0 publication persists every target delta before retiring inputs.
+// Retired inputs therefore prove installation even before the task-state write.
 func (t *l0CompactionTask) restoreMutationApplied() bool {
 	if t.GetTaskProto().GetType() != datapb.CompactionType_RestoreLevel0DeleteCompaction || len(t.GetTaskProto().GetInputSegments()) == 0 {
 		return false
