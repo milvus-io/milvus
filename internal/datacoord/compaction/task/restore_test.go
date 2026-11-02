@@ -44,9 +44,9 @@ func TestRestoreL0CommitAndTaskSaveCrash(t *testing.T) {
 		task.CreateTaskOnWorker(8, nil) // must not read or resend the retired L0
 		require.Equal(t, datapb.CompactionTaskState_meta_saved, task.GetTaskProto().State)
 		require.True(t, task.Process())
-		require.True(t, task.GetTaskProto().RestoreCompleted)
+		require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState())
 		require.True(t, task.Clean())
-		require.True(t, task.GetTaskProto().RestoreCompleted, "cleanup retains successful completion")
+		require.Equal(t, datapb.CompactionTaskState_completed, task.GetTaskProto().GetTerminalState(), "cleanup retains successful completion")
 		require.NoError(t, task.SaveSegmentMeta(nil), "replaying an applied result does not append twice")
 		gc := &gc.GarbageCollector{}
 		require.False(t, gc.CheckDroppedSegmentGCForTest(m.GetSegment(ctx, 1), nil, nil, 0))

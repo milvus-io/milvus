@@ -38,7 +38,7 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 		}
 		complete := true
 		for _, id := range recipe.GetRestoreCompactionPlans() {
-			complete = complete && persisted[id].GetRestoreCompleted()
+			complete = complete && persisted[id].GetTerminalState() == datapb.CompactionTaskState_completed
 		}
 		if complete {
 			return true, nil
@@ -119,7 +119,7 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 			return false, merr.WrapErrDataIntegrityMsg("restore compaction group %s has no durable plan ID", key)
 		}
 		if previous := persisted[plan.PlanID]; previous != nil {
-			if previous.GetRestoreCompleted() {
+			if previous.GetTerminalState() == datapb.CompactionTaskState_completed {
 				continue
 			}
 			switch previous.GetState() {

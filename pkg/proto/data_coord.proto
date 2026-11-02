@@ -1871,8 +1871,6 @@ message CompactionTask{
   // Nonzero only for L0 materialization before a restored collection is published.
   int64 restore_job_id = 32;
   repeated int64 restore_target_segments = 33;
-  // Retained through task cleanup so the restore owner can prove completion.
-  bool restore_completed = 34;
 }
 
 message PartitionStatsInfo {
