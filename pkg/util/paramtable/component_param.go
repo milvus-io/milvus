@@ -8329,7 +8329,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
 		Version:      "2.5.8",
-		Doc:          "slot usage of index task per 512mb",
+		Doc:          "Deprecated: unused. Vector task slots are estimated from input, build workspace and output memory.",
 		DefaultValue: "64",
 		PanicIfEmpty: false,
 		Export:       true,

@@ -338,12 +338,14 @@ VectorBuildMaterializer::VectorBuildMaterializer(
     int64_t dim,
     int64_t expected_rows,
     const index::IndexFamily& family,
-    const index::BuildParams& params)
+    const index::BuildParams& params,
+    milvus::OpContext* op_context)
     : field_type_(field_type),
       value_type_(value_type),
       dim_(dim),
       observed_dim_(dim),
-      expected_rows_(expected_rows) {
+      expected_rows_(expected_rows),
+      op_context_(op_context) {
     index::DispatchPhysicalVectorDataType(
         value_type,
         [&]<typename T>() {
@@ -373,7 +375,9 @@ VectorBuildMaterializer::VectorBuildMaterializer(
       embedding_offsets_(std::move(other.embedding_offsets_)),
       scalar_info_(std::move(other.scalar_info_)),
       consumed_(other.consumed_),
-      state_(std::move(other.state_)) {
+      state_(std::move(other.state_)),
+      op_context_(other.op_context_),
+      input_(std::move(other.input_)) {
     other.state_.emplace<0>();
 }
 
@@ -395,6 +399,8 @@ VectorBuildMaterializer::operator=(VectorBuildMaterializer&& other) noexcept {
     scalar_info_ = std::move(other.scalar_info_);
     consumed_ = other.consumed_;
     state_ = std::move(other.state_);
+    op_context_ = other.op_context_;
+    input_ = std::move(other.input_);
     other.state_.emplace<0>();
     return *this;
 }
@@ -484,13 +490,75 @@ VectorBuildMaterializer::SetScalarInfo(VectorScalarInfo scalar_info) {
     scalar_info_.emplace(std::move(scalar_info));
 }
 
+bool
+VectorBuildMaterializer::TryReserveBuild() {
+    AssertOpen("reserve");
+    const bool embedding_list = field_type_ == DataType::VECTOR_ARRAY;
+    const auto rows =
+        embedding_list ? embedding_offsets_.back() : layout_.PhysicalRows();
+    AssertInfo(rows <= static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "vector physical row count exceeds int64");
+    const index::BuildInputShape shape{
+        .rows = static_cast<int64_t>(rows),
+        .dim = observed_dim_,
+        .embedding_list_count =
+            embedding_list ? static_cast<int64_t>(embedding_offsets_.size() - 1)
+                           : 0};
+    return std::visit(
+        [&shape](auto& state) {
+            using S = std::decay_t<decltype(state)>;
+            if constexpr (std::is_same_v<S, std::monostate>) {
+                return false;
+            } else {
+                return state.builder->TryReserveBuild(shape);
+            }
+        },
+        state_);
+}
+
+uint8_t*
+VectorBuildMaterializer::AllocateInput() {
+    AssertOpen("allocate input for");
+    AssertInfo(field_type_ != DataType::VECTOR_ARRAY &&
+                   !IsSparseFloatVectorDataType(value_type_) &&
+                   layout_.LogicalRows() == 0,
+               "direct input requires an empty dense vector materializer");
+    const auto row_bytes = vector_bytes_per_element(value_type_, dim_);
+    const auto rows =
+        index::vector_builder::CheckedSize(expected_rows_, "expected row");
+    AssertInfo(
+        row_bytes > 0 && rows <= std::numeric_limits<size_t>::max() / row_bytes,
+        "vector input size overflows size_t");
+    if (!input_) {
+        input_ = std::make_unique_for_overwrite<uint8_t[]>(rows * row_bytes);
+    }
+    return input_.get();
+}
+
+void
+VectorBuildMaterializer::FinishInput(size_t rows) {
+    AssertOpen("finish input for");
+    AssertInfo(input_ && rows == static_cast<size_t>(expected_rows_) &&
+                   layout_.LogicalRows() == 0,
+               "direct vector input has {} rows, expected {}",
+               rows,
+               expected_rows_);
+    layout_.Append(rows, {});
+}
+
 template <typename T>
 storage::ArtifactPtr
 VectorBuildMaterializer::BuildTyped(
     TypedState<T>& state,
     std::span<const index::VectorScalarFieldGroups> field_views) {
     using ValueType = typename TypedState<T>::ValueType;
-    const std::span<const ValueType> physical_values = state.values;
+    const std::span<const ValueType> physical_values =
+        input_ ? std::span<const ValueType>(
+                     reinterpret_cast<const ValueType*>(input_.get()),
+                     layout_.PhysicalRows() *
+                         vector_bytes_per_element(value_type_, dim_) /
+                         sizeof(ValueType))
+               : std::span<const ValueType>(state.values);
     const auto physical_rows = field_type_ == DataType::VECTOR_ARRAY
                                    ? embedding_offsets_.back()
                                    : layout_.PhysicalRows();
@@ -509,6 +577,7 @@ VectorBuildMaterializer::BuildTyped(
         .parent_validity = layout_.Validity(),
         .embedding_offsets = offsets,
         .scalar_fields = field_views,
+        .op_context = op_context_,
     };
     auto builder = std::move(state.builder);
     try {
@@ -712,26 +781,24 @@ VectorBuildMaterializer::AppendBatch(TypedState<T>& state,
                    batch->get_dim(),
                    dim_);
         const auto elements = BatchElementCount<T>(*batch, valid_rows);
-        if (state.values.empty() && layout_.LogicalRows() == 0 &&
-            !batch->IsNullable()) {
-            const auto row_elements =
-                vector_bytes_per_element(value_type_, dim_) / sizeof(ValueType);
-            const auto expected = index::vector_builder::CheckedSize(
-                expected_rows_, "expected row");
-            AssertInfo(row_elements == 0 ||
-                           expected <= std::numeric_limits<size_t>::max() /
-                                           row_elements,
-                       "vector tensor element count overflows size_t");
-            state.values.reserve(expected * row_elements);
+        if (!input_) {
+            AllocateInput();
         }
         const auto* begin = static_cast<const ValueType*>(batch->Data());
         AssertInfo(begin != nullptr || elements == 0,
                    "vector batch has null physical data");
         if (elements != 0) {
-            state.values.insert(state.values.end(), begin, begin + elements);
+            const auto offset = layout_.PhysicalRows() *
+                                vector_bytes_per_element(value_type_, dim_);
+            std::memcpy(
+                input_.get() + offset, begin, elements * sizeof(ValueType));
         }
     }
     layout_.Append(batch->Length(), validity);
+    if (layout_.LogicalRows() == static_cast<size_t>(expected_rows_) &&
+        layout_.PhysicalRows() == 0) {
+        input_.reset();
+    }
 }
 
 }  // namespace milvus::indexbuilder
