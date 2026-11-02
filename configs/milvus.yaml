@@ -1304,6 +1304,12 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    # Configured initial Broker URLs for External Tables, including legacy Azure Brokers.
+    # Redirects follow storage SDK defaults; redirect targets are not checked.
+    # JSON array string, not a YAML list or comma-separated URLs.
+    # Example: '["https://broker.example.com/token?scope=a,b"]'
+    # Empty or [] denies all Brokers. Restart all components after changing this value.
+    credentialBrokerAllowedEndpoints: "[]"
     internaltlsEnabled: false
     tlsMode: 0
   session:

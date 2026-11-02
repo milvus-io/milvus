@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "storage/loon_ffi/util.h"
 #include <gtest/gtest.h>
 
 #include <aws/core/http/HttpClientFactory.h>
@@ -206,6 +207,12 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
         return "fake";
     }
 
+    void
+    Reset(Mode mode) {
+        mode_ = mode;
+        calls_ = 0;
+    }
+
     int
     calls() const {
         return calls_;
@@ -222,11 +229,23 @@ static std::shared_ptr<FakeGcpCredentialProvider>
 RegisterFakeProvider(const std::string& endpoint,
                      const std::string& bucket,
                      FakeGcpCredentialProvider::Mode mode) {
-    auto provider = std::make_shared<FakeGcpCredentialProvider>(mode);
-    auto status = milvus_storage::GcpCredentialRegistry::Instance().Register(
-        {milvus_storage::NormalizeGcpEndpoint(endpoint, true), bucket},
-        provider);
-    EXPECT_TRUE(status.ok()) << status;
+    auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
+    const auto address = endpoint.find("://") == std::string::npos
+                             ? "https://" + endpoint
+                             : endpoint;
+    // Register retains the provider for an existing identity across repeats.
+    auto provider = std::dynamic_pointer_cast<FakeGcpCredentialProvider>(
+        registry.Lookup(Aws::Http::URI((address + "/" + bucket).c_str())));
+    if (provider == nullptr) {
+        provider = std::make_shared<FakeGcpCredentialProvider>(mode);
+    }
+    provider->Reset(mode);
+    EXPECT_TRUE(
+        registry
+            .Register(
+                {milvus_storage::NormalizeGcpEndpoint(endpoint, true), bucket},
+                provider)
+            .ok());
     return provider;
 }
 
@@ -475,6 +494,32 @@ TEST(GcpChunkManagerRegistrationDeathTest, MilvusBucketKeepsItsProvider) {
         },
         ::testing::ExitedWithCode(0),
         "");
+}
+
+TEST(GoogleHttpClientFactoryTest, BrokerDoesNotInheritGcpCredentials) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    ASSERT_TRUE(
+        ::InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    AddGcsEndpointForCredentials("broker.example.com", true);
+    auto provider = RegisterFakeProvider(
+        "broker.example.com", "v1", FakeGcpCredentialProvider::Mode::kToken);
+    milvus::storage::GoogleHttpClientFactory factory;
+    auto request = factory.CreateHttpRequest(
+        Aws::String(endpoint.c_str()),
+        Aws::Http::HttpMethod::HTTP_POST,
+        Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+    EXPECT_FALSE(request->HasHeader("Authorization"));
+    EXPECT_EQ(provider->calls(), 0);
+    auto ordinary = factory.CreateHttpRequest(
+        Aws::String((endpoint + "/object").c_str()),
+        Aws::Http::HttpMethod::HTTP_GET,
+        Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+    EXPECT_EQ(ordinary->GetHeaderValue("Authorization"), "Bearer fake-token");
+    EXPECT_EQ(provider->calls(), 1);
 }
 
 }  // namespace milvus::storage

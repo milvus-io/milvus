@@ -193,6 +193,9 @@ GoogleHttpClientFactory::CreateHttpRequest(
     auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
         GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
     request->SetResponseStreamFactory(streamFactory);
+    if (IsCredentialBrokerEndpoint(uri.GetURIString().c_str())) {
+        return request;
+    }
     // Only GCS endpoints get a token, and only for buckets with a registered
     // provider, as in milvus-storage's GCP factory. Requests to any other
     // host, such as the instance metadata endpoint or an external table

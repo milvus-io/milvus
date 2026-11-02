@@ -19,6 +19,7 @@ package externalspec
 import (
 	"encoding/json"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -1020,4 +1022,143 @@ func TestRedactExternalSpec_SnapshotIDNumber(t *testing.T) {
 	redacted := RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
 	assert.Contains(t, redacted, `"snapshot_id":"5320540205222981137"`)
 	assert.NotEqual(t, "<invalid spec>", redacted)
+}
+
+func TestCredentialBrokerModesAndPolicy(t *testing.T) {
+	const endpoint = "https://broker.example.com/v1/credentials/assume-role"
+	policy, err := specutil.NewBrokerPolicy([]string{endpoint})
+	require.NoError(t, err)
+	for _, iam := range []string{"true", "false"} {
+		missingProvider := map[string]string{
+			"endpoint_url": "https://s3.us-west-2.amazonaws.com", "region": "us-west-2",
+			"credential_endpoint": endpoint, "use_iam": iam,
+		}
+		if iam == "false" {
+			missingProvider["role_arn"] = "role"
+		}
+		require.ErrorContains(t, ValidateExtfsComplete("s3://bucket/key", missingProvider), "cloud_provider is required for credential broker")
+	}
+
+	for _, cloud := range []string{"aws", "aliyun", "tencent"} {
+		t.Run(cloud, func(t *testing.T) {
+			extfs := map[string]string{"cloud_provider": cloud, "region": "test-region", "credential_endpoint": endpoint, "use_iam": "true"}
+			for _, iam := range []bool{true, false} {
+				extfs["use_iam"] = strconv.FormatBool(iam)
+				if !iam {
+					extfs["role_arn"] = "role"
+				} else {
+					delete(extfs, "role_arn")
+				}
+				data, err := json.Marshal(ExternalSpec{Format: FormatParquet, Extfs: extfs})
+				require.NoError(t, err)
+				require.NoError(t, ValidateSourceAndSpec("s3://bucket/key", string(data), policy))
+				require.Error(t, ValidateSourceAndSpec("s3://bucket/key", string(data)))
+			}
+			extfs["use_iam"] = "true"
+			delete(extfs, "role_arn")
+			for _, key := range []string{"role_arn", "external_id", "session_name", "access_key_id", "access_key_value", "gcp_target_service_account", "azure_client_id", "azure_tenant_id"} {
+				extfs[key] = "unused"
+				require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs), key)
+				delete(extfs, key)
+			}
+			extfs["anonymous"] = "true"
+			require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
+			delete(extfs, "anonymous")
+			for _, duration := range []string{"899", "3601", "bad", "2147483648"} {
+				extfs["load_frequency"] = duration
+				require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
+			}
+			for _, duration := range []string{"900", "3600", ""} {
+				extfs["load_frequency"] = duration
+				require.NoError(t, ValidateExtfsComplete("s3://bucket/key", extfs))
+			}
+			delete(extfs, "region")
+			require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
+			extfs["region"] = "region"
+			extfs["use_iam"] = "false"
+			require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
+		})
+	}
+	for _, cloud := range []string{"gcp", "huawei", "minio"} {
+		require.Error(t, ValidateExtfsComplete("s3://bucket/key", map[string]string{"cloud_provider": cloud, "region": "r", "use_iam": "true", "credential_endpoint": endpoint}))
+	}
+	extfs := map[string]string{"cloud_provider": "azure", "access_key_id": "account", "region": "westus3", "azure_client_id": "client", "azure_tenant_id": "tenant", "azure_credential_endpoint": endpoint}
+	for _, legacy := range []bool{true, false} {
+		if !legacy {
+			delete(extfs, "azure_credential_endpoint")
+			extfs["credential_endpoint"] = endpoint
+		}
+		data, err := json.Marshal(ExternalSpec{Format: FormatParquet, Extfs: extfs})
+		require.NoError(t, err)
+		require.NoError(t, ValidateSourceAndSpec("azure://core.windows.net/container/path", string(data), policy))
+		require.Error(t, ValidateSourceAndSpec("azure://core.windows.net/container/path", string(data)))
+	}
+}
+
+func TestCredentialBrokerFormatCompatibility(t *testing.T) {
+	const endpoint = "https://broker.example.com/token?scope=a,b&next=https://other.example.com/token"
+	policy, err := specutil.NewBrokerPolicy([]string{endpoint})
+	require.NoError(t, err)
+	formats := []string{"", FormatParquet, FormatVortex, FormatLanceTable, FormatIcebergTable, FormatMilvusTable}
+	for _, cloud := range []string{"aws", "aliyun", "tencent"} {
+		for _, iam := range []bool{true, false} {
+			for _, format := range formats {
+				t.Run(cloud+"/"+strconv.FormatBool(iam)+"/"+format, func(t *testing.T) {
+					extfs := map[string]string{"cloud_provider": cloud, "region": "test-region", "use_iam": strconv.FormatBool(iam), "credential_endpoint": endpoint}
+					if !iam {
+						extfs["role_arn"] = "target-role"
+					}
+					data, err := json.Marshal(ExternalSpec{Format: format, Extfs: extfs})
+					require.NoError(t, err)
+					err = ValidateSourceAndSpec("s3://bucket/key", string(data), policy)
+					require.NoError(t, err)
+					require.Error(t, ValidateSourceAndSpec("s3://bucket/key", string(data)))
+					delete(extfs, "credential_endpoint")
+					data, err = json.Marshal(ExternalSpec{Format: format, Extfs: extfs})
+					require.NoError(t, err)
+					require.NoError(t, ValidateSourceAndSpec("s3://bucket/key", string(data)))
+				})
+			}
+		}
+	}
+	for _, field := range []string{"credential_endpoint", "azure_credential_endpoint"} {
+		for _, format := range formats {
+			t.Run("azure/"+field+"/"+format, func(t *testing.T) {
+				extfs := map[string]string{"cloud_provider": "azure", "access_key_id": "account", "region": "westus3", "azure_client_id": "client", "azure_tenant_id": "tenant", field: endpoint}
+				data, err := json.Marshal(ExternalSpec{Format: format, Extfs: extfs})
+				require.NoError(t, err)
+				require.NoError(t, ValidateSourceAndSpec("azure://core.windows.net/container/path", string(data), policy))
+			})
+		}
+	}
+}
+
+func TestAzureLegacyBrokerQuery(t *testing.T) {
+	endpoint := "https://broker.example.com/token?api-version=1&scope=a%2Fb+x"
+	policy, err := specutil.NewBrokerPolicy([]string{endpoint})
+	require.NoError(t, err)
+	extfs := map[string]string{"cloud_provider": "azure", "access_key_id": "account", "region": "westus3", "azure_client_id": "client", "azure_tenant_id": "tenant", "azure_credential_endpoint": endpoint}
+	validate := func() error {
+		data, err := json.Marshal(ExternalSpec{Format: FormatParquet, Extfs: extfs})
+		require.NoError(t, err)
+		return ValidateSourceAndSpec("azure://core.windows.net/container/path", string(data), policy)
+	}
+	require.NoError(t, validate())
+	require.Equal(t, endpoint, extfs["azure_credential_endpoint"])
+	extfs["credential_endpoint"] = endpoint
+	require.NoError(t, validate())
+	delete(extfs, "credential_endpoint")
+	for _, denied := range []string{
+		"https://broker.example.com/token",
+		endpoint + "&extra=1",
+		"https://broker.example.com/token?api-version=2&scope=a%2Fb+x",
+		"https://broker.example.com/token?scope=a%2Fb+x&api-version=1",
+		"https://broker.example.com/token?api-version=1&scope=a%2fb+x",
+	} {
+		extfs["azure_credential_endpoint"] = denied
+		require.Error(t, validate(), denied)
+	}
+	extfs["azure_credential_endpoint"] = endpoint
+	extfs["credential_endpoint"] = endpoint + "&extra=1"
+	require.Error(t, validate())
 }
