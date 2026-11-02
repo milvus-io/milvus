@@ -166,8 +166,11 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/meta
 
 function test_cmd()
 {
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/coverage/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/milvus/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go vet -tags dynamic,test,servercoverage "${ROOT_DIR}/cmd/coverage/..." "${ROOT_DIR}/cmd/milvus/..."
+bash "${ROOT_DIR}/tests/scripts/test_server_coverage_export.sh"
 }
 
 function test_streaming()

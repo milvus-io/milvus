@@ -372,7 +372,9 @@ endif ()
 config_summary()
 
 # **************************** Source files ****************************
-if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
+if (BUILD_SERVER_COVERAGE)
+    include(cmake/ServerCoverage.cmake)
+elseif ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS
                   FLAGS
                         "-fprofile-arcs"

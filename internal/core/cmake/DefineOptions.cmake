@@ -43,6 +43,8 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Milvus Build Option")
 
+define_option(BUILD_SERVER_COVERAGE "Instrument the running server for E2E coverage (Linux/GCC)" OFF)
+
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
 #----------------------------------------------------------------------
