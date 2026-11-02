@@ -1497,7 +1497,7 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_segment, nullptr);
     const auto planned_index_pin =
-        growing_segment->PinGrowingIndex(vector_field);
+        growing_segment->PinGrowingIndex(nullptr, vector_field);
     ASSERT_TRUE(planned_index_pin);
     ASSERT_NE(
         dynamic_cast<const index::IVectorReader*>(&planned_index_pin.Reader()),
@@ -1544,7 +1544,7 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
                     std::make_shared<InsertRecordProto>(*appended.raw_));
     ASSERT_EQ(growing_segment->get_row_count(), initial_count + appended_count);
     const auto appended_index_pin =
-        growing_segment->PinGrowingIndex(vector_field);
+        growing_segment->PinGrowingIndex(nullptr, vector_field);
     ASSERT_TRUE(appended_index_pin);
     ASSERT_EQ(appended_index_pin.CoveredRowEnd(),
               initial_count + appended_count);

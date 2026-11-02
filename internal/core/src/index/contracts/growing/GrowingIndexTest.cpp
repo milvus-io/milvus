@@ -53,8 +53,10 @@ namespace {
 // owner and reader let these tests isolate pin semantics from any one engine.
 class LifetimeReader final : public IIndexReaderBase {
  public:
-    LifetimeReader(int64_t count, std::shared_ptr<int> lifetime)
-        : count_(count), lifetime_(std::move(lifetime)) {
+    LifetimeReader(int64_t count,
+                   std::shared_ptr<int> lifetime,
+                   milvus::OpContext* op_ctx)
+        : count_(count), lifetime_(std::move(lifetime)), op_ctx_(op_ctx) {
     }
 
     ReaderCaps
@@ -87,6 +89,34 @@ class LifetimeReader final : public IIndexReaderBase {
         return {};
     }
 
+    milvus::OpContext*
+    Context() const {
+        return op_ctx_;
+    }
+
+ private:
+    int64_t count_;
+    std::shared_ptr<int> lifetime_;
+    milvus::OpContext* op_ctx_;
+};
+
+class LifetimeIndex final : public IIndex {
+ public:
+    LifetimeIndex(int64_t count, std::shared_ptr<int> lifetime)
+        : count_(count), lifetime_(std::move(lifetime)) {
+    }
+    IndexMetadata
+    Metadata() const override {
+        return {{}, Domain::Element, DataType::INT64, count_};
+    }
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override {
+        return std::make_unique<LifetimeReader>(count_, lifetime_, op_ctx);
+    }
+    void
+    CancelWarmup() const override {
+    }
+
  private:
     int64_t count_;
     std::shared_ptr<int> lifetime_;
@@ -95,9 +125,8 @@ class LifetimeReader final : public IIndexReaderBase {
 class PublicationOwner final : public IGrowingIndex {
  public:
     void
-    Publish(std::unique_ptr<const IIndexReaderBase> reader,
-            int64_t covered_row_end) {
-        PublishSnapshot(std::move(reader), covered_row_end);
+    Publish(IndexPtr index, int64_t covered_row_end) {
+        PublishSnapshot(std::move(index), covered_row_end);
     }
 
     void
@@ -190,7 +219,7 @@ TEST(GrowingIndexContractTest, EmptyAndPublishedPinsAreDistinct) {
     EXPECT_EQ(empty.CoveredRowEnd(), 0);
     EXPECT_ANY_THROW(static_cast<void>(empty.Reader()));
 
-    owner.Publish(std::make_unique<LifetimeReader>(0, std::make_shared<int>()),
+    owner.Publish(std::make_shared<LifetimeIndex>(0, std::make_shared<int>()),
                   3);
     auto published = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(published));
@@ -203,6 +232,23 @@ TEST(GrowingIndexContractTest, EmptyAndPublishedPinsAreDistinct) {
     EXPECT_NO_THROW(owner.Flush());
 }
 
+TEST(GrowingIndexContractTest, SeparateRequestsBindSeparateContexts) {
+    PublicationOwner owner;
+    owner.Publish(std::make_shared<LifetimeIndex>(2, std::make_shared<int>()),
+                  2);
+    milvus::OpContext first_context;
+    milvus::OpContext second_context;
+    const auto first = owner.PinSnapshot(&first_context);
+    const auto second = owner.PinSnapshot(&second_context);
+    const auto copied = first;
+    EXPECT_NE(&first.Reader(), &second.Reader());
+    EXPECT_EQ(&first.Reader(), &copied.Reader());
+    EXPECT_EQ(static_cast<const LifetimeReader&>(first.Reader()).Context(),
+              &first_context);
+    EXPECT_EQ(static_cast<const LifetimeReader&>(second.Reader()).Context(),
+              &second_context);
+}
+
 TEST(GrowingIndexContractTest, CopiesMovesAndReplacementsRetainPinnedReader) {
     GrowingIndexSnapshotPin held;
     GrowingIndexSnapshotPin copied;
@@ -212,7 +258,7 @@ TEST(GrowingIndexContractTest, CopiesMovesAndReplacementsRetainPinnedReader) {
         PublicationOwner owner;
         auto old = std::make_shared<int>(1);
         old_lifetime = old;
-        owner.Publish(std::make_unique<LifetimeReader>(2, old), 5);
+        owner.Publish(std::make_shared<LifetimeIndex>(2, old), 5);
         old.reset();
 
         auto moved_from = owner.PinSnapshot();
@@ -226,7 +272,7 @@ TEST(GrowingIndexContractTest, CopiesMovesAndReplacementsRetainPinnedReader) {
 
         auto newer = std::make_shared<int>(2);
         new_lifetime = newer;
-        owner.Publish(std::make_unique<LifetimeReader>(4, newer), 7);
+        owner.Publish(std::make_shared<LifetimeIndex>(4, newer), 7);
         newer.reset();
         const auto current = owner.PinSnapshot();
         ASSERT_TRUE(static_cast<bool>(current));
@@ -245,22 +291,22 @@ TEST(GrowingIndexContractTest, CopiesMovesAndReplacementsRetainPinnedReader) {
 
 TEST(GrowingIndexContractTest, RejectedPublicationKeepsCurrentGeneration) {
     PublicationOwner owner;
-    owner.Publish(std::make_unique<LifetimeReader>(2, std::make_shared<int>()),
+    owner.Publish(std::make_shared<LifetimeIndex>(2, std::make_shared<int>()),
                   5);
     auto current = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(current));
 
     EXPECT_ANY_THROW(owner.Publish(nullptr, 6));
     EXPECT_ANY_THROW(owner.Publish(
-        std::make_unique<LifetimeReader>(3, std::make_shared<int>()), -1));
+        std::make_shared<LifetimeIndex>(3, std::make_shared<int>()), -1));
     EXPECT_ANY_THROW(owner.Publish(
-        std::make_unique<LifetimeReader>(3, std::make_shared<int>()), 4));
+        std::make_shared<LifetimeIndex>(3, std::make_shared<int>()), 4));
 
     auto after = owner.PinSnapshot();
     ASSERT_TRUE(static_cast<bool>(after));
     EXPECT_EQ(after.CoveredRowEnd(), 5);
     EXPECT_EQ(after.Reader().Count(), 2);
-    EXPECT_EQ(&after.Reader(), &current.Reader());
+    EXPECT_NE(&after.Reader(), &current.Reader());
 }
 
 TEST(GrowingIndexContractTest, AppendOwnsInputAndFlushPublishesCompletePrefix) {

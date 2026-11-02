@@ -316,7 +316,7 @@ class SegmentInterface {
     // Growing publication is independent from sealed cache pinning. One pin
     // binds an immutable reader generation to its contiguous covered row end.
     virtual index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId field_id) const = 0;
+    PinGrowingIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
     virtual void
     BulkGetJsonData(milvus::OpContext* op_ctx,

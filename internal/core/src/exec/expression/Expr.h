@@ -3880,7 +3880,7 @@ class SegmentExpr : public Expr {
                    "selected index key is absent from field {} metadata",
                    field_id_.get());
         if (segment_->type() == SegmentType::Growing) {
-            growing_index_pin_ = segment_->PinGrowingIndex(field_id_);
+            growing_index_pin_ = segment_->PinGrowingIndex(op_ctx_, field_id_);
             if (!growing_index_pin_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;

@@ -186,7 +186,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const override;
 
     index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId) const override {
+    PinGrowingIndex(milvus::OpContext*, FieldId) const override {
         return {};
     }
 

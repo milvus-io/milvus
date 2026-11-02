@@ -195,11 +195,13 @@ ownership accounting after a reader is opened are two independent values.
   write side is responsible for serializing append/commit or satisfying the family's concurrency
   protocol; query correctness depends only on published records and coverage, not on a concrete
   family's commit cadence.
-- Each published record solely owns one const reader and atomically fixes `Reader::Count()`,
+- Each published record retains one Index version and atomically fixes `Reader::Count()`,
   `CoveredRowEnd()`, the validity/offset mapping, and the lifetimes of its dependencies. `const`
   does not by itself guarantee that the underlying engine is immutable or that Add/Search are safe
   to run concurrently.
-- `PinSnapshot()` pins only an already published record. An empty pin has coverage 0; a non-empty
+- `PinSnapshot(op_ctx)` retains an already published record and creates its request reader
+  outside the publication lock. Separate calls create separate readers; copies of one pin share
+  that request reader. The context must outlive the pin and its copies. An empty pin has coverage 0; a non-empty
   pin can be copied or moved and is empty after being moved from. Reader references and
   query-interface pointers must not outlive the pin. The owner must still be protected while the pin
   is acquired; once acquired, the pin can live independently.

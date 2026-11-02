@@ -113,9 +113,9 @@ flowchart TB
     spin --> cells["CacheSlot::PinCells"]
     cells --> indexpin["IndexPin + borrowed reader"]
 
-    select -->|growing| gpin["Segment::PinGrowingIndex(field)"]
+    select -->|growing| gpin["Segment::PinGrowingIndex(op_ctx, field)"]
     gpin --> commit["CommitIfNeeded + PinSnapshot"]
-    commit --> snapshot["GrowingIndexSnapshotPin<br/>reader + CoveredRowEnd"]
+    commit --> snapshot["GrowingIndexSnapshotPin<br/>request reader + Index version + CoveredRowEnd"]
 
     indexpin --> cast["Obtain the required query interface"]
     snapshot --> cast

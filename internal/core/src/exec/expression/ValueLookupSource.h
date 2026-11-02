@@ -59,7 +59,7 @@ class PinnedValueLookup final {
             field_id.get());
         const index::IIndexReaderBase* reader = nullptr;
         if (segment->type() == SegmentType::Growing) {
-            growing_pin_ = segment->PinGrowingIndex(field_id);
+            growing_pin_ = segment->PinGrowingIndex(op_ctx, field_id);
             if (!growing_pin_) {
                 return;
             }

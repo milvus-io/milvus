@@ -1754,7 +1754,7 @@ TEST(Expr, TestFloatVectorNullExprUsesGrowingIndexValidity) {
                     std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
-    auto index_pin = growing_segment->PinGrowingIndex(vector_fid);
+    auto index_pin = growing_segment->PinGrowingIndex(nullptr, vector_fid);
     ASSERT_TRUE(index_pin);
     ASSERT_GE(index_pin.CoveredRowEnd(), N);
     const auto* vec_index =
