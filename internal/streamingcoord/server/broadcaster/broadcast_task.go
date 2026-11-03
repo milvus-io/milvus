@@ -273,7 +273,7 @@ func (b *broadcastTask) MessageTypeWithVersion() message.MessageTypeWithVersion 
 }
 
 // PendingSchemaFileResourceSnapshot returns the collection and file resource
-// IDs referenced by a CreateCollection or AlterCollection task that is neither
+// IDs referenced by a collection schema creation/update task that is neither
 // a tombstone nor a tombstone being dropped (DONE).
 func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, bool) {
 	b.mu.Lock()
@@ -298,6 +298,14 @@ func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, boo
 		}
 		ids := alterMsg.MustBody().GetUpdates().GetSchema().GetFileResourceIds()
 		return alterMsg.Header().CollectionId, append([]int64(nil), ids...), true
+	case message.MessageTypeRestoreSnapshotV2:
+		restoreMsg := message.MustAsMutableRestoreSnapshotMessageV2(b.msg)
+		collection := restoreMsg.MustBody().GetCollection()
+		if collection == nil {
+			return 0, nil, false // Legacy Restore does not own a creation recipe.
+		}
+		ids := collection.GetCollectionSchema().GetFileResourceIds()
+		return restoreMsg.Header().GetCollectionId(), append([]int64(nil), ids...), true
 	default:
 		return 0, nil, false
 	}
