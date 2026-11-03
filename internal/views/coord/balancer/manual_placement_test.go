@@ -156,6 +156,28 @@ func TestManualPlacement(t *testing.T) {
 			require.Empty(t, accepted, "invalid data must be rejected before publishing")
 		})
 	}
+	t.Run("collection retires after placement snapshot", func(t *testing.T) {
+		before := c.GetCollection(1)
+		defer func() {
+			c.PublishLoadConfig(1, before.LoadConfig(), before.ConfigVersion())
+			c.PublishDataView(1, before.DataView())
+			c.PublishShard(id, stats)
+		}()
+		var original func(*DefaultBalancer, int64) (*CollectionPlacement, error)
+		patch := mockey.Mock((*DefaultBalancer).placementLocked).Origin(&original).To(func(b *DefaultBalancer, collection int64) (*CollectionPlacement, error) {
+			pl, err := original(b, collection)
+			c.PublishLoadConfig(collection, nil, 2)
+			c.PublishDataView(collection, nil)
+			c.PublishShard(id, nil)
+			require.Nil(t, c.GetCollection(collection))
+			return pl, err
+		}).Build()
+		defer patch.UnPatch()
+		_, err := b.MoveSegmentsAndWait(t.Context(), 1, 1, []int64{2}, []int64{101})
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.Empty(t, accepted, "retired collection must not publish a handoff")
+		require.Equal(t, map[int64]int64{101: 1, 102: 1}, flattenAssignments(source.Build()))
+	})
 	c.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, Stopping: true, ResourceGroup: "rg1"})
 	_, err = b.MoveSegmentsAndWait(t.Context(), 1, 1, []int64{2}, []int64{101})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)

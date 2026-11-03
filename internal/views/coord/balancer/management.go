@@ -21,6 +21,7 @@ type Management interface {
 }
 
 type CollectionPlacement struct {
+	data          *CollectionDataView
 	Config        *loadmgr.LoadConfig
 	ConfigVersion uint64
 	Nodes         map[int64][]int64
@@ -49,6 +50,8 @@ func (b *DefaultBalancer) placementLocked(collectionID int64) (*CollectionPlacem
 		return result, nil
 	}
 	result.Config, result.ConfigVersion = c.LoadConfig(), c.ConfigVersion()
+	// Keep sizing data from the same immutable collection snapshot as config.
+	result.data = c.DataView()
 	policy, ok := b.policy.(*DefaultBalancePolicy)
 	if !ok {
 		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "balance policy does not expose replica placement")

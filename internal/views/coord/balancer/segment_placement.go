@@ -120,7 +120,7 @@ func (b *DefaultBalancer) MoveSegmentsAndWait(ctx context.Context, collectionID,
 						assignments[target] = make(map[int64][]int64)
 					}
 					assignments[target][partition] = append(assignments[target][partition], segment)
-					if data := b.cache.GetCollection(meta.GetCollectionId()).DataView(); data != nil {
+					if data := placements[meta.GetCollectionId()].data; data != nil {
 						if info, ok := data.Segment(segment); ok {
 							rows[target] += info.LogicalSize
 						}
