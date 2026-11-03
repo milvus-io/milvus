@@ -1981,6 +1981,109 @@ TEST(InternalTakeTest, TryTakeForRetrieve_ProjectsDynamicField) {
     EXPECT_EQ(dynamic_data.scalars().json_data().data(1), R"({"foo":1})");
 }
 
+// A VECTOR_ARRAY column taken from a manifest-backed sealed segment must carry
+// the collection-level element type and dim, which the Go reduce and the SDK
+// read to decode the rows.
+TEST(InternalTakeTest, TryTakeForRetrieve_VectorArraySetsElementTypeAndDim) {
+    constexpr int64_t kRows = 3;
+    constexpr int kWidth = kVecDim * sizeof(float);
+    const FieldId pk_id(100);
+    const FieldId vecs_id(101);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->AddField(FieldMeta(
+        FieldName("pk"), pk_id, DataType::INT64, false, std::nullopt));
+    schema->AddField(FieldMeta(FieldName("vecs"),
+                               vecs_id,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               false,
+                               false));
+    schema->set_primary_field_id(pk_id);
+
+    auto vector_of = [](int64_t row, int64_t element) {
+        std::vector<float> v(kVecDim);
+        for (int64_t k = 0; k < kVecDim; ++k) {
+            v[k] = static_cast<float>(row * 100 + element * 10 + k);
+        }
+        return v;
+    };
+
+    // Row r of vecs holds r + 1 vectors.
+    arrow::Int64Builder pk_builder;
+    auto vecs_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+            arrow::fixed_size_binary(kWidth)));
+    auto* vecs_values = static_cast<arrow::FixedSizeBinaryBuilder*>(
+        vecs_builder->value_builder());
+    for (int64_t row = 0; row < kRows; ++row) {
+        ASSERT_TRUE(pk_builder.Append(row).ok());
+        ASSERT_TRUE(vecs_builder->Append().ok());
+        for (int64_t j = 0; j <= row; ++j) {
+            auto v = vector_of(row, j);
+            ASSERT_TRUE(
+                vecs_values->Append(reinterpret_cast<const uint8_t*>(v.data()))
+                    .ok());
+        }
+    }
+    auto table = arrow::Table::Make(
+        arrow::schema({
+            arrow::field(std::to_string(pk_id.get()), arrow::int64()),
+            arrow::field(std::to_string(vecs_id.get()),
+                         arrow::list(arrow::fixed_size_binary(kWidth))),
+        }),
+        {pk_builder.Finish().ValueOrDie(),
+         vecs_builder->Finish().ValueOrDie()});
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {pk_id, vecs_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {2, 0, 2};
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true));
+    ASSERT_EQ(results->fields_data_size(), 2);
+
+    const auto& vecs = results->fields_data(1);
+    ASSERT_EQ(vecs.field_id(), vecs_id.get());
+    ASSERT_EQ(vecs.type(), proto::schema::DataType::ArrayOfVector);
+    EXPECT_EQ(vecs.vectors().dim(), kVecDim);
+    const auto& vector_array = vecs.vectors().vector_array();
+    EXPECT_EQ(vector_array.element_type(),
+              proto::schema::DataType::FloatVector);
+    EXPECT_EQ(vector_array.dim(), kVecDim);
+    ASSERT_EQ(vector_array.data_size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(i);
+        const auto& row = vector_array.data(i);
+        EXPECT_EQ(row.dim(), kVecDim);
+        ASSERT_EQ(row.float_vector().data_size(), (offsets[i] + 1) * kVecDim);
+        for (int64_t j = 0; j <= offsets[i]; ++j) {
+            auto expected = vector_of(offsets[i], j);
+            for (int64_t k = 0; k < kVecDim; ++k) {
+                EXPECT_FLOAT_EQ(row.float_vector().data(j * kVecDim + k),
+                                expected[k]);
+            }
+        }
+        EXPECT_EQ(row.valid_data_size(), 0);
+    }
+}
+
 TEST(InternalTakeTest, TryTakeForSearch_ResolvesTextOutputField) {
     auto info = BuildInternalSchemaWithTextAndDynamicFields();
     auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
