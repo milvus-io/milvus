@@ -6,6 +6,7 @@ PR CI runs L0/L1; the daily regression runs L2.
 
 import base64
 import hashlib
+import io
 import json
 import re
 import time
@@ -75,6 +76,7 @@ from common.snapshot_import_common import (
     wait_for_snapshot_export,
 )
 from minio.credentials import StaticProvider
+from minio.error import S3Error
 from minio.minioadmin import MinioAdmin
 from pymilvus import DataType
 from pymilvus.bulk_writer import abort_import, bulk_import, commit_import, get_import_progress
@@ -2212,7 +2214,9 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         expected: Failed with missing-output reason; no input-based regeneration; only the unchanged sentinel visible
         """
         client, source, target, snapshot = snapshot_resources
-        source_fields = self._create_function_collection(client, source, family, input_type, tei_endpoint, with_output=False)
+        source_fields = self._create_function_collection(
+            client, source, family, input_type, tei_endpoint, with_output=False
+        )
         target_fields = self._create_function_collection(client, target, family, input_type, tei_endpoint)
         assert {name: target_fields[name] for name in source_fields} == source_fields
         assert target_fields["output"]["field_id"] not in {field["field_id"] for field in source_fields.values()}
@@ -4371,6 +4375,15 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
         self._unchanged(batch, target, before)
         batch.assert_rows(source, plain_rows(range(8, 32) if variant == "l0_only" else range(32)))
 
+    @pytest.fixture
+    def snapshot_boundary_bucket(self, batch, variant, minio_host, minio_bucket, tmp_path):
+        if variant != "foreign_descriptor":
+            yield None
+            return
+        cfg = get_minio_config(minio_host, minio_bucket)
+        with external_snapshot_bucket(cfg, tmp_path, lambda: bool(batch.jobs or batch.uncertain)) as foreign:
+            yield foreign
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
         "variant",
@@ -4392,7 +4405,7 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
             "unprojected_lob",
         ],
     )
-    def test_batch_er04_static_object_fault(self, batch, variant):
+    def test_batch_er04_static_object_fault(self, batch, variant, snapshot_boundary_bucket):
         """
         target: SI-ER-04, missing/corrupt private bundle objects never become empty success
         method: export self-contained copy; damage one required object before Import; check unchanged sentinel
@@ -4455,10 +4468,25 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
             damaged = _data_key(base, files[0]["path"])
             assert batch.store.stat_object(batch.bucket, damaged).size > 0
         else:
-            metadata["manifest_list"][0] = (
-                "../escape.avro" if variant == "escape_descriptor" else "s3://foreign-bucket/foreign.avro"
-            )
+            # Both forbidden destinations exist and contain a valid descriptor.
+            # A missing-object failure must never satisfy a boundary test.
+            descriptor_bytes = object_bytes(batch.store, batch.bucket, descriptor)
+            if variant == "escape_descriptor":
+                outside_key = batch.prefix + "outside-descriptor.avro"
+                assert not outside_key.startswith(root + "/")
+                batch.put(outside_key, descriptor_bytes)
+                assert object_bytes(batch.store, batch.bucket, outside_key) == descriptor_bytes
+                forbidden_path = outside_key
+            else:
+                foreign = snapshot_boundary_bucket
+                outside_key = foreign.prefix + "foreign-descriptor.avro"
+                batch_payload = io.BytesIO(descriptor_bytes)
+                foreign.store.put_object(foreign.bucket, outside_key, batch_payload, len(descriptor_bytes))
+                assert object_bytes(foreign.store, foreign.bucket, outside_key) == descriptor_bytes
+                forbidden_path = f"s3://{foreign.bucket}/{outside_key}"
+            metadata["manifest_list"][0] = forbidden_path
             batch.put(key, metadata)
+            batch.record("forbidden_descriptor_exists", variant=variant, path=forbidden_path)
             damaged = None
         if damaged:
             assert damaged.startswith(batch.prefix)
@@ -4486,7 +4514,11 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
             target,
             uri,
             label="SI-ER-04/" + variant,
-            reason=["read", "decode", "manifest", "path", "file", "metadata", "EOF", "json", "exist", "invalid"],
+            reason=(
+                ["outside snapshot root", "does not match configured bucket", "outside source root"]
+                if variant in ("escape_descriptor", "foreign_descriptor")
+                else ["read", "decode", "manifest", "path", "file", "metadata", "EOF", "json", "exist", "invalid"]
+            ),
         )
         batch.reload_assert(target, sentinel)
         assert batch.client.describe_collection(target) == before
@@ -4838,7 +4870,19 @@ class TestSnapshotImportSecurity(SnapshotBatchBase):
                 path = tmp_path / "deny-policy.json"
                 path.write_text(json.dumps(policy))
                 admin.policy_add(policy_name, str(path))
-                batch.record("denied_objects", variant=variant, keys=denied)
+                # Verify policy propagation with the exact source identity before Import.
+                deadline = time.monotonic() + 15
+                for denied_key in denied:
+                    assert external.store.stat_object(external.bucket, denied_key).size > 0
+                    while True:
+                        try:
+                            object_bytes(external.reader, external.bucket, denied_key)
+                        except S3Error as error:
+                            assert error.code == "AccessDenied", error.code
+                            break
+                        assert time.monotonic() < deadline, "Source GET policy did not take effect"
+                        time.sleep(0.5)
+                batch.record("denied_objects", variant=variant, keys=denied, get_error="AccessDenied")
             options = {"backup": "true", "source_type": "snapshot", "auto_commit": "true", "timeout": "45s"}
             if variant != "no_spec":
                 if variant == "bad_credentials":
@@ -4856,7 +4900,19 @@ class TestSnapshotImportSecurity(SnapshotBatchBase):
                 foreign_uri,
                 options=options,
                 label="SI-ER-05/" + variant,
-                reason=["source", "read", "access", "credential", "denied", "timeout", "deadline"],
+                reason=(
+                    ["must match instance storage", "does not match configured bucket"]
+                    if variant == "no_spec"
+                    else [
+                        "AccessDenied",
+                        "ACCESS_DENIED",
+                        "Access Denied",
+                        "permission denied",
+                        "InvalidAccessKeyId",
+                        "SignatureDoesNotMatch",
+                        "request signature we calculated does not match",
+                    ]
+                ),
             )
             batch.reload_assert(target, sentinel)
             # Restore the same owned identity, then prove a new job succeeds.

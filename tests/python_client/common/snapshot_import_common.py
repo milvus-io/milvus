@@ -1589,11 +1589,17 @@ def _index_objects(base, entry, segment, root, collection_id, layout, bundle_roo
     build, version = int(entry["build_id"]), int(entry["index_version"])
     assert build > 0 and version >= 0
     if layout == "referenced":
-        if int(entry["index_store_path_version"]) >= 1:
+        path_version = int(entry["index_store_path_version"])
+        if path_version == 2:
+            expected = posixpath.join(base, "_index", str(build), str(version))
+        elif path_version == 1:
             suffix = f"index_v1/{collection_id}/{segment['partition_id']}/{segment['segment_id']}/{build}/{version}"
+            expected = posixpath.join(root, suffix)
         else:
+            assert path_version == 0, f"Unsupported index path version: {path_version}"
             suffix = f"index_files/{build}/{version}/{segment['partition_id']}/{segment['segment_id']}"
-        assert directory == posixpath.join(root, suffix), directory
+            expected = posixpath.join(root, suffix)
+        assert directory == expected, (directory, expected)
     else:
         assert directory.startswith(bundle_root + "/files/"), "Exported index escapes its private bundle"
     assert names and len(names) == len(set(names))
