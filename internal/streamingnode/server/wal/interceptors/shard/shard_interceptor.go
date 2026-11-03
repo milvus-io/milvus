@@ -86,7 +86,20 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	}
 	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
-	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
+	if err := impl.shardManager.CheckIfVChannelCanBeCreated(header.GetCollectionId(), createCollectionMsg.VChannel()); err != nil {
+		if errors.Is(err, shards.ErrVChannelFenced) {
+			// A late retry of this collection's genesis -- the broadcaster re-drives
+			// a replica whose append answered an error even if it landed -- landing
+			// after a shard split fenced the vchannel as a source. The fence freed
+			// the registration slot, so appending this would register the source
+			// again, writable after T_switch and outside the split's drain and
+			// adoption. Unrecoverable, so the producer stops retrying it: the
+			// genesis that landed is the vchannel's genesis. The CreateVChannel
+			// path (a split target's genesis) refuses the same way.
+			impl.shardManager.Logger().Warn(ctx, "refuse a late create collection of a vchannel fenced by a shard split",
+				mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
+			return nil, status.NewUnrecoverableError("%s", err.Error())
+		}
 		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
 		// The collection can not be created at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.

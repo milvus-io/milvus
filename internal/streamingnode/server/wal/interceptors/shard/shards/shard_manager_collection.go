@@ -327,6 +327,15 @@ func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableSplitShardMessage
 // createCollectionLocked registers the collection and its partition managers on
 // this pchannel for DML and segment assignment. The caller must hold m.mu.
 func (m *shardManagerImpl) createCollectionLocked(collectionID int64, partitionIDs []int64, vchannel string, timetick uint64, schema *schemapb.CollectionSchema, logger *mlog.Logger) {
+	if fence, fenced := m.fencedVChannels[vchannel]; fenced {
+		// The append path refuses a genesis of a fenced vchannel
+		// (checkIfVChannelCanBeCreated); the consume path must not register it
+		// either, whether the record is a late CreateCollection retry or a
+		// split target's genesis, or the fence's guard would be undone.
+		logger.Warn(context.TODO(), "a late genesis of a vchannel fenced by a shard split is not registered",
+			mlog.String("vchannel", vchannel), mlog.Int64("splitTaskID", fence.TaskID), mlog.Uint64("splitFenceTimeTick", fence.TimeTick))
+		return
+	}
 	if err := m.checkIfCollectionCanBeCreated(collectionID); err != nil {
 		logger.Warn(context.TODO(), "collection already exists")
 		return

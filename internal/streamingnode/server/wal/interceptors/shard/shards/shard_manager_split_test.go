@@ -402,3 +402,31 @@ func TestShardManagerGenesisOfAFencedVChannelDoesNotRegisterIt(t *testing.T) {
 	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("t1", 7, []int64{8}, 4000))
 	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(7, "t1"), ErrVChannelFenced, "the late genesis must not undo the fence")
 }
+
+// TestShardManagerLateCreateCollectionOfAFencedVChannelDoesNotRegisterIt: the
+// consume-side twin of the append-path refusal above for the ordinary
+// CreateCollection genesis. A late CreateCollection record of a vchannel a split
+// has fenced as a source must not register it again.
+func TestShardManagerLateCreateCollectionOfAFencedVChannelDoesNotRegisterIt(t *testing.T) {
+	m := newTestShardManagerWithSplitFence(t, 0)
+	createCollection := func(timetick uint64) message.ImmutableCreateCollectionMessageV1 {
+		msg := message.NewCreateCollectionMessageBuilderV1().
+			WithVChannel("t1").
+			WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 7, PartitionIds: []int64{8}}).
+			WithBody(&message.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "test"}}).
+			MustBuildMutable().
+			WithTimeTick(timetick).
+			WithLastConfirmedUseMessageID()
+		return message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(rmq.NewRmqID(int64(timetick))))
+	}
+	m.CreateCollection(createCollection(2000))
+	require.NoError(t, m.CheckIfVChannelCanBeWritten(7, "t1"))
+
+	m.SplitShard(newTestSplitShardImmutableMessageOfTask("t1", 7, 200, 3000))
+	require.ErrorIs(t, m.CheckIfVChannelCanBeWritten(7, "t1"), ErrVChannelFenced)
+
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(7, "t1"), ErrVChannelFenced)
+	m.CreateCollection(createCollection(4000))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(7, "t1"), ErrVChannelFenced, "the late create collection must not undo the fence")
+	assert.ErrorIs(t, m.CheckIfCollectionExists(7), ErrCollectionNotFound, "the fenced source's registration stays released")
+}

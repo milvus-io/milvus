@@ -227,7 +227,7 @@ func TestShardInterceptorCreateCollectionAllocatesFunctionRunnersFromLegacySchem
 	require.NoError(t, err)
 
 	shardManager := mock_shards.NewMockShardManager(t)
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(collectionID).Return(nil).Once()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(collectionID, mock.Anything).Return(nil).Once()
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return().Once()
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	impl := &shardInterceptor{shardManager: shardManager}
@@ -552,14 +552,14 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Version: 0}}).
 		MustBuildMutable()
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Return(nil)
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(mock.Anything, mock.Anything).Return(nil)
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return()
 	msgID, err := i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfCollectionCanBeCreated(mock.Anything).Return(mockErr)
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(mock.Anything, mock.Anything).Return(mockErr)
 	shardManager.EXPECT().CreateCollection(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
@@ -889,4 +889,31 @@ func TestDropPartitionUpdatesManagerAfterAppend(t *testing.T) {
 			require.Equal(t, []string{"append", "drop"}, events)
 		})
 	}
+}
+
+// TestShardInterceptorRefusesLateCreateCollectionOfAFencedVChannel: a
+// CreateCollection replica re-driven by the broadcaster after a shard split
+// fenced its vchannel as a source is refused as unrecoverable and never
+// appended; appending it would register the fenced source again, writable
+// after T_switch.
+func TestShardInterceptorRefusesLateCreateCollectionOfAFencedVChannel(t *testing.T) {
+	shardManager := mock_shards.NewMockShardManager(t)
+	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(99006), "by-dev-rootcoord-dml_0_99006v0").
+		Return(errors.Wrap(shards.ErrVChannelFenced, "fenced by split 200")).Once()
+	impl := &shardInterceptor{shardManager: shardManager}
+	msg := message.NewCreateCollectionMessageBuilderV1().
+		WithVChannel("by-dev-rootcoord-dml_0_99006v0").
+		WithHeader(&messagespb.CreateCollectionMessageHeader{CollectionId: 99006}).
+		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "test"}}).
+		MustBuildMutable()
+
+	appended := false
+	msgID, err := impl.handleCreateCollection(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return rmq.NewRmqID(1), nil
+	})
+	assert.Nil(t, msgID)
+	assert.False(t, appended, "the late genesis of a fenced vchannel must not be appended")
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
