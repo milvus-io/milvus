@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -181,12 +182,15 @@ func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
 		name      string
 		virtualPK bool
 		failure   string
+		permanent bool
 	}{
 		{name: "real_pk_success", failure: "none"},
 		{name: "virtual_pk_success", virtualPK: true, failure: "none"},
 		{name: "reopen_failure", failure: "reopen"},
 		{name: "read_failure", failure: "read"},
 		{name: "apply_failure", failure: "apply"},
+		{name: "permanent_read_failure", failure: "read", permanent: true},
+		{name: "permanent_apply_failure", failure: "apply", permanent: true},
 		{name: "virtual_pk_read_failure", virtualPK: true, failure: "read"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -216,6 +220,9 @@ func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
 			defer freePatch.UnPatch()
 
 			injected := merr.Wrap(merr.ErrIoTooManyRequests, "injected reopen failure")
+			if scenario.permanent {
+				injected = merr.Wrap(merr.ErrParameterInvalid, "injected permanent failure")
+			}
 			var calls []string
 			failed := false
 			expectedInfo := oldInfo
@@ -284,7 +291,7 @@ func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
 			if failure != "none" {
 				require.ErrorIs(t, err, injected)
 				assert.Equal(t, merr.Code(injected), merr.Code(err))
-				assert.True(t, merr.Status(err).GetRetriable())
+				assert.Equal(t, !scenario.permanent, merr.Status(err).GetRetriable())
 				// The old load info stays reported, so QueryCoord retries the reopen.
 				require.Same(t, oldInfo, segment.LoadInfo())
 				require.False(t, applied)
@@ -3326,4 +3333,32 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 		assert.Len(t, gotDeltalogs, 1)
 		assert.EqualValues(t, 50, gotDeltalogs[0].GetBinlogs()[0].GetMemorySize())
 	})
+}
+
+func TestDeltaSourceUnchangedOrderIndependent(t *testing.T) {
+	logs := func(ids ...int64) []*datapb.Binlog {
+		result := make([]*datapb.Binlog, 0, len(ids))
+		for _, id := range ids {
+			result = append(result, &datapb.Binlog{LogID: id})
+		}
+		return result
+	}
+	current := &querypb.SegmentLoadInfo{ManifestPath: "manifest", Deltalogs: []*datapb.FieldBinlog{
+		{FieldID: 1, Binlogs: logs(1, 2)}, {FieldID: 2, Binlogs: logs(3)},
+	}}
+	incoming := proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs = []*datapb.FieldBinlog{
+		{FieldID: 2, Binlogs: logs(3, 3)}, {FieldID: 1, Binlogs: logs(2, 1)},
+	}
+	require.True(t, deltaSourceUnchanged(current, incoming))
+	require.EqualValues(t, 1, current.Deltalogs[0].Binlogs[0].LogID, "comparison must not mutate input")
+	incoming.Deltalogs[1].Binlogs[0].LogID = 4
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	incoming = proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs[0].Binlogs[0].LogPath = "another/path"
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	incoming = proto.Clone(current).(*querypb.SegmentLoadInfo)
+	incoming.Deltalogs[0].FieldID = 3
+	require.False(t, deltaSourceUnchanged(current, incoming))
+	require.True(t, deltaSourceUnchanged(nil, &querypb.SegmentLoadInfo{}))
 }
