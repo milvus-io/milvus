@@ -50,7 +50,8 @@ func (ut *UpsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *
 	if ut.partialState == nil {
 		return merr.WrapErrServiceInternalMsg("partial update row state is unavailable")
 	}
-	defer func() { ut.req.NumRows = ut.partialState.originalCount }()
+	ut.requestSize = proto.Size(ut.req)
+	ut.mutationSize = ut.upsertMsg.InsertMsg.Size() + ut.upsertMsg.DeleteMsg.Size()
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
 			delay := partialUpdateCASRetryBackoff * (1 << min(attempt-1, 2))
@@ -165,6 +166,14 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		if err := ut.attachPartialUpdateCAS(messages); err != nil {
 			logger.Warn(ctx, "attach partial update CAS metadata failed", mlog.Err(err))
 			return err
+		}
+	}
+	if ut.req.GetWriteCondition() != nil {
+		if err := ctx.Err(); err != nil {
+			return ut.conditionalWriteState().Cancel(merr.Wrap(err, "conditional upsert canceled before WAL submission"))
+		}
+		if !ut.conditionalWriteState().TryAppend() {
+			return merr.Wrap(context.Canceled, "conditional upsert canceled before WAL submission")
 		}
 	}
 	if ut.partialState != nil {
