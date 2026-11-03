@@ -316,3 +316,20 @@ TEST(ThreadPool, InitializedOverheadGroupsDoNotAcquirePoolMapLock) {
     EXPECT_NE(groups.first, nullptr);
     EXPECT_NE(groups.second, nullptr);
 }
+
+TEST(LoadPriorityTest, QueryOverrideDoesNotChangeBackgroundPriority) {
+    using milvus::proto::common::LoadPriority;
+    milvus::OpContext ctx;
+    for (const auto configured : {LoadPriority::HIGH, LoadPriority::LOW}) {
+        EXPECT_EQ(milvus::ResolveLoadPriority(nullptr, configured), configured);
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured), configured);
+        ctx.runtime_load_priority = LoadPriority::HIGH;
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured),
+                  LoadPriority::HIGH);
+        ctx.runtime_load_priority = LoadPriority::LOW;
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured),
+                  LoadPriority::LOW);
+        ctx.runtime_load_priority.reset();
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured), configured);
+    }
+}

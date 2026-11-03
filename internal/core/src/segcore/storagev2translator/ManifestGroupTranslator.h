@@ -231,11 +231,13 @@ class ManifestGroupTranslator
      *
      * @param tables Arrow Tables from row groups
      * @param cid Cell ID of the chunk being loaded
+     * @param priority Effective priority for this load, including mmap writes
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     milvus::cachinglayer::cid_t cid) const;
+                     milvus::cachinglayer::cid_t cid,
+                     milvus::proto::common::LoadPriority priority) const;
 
     // Returns peak transient bytes needed to materialize one cell.
     int64_t

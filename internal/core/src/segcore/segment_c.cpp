@@ -646,6 +646,8 @@ AsyncSearch(CTraceContext c_trace,
                 plan->plan_node_->search_info_.field_id_;
 
             milvus::OpContext op_ctx(cancel_token);
+            op_ctx.runtime_load_priority =
+                milvus::proto::common::LoadPriority::HIGH;
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(
@@ -756,6 +758,8 @@ AsyncRetrieve(CTraceContext c_trace,
             milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
             milvus::OpContext op_ctx(cancel_token);
+            op_ctx.runtime_load_priority =
+                milvus::proto::common::LoadPriority::HIGH;
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(
@@ -1190,6 +1194,8 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
                 "SegCoreRetrieveAsArrow", &trace_ctx, true);
 
             milvus::OpContext op_ctx(cancel_token);
+            op_ctx.runtime_load_priority =
+                milvus::proto::common::LoadPriority::HIGH;
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(
@@ -1366,6 +1372,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                 "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
             milvus::OpContext op_ctx(cancel_token);
+            op_ctx.runtime_load_priority =
+                milvus::proto::common::LoadPriority::HIGH;
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(

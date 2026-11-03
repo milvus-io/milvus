@@ -55,6 +55,7 @@
 #include "storage/LoadOverheadController.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/Util.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -351,6 +352,7 @@ GroupChunkTranslator::get_global_row_group_idx(size_t file_idx,
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
                                 const std::vector<cachinglayer::cid_t>& cids) {
+    const auto priority = ResolveLoadPriority(ctx, load_priority_);
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "GroupChunkTranslator::get_cells()");
 
@@ -389,17 +391,20 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
 
     auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
     auto finalize_cell =
-        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               int64_t cid) {
+        [this, priority](
+            const std::vector<std::shared_ptr<arrow::Table>>& tables,
+            int64_t cid) {
             return load_group_chunk(
-                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+                tables,
+                static_cast<milvus::cachinglayer::cid_t>(cid),
+                priority);
         };
     auto load_futures = milvus::segcore::LoadCellBatchAsync(
         ctx,
         std::move(cell_specs),
         std::move(factory),
         FieldDataLoadBatchSplitTargetBytes(),
-        load_priority_,
+        priority,
         std::move(finalize_cell));
 
     LOG_INFO(
@@ -460,7 +465,8 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
 std::unique_ptr<milvus::GroupChunk>
 GroupChunkTranslator::load_group_chunk(
     const std::vector<std::shared_ptr<arrow::Table>>& tables,
-    const milvus::cachinglayer::cid_t cid) {
+    const milvus::cachinglayer::cid_t cid,
+    milvus::proto::common::LoadPriority priority) {
     assert(!tables.empty());
     // Use the first table's schema as reference for field iteration
     const auto& schema = tables[0]->schema();
@@ -569,7 +575,7 @@ GroupChunkTranslator::load_group_chunk(
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_,
+                                    priority,
                                     writeback_mode_);
     }
     return std::make_unique<milvus::GroupChunk>(std::move(chunks));
