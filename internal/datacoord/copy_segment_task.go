@@ -1186,9 +1186,10 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// worker returns a complete manifest pointer - including the copied
 			// index entries, which it re-derives rather than inheriting from the
 			// source manifest. First-time publication is therefore set inline via
-			// UpdateManifest; no CommitSegmentManifest serialization is needed for
-			// a segment no other writer touches, and no second revision is needed
-			// to correct what the worker already published.
+			// updateCopiedManifest; no second revision is needed to correct what
+			// the worker already published. Once a partial installation is Flushed,
+			// index/stats writers may advance it before this task completes, so
+			// replay must preserve any newer manifest.
 			//
 			// "Re-derives" is verified, not assumed: an old DataNode silently
 			// skips the republication (the result carries no acknowledgement and
@@ -1196,7 +1197,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// and rejected before publication if it still carries foreign entries.
 			publishedBuilds := verified[i]
 			if manifestPath := result.GetManifestPath(); manifestPath != "" {
-				operators = append(operators, UpdateManifest(result.GetSegmentId(), manifestPath))
+				operators = append(operators, updateCopiedManifest(result.GetSegmentId(), manifestPath))
 				if len(publishedBuilds) > 0 {
 					// The worker-created manifest is adopted outside
 					// CommitSegmentManifest, so publish its recovery
@@ -1267,6 +1268,26 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			UpdateCopyTaskReason(resp.GetReason()))
 	}
 	return nil
+}
+
+// updateCopiedManifest adopts the worker's first pointer and preserves monotonic
+// publication when a partially installed completed response is replayed. The
+// comparison runs under segMu with the rest of the segment metadata update.
+func updateCopiedManifest(segmentID int64, manifestPath string) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return false
+		}
+		if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifestPath() == "" {
+			return UpdateManifest(segmentID, manifestPath)(pack)
+		}
+		previous := segment.GetManifestPath()
+		if err := updateManifestPathIfNewer(segment, manifestPath); err != nil {
+			return pack.fail(merr.Wrapf(err, "failed to adopt copied manifest for segment %d", segmentID))
+		}
+		return segment.GetManifestPath() != previous
+	}
 }
 
 func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta CopySegmentMeta, err error) error {
