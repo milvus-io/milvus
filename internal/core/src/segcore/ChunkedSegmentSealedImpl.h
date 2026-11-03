@@ -182,8 +182,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<IndexRegistration>
     IndexRegistrations(FieldId field_id) const override;
 
-    IndexPin
-    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const override;
+    IndexReaderHandle
+    CreateIndexReader(milvus::OpContext* op_ctx,
+                      const IndexKey& key) const override;
 
     index::GrowingIndexSnapshotPin
     PinGrowingIndex(milvus::OpContext*, FieldId) const override {
@@ -1617,10 +1618,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const RuntimeResourceState>& runtime,
         FieldId field_id);
 
-    IndexPin
-    PinVectorIndex(const std::shared_ptr<const RuntimeResourceState>& runtime,
-                   milvus::OpContext* op_ctx,
-                   FieldId field_id) const;
+    IndexReaderHandle
+    CreateVectorReader(
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
+        milvus::OpContext* op_ctx,
+        FieldId field_id) const;
 
     static std::vector<std::shared_ptr<IndexInventory::Entry>>
     EraseJsonIndexesAtPath(RuntimeResourceState& runtime,

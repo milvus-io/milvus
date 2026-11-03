@@ -82,14 +82,25 @@ CountInvalidRows(const BitsetView& invalid) {
     return prepared.count();
 }
 
+struct ScalarReadCounts {
+    size_t in_calls = 0;
+    size_t in_values = 0;
+    size_t null_calls = 0;
+    size_t gather_calls = 0;
+    size_t gather_values = 0;
+    size_t gather_nulls = 0;
+};
+
 class CountingScalarReader final
     : public index::IIndexReaderBase,
       public index::IScalarPredicateReader<int64_t>,
       public index::INullReader,
       public index::IScalarValueReader<int64_t> {
  public:
-    explicit CountingScalarReader(index::IIndexReaderBasePtr reader)
-        : reader_(std::move(reader)),
+    CountingScalarReader(index::IIndexReaderBasePtr reader,
+                         std::shared_ptr<ScalarReadCounts> counts)
+        : counts_(std::move(counts)),
+          reader_(std::move(reader)),
           predicates_(
               dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(
                   reader_.get())),
@@ -101,13 +112,6 @@ class CountingScalarReader final
             "group membership fixture needs scalar predicate, null and value "
             "readers");
     }
-
-    mutable size_t in_calls = 0;
-    mutable size_t in_values = 0;
-    mutable size_t null_calls = 0;
-    mutable size_t gather_calls = 0;
-    mutable size_t gather_values = 0;
-    mutable size_t gather_nulls = 0;
 
     index::ReaderCaps
     Caps() const override {
@@ -136,8 +140,8 @@ class CountingScalarReader final
 
     TargetBitmap
     In(size_t n, const int64_t* values) const override {
-        ++in_calls;
-        in_values += n;
+        ++counts_->in_calls;
+        counts_->in_values += n;
         return predicates_->In(n, values);
     }
 
@@ -161,7 +165,7 @@ class CountingScalarReader final
 
     TargetBitmap
     IsNull() const override {
-        ++null_calls;
+        ++counts_->null_calls;
         return nulls_->IsNull();
     }
 
@@ -180,16 +184,17 @@ class CountingScalarReader final
            int64_t count,
            const std::function<void(int64_t, const int64_t*, bool)>& out)
         const override {
-        ++gather_calls;
-        gather_values += count;
+        ++counts_->gather_calls;
+        counts_->gather_values += count;
         values_->Gather(
             offsets, count, [&](int64_t i, const int64_t* value, bool valid) {
-                gather_nulls += !valid;
+                counts_->gather_nulls += !valid;
                 out(i, value, valid);
             });
     }
 
  private:
+    std::shared_ptr<ScalarReadCounts> counts_;
     index::IIndexReaderBasePtr reader_;
     const index::IScalarPredicateReader<int64_t>* predicates_;
     const index::INullReader* nulls_;
@@ -1391,11 +1396,12 @@ TEST(GroupMembershipTest, RawClassificationAndIndexOnlyFallback) {
                                                    kRowCount,
                                                    values.data(),
                                                    valid.data());
-    auto scalar_reader =
-        std::make_unique<CountingScalarReader>(std::move(opened.reader));
-    auto* counters = scalar_reader.get();
-    opened.reader = std::move(scalar_reader);
-    opened.caps = opened.reader->Caps();
+    auto counters = std::make_shared<ScalarReadCounts>();
+    test::expr_index::DecorateIndex(
+        opened, [counters](index::IIndexReaderBasePtr reader) {
+            return std::make_unique<CountingScalarReader>(std::move(reader),
+                                                          counters);
+        });
     auto load_info = test::consumer::MakeLoadIndexInfo(
         std::move(opened), DataType::INT64, group_field.get());
     index_segment->LoadIndex(load_info);

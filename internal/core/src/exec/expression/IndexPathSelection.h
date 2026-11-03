@@ -117,7 +117,7 @@ struct ExecPathDecision {
 
     // Which inventory entry to pin. Present exactly when the selected path is
     // index-backed. The caller passes this straight to
-    // `segcore::SegmentInterface::PinIndex` — ONCE, for the whole expression node.
+    // `segcore::SegmentInterface::CreateIndexReader` — ONCE, for the whole expression node.
     std::optional<segcore::IndexKey> key;
 };
 

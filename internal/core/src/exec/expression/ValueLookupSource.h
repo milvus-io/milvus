@@ -30,7 +30,7 @@
 namespace milvus::exec {
 
 // One expression-local value source. Resolving a sealed lazy index may read
-// artifact metadata; the exact entry is then pinned. An empty pin means the
+// artifact metadata; the selected entry then creates a reader. An empty handle means the
 // caller scans raw column data.
 class PinnedValueLookup final {
  public:
@@ -66,7 +66,7 @@ class PinnedValueLookup final {
             reader = &growing_pin_.Reader();
             covered_end_ = std::min(active_count, growing_pin_.CoveredRowEnd());
         } else {
-            root_pin_ = segment->PinIndex(op_ctx, *decision.key);
+            root_pin_ = segment->CreateIndexReader(op_ctx, *decision.key);
             if (!root_pin_) {
                 return;
             }
@@ -178,8 +178,8 @@ class PinnedValueLookup final {
         }
     }
 
-    // Reader pointers are non-owning and are destroyed before both pins.
-    segcore::IndexPin root_pin_;
+    // Borrowed interfaces are destroyed before their owning reader or snapshot.
+    segcore::IndexReaderHandle root_pin_;
     index::GrowingIndexSnapshotPin growing_pin_;
     const index::IIndexReaderBase* reader_{nullptr};
     int64_t covered_end_{0};

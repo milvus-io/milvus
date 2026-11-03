@@ -160,23 +160,18 @@ BuildVectorReader(DataType field_type,
     AssertInfo(static_cast<bool>(loader),
                "consumer vector fixture has no loader");
     const auto caps = loader.derive_caps(adapted.params);
-    auto reader =
+    auto owner =
         loader.Load({index::IndexFiles{std::move(context),
                                        std::move(files),
                                        index::LegacyIndexStorageConfig{}},
-                     std::move(options)})->CreateReader(nullptr);
+                     std::move(options)});
+    auto reader = owner->CreateReader(nullptr);
     sink.ReleaseLocalStaging();
-    return {std::move(reader), adapted.family, std::move(adapted.params), caps};
-}
-
-inline std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-CreateReaderCache(index::IIndexReaderBasePtr reader,
-                  OpContext** observed = nullptr) {
-    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
-        translator = std::make_unique<expr_index::ReaderTranslator>(
-            std::move(reader), observed);
-    return cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
+    return {std::move(owner),
+            std::move(reader),
+            adapted.family,
+            std::move(adapted.params),
+            caps};
 }
 
 inline segcore::LoadIndexInfo
@@ -208,7 +203,7 @@ MakeLoadIndexInfo(OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.index = CreateReaderCache(std::move(opened.reader));
+    info.index = std::move(opened.index);
     return info;
 }
 

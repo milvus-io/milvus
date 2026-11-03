@@ -266,8 +266,12 @@ class GISIndexRefinementTest : public ::testing::Test {
                                                    index::RTREE_INDEX_TYPE,
                                                    {data});
         if (hook) {
-            opened.reader = std::make_unique<InterceptedSpatialCandidates>(
-                std::move(opened.reader), std::move(hook));
+            test::expr_index::DecorateIndex(
+                opened,
+                [hook = std::move(hook)](index::IIndexReaderBasePtr reader) {
+                    return std::make_unique<InterceptedSpatialCandidates>(
+                        std::move(reader), hook);
+                });
         }
         test::expr_index::InstallIndex(*segment.sealed,
                                        segment.geo_id,

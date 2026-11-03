@@ -211,7 +211,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
 
     // Keep the parent cell pinned longer than a resolved JSON view. The typed
     // value interface is borrowed from the root reader or that view.
-    segcore::IndexPin index_pin_;
+    segcore::IndexReaderHandle index_pin_;
     index::JsonResolvedReader json_view_;
     const index::IScalarValueReader<IndexValueType>* value_reader_{nullptr};
     std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
@@ -486,7 +486,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
             entry != nullptr,
             "selected group-by index for field {} is absent from metadata",
             field_id_.get());
-        index_pin_ = segment_.PinIndex(op_ctx_, *decision.key);
+        index_pin_ = segment_.CreateIndexReader(op_ctx_, *decision.key);
         if (!index_pin_) {
             return false;
         }

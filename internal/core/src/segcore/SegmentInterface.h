@@ -60,7 +60,7 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/SkipIndex.h"
 #include "segcore/indexing/FieldIndexCapability.h"
-#include "segcore/indexing/IndexPin.h"
+#include "segcore/indexing/IndexReaderHandle.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
@@ -308,12 +308,12 @@ class SegmentInterface {
     virtual std::vector<IndexRegistration>
     IndexRegistrations(FieldId field_id) const = 0;
 
-    // Sealed index pinning. Missing keys return an empty pin; cache loading
-    // failures propagate. The reader remains uniquely owned by its cache cell.
-    virtual IndexPin
-    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const = 0;
+    // Creates a sealed request reader. Missing keys return an empty handle;
+    // initialization failures propagate. The reader retains its Index version.
+    virtual IndexReaderHandle
+    CreateIndexReader(milvus::OpContext* op_ctx, const IndexKey& key) const = 0;
 
-    // Growing publication is independent from sealed cache pinning. One pin
+    // Growing publication is independent from sealed reader creation. One pin
     // binds an immutable reader generation to its contiguous covered row end.
     virtual index::GrowingIndexSnapshotPin
     PinGrowingIndex(milvus::OpContext* op_ctx, FieldId field_id) const = 0;

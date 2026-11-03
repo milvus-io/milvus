@@ -258,7 +258,7 @@ OnlyIndexKey(const SegmentInterface& segment, FieldId field_id) {
 
 // Source-backed consumer fixtures publish a finished artifact before opening a
 // reader. The loader never borrows the BuildSession or its materialized input.
-index::IIndexReaderBasePtr
+BuiltTestIndex
 BuildSourceBackedVectorIndex(Config params,
                              storage::FileManagerContext context,
                              int64_t row_count,
@@ -313,7 +313,7 @@ BuildSourceBackedVectorIndex(Config params,
                        adapted.family == index::families::kVectorDisk
                            ? storage::V1SourceLayout::DiskFiles
                            : storage::V1SourceLayout::MemoryEntries}},
-               std::move(options)})->CreateReader(nullptr);
+               std::move(options)});
 }
 
 std::vector<IndexCapabilityEntry>
@@ -330,11 +330,11 @@ TestIndexEntries(const IndexInventory& inventory,
     return entries;
 }
 
-IndexInventory::RootSlot
-TestIndexSlot(const IndexInventory& inventory,
-              FieldId field,
-              std::string_view family = {},
-              std::string_view path = {}) {
+index::IndexPtr
+TestIndexOwner(const IndexInventory& inventory,
+               FieldId field,
+               std::string_view family = {},
+               std::string_view path = {}) {
     const auto capability = inventory.ResolveCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if ((family.empty() || entry.family == family) &&
@@ -348,12 +348,12 @@ TestIndexSlot(const IndexInventory& inventory,
     return nullptr;
 }
 
-IndexPin
+IndexReaderHandle
 PinTestTextIndex(const SegmentInterface& segment, FieldId field) {
     const auto capability = segment.ResolveIndexCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if (entry.family == index::families::kText) {
-            return segment.PinIndex(nullptr, entry.key);
+            return segment.CreateIndexReader(nullptr, entry.key);
         }
     }
     return {};
@@ -632,100 +632,42 @@ class RendezvousTestReader : public WarmupTestReader {
     mutable int arrived_{0};
 };
 
-class CancellationObservingIndexTranslator
-    : public cachinglayer::Translator<index::IIndexReaderBase> {
+class CancellationObservingIndex final : public index::IIndex {
  public:
-    CancellationObservingIndexTranslator(
-        std::string key,
-        std::unique_ptr<index::IIndexReaderBase> index,
-        folly::CancellationToken* observed_token,
-        std::promise<void>* warmup_started)
-        : key_(std::move(key)),
-          index_(std::move(index)),
-          observed_token_(observed_token),
-          warmup_started_(warmup_started),
-          meta_(cachinglayer::StorageType::MEMORY,
-                cachinglayer::CellIdMappingMode::IDENTICAL,
-                cachinglayer::CellDataType::OTHER,
-                CacheWarmupPolicy::CacheWarmupPolicy_Async,
-                false) {
+    explicit CancellationObservingIndex(index::IndexPtr owner)
+        : owner_(std::move(owner)) {
     }
-
-    size_t
-    num_cells() const override {
-        return 1;
+    index::IndexMetadata
+    Metadata() const override {
+        return owner_->Metadata();
     }
-
-    cachinglayer::cid_t
-    cell_id_of(cachinglayer::uid_t uid) const override {
-        return uid;
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        return owner_->CreateReader(ctx);
     }
-
-    cachinglayer::LoadingResourceUsage
-    estimated_loading_usage(
-        const std::vector<cachinglayer::cid_t>& cids) const override {
-        return {};
+    void
+    CancelWarmup() const override {
+        cancellation_.requestCancellation();
+        owner_->CancelWarmup();
     }
-
-    int64_t
-    cells_storage_bytes(
-        const std::vector<cachinglayer::cid_t>&) const override {
-        return 0;
-    }
-
-    const std::string&
-    key() const override {
-        return key_;
-    }
-
-    cachinglayer::Meta*
-    meta() override {
-        return &meta_;
-    }
-
-    std::vector<std::pair<cachinglayer::cid_t,
-                          std::unique_ptr<index::IIndexReaderBase>>>
-    get_cells(milvus::OpContext* ctx,
-              const std::vector<cachinglayer::cid_t>& cids) override {
-        AssertInfo(ctx != nullptr, "warmup context must not be null");
-        *observed_token_ = ctx->cancellation_token;
-        warmup_started_->set_value();
-        std::vector<std::pair<cachinglayer::cid_t,
-                              std::unique_ptr<index::IIndexReaderBase>>>
-            result;
-        result.reserve(cids.size());
-        for (auto cid : cids) {
-            AssertInfo(cid == 0, "test index translator has one cell");
-            result.emplace_back(cid, std::move(index_));
-        }
-        return result;
+    folly::CancellationToken
+    WarmupToken() const {
+        return cancellation_.getToken();
     }
 
  private:
-    std::string key_;
-    std::unique_ptr<index::IIndexReaderBase> index_;
-    folly::CancellationToken* observed_token_;
-    std::promise<void>* warmup_started_;
-    cachinglayer::Meta meta_;
+    index::IndexPtr owner_;
+    mutable folly::CancellationSource cancellation_;
 };
 
-IndexInventory::RootSlot
-CreateCancellationObservingCacheIndex(
-    std::string key,
-    std::unique_ptr<index::IIndexReaderBase> index,
-    folly::CancellationToken* observed_token,
-    std::promise<void>* warmup_started,
-    cachinglayer::internal::DList* dlist) {
-    auto translator = std::make_unique<CancellationObservingIndexTranslator>(
-        std::move(key), std::move(index), observed_token, warmup_started);
-    return std::make_shared<cachinglayer::CacheSlot<index::IIndexReaderBase>>(
-        std::move(translator),
-        dlist,
-        false,
-        false,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
+std::vector<index::IndexPtr>
+ResolvedIndexes(const IndexInventory& inventory) {
+    std::vector<index::IndexPtr> indexes;
+    for (const auto& entry : inventory.SnapshotEntries()) {
+        if (auto owner = entry->Peek())
+            indexes.push_back(std::move(owner));
+    }
+    return indexes;
 }
 
 }  // namespace
@@ -840,9 +782,7 @@ TEST(SealedLazyIndexSlot,
         ASSERT_NO_THROW(sealed->LoadIndex(info));
         EXPECT_TRUE(info.index_family.empty());
         EXPECT_EQ(info.index_value_type, DataType::NONE);
-        EXPECT_EQ(
-            std::get<milvus::segcore::IndexInventory::RootSlot>(info.index),
-            nullptr);
+        EXPECT_EQ(info.index, nullptr);
 
         const auto registrations = sealed->IndexRegistrations(json);
         ASSERT_EQ(registrations.size(), 1);
@@ -856,7 +796,7 @@ TEST(SealedLazyIndexSlot,
 
         const auto snapshot = sealed->TestGetPublishedStateSnapshot();
         ASSERT_NE(snapshot, nullptr);
-        EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+        EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
         EXPECT_EQ(GetFieldBit(snapshot->index_ready_bitset, json),
                   test.kind == IndexKind::Ngram);
     }
@@ -876,8 +816,7 @@ TEST(SealedLazyIndexSlot, CleanLoadedIndexClearsLazyFactory) {
     ASSERT_TRUE(info.lazy_index_factory);
     const auto status = CleanLoadedIndex(static_cast<CLoadIndexInfo>(&info));
     ASSERT_EQ(status.error_code, milvus::Success);
-    EXPECT_EQ(std::get<milvus::segcore::IndexInventory::RootSlot>(info.index),
-              nullptr);
+    EXPECT_EQ(info.index, nullptr);
     EXPECT_FALSE(info.lazy_index_factory);
 }
 
@@ -917,8 +856,8 @@ TEST(SealedLazyIndexSlot, SortedPrimaryKeyDoesNotRegisterLazyIndex) {
     sealed->TestLoadBatchIndexes(indexes);
     EXPECT_FALSE(sealed->HasIndex(pk));
     EXPECT_TRUE(sealed->IndexRegistrations(pk).empty());
-    EXPECT_TRUE(sealed->TestGetPublishedStateSnapshot()
-                    ->runtime->indexes.Slots()
+    EXPECT_TRUE(ResolvedIndexes(
+                    sealed->TestGetPublishedStateSnapshot()->runtime->indexes)
                     .empty());
 }
 
@@ -957,24 +896,24 @@ TEST(SealedLazyIndexSlot, ScalarArtifactStaysColdUntilPinAndRetriesCancel) {
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
     ASSERT_NE(snapshot->runtime, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto key = OnlyIndexKey(*sealed, scalar);
 
     folly::CancellationSource cancelled_source;
     cancelled_source.requestCancellation();
     OpContext cancelled(cancelled_source.getToken());
-    EXPECT_THROW(sealed->PinIndex(&cancelled, key), std::exception);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_THROW(sealed->CreateIndexReader(&cancelled, key), std::exception);
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
 
     // Existing entries keep their factory when the configuration changes.
     SegcoreConfig::default_config().set_lazy_index_slot_enabled(false);
-    auto pin = sealed->PinIndex(nullptr, key);
+    auto pin = sealed->CreateIndexReader(nullptr, key);
     ASSERT_TRUE(pin);
     const auto* reader =
         dynamic_cast<const index::IScalarValueReader<int64_t>*>(pin.get());
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Lookup(1), std::optional<int64_t>(22));
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
 }
 
 TEST(SealedLazyIndexSlot, DisabledFlagOrSyncWarmupCreatesSlotBeforePin) {
@@ -1017,15 +956,18 @@ TEST(SealedLazyIndexSlot, DisabledFlagOrSyncWarmupCreatesSlotBeforePin) {
 
         auto snapshot = sealed->TestGetPublishedStateSnapshot();
         ASSERT_NE(snapshot, nullptr);
-        ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
-        EXPECT_EQ(snapshot->runtime->indexes.Slots().front()->IsCached(0),
-                  warmup == "sync");
-        auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, scalar));
+        ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
+        OpContext query_context;
+        auto pin = sealed->CreateIndexReader(&query_context,
+                                             OnlyIndexKey(*sealed, scalar));
+        EXPECT_EQ(query_context.storage_usage.scanned_cold_bytes.load(), 0);
         ASSERT_TRUE(pin);
         const auto* reader =
             dynamic_cast<const index::IScalarValueReader<int64_t>*>(pin.get());
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Lookup(2), std::optional<int64_t>(33));
+        EXPECT_EQ(query_context.storage_usage.scanned_cold_bytes.load() > 0,
+                  warmup != "sync");
     }
 }
 
@@ -1078,13 +1020,15 @@ TEST(SealedLazyIndexSlot, ReplacementKeepsOldSnapshotArtifactUsable) {
     ASSERT_NE(new_snapshot, nullptr);
     const auto new_key = OnlyIndexKey(*sealed, scalar);
     EXPECT_NE(old_key, new_key);
-    EXPECT_TRUE(old_snapshot->runtime->indexes.Slots().empty());
-    EXPECT_TRUE(new_snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(old_snapshot->runtime->indexes).empty());
+    EXPECT_TRUE(ResolvedIndexes(new_snapshot->runtime->indexes).empty());
     // Readers can open either generation after the owning segment is gone.
     segment.reset();
 
-    auto old_pin = old_snapshot->runtime->indexes.PinIndex(nullptr, old_key);
-    auto new_pin = new_snapshot->runtime->indexes.PinIndex(nullptr, new_key);
+    auto old_pin =
+        old_snapshot->runtime->indexes.CreateIndexReader(nullptr, old_key);
+    auto new_pin =
+        new_snapshot->runtime->indexes.CreateIndexReader(nullptr, new_key);
     ASSERT_TRUE(old_pin);
     ASSERT_TRUE(new_pin);
     const auto* old_reader =
@@ -1131,8 +1075,9 @@ TEST(SealedLazyIndexSlot, InvertedArtifactStaysColdUntilPin) {
 
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
-    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, scalar));
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
+    auto pin =
+        sealed->CreateIndexReader(nullptr, OnlyIndexKey(*sealed, scalar));
     ASSERT_TRUE(pin);
     const auto* reader =
         dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(pin.get());
@@ -1142,7 +1087,7 @@ TEST(SealedLazyIndexSlot, InvertedArtifactStaysColdUntilPin) {
     EXPECT_TRUE(matches[0]);
     EXPECT_FALSE(matches[1]);
     EXPECT_TRUE(matches[2]);
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
 }
 
 TEST(SealedLazyIndexSlot,
@@ -1183,26 +1128,27 @@ TEST(SealedLazyIndexSlot,
 
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto registrations = sealed->IndexRegistrations(scalar);
     ASSERT_EQ(registrations.size(), 1);
     EXPECT_EQ(registrations.front().kind, IndexKind::Scalar);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
 
     const auto capability = sealed->ResolveIndexCapability(nullptr, scalar);
     ASSERT_EQ(capability.entries().size(), 1);
     const auto& resolved = capability.entries().front();
     EXPECT_EQ(resolved.family, index::families::kBitmap);
     EXPECT_TRUE(resolved.caps.predicate);
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
-    EXPECT_FALSE(snapshot->runtime->indexes.Slots().front()->IsCached(0));
-
-    auto pin = sealed->PinIndex(nullptr, resolved.key);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
+    OpContext query_context;
+    auto pin = sealed->CreateIndexReader(&query_context, resolved.key);
+    EXPECT_EQ(query_context.storage_usage.scanned_cold_bytes.load(), 0);
     ASSERT_TRUE(pin);
     const auto* reader =
         dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(pin.get());
     ASSERT_NE(reader, nullptr);
     const auto matches = reader->Range(4, index::CompareOp::Equal);
+    EXPECT_GT(query_context.storage_usage.scanned_cold_bytes.load(), 0);
     ASSERT_EQ(matches.size(), values.size());
     EXPECT_TRUE(matches[0]);
     EXPECT_FALSE(matches[1]);
@@ -1264,9 +1210,9 @@ TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
 
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto key = OnlyIndexKey(*sealed, vector);
-    auto pin = sealed->PinIndex(nullptr, key);
+    auto pin = sealed->CreateIndexReader(nullptr, key);
     ASSERT_TRUE(pin);
     const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
     ASSERT_NE(reader, nullptr);
@@ -1282,7 +1228,7 @@ TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
     reader->Search(query, search_params, nullptr, result);
     ASSERT_EQ(result.distances_.size(), 1);
     EXPECT_FLOAT_EQ(result.distances_.front(), 0.0F);
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
 }
 
 class SealedCardinalWarmupTest
@@ -1295,10 +1241,6 @@ TEST_P(SealedCardinalWarmupTest, WarmupAndFirstSearch) {
         GTEST_SKIP() << "Cardinal tiered engine is not linked";
     }
     const auto& [lazy_enabled, warmup] = GetParam();
-    const auto expected_policy =
-        warmup == "disable" ? CacheWarmupPolicy::CacheWarmupPolicy_Disable
-        : warmup == "sync"  ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
-                            : CacheWarmupPolicy::CacheWarmupPolicy_Async;
     LazyIndexSlotConfigGuard guard(lazy_enabled);
     constexpr int64_t dim = 32;
     constexpr int64_t row_count = 1024;
@@ -1349,28 +1291,12 @@ TEST_P(SealedCardinalWarmupTest, WarmupAndFirstSearch) {
 
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    auto slots = snapshot->runtime->indexes.Slots();
+    auto slots = ResolvedIndexes(snapshot->runtime->indexes);
     const bool lazy_creation = lazy_enabled && warmup == "disable";
     ASSERT_EQ(slots.size(), lazy_creation ? 0 : 1);
-    if (!slots.empty()) {
-        EXPECT_FALSE(slots.front()->meta()->support_eviction);
-        EXPECT_EQ(slots.front()->meta()->cache_warmup_policy, expected_policy);
-        if (warmup == "disable") {
-            EXPECT_FALSE(slots.front()->IsCached(0));
-        } else if (warmup == "sync") {
-            EXPECT_TRUE(slots.front()->IsCached(0));
-        } else {
-            const auto deadline =
-                std::chrono::steady_clock::now() + std::chrono::seconds(10);
-            while (!slots.front()->IsCached(0) &&
-                   std::chrono::steady_clock::now() < deadline) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            ASSERT_TRUE(slots.front()->IsCached(0));
-        }
-    }
 
-    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, vector));
+    auto pin =
+        sealed->CreateIndexReader(nullptr, OnlyIndexKey(*sealed, vector));
     ASSERT_TRUE(pin);
     const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
     ASSERT_NE(reader, nullptr);
@@ -1393,11 +1319,8 @@ TEST_P(SealedCardinalWarmupTest, WarmupAndFirstSearch) {
     ASSERT_EQ(warmed_result.distances_.size(), 1);
     EXPECT_FLOAT_EQ(warmed_result.distances_.front(),
                     result.distances_.front());
-    slots = snapshot->runtime->indexes.Slots();
+    slots = ResolvedIndexes(snapshot->runtime->indexes);
     ASSERT_EQ(slots.size(), 1);
-    EXPECT_TRUE(slots.front()->IsCached(0));
-    EXPECT_FALSE(slots.front()->meta()->support_eviction);
-    EXPECT_EQ(slots.front()->meta()->cache_warmup_policy, expected_policy);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1472,22 +1395,20 @@ TEST(SealedLazyIndexSlot, CardinalMissingArtifactRetriesAtFirstPin) {
     sealed->TestLoadBatchIndexes(indexes);
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto key = OnlyIndexKey(*sealed, vector);
-    EXPECT_THROW(sealed->PinIndex(nullptr, key), std::exception);
-    const auto slots = snapshot->runtime->indexes.Slots();
-    ASSERT_EQ(slots.size(), 1);
-    EXPECT_FALSE(slots.front()->IsCached(0));
+    EXPECT_THROW(sealed->CreateIndexReader(nullptr, key), std::exception);
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
 
     chunk_manager->Write(path, saved.data(), saved.size());
     restore_artifact.dismiss();
-    auto pin = sealed->PinIndex(nullptr, key);
+    auto pin = sealed->CreateIndexReader(nullptr, key);
     ASSERT_TRUE(pin);
     EXPECT_EQ(pin->Count(), row_count);
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
-    EXPECT_EQ(snapshot->runtime->indexes.Slots().front(), slots.front());
-    EXPECT_TRUE(slots.front()->IsCached(0));
-    EXPECT_FALSE(slots.front()->meta()->support_eviction);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
+    auto second = sealed->CreateIndexReader(nullptr, key);
+    EXPECT_NE(pin.get(), second.get());
+    EXPECT_EQ(second->Count(), row_count);
 }
 
 TEST(SealedLazyIndexSlot, SparseInvertedArtifactStaysColdUntilFirstSearch) {
@@ -1548,9 +1469,10 @@ TEST(SealedLazyIndexSlot, SparseInvertedArtifactStaysColdUntilFirstSearch) {
 
     auto snapshot = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(snapshot, nullptr);
-    EXPECT_TRUE(snapshot->runtime->indexes.Slots().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
 
-    auto pin = sealed->PinIndex(nullptr, OnlyIndexKey(*sealed, sparse));
+    auto pin =
+        sealed->CreateIndexReader(nullptr, OnlyIndexKey(*sealed, sparse));
     ASSERT_TRUE(pin);
     const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
     ASSERT_NE(reader, nullptr);
@@ -1569,7 +1491,7 @@ TEST(SealedLazyIndexSlot, SparseInvertedArtifactStaysColdUntilFirstSearch) {
     ASSERT_EQ(result.distances_.size(), 1);
     EXPECT_EQ(result.seg_offsets_.front(), 2);
     EXPECT_FLOAT_EQ(result.distances_.front(), 4.0F);
-    ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+    ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
 }
 
 TEST(SealedLazyIndexSlot, TextArtifactSupportsEagerAndLazySlots) {
@@ -1624,22 +1546,26 @@ TEST(SealedLazyIndexSlot, TextArtifactSupportsEagerAndLazySlots) {
         const auto registrations = sealed->IndexRegistrations(text);
         ASSERT_EQ(registrations.size(), 1);
         EXPECT_EQ(registrations.front().kind, IndexKind::Text);
-        const auto slots = snapshot->runtime->indexes.Slots();
+        const auto slots = ResolvedIndexes(snapshot->runtime->indexes);
         ASSERT_EQ(slots.size(), lazy_enabled ? 0 : 1);
-        if (!lazy_enabled) {
-            EXPECT_FALSE(slots.front()->IsCached(0));
-        }
-        auto pin = sealed->PinIndex(nullptr, registrations.front().key);
+        // Resolve the optional lazy factory before measuring request creation.
+        auto initial_reader =
+            sealed->CreateIndexReader(nullptr, registrations.front().key);
+        OpContext query_context;
+        auto pin = sealed->CreateIndexReader(&query_context,
+                                             registrations.front().key);
+        EXPECT_EQ(query_context.storage_usage.scanned_cold_bytes.load(), 0);
         ASSERT_TRUE(pin);
         const auto* reader =
             dynamic_cast<const index::ITextMatchReader*>(pin.get());
         ASSERT_NE(reader, nullptr);
         const auto matches = reader->MatchQuery("alpha", 1);
+        EXPECT_GT(query_context.storage_usage.scanned_cold_bytes.load(), 0);
         ASSERT_EQ(matches.size(), 3);
         EXPECT_TRUE(matches[0]);
         EXPECT_FALSE(matches[1]);
         EXPECT_FALSE(matches[2]);
-        ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
+        ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
     }
 }
 
@@ -1680,8 +1606,7 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     load_info.field_type = DataType::VARCHAR;
     load_info.index_params = GenIndexParams(scalar_index.get());
     SetTestIndexMetadata(load_info, *scalar_index, index::families::kSort);
-    load_info.index =
-        CreateTestCacheIndex("nullable-text", std::move(scalar_index));
+    load_info.index = CreateTestIndex("nullable-text", std::move(scalar_index));
 
     auto dataset = DataGen(schema, values.size());
     auto segment = CreateSealedSegment(schema, empty_index_meta, 51599);
@@ -1798,7 +1723,7 @@ TEST(Sealed, without_predicate) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -1875,7 +1800,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -1979,7 +1904,7 @@ TEST(Sealed, with_predicate) {
     load_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    load_info.index = CreateTestIndex("test", std::move(indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -2056,7 +1981,7 @@ TEST(Sealed, with_predicate_filter_all) {
     load_info.index_params = GenIndexParams(ivf_indexing.get());
     SetTestIndexMetadata(load_info, *ivf_indexing, index::families::kVectorMem);
     load_info.field_type = ivf_indexing->ValueType();
-    load_info.index = CreateTestCacheIndex("test", std::move(ivf_indexing));
+    load_info.index = CreateTestIndex("test", std::move(ivf_indexing));
     load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -2095,8 +2020,7 @@ TEST(Sealed, with_predicate_filter_all) {
     SetTestIndexMetadata(
         hnsw_load_info, *hnsw_indexing, index::families::kVectorMem);
     hnsw_load_info.field_type = hnsw_indexing->ValueType();
-    hnsw_load_info.index =
-        CreateTestCacheIndex("test", std::move(hnsw_indexing));
+    hnsw_load_info.index = CreateTestIndex("test", std::move(hnsw_indexing));
     hnsw_load_info.index_params["metric_type"] = "L2";
 
     // load index for vec field, load raw data for scalar field
@@ -2149,7 +2073,7 @@ TEST(Sealed, SegmentInterfaceIsIndexRefineEnabledPropagatesOpContext) {
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
     load_info.index =
-        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+        CreateTestIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
 
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
@@ -2202,7 +2126,7 @@ TEST(Sealed, SegmentInterfaceCalcDistByIDsPropagatesOpContext) {
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
     load_info.index =
-        CreateTestCacheIndex("test", std::move(indexing), &observed_ctx);
+        CreateTestIndex("test", std::move(indexing), &observed_ctx);
     load_info.index_params["metric_type"] = "L2";
 
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
@@ -2296,7 +2220,7 @@ TEST(Sealed, LoadFieldData) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2439,7 +2363,7 @@ TEST(Sealed, ClearData) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2527,7 +2451,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2571,7 +2495,7 @@ TEST(Sealed, LoadPkScalarIndex) {
     auto index = GenScalarIndexing<int64_t>(N, pk_data.data());
     pk_index.index_params = GenIndexParams(index.get());
     SetTestIndexMetadata(pk_index, *index, index::families::kSort);
-    pk_index.index = CreateTestCacheIndex("test", std::move(index));
+    pk_index.index = CreateTestIndex("test", std::move(index));
     segment->LoadIndex(pk_index);
 }
 
@@ -2621,7 +2545,7 @@ TEST(Sealed, LoadScalarIndex) {
     vec_info.field_type = DataType::VECTOR_FLOAT;
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
-    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -2633,7 +2557,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto index = GenScalarIndexing<int64_t>(N, counter_data.data());
     counter_index.index_params = GenIndexParams(index.get());
     SetTestIndexMetadata(counter_index, *index, index::families::kSort);
-    counter_index.index = CreateTestCacheIndex("test", std::move(index));
+    counter_index.index = CreateTestIndex("test", std::move(index));
     segment->LoadIndex(counter_index);
 
     LoadIndexInfo double_index{};
@@ -2644,7 +2568,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto temp1 = GenScalarIndexing<double>(N, double_data.data());
     double_index.index_params = GenIndexParams(temp1.get());
     SetTestIndexMetadata(double_index, *temp1, index::families::kSort);
-    double_index.index = CreateTestCacheIndex("test", std::move(temp1));
+    double_index.index = CreateTestIndex("test", std::move(temp1));
     segment->LoadIndex(double_index);
 
     LoadIndexInfo nothing_index{};
@@ -2655,7 +2579,7 @@ TEST(Sealed, LoadScalarIndex) {
     auto temp2 = GenScalarIndexing<int32_t>(N, nothing_data.data());
     nothing_index.index_params = GenIndexParams(temp2.get());
     SetTestIndexMetadata(nothing_index, *temp2, index::families::kSort);
-    nothing_index.index = CreateTestCacheIndex("test", std::move(temp2));
+    nothing_index.index = CreateTestIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
     auto sr = segment->Search(plan.get(),
@@ -2681,7 +2605,7 @@ TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // Load a scalar index whose metadata reports no raw data (as INVERTED
-    // does). TestIndexTranslator records the OpContext when the index is
+    // does). ContextObservingIndex records the OpContext when a reader is
     // actually materialized, so we can assert bulk_subscript never pins it.
     auto index = BuildTestScalarIndex<double>(
         index::families::kInverted, N, double_col.data());
@@ -2694,8 +2618,7 @@ TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
     load_info.load_resource_request.emplace();
     load_info.load_resource_request->has_raw_data = false;
     SetTestIndexMetadata(load_info, *index, index::families::kInverted);
-    load_info.index =
-        CreateTestCacheIndex("test", std::move(index), &observed_ctx);
+    load_info.index = CreateTestIndex("test", std::move(index), &observed_ctx);
     segment->LoadIndex(load_info);
     ASSERT_TRUE(segment->HasIndex(double_id));
 
@@ -3242,7 +3165,7 @@ TEST(Sealed, GetVector) {
     vec_info.index_params = GenIndexParams(indexing.get());
     SetTestIndexMetadata(vec_info, *indexing, index::families::kVectorMem);
     vec_info.field_type = indexing->ValueType();
-    vec_info.index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params["metric_type"] = knowhere::metric::L2;
     segment_sealed->LoadIndex(vec_info);
 
@@ -3329,8 +3252,7 @@ TEST(Sealed, LoadArrayFieldDataWhenIndexHasRawData) {
     request.has_raw_data = true;
     array_index.load_resource_request = request;
     SetTestIndexMetadata(array_index, *indexing, index::families::kSort);
-    array_index.index =
-        CreateTestCacheIndex("array_raw_index", std::move(indexing));
+    array_index.index = CreateTestIndex("array_raw_index", std::move(indexing));
     segment->LoadIndex(array_index);
 
     auto ids_ds = GenRandomIds(N);
@@ -4064,7 +3986,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
         SetTestIndexMetadata(
             load_info, *emb_list_hnsw_index, index::families::kVectorMem);
         load_info.index =
-            CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+            CreateTestIndex("test", std::move(emb_list_hnsw_index));
         load_info.index_params["metric_type"] = metric_type;
 
         sealed_segment->DropFieldData(array_vec);
@@ -4220,8 +4142,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.index =
-        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index = CreateTestIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = metric_type;
 
     segment->DropFieldData(array_vec);
@@ -4418,8 +4339,7 @@ TEST(SealedVectorArrayNullable,
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.index =
-        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index = CreateTestIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
 
     segment->DropFieldData(array_vec);
@@ -4545,8 +4465,7 @@ TEST(SealedVectorArrayNullable,
     load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_index, index::families::kVectorMem);
-    load_info.index =
-        CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+    load_info.index = CreateTestIndex("test", std::move(emb_list_hnsw_index));
     load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
 
     segment->DropFieldData(array_vec);
@@ -4676,7 +4595,7 @@ TEST(SealedVectorArrayFallback,
     SetTestIndexMetadata(
         load_info, *emb_list_hnsw_sq_index, index::families::kVectorMem);
     load_info.index =
-        CreateTestCacheIndex("test", std::move(emb_list_hnsw_sq_index));
+        CreateTestIndex("test", std::move(emb_list_hnsw_sq_index));
 
     ASSERT_TRUE(segment->HasFieldData(array_vec));
     segment->LoadIndex(load_info);
@@ -4803,7 +4722,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
         GenIndexParams(loaded_index.get(), index::families::kVectorDisk);
     SetTestIndexMetadata(
         load_info, *loaded_index, index::families::kVectorDisk);
-    load_info.index = CreateTestCacheIndex("test", std::move(loaded_index));
+    load_info.index = CreateTestIndex("test", std::move(loaded_index));
     load_info.index_params["metric_type"] = metric_type;
 
     segment->DropFieldData(array_vec);
@@ -5787,8 +5706,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
     load_info.index_params["metric_type"] = knowhere::metric::L2;
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
-    load_info.index =
-        CreateTestCacheIndex("staged-vector", std::move(indexing));
+    load_info.index = CreateTestIndex("staged-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
@@ -6515,7 +6433,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     SetTestIndexMetadata(load_info, *indexing, index::families::kVectorMem);
     load_info.field_type = indexing->ValueType();
     load_info.index =
-        CreateTestCacheIndex("staged-real-vector", std::move(indexing));
+        CreateTestIndex("staged-real-vector", std::move(indexing));
     load_info.load_resource_request = LoadResourceRequest{0, 0, 0, 0, true};
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
@@ -6558,13 +6476,6 @@ TEST(SealedSegmentCowState,
         "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
     schema->set_primary_field_id(pk);
 
-    auto warmup_limit = cachinglayer::ResourceUsage{1024 * 1024, 0};
-    auto warmup_dlist = std::make_shared<cachinglayer::internal::DList>(
-        false,
-        warmup_limit,
-        warmup_limit,
-        warmup_limit,
-        cachinglayer::EvictionConfig{});
     auto segment = CreateSealedSegment(schema);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
@@ -6580,26 +6491,15 @@ TEST(SealedSegmentCowState,
             Config{{knowhere::indexparam::NLIST, 1}});
     };
 
-    folly::CancellationToken published_warmup_token;
-    std::promise<void> warmup_started;
-    auto warmup_started_future = warmup_started.get_future();
     auto published_index_impl = create_index();
     auto published_index_params = GenIndexParams(published_index_impl.get());
     LoadIndexInfo published_index{};
     SetTestIndexMetadata(
         published_index, *published_index_impl, index::families::kVectorMem);
     published_index.field_type = DataType::VECTOR_FLOAT;
-    auto published_cache_index =
-        CreateCancellationObservingCacheIndex("published-vector",
-                                              std::move(published_index_impl),
-                                              &published_warmup_token,
-                                              &warmup_started,
-                                              warmup_dlist.get());
-    auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    folly::coro::blockingWait(
-        published_cache_index->Warmup(nullptr, warmup_pool));
-    ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
-              std::future_status::ready);
+    auto published_cache_index = std::make_shared<CancellationObservingIndex>(
+        std::move(published_index_impl.index));
+    auto published_warmup_token = published_cache_index->WarmupToken();
     ASSERT_FALSE(published_warmup_token.isCancellationRequested());
 
     published_index.field_id = vec.get();
@@ -6628,7 +6528,7 @@ TEST(SealedSegmentCowState,
         SetTestIndexMetadata(
             replacement, *replacement_impl, index::families::kVectorMem);
         replacement.field_type = replacement_impl->ValueType();
-        replacement.index = CreateTestCacheIndex(
+        replacement.index = CreateTestIndex(
             fail_before_publish ? "rolled-back-vector" : "replacement-vector",
             std::move(replacement_impl));
         replacement.load_resource_request =
@@ -6650,9 +6550,9 @@ TEST(SealedSegmentCowState,
                 final_delta,
                 [&] {
                     auto published = sealed->TestGetPublishedStateSnapshot();
-                    ASSERT_EQ(TestIndexSlot(published->runtime->indexes,
-                                            vec,
-                                            index::families::kVectorMem),
+                    ASSERT_EQ(TestIndexOwner(published->runtime->indexes,
+                                             vec,
+                                             index::families::kVectorMem),
                               published_cache_index);
                     EXPECT_FALSE(
                         published_warmup_token.isCancellationRequested());
@@ -6673,7 +6573,7 @@ TEST(SealedSegmentCowState,
     EXPECT_FALSE(published_warmup_token.isCancellationRequested());
     auto after_rollback = sealed->TestGetPublishedStateSnapshot();
     ASSERT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             after_rollback->runtime->indexes, vec, index::families::kVectorMem),
         published_cache_index);
 
@@ -6681,7 +6581,7 @@ TEST(SealedSegmentCowState,
     EXPECT_TRUE(published_warmup_token.isCancellationRequested());
     auto after_publish = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(
-        TestIndexSlot(
+        TestIndexOwner(
             after_publish->runtime->indexes, vec, index::families::kVectorMem),
         published_cache_index);
 }
@@ -6706,23 +6606,22 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
                                                  payload_data.data());
     first_index.index_params = GenIndexParams(first_impl.get());
     SetTestIndexMetadata(first_index, *first_impl, index::families::kSort);
-    first_index.index = CreateTestCacheIndex("first", std::move(first_impl));
-    auto first_cache_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(first_index.index);
+    first_index.index = CreateTestIndex("first", std::move(first_impl));
+    auto first_cache_index = first_index.index;
     sealed->LoadIndex(first_index);
 
     auto before = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(before, nullptr);
     ASSERT_NE(before->runtime, nullptr);
     ASSERT_TRUE(TestIndexEntries(before->runtime->indexes, payload).size() > 0);
-    auto published_before_replace = TestIndexSlot(
+    auto published_before_replace = TestIndexOwner(
         before->runtime->indexes, payload, index::families::kSort);
     ASSERT_EQ(published_before_replace, first_cache_index);
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     ASSERT_TRUE(TestIndexEntries(runtime->indexes, payload).size() > 0);
     auto stale_runtime_index =
-        TestIndexSlot(runtime->indexes, payload, index::families::kSort);
+        TestIndexOwner(runtime->indexes, payload, index::families::kSort);
     ASSERT_EQ(stale_runtime_index, first_cache_index);
 
     LoadIndexInfo replacement_index{};
@@ -6735,17 +6634,15 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     SetTestIndexMetadata(
         replacement_index, *replacement_impl, index::families::kSort);
     replacement_index.index =
-        CreateTestCacheIndex("replacement", std::move(replacement_impl));
-    auto replacement_cache_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(
-            replacement_index.index);
+        CreateTestIndex("replacement", std::move(replacement_impl));
+    auto replacement_cache_index = replacement_index.index;
 
     sealed->TestLoadIndex(replacement_index, true, runtime.get());
 
     ASSERT_TRUE(TestIndexEntries(runtime->indexes, payload).size() > 0);
     EXPECT_EQ(runtime->indexes.Entries().size(), 1);
     auto updated_runtime_index =
-        TestIndexSlot(runtime->indexes, payload, index::families::kSort);
+        TestIndexOwner(runtime->indexes, payload, index::families::kSort);
     EXPECT_EQ(updated_runtime_index, replacement_cache_index);
     EXPECT_NE(updated_runtime_index, stale_runtime_index);
 
@@ -6755,7 +6652,7 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     ASSERT_TRUE(
         TestIndexEntries(staged_only->runtime->indexes, payload).size() > 0);
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             staged_only->runtime->indexes, payload, index::families::kSort),
         first_cache_index);
 
@@ -6771,7 +6668,7 @@ TEST(SealedSegmentCowState, ReplaceScalarIndexStagesRuntimeUntilFinalPublish) {
     EXPECT_EQ(next->runtime->indexes.Entries().size(), 1);
     ASSERT_TRUE(TestIndexEntries(next->runtime->indexes, payload).size() > 0);
     auto published_runtime_index =
-        TestIndexSlot(next->runtime->indexes, payload, index::families::kSort);
+        TestIndexOwner(next->runtime->indexes, payload, index::families::kSort);
     EXPECT_EQ(published_runtime_index, replacement_cache_index);
     EXPECT_NE(published_runtime_index, stale_runtime_index);
     EXPECT_EQ(TestIndexEntries(
@@ -7014,9 +6911,8 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
         {JSON_CAST_TYPE, "DOUBLE"},
     };
     SetTestIndexMetadata(load_info, *indexing, index::families::kInverted);
-    load_info.index = CreateTestCacheIndex("json-runtime", std::move(indexing));
-    auto loaded_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(load_info.index);
+    load_info.index = CreateTestIndex("json-runtime", std::move(indexing));
+    auto loaded_index = load_info.index;
 
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_TRUE(TestIndexEntries(
@@ -7060,7 +6956,7 @@ TEST(SealedSegmentCowState, JsonIndexStagesAndFollowsSnapshotLifetime) {
                   .size(),
               1);
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             published->runtime->indexes, json, index::families::kInverted),
         loaded_index);
     EXPECT_TRUE(sealed->HasJsonIndex(json));
@@ -7108,18 +7004,16 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
             info,
             *indexing,
             is_ngram ? index::families::kNgram : index::families::kInverted);
-        info.index = CreateTestCacheIndex(std::move(key), std::move(indexing));
+        info.index = CreateTestIndex(std::move(key), std::move(indexing));
         return info;
     };
 
     auto sibling = make_load_info("json-scalar-b", "b", false);
-    auto sibling_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(sibling.index);
+    auto sibling_index = sibling.index;
     sealed->LoadIndex(sibling);
 
     auto original = make_load_info("json-scalar-a", "a", false);
-    auto original_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(original.index);
+    auto original_index = original.index;
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
@@ -7141,8 +7035,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     auto replacement = make_load_info("json-ngram-a", "a", true);
-    auto replacement_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(replacement.index);
+    auto replacement_index = replacement.index;
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
@@ -7165,17 +7058,17 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
                           .front()
                           .json_path,
                       "b");
-            EXPECT_EQ(TestIndexSlot(
+            EXPECT_EQ(TestIndexOwner(
                           runtime->indexes, json, index::families::kInverted),
                       sibling_index);
             ASSERT_EQ(TestIndexEntries(
                           runtime->indexes, json, index::families::kNgram)
                           .size(),
                       1);
-            ASSERT_NE(TestIndexSlot(
+            ASSERT_NE(TestIndexOwner(
                           runtime->indexes, json, index::families::kNgram, "a"),
                       nullptr);
-            EXPECT_EQ(TestIndexSlot(
+            EXPECT_EQ(TestIndexOwner(
                           runtime->indexes, json, index::families::kNgram, "a"),
                       replacement_index);
             EXPECT_TRUE(GetFieldBit(staged->index_ready_bitset, json));
@@ -7202,7 +7095,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
                   .json_path,
               "b");
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             published->runtime->indexes, json, index::families::kInverted),
         sibling_index);
     ASSERT_EQ(TestIndexEntries(
@@ -7210,7 +7103,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
                   .size(),
               1);
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             published->runtime->indexes, json, index::families::kNgram, "a"),
         replacement_index);
     EXPECT_TRUE(GetFieldBit(published->index_ready_bitset, json));
@@ -7219,7 +7112,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
                   current->runtime->indexes, json, index::families::kInverted)
                   .size(),
               2);
-    auto old_path = TestIndexSlot(
+    auto old_path = TestIndexOwner(
         current->runtime->indexes, json, index::families::kInverted, "a");
     ASSERT_NE(old_path, nullptr);
     EXPECT_EQ(old_path, original_index);
@@ -7267,18 +7160,16 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
             info,
             *indexing,
             is_ngram ? index::families::kNgram : index::families::kInverted);
-        info.index = CreateTestCacheIndex(std::move(key), std::move(indexing));
+        info.index = CreateTestIndex(std::move(key), std::move(indexing));
         return info;
     };
 
     auto sibling = make_load_info("json-scalar-b", "b", false);
-    auto sibling_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(sibling.index);
+    auto sibling_index = sibling.index;
     sealed->LoadIndex(sibling);
 
     auto original = make_load_info("json-ngram-a", "a", true);
-    auto original_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(original.index);
+    auto original_index = original.index;
     sealed->LoadIndex(original);
 
     auto current = sealed->TestGetPublishedStateSnapshot();
@@ -7291,7 +7182,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
                   .size(),
               1);
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             current->runtime->indexes, json, index::families::kNgram, "a"),
         original_index);
     EXPECT_TRUE(GetFieldBit(current->index_ready_bitset, json));
@@ -7305,8 +7196,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
     auto staged = sealed->TestBuildNextPublishedState(current, initial_delta);
 
     auto replacement = make_load_info("json-scalar-a", "a", false);
-    auto replacement_index =
-        std::get<milvus::segcore::IndexInventory::RootSlot>(replacement.index);
+    auto replacement_index = replacement.index;
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = current->fields;
     final_delta.load_info = current->load_info;
@@ -7327,7 +7217,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
                           runtime->indexes, json, index::families::kInverted)
                           .size(),
                       2);
-            auto replacement_path = TestIndexSlot(
+            auto replacement_path = TestIndexOwner(
                 runtime->indexes, json, index::families::kInverted, "a");
             ASSERT_NE(replacement_path, nullptr);
             EXPECT_EQ(replacement_path, replacement_index);
@@ -7338,10 +7228,10 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
                     current->runtime->indexes, json, index::families::kNgram)
                     .size(),
                 1);
-            EXPECT_EQ(TestIndexSlot(current->runtime->indexes,
-                                    json,
-                                    index::families::kNgram,
-                                    "a"),
+            EXPECT_EQ(TestIndexOwner(current->runtime->indexes,
+                                     json,
+                                     index::families::kNgram,
+                                     "a"),
                       original_index);
         });
 
@@ -7353,11 +7243,11 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
                   published->runtime->indexes, json, index::families::kInverted)
                   .size(),
               2);
-    auto sibling_path = TestIndexSlot(
+    auto sibling_path = TestIndexOwner(
         published->runtime->indexes, json, index::families::kInverted, "b");
     ASSERT_NE(sibling_path, nullptr);
     EXPECT_EQ(sibling_path, sibling_index);
-    auto replacement_path = TestIndexSlot(
+    auto replacement_path = TestIndexOwner(
         published->runtime->indexes, json, index::families::kInverted, "a");
     ASSERT_NE(replacement_path, nullptr);
     EXPECT_EQ(replacement_path, replacement_index);
@@ -7368,7 +7258,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
                   .size(),
               1);
     EXPECT_EQ(
-        TestIndexSlot(
+        TestIndexOwner(
             current->runtime->indexes, json, index::families::kNgram, "a"),
         original_index);
 }

@@ -80,7 +80,7 @@ class DetermineExecPathTest : public ::testing::Test {
             GenIndexParams(int64_index.get(), "sort");
         SetTestIndexMetadata(load_index_info, *int64_index, "sort");
         load_index_info.index =
-            CreateTestCacheIndex("test_int64", std::move(int64_index));
+            CreateTestIndex("test_int64", std::move(int64_index));
         segment->LoadIndex(load_index_info);
 
         return SegmentSealedSPtr(segment.release());

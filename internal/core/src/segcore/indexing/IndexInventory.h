@@ -27,32 +27,23 @@
 
 #include <folly/synchronization/DistributedMutex.h>
 
-#include "cachinglayer/CacheSlot.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
-#include <variant>
 #include "segcore/indexing/FieldIndexCapability.h"
-#include "segcore/indexing/IndexPin.h"
+#include "segcore/indexing/IndexReaderHandle.h"
 
 // Sealed index registrations, resolved owners, and request readers.
-// Keep an IndexPin alive while using its borrowed reader.
+// Keep an IndexReaderHandle alive while using its borrowed reader.
 namespace milvus::segcore {
 
 class IndexInventory {
  public:
-    using RootSlot = std::shared_ptr<
-        milvus::cachinglayer::CacheSlot<index::IIndexReaderBase>>;
-
-    // shortcut: Reader slots coexist only during family migration; remove that
-    // alternative after the last loader owns its concrete storage cache.
-    using LoadedIndex = std::variant<RootSlot, index::IndexPtr>;
-
     struct ResolvedData {
         std::string family;
         DataType value_type;
         index::ReaderCaps caps;
-        LoadedIndex index;
+        index::IndexPtr index;
     };
 
     using Factory = std::function<ResolvedData(milvus::OpContext*)>;
@@ -60,7 +51,7 @@ class IndexInventory {
     // Runtime snapshots share entries and their initialization results.
     class Entry {
      public:
-        Entry(IndexCapabilityEntry meta, LoadedIndex index);
+        Entry(IndexCapabilityEntry meta, index::IndexPtr index);
         Entry(IndexRegistration registration, Factory factory);
 
         const IndexRegistration&
@@ -71,7 +62,7 @@ class IndexInventory {
         const ResolvedData&
         Resolve(milvus::OpContext* op_ctx) const;
 
-        RootSlot
+        index::IndexPtr
         Peek() const;
 
         // Retirement is remembered even when lazy initialization has not finished.
@@ -111,18 +102,14 @@ class IndexInventory {
     std::vector<IndexRegistration>
     Entries(FieldId field_id) const;
 
-    // Legacy-slot inspection retained for unmigrated families and their tests.
-    std::vector<RootSlot>
-    Slots() const;
-
     // Retain all entries without resolving them, for post-publication retirement.
     std::vector<std::shared_ptr<Entry>>
     SnapshotEntries() const;
 
     // Resolves the selected key and retains its request reader.
-    // Missing keys return an empty pin; resolution, load, and caps errors propagate.
-    IndexPin
-    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const;
+    // Missing keys return an empty handle; resolution, load, and caps errors propagate.
+    IndexReaderHandle
+    CreateIndexReader(milvus::OpContext* op_ctx, const IndexKey& key) const;
 
  private:
     using FieldEntries =

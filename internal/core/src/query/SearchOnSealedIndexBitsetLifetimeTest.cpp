@@ -343,10 +343,10 @@ MakeNullableIndexLoadInfo(test::consumer::OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.index =
-        CreateTestCacheIndex("nullable-vector-" + std::to_string(info.index_id),
-                             std::move(opened.reader),
-                             observed_ctx);
+    info.index = observed_ctx != nullptr
+                     ? std::make_shared<ContextObservingIndex>(
+                           std::move(opened.index), observed_ctx)
+                     : std::move(opened.index);
     return info;
 }
 
@@ -779,7 +779,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
 }
 
 TEST(SearchOnSealedIndexCachePinLifetime,
-     GroupByIteratorKeepsVectorIndexPinnedUntilSearchResultDestruction) {
+     GroupByIteratorKeepsReaderAliveAfterSegmentDestruction) {
     constexpr int64_t total_count = 10000;
 
     int64_t valid_count = 0;
@@ -803,7 +803,7 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     auto load_info = MakeNullableIndexLoadInfo(
         std::move(index_base), vector_field, total_count);
-    auto cache_index = std::get<IndexInventory::RootSlot>(load_info.index);
+    std::weak_ptr<index::IIndex> owner = load_info.index;
     auto segment =
         BuildIndexSearchSegment(schema, vector_field, total_count, load_info);
 
@@ -813,8 +813,8 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     {
         SearchResult search_result;
-        // The segment is the consumer responsible for retaining the reader
-        // cache pin after SearchOnSealedIndex returns borrowed iterators.
+        // Deferred iteration must retain the request reader and engine after
+        // the segment releases its inventory.
         segment->vector_search(search_info,
                                query.data(),
                                nullptr,
@@ -826,16 +826,17 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
         ASSERT_TRUE(search_result.vector_iterators_.has_value());
         ASSERT_FALSE(search_result.vector_iterators_->empty());
-        ASSERT_FALSE(cache_index->ManualEvictAll())
-            << "the vector index must stay pinned while SearchResult owns "
-               "iterators";
+        load_info.index.reset();
+        segment.reset();
+        EXPECT_FALSE(owner.expired());
+        AssertVectorIteratorUsableAfterSearchReturns(
+            search_result, 10, search_result.pinned_bitsets_.size());
     }
 
-    EXPECT_TRUE(cache_index->ManualEvictAll())
-        << "the vector index pin must be released with SearchResult";
+    EXPECT_TRUE(owner.expired());
 }
 
-TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
+TEST(SearchOnSealedIndexCancellation, CreateVectorReaderUsesCallerOpContext) {
     constexpr int64_t total_count = 1000;
     constexpr int64_t topk = 10;
 

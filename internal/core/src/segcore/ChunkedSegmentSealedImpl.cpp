@@ -709,9 +709,7 @@ erase_index_entries(IndexInventory& inventory,
 
 std::shared_ptr<IndexInventory::Entry>
 make_persisted_index_entry(LoadIndexInfo& info) {
-    AssertInfo(std::visit([](const auto& value) { return value != nullptr; },
-                          info.index) ||
-                   info.lazy_index_factory != nullptr,
+    AssertInfo(info.index != nullptr || info.lazy_index_factory != nullptr,
                "loaded index for field {} has no index owner",
                info.field_id);
     if (info.lazy_index_factory != nullptr) {
@@ -899,15 +897,15 @@ ChunkedSegmentSealedImpl::IndexRegistrations(FieldId field_id) const {
                               : std::vector<IndexRegistration>{};
 }
 
-IndexPin
-ChunkedSegmentSealedImpl::PinIndex(milvus::OpContext* op_ctx,
-                                   const IndexKey& key) const {
+IndexReaderHandle
+ChunkedSegmentSealedImpl::CreateIndexReader(milvus::OpContext* op_ctx,
+                                            const IndexKey& key) const {
     // Search/Retrieve holds the segment read lease across metadata selection
     // and this pin, so publication cannot change the runtime generation between
     // the two calls.
     auto runtime = CaptureRuntimeResourceState();
-    return runtime != nullptr ? runtime->indexes.PinIndex(op_ctx, key)
-                              : IndexPin{};
+    return runtime != nullptr ? runtime->indexes.CreateIndexReader(op_ctx, key)
+                              : IndexReaderHandle{};
 }
 
 bool
@@ -1845,14 +1843,14 @@ ChunkedSegmentSealedImpl::GetVectorIndexKey(
     return result;
 }
 
-IndexPin
-ChunkedSegmentSealedImpl::PinVectorIndex(
+IndexReaderHandle
+ChunkedSegmentSealedImpl::CreateVectorReader(
     const std::shared_ptr<const RuntimeResourceState>& runtime,
     milvus::OpContext* op_ctx,
     FieldId field_id) const {
     auto key = GetVectorIndexKey(runtime, field_id);
-    return key.has_value() ? runtime->indexes.PinIndex(op_ctx, *key)
-                           : IndexPin{};
+    return key.has_value() ? runtime->indexes.CreateIndexReader(op_ctx, *key)
+                           : IndexReaderHandle{};
 }
 
 std::vector<std::shared_ptr<IndexInventory::Entry>>
@@ -3806,7 +3804,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByRange(
     }
 
     if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
-        auto vector_pin = PinVectorIndex(snapshot->runtime, op_ctx, field_id);
+        auto vector_pin =
+            CreateVectorReader(snapshot->runtime, op_ctx, field_id);
         if (vector_pin) {
             const auto* vec_index =
                 dynamic_cast<const index::IVectorReader*>(vector_pin.get());
@@ -3862,7 +3861,8 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
     }
 
     if (IsOrdinaryVectorDataType(field_meta.get_data_type())) {
-        auto vector_pin = PinVectorIndex(snapshot->runtime, op_ctx, field_id);
+        auto vector_pin =
+            CreateVectorReader(snapshot->runtime, op_ctx, field_id);
         if (vector_pin) {
             const auto* vec_index =
                 dynamic_cast<const index::IVectorReader*>(vector_pin.get());
@@ -4168,7 +4168,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                    "The binlog params is not generate.");
         auto binlog_search_info = config_it->second->GetSearchConf(search_info);
 
-        auto vector_pin = PinVectorIndex(runtime, op_context, field_id);
+        auto vector_pin = CreateVectorReader(runtime, op_context, field_id);
         AssertInfo(vector_pin,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4197,7 +4197,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             IsIndexRefineEnabledLocked(op_context, field_id, runtime)) {
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
         }
-        auto vector_pin = PinVectorIndex(runtime, op_context, field_id);
+        auto vector_pin = CreateVectorReader(runtime, op_context, field_id);
         AssertInfo(vector_pin,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4322,7 +4322,7 @@ ChunkedSegmentSealedImpl::get_vector_from_state(
         return fill_with_empty(field_id, count);
     }
 
-    auto vector_pin = PinVectorIndex(snapshot.runtime, op_ctx, field_id);
+    auto vector_pin = CreateVectorReader(snapshot.runtime, op_ctx, field_id);
     AssertInfo(vector_pin, "vector index is not ready");
     auto* reader = dynamic_cast<const index::IVectorReader*>(vector_pin.get());
     AssertInfo(reader != nullptr,
@@ -4400,7 +4400,7 @@ ChunkedSegmentSealedImpl::get_emb_list_from_state(
         return fill_with_empty(field_id, count);
     }
 
-    auto vector_pin = PinVectorIndex(snapshot.runtime, op_ctx, field_id);
+    auto vector_pin = CreateVectorReader(snapshot.runtime, op_ctx, field_id);
     AssertInfo(vector_pin, "vector index is not ready");
     auto* reader = dynamic_cast<const index::IVectorReader*>(vector_pin.get());
     AssertInfo(reader != nullptr,
@@ -6052,7 +6052,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                        "failed to create text index, neither raw data nor "
                        "index are found");
             auto root_pin =
-                target_runtime->indexes.PinIndex(op_ctx, *value_key);
+                target_runtime->indexes.CreateIndexReader(op_ctx, *value_key);
             auto* value_reader = dynamic_cast<
                 const index::IScalarValueReader<std::string_view>*>(
                 root_pin.get());
@@ -6296,7 +6296,7 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
     IndexInventory::ResolvedData resolved{translator->Family(),
                                           translator->ValueType(),
                                           translator->Caps(),
-                                          IndexInventory::RootSlot{}};
+                                          nullptr};
     resolved.index = translator->CreateIndex(op_ctx);
 
     CheckCancellation(op_ctx,
@@ -6947,8 +6947,8 @@ ChunkedSegmentSealedImpl::bulk_subscript_from_state(
                 }
             }
             if (value_key.has_value()) {
-                auto root_pin =
-                    snapshot->runtime->indexes.PinIndex(op_ctx, *value_key);
+                auto root_pin = snapshot->runtime->indexes.CreateIndexReader(
+                    op_ctx, *value_key);
                 if (root_pin) {
                     return ReverseDataFromIndex(
                         root_pin.get(), seg_offsets, count, field_meta);
@@ -7194,7 +7194,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     float* distances) const {
     std::shared_lock vector_state_lck(mutex_);
     auto runtime = CaptureRuntimeResourceState();
-    auto vector_pin = PinVectorIndex(runtime, op_ctx, field_id);
+    auto vector_pin = CreateVectorReader(runtime, op_ctx, field_id);
     if (!vector_pin) {
         return false;
     }
@@ -7223,7 +7223,7 @@ ChunkedSegmentSealedImpl::IsIndexRefineEnabledLocked(
     milvus::OpContext* op_ctx,
     FieldId field_id,
     const std::shared_ptr<const RuntimeResourceState>& runtime) const {
-    auto vector_pin = PinVectorIndex(runtime, op_ctx, field_id);
+    auto vector_pin = CreateVectorReader(runtime, op_ctx, field_id);
     if (!vector_pin) {
         return false;
     }
@@ -11342,7 +11342,7 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
                                           FieldId field_id) const {
     std::shared_lock vector_state_lck(mutex_);
     auto runtime = CaptureRuntimeResourceState();
-    auto vector_pin = PinVectorIndex(runtime, op_ctx, field_id);
+    auto vector_pin = CreateVectorReader(runtime, op_ctx, field_id);
     if (!vector_pin) {
         this->prefetch_chunks_locked(op_ctx, field_id);
     }

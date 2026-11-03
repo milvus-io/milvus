@@ -19,26 +19,24 @@
 #include <chrono>
 #include <utility>
 
-#include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
 
 namespace milvus::segcore {
 
 // Eager: metadata and owner already exist; storage may still be unloaded.
-IndexInventory::Entry::Entry(IndexCapabilityEntry meta, LoadedIndex index)
+IndexInventory::Entry::Entry(IndexCapabilityEntry meta, index::IndexPtr index)
     : registration_(RegistrationFromCapability(meta)),
       resolved_(ResolvedData{std::move(meta.family),
                              meta.value_type,
                              meta.caps,
                              std::move(index)}),
       ready_(true) {
-    AssertInfo(std::visit([](const auto& value) { return value != nullptr; },
-                          resolved_->index),
+    AssertInfo(resolved_->index != nullptr,
                "eager index entry for field {} has no index owner",
                registration_.key.field_id.get());
 }
 
-// Lazy: keep the factory for metadata resolution and slot creation on first use.
+// Lazy: keep the factory for metadata resolution and index creation on first use.
 IndexInventory::Entry::Entry(IndexRegistration registration, Factory factory)
     : registration_(std::move(registration)), factory_(std::move(factory)) {
     AssertInfo(factory_ != nullptr,
@@ -64,41 +62,31 @@ IndexInventory::Entry::Resolve(milvus::OpContext* op_ctx) const {
 
         if (!ready_.load(std::memory_order_acquire)) {
             auto result = factory_(op_ctx);
-            AssertInfo(
-                std::visit([](const auto& value) { return value != nullptr; },
-                           result.index),
-                "lazy index factory returned null owner");
+            AssertInfo(result.index != nullptr,
+                       "lazy index factory returned null owner");
             resolved_ = std::move(result);
             // Release the captured load metadata before publishing the result.
             factory_ = nullptr;
             // Pair with CancelWarmup's sequentially consistent publication check.
             ready_.store(true);
             if (retired_.load()) {
-                std::visit([](const auto& value) { value->CancelWarmup(); },
-                           resolved_->index);
+                resolved_->index->CancelWarmup();
             }
         }
     }
     return *resolved_;
 }
 
-IndexInventory::RootSlot
+index::IndexPtr
 IndexInventory::Entry::Peek() const {
-    if (!ready_.load(std::memory_order_acquire)) {
-        return nullptr;
-    }
-    if (const auto* slot = std::get_if<RootSlot>(&resolved_->index)) {
-        return *slot;
-    }
-    return nullptr;
+    return ready_.load(std::memory_order_acquire) ? resolved_->index : nullptr;
 }
 
 void
 IndexInventory::Entry::CancelWarmup() const {
     retired_.store(true);
     if (ready_.load()) {
-        std::visit([](const auto& value) { value->CancelWarmup(); },
-                   resolved_->index);
+        resolved_->index->CancelWarmup();
     }
 }
 
@@ -189,25 +177,6 @@ IndexInventory::Entries(FieldId field_id) const {
     return registrations;
 }
 
-std::vector<IndexInventory::RootSlot>
-IndexInventory::Slots() const {
-    size_t count = 0;
-    for (const auto& [_, field_entries] : entries_) {
-        count += field_entries.size();
-    }
-    std::vector<RootSlot> result;
-    result.reserve(count);
-    for (const auto& [_, field_entries] : entries_) {
-        for (const auto& [key, entry] : field_entries) {
-            auto slot = entry->Peek();
-            if (slot != nullptr) {
-                result.push_back(std::move(slot));
-            }
-        }
-    }
-    return result;
-}
-
 std::vector<std::shared_ptr<IndexInventory::Entry>>
 IndexInventory::SnapshotEntries() const {
     std::vector<std::shared_ptr<Entry>> result;
@@ -224,8 +193,9 @@ IndexInventory::SnapshotEntries() const {
     return result;
 }
 
-IndexPin
-IndexInventory::PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const {
+IndexReaderHandle
+IndexInventory::CreateIndexReader(milvus::OpContext* op_ctx,
+                                  const IndexKey& key) const {
     const auto field_it = entries_.find(key.field_id);
     if (field_it == entries_.end()) {
         return {};
@@ -238,27 +208,12 @@ IndexInventory::PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const {
 
     const auto& entry = it->second;
     const auto& resolved = entry->Resolve(op_ctx);
-    if (const auto* index = std::get_if<index::IndexPtr>(&resolved.index)) {
-        std::shared_ptr<index::IIndexReaderBase> reader =
-            (*index)->CreateReader(op_ctx);
-        AssertInfo(reader != nullptr, "index returned a null request reader");
-        AssertInfo(SameCaps(resolved.caps, reader->Caps()),
-                   "index capability metadata disagrees with request reader");
-        const auto* view = reader.get();
-        return IndexPin(std::move(reader), view);
-    }
-    auto slot = std::get<RootSlot>(resolved.index);
-    auto accessor =
-        milvus::cachinglayer::SemiInlineGet(slot->PinCells(op_ctx, {0}));
-    auto* reader = accessor->get_cell_of(0);
-    AssertInfo(reader != nullptr,
-               "index cache slot returned a null reader for field {}",
-               key.field_id.get());
+    std::shared_ptr<index::IIndexReaderBase> reader =
+        resolved.index->CreateReader(op_ctx);
+    AssertInfo(reader != nullptr, "index returned a null request reader");
     AssertInfo(SameCaps(resolved.caps, reader->Caps()),
-               "index capability metadata disagrees with the opened reader "
-               "for field {}",
-               key.field_id.get());
-    return IndexPin(std::move(accessor), reader);
+               "index capability metadata disagrees with request reader");
+    return IndexReaderHandle(std::move(reader));
 }
 
 }  // namespace milvus::segcore

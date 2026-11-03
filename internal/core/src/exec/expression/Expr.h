@@ -3858,7 +3858,7 @@ class SegmentExpr : public Expr {
         ngram_reader_ = nullptr;
         spatial_reader_ = nullptr;
         growing_index_pin_ = {};
-        selected_root_pin_ = {};
+        selected_index_reader_ = {};
         selected_index_entry_.reset();
         selected_element_level_result_ = false;
         selected_covered_row_end_ = 0;
@@ -3892,13 +3892,14 @@ class SegmentExpr : public Expr {
             AssertInfo(segcore::SameCaps(entry->caps, selected_reader_->Caps()),
                        "growing index metadata does not match reader caps");
         } else {
-            selected_root_pin_ = segment_->PinIndex(op_ctx_, *decision.key);
-            if (!selected_root_pin_) {
+            selected_index_reader_ =
+                segment_->CreateIndexReader(op_ctx_, *decision.key);
+            if (!selected_index_reader_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;
                 return false;
             }
-            selected_reader_ = selected_root_pin_.get();
+            selected_reader_ = selected_index_reader_.get();
             selected_covered_row_end_ = active_count_;
         }
         selected_index_entry_ = *entry;
@@ -4594,7 +4595,7 @@ class SegmentExpr : public Expr {
     // destroyed first. Every pointer below borrows from selected_reader_ after
     // the exact metadata-selected entry is pinned and validated.
     index::GrowingIndexSnapshotPin growing_index_pin_;
-    segcore::IndexPin selected_root_pin_;
+    segcore::IndexReaderHandle selected_index_reader_;
     index::JsonResolvedReader selected_json_view_;
     const index::IIndexReaderBase* selected_reader_{nullptr};
     std::optional<segcore::IndexCapabilityEntry> selected_index_entry_;

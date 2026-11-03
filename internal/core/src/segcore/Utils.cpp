@@ -1564,7 +1564,7 @@ PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info) {
     auto metadata = std::make_shared<LoadIndexInfo>(load_index_info);
     // The decision and policy belong to this generation, even after a config refresh.
     metadata->warmup_policy = "disable";
-    load_index_info.index = IndexInventory::RootSlot{};
+    load_index_info.index = nullptr;
     load_index_info.lazy_index_factory =
         [metadata = std::move(metadata)](milvus::OpContext* op_ctx) {
             CheckCancellation(op_ctx,
