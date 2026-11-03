@@ -106,7 +106,7 @@ func newSealTestStorage(t *testing.T) (*recoveryStorageImpl, *walsummary.Manager
 
 	tasks := &[]nodescheduler.Task{}
 	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(
-		func(task nodescheduler.Task) nodescheduler.TaskHandle {
+		func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 			*tasks = append(*tasks, task)
 			return nil
 		}).Build()
