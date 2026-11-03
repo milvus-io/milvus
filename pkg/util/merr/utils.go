@@ -900,6 +900,13 @@ func WrapErrChannelMisrouted(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelMisrouted, name, msg...)
 }
 
+// WrapErrChannelWorkerUnavailable translates an untyped downstream connection
+// failure at the delegator's worker boundary. Already classified application
+// errors must retain their original code instead of using this factory.
+func WrapErrChannelWorkerUnavailable(err error) error {
+	return wrapInner(ErrChannelWorkerUnavailable, ErrChannelWorkerUnavailable.Error(), err)
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotFound, value("segment", id))

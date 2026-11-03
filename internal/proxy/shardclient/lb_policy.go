@@ -25,12 +25,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -443,10 +445,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		client, err := lb.clientMgr.GetClient(ctx, targetNode)
 		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
+			if isQueryCancellation(err) {
+				requestExcludedNodes.Insert(targetNode.NodeID)
+			} else {
+				lb.blacklist.Add(workload.Channel, targetNode.NodeID)
+			}
 
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.NodeID, workload.Channel)
 			return true, lastErr
@@ -454,6 +463,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 		err = workload.Exec(ctx, targetNode.NodeID, client, workload.Channel)
 		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			log.Warn(ctx, "search/query channel failed",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
@@ -475,7 +487,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				errors.Is(err, merr.ErrSegcoreUnsupported) {
 				return false, err
 			}
-			if merr.IsRetryableErr(err) {
+			if errors.Is(err, merr.ErrChannelWorkerUnavailable) {
+				// Retriable describes what to do with this request, not whether
+				// subsequent requests should reuse the same failed worker path.
+				lb.blacklist.Add(workload.Channel, targetNode.NodeID)
+				requestExcludedNodes.Insert(targetNode.NodeID)
+			} else if isQueryCancellation(err) || merr.IsRetryableErr(err) {
 				requestExcludedNodes.Insert(targetNode.NodeID)
 			} else {
 				lb.blacklist.Add(workload.Channel, targetNode.NodeID)
@@ -510,6 +527,13 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	}
 
 	return err
+}
+
+// Cancellation (including a status returned by a delegator) is not evidence
+// that the selected replica is unhealthy. A live caller may still retry it.
+func isQueryCancellation(err error) bool {
+	return merr.IsCanceledOrTimeout(err) || merr.Code(err) == merr.CanceledCode ||
+		merr.Code(err) == merr.TimeoutCode || funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded)
 }
 
 // Execute will execute collection workload in parallel

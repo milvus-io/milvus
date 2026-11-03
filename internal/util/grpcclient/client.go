@@ -484,6 +484,7 @@ func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	log := mlog.With(mlog.String("client_role", c.GetRole()))
+	failFast, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
 	var (
 		ret       any
 		clientErr error
@@ -511,6 +512,11 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
 				return false, merr.ErrNodeNotFound
 			}
+			if failFast && ctx.Err() == nil && isDialFailure(clientErr) {
+				// A local dial deadline is distinct from the read's deadline.
+				// Do not spend the remaining read budget reconnecting here.
+				return false, connectionFailure{clientErr}
+			}
 
 			err := errors.Wrap(clientErr, "empty grpc client")
 			log.Warn(ctx, "grpc client is nil, maybe fail to get client in the retry state", mlog.Err(err))
@@ -524,6 +530,15 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		wrapper.Unpin()
 
 		if err != nil {
+			if failFast && ctx.Err() == nil && funcutil.IsGrpcErr(err, codes.Unavailable) &&
+				!IsConnectionClosingErr(err) && !IsServerIDMismatchErr(err) && !IsCrossClusterRoutingErr(err) {
+				// Retire the failed connection, but leave dialing its replacement
+				// to the next call. Reconnecting synchronously can hide this error
+				// from the caller until the read's context has already expired.
+				failure := connectionFailure{err}
+				c.resetConnection(wrapper, false)
+				return false, failure
+			}
 			var needRetry, needReset, forceReset bool
 			needRetry, needReset, forceReset, err = c.checkGrpcErr(ctx, err)
 			if needReset {

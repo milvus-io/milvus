@@ -124,6 +124,9 @@ var (
 	// stale shard-map at the caller (proxy). Retryable so the caller can
 	// re-resolve the shard map and dispatch to the correct node.
 	ErrChannelMisrouted = newMilvusError("channel misrouted: not owned by this node", 507, true)
+	// ErrChannelWorkerUnavailable identifies a downstream connection failure,
+	// allowing the proxy to temporarily avoid this channel's delegator path.
+	ErrChannelWorkerUnavailable = newMilvusError("channel worker unavailable", 508, true)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
