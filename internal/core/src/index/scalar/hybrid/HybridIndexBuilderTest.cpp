@@ -478,7 +478,8 @@ HybridLifecycleCases() {
                      input.View(), {.row_count = data.values.size()});
                  ExpectSegcoreError(ErrorCode::Unsupported, [&] {
                      static_cast<void>(
-                         IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr));
+                         IIndexConvertible::FromArtifact(std::move(artifact))
+                             ->CreateReader(nullptr));
                  });
              }},
     };

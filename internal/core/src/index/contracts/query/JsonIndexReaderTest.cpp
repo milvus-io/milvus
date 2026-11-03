@@ -715,11 +715,13 @@ TEST(JsonPathIndexOwnershipTest, RequestsShareMetadataAndRetainTypedIndex) {
         options.valid_bitset = TargetBitmap(3);
         options.valid_bitset.set(0);
         options.value_type = DataType::BOOL;
-        auto child = CreateBitmapIndex<bool>(std::move(postings), std::move(options));
+        auto child =
+            CreateBitmapIndex<bool>(std::move(postings), std::move(options));
         std::weak_ptr<IIndex> child_lifetime = child;
         const auto cast = JsonCastType::FromString(cast_name);
         auto index = std::make_shared<JsonPathIndex>(
-            std::move(child), JsonProjectedIndexSpec("/flag", cast, 3),
+            std::move(child),
+            JsonProjectedIndexSpec("/flag", cast, 3),
             std::vector<size_t>{1});
         auto first = index->CreateReader(nullptr);
         auto second = index->CreateReader(nullptr);

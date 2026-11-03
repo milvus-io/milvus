@@ -149,7 +149,8 @@ class PackedScalarLoadRoutingTest : public ::testing::Test {
             .Lookup(index::families::kSort)
             .Load({index::IndexFiles{
                        context_, {path}, index::PackedIndexStorageConfig{}},
-                   options})->CreateReader(nullptr);
+                   options})
+            ->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> root_;
@@ -250,7 +251,9 @@ class PayloadIndex final : public index::IIndex {
     CreateReader(OpContext*) const override {
         return nullptr;
     }
-    void CancelWarmup() const override {}
+    void
+    CancelWarmup() const override {
+    }
 };
 
 folly::coro::Task<index::IndexPtr>

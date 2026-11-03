@@ -233,7 +233,8 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         }
         const auto expected_caps =
             Loader(spec_.load_families.front()).derive_caps(params);
-        auto reader = IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
+        auto reader = IIndexConvertible::FromArtifact(std::move(artifact))
+                          ->CreateReader(nullptr);
         ValidateReader(Name(), *this, expected_caps, reader);
         return reader;
     }
@@ -271,10 +272,12 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();
     }
     options.params = std::move(params);
-    auto reader = loader_entry.Load(
-        {OpenedIndexSource{PackedIndexSource{
-             std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options})->CreateReader(nullptr);
+    auto reader = loader_entry
+                      .Load({OpenedIndexSource{PackedIndexSource{
+                                 std::shared_ptr<storage::IndexEntryReader>(
+                                     std::move(source))}},
+                             options})
+                      ->CreateReader(nullptr);
     ValidateReader(Name(), *this, expected_caps, reader);
     return reader;
 }

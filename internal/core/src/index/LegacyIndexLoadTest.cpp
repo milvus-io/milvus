@@ -957,10 +957,9 @@ TEST_F(LegacyIndexLoadTest, AsyncFamilyRunsOutsideLocalFilePool) {
     const auto caller = std::this_thread::get_id();
     for (bool use_async : {false, true}) {
         LegacyIndexSource input{source, use_async};
-        LegacyLoadFn load =
-            [&](storage::FileSource&,
-                const storage::LoadOptions&,
-                bool async) -> folly::coro::Task<IndexPtr> {
+        LegacyLoadFn load = [&](storage::FileSource&,
+                                const storage::LoadOptions&,
+                                bool async) -> folly::coro::Task<IndexPtr> {
             if (async)
                 EXPECT_NE(std::this_thread::get_id(), file_thread);
             else
@@ -974,12 +973,13 @@ TEST_F(LegacyIndexLoadTest, AsyncFamilyRunsOutsideLocalFilePool) {
             reader_options.valid_bitset = TargetBitmap(3, true);
             reader_options.value_type = DataType::INT64;
             co_return CreateBitmapIndex<int64_t>(std::move(postings),
-                                                std::move(reader_options));
+                                                 std::move(reader_options));
         };
         storage::LoadOptions options;
         auto task = RunLegacyLoad(input, options, std::move(load), nullptr);
         auto reader = (use_async ? Run(std::move(task))
-                                : folly::coro::blockingWait(std::move(task)))->CreateReader(nullptr);
+                                 : folly::coro::blockingWait(std::move(task)))
+                          ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Count(), 3);
     }
@@ -1029,7 +1029,8 @@ TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForFreshLoadContexts) {
         auto reader1 = Run(loader->Load(&first_context))->CreateReader(nullptr);
         first.requestCancellation();
         OpContext second_context;
-        auto reader2 = Run(loader->Load(&second_context))->CreateReader(nullptr);
+        auto reader2 =
+            Run(loader->Load(&second_context))->CreateReader(nullptr);
         for (const auto& [path, count] : metadata_reads)
             EXPECT_EQ(fs_->files.at(path)->DirectReadCalls().size(), count);
         loader.reset();
@@ -1074,7 +1075,8 @@ TEST_F(LegacyIndexLoadTest, FailedCreateDetachesBorrowedSourceContext) {
     const auto loader_entry =
         LoaderRegistry::Instance().Lookup(backend.Family());
     ExpectError(DataTypeInvalid, [&] {
-        static_cast<void>(loader_entry.Load(std::move(request))->CreateReader(nullptr));
+        static_cast<void>(
+            loader_entry.Load(std::move(request))->CreateReader(nullptr));
     });
     opening.requestCancellation();
     // No new loader/context bind is allowed to hide a leaked opening token.
@@ -1102,7 +1104,8 @@ TEST_F(LegacyIndexLoadTest, CancelledLoadDoesNotPoisonPreparedMetadata) {
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
     OpContext rejected(cancelled.getToken());
-    ExpectError(FollyCancel, [&] { Run(loader->Load(&rejected))->CreateReader(nullptr); });
+    ExpectError(FollyCancel,
+                [&] { Run(loader->Load(&rejected))->CreateReader(nullptr); });
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
     auto reader = Run(loader->Load())->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
@@ -1128,14 +1131,18 @@ TEST_F(LegacyIndexLoadTest,
             auto options = Options(backend.LoadParams({.row_count = 4}), mmap);
             const auto loader_entry =
                 LoaderRegistry::Instance().Lookup(backend.Family());
-            auto reader = loader_entry.Load(
-                {IndexFiles{context_,
-                            paths_,
-                            LegacyIndexStorageConfig{
-                                backend.Family() == families::kInverted
-                                    ? storage::V1SourceLayout::DiskFiles
-                                    : storage::V1SourceLayout::MemoryEntries}},
-                 options})->CreateReader(nullptr);
+            auto reader =
+                loader_entry
+                    .Load(
+                        {IndexFiles{
+                             context_,
+                             paths_,
+                             LegacyIndexStorageConfig{
+                                 backend.Family() == families::kInverted
+                                     ? storage::V1SourceLayout::DiskFiles
+                                     : storage::V1SourceLayout::MemoryEntries}},
+                         options})
+                    ->CreateReader(nullptr);
             const auto* pattern =
                 dynamic_cast<const IPatternMatchReader*>(reader.get());
             ASSERT_NE(pattern, nullptr);
@@ -1183,12 +1190,12 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
             auto reader =
                 LoaderRegistry::Instance()
                     .Lookup(backend.Family())
-                    .Load(
-                        {IndexFiles{context_,
-                                    paths_,
-                                    LegacyIndexStorageConfig{
-                                        storage::V1SourceLayout::DiskFiles}},
-                         Options(backend.LoadParams({.row_count = 4}), mmap)})->CreateReader(nullptr);
+                    .Load({IndexFiles{context_,
+                                      paths_,
+                                      LegacyIndexStorageConfig{
+                                          storage::V1SourceLayout::DiskFiles}},
+                           Options(backend.LoadParams({.row_count = 4}), mmap)})
+                    ->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), 4);
             if (spatial) {
@@ -1262,7 +1269,8 @@ TEST_F(LegacyIndexLoadTest, InvertedSlicedNullOffsetsPreserveRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})->CreateReader(nullptr);
+                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Count(), rows);
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
@@ -1303,7 +1311,8 @@ TEST_F(LegacyIndexLoadTest, TextSlicedNullOffsetsPreserveAllNullRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})->CreateReader(nullptr);
+                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Count(), rows);
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
@@ -1348,7 +1357,8 @@ TEST_F(LegacyIndexLoadTest, RTreeSlicedNullOffsetsPreserveCandidates) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})->CreateReader(nullptr);
+                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
         const auto* spatial = dynamic_cast<const ISpatialReader*>(reader.get());
@@ -1425,7 +1435,8 @@ TEST_F(LegacyIndexLoadTest, JsonProjectedSlicedOffsetsRemainDistinct) {
                 LoaderRegistry::Instance()
                     .Lookup(ResolveLoadFamily(backend.Family(), *source))
                     .Load({OpenedIndexSource{LegacyIndexSource{source, true}},
-                           options})->CreateReader(nullptr);
+                           options})
+                    ->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), rows);
             const auto* json =
@@ -1501,7 +1512,8 @@ TEST_F(LegacyIndexLoadTest, ReversedSliceCompletionPreservesEveryRow) {
             return LoaderRegistry::Instance()
                 .Lookup(backend.Family())
                 .Load({OpenedIndexSource{LegacyIndexSource{source, true}},
-                       options})->CreateReader(nullptr);
+                       options})
+                ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
             for (const auto& file : {first, second}) {
@@ -1576,8 +1588,9 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
         file->SetAutoComplete(false);
         folly::CancellationSource cancel;
         OpContext interrupted(cancel.getToken());
-        auto load = std::async(std::launch::async,
-                               [&] { return Run(loader->Load(&interrupted))->CreateReader(nullptr); });
+        auto load = std::async(std::launch::async, [&] {
+            return Run(loader->Load(&interrupted))->CreateReader(nullptr);
+        });
         auto drain = folly::makeGuard([&] {
             cancel.requestCancellation();
             file->SetAutoComplete(true);
@@ -1673,7 +1686,8 @@ TEST_F(LegacyIndexLoadTest, VectorHeapAndMmapPreserveNullableAndAllNullRows) {
                                paths_,
                                LegacyIndexStorageConfig{
                                    storage::V1SourceLayout::MemoryEntries}},
-                           options})->CreateReader(nullptr);
+                           options})
+                    ->CreateReader(nullptr);
             const auto* vectors =
                 dynamic_cast<const IVectorReader*>(reader.get());
             ASSERT_NE(vectors, nullptr);
@@ -1740,7 +1754,8 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::MemoryEntries}},
-                       options})->CreateReader(nullptr);
+                       options})
+                ->CreateReader(nullptr);
         const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
         ASSERT_NE(vectors, nullptr);
         EXPECT_EQ(vectors->ValidCount(), 2);
@@ -1918,8 +1933,8 @@ TEST_F(LegacyIndexLoadTest,
     auto load = std::async(std::launch::async, [&] {
         return LoaderRegistry::Instance()
             .Lookup(backend.Family())
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, true}}, options})->CreateReader(nullptr);
+            .Load({OpenedIndexSource{LegacyIndexSource{source, true}}, options})
+            ->CreateReader(nullptr);
     });
     auto drain = folly::makeGuard([&] {
         cancel.requestCancellation();
@@ -1951,7 +1966,8 @@ TEST_F(LegacyIndexLoadTest, DisabledAsyncUsesLegacySynchronousTransport) {
                               paths_,
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::MemoryEntries}},
-                   options})->CreateReader(nullptr);
+                   options})
+            ->CreateReader(nullptr);
     const auto* pattern =
         dynamic_cast<const IPatternMatchReader*>(reader.get());
     ASSERT_NE(pattern, nullptr);
@@ -2211,7 +2227,8 @@ TEST_F(LegacyIndexLoadTest, CorruptOrFailedReadKeepsCodeAndRemovesMmapStaging) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::MemoryEntries}},
-                       options})->CreateReader(nullptr);
+                       options})
+                ->CreateReader(nullptr);
         });
         EXPECT_TRUE(std::filesystem::is_empty(staging_));
     }
@@ -2236,7 +2253,8 @@ TEST_F(LegacyIndexLoadTest, CancellationDrainsRemoteReadBeforeRemovingStaging) {
                               paths_,
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::MemoryEntries}},
-                   options})->CreateReader(nullptr);
+                   options})
+            ->CreateReader(nullptr);
     });
     auto drain = folly::makeGuard([&] {
         cancel.requestCancellation();

@@ -131,11 +131,13 @@ TEST_P(ScalarArtifactRoundTripTest,
         index::LoaderRegistry::Instance().Lookup(GetParam());
     ASSERT_TRUE(static_cast<bool>(loader_entry));
     const auto derived_caps = loader_entry.derive_caps(options.params);
-    auto reader = loader_entry.Load(
-        {index::OpenedIndexSource{index::LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             false}},
-         options})->CreateReader(nullptr);
+    auto reader = loader_entry
+                      .Load({index::OpenedIndexSource{index::LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 false}},
+                             options})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
 
     EXPECT_EQ(reader->Count(), 8);

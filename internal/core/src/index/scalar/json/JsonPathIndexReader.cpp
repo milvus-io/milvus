@@ -263,7 +263,8 @@ JsonPathIndex::Metadata() const {
 
 IIndexReaderBasePtr
 JsonPathIndex::CreateReader(milvus::OpContext* op_ctx) const {
-    return IIndexReaderBasePtr(new JsonPathIndexReader(shared_from_this(), op_ctx));
+    return IIndexReaderBasePtr(
+        new JsonPathIndexReader(shared_from_this(), op_ctx));
 }
 
 void

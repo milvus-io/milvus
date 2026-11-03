@@ -86,8 +86,9 @@ LoadFloatVectors(const VectorBuildInput<float>& input, bool vector_array) {
     storage::LoadOptions options;
     options.params = adapted.params;
     auto entry = LoaderRegistry::Instance().Lookup(adapted.family);
-    return entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{source, false}}, options})->CreateReader(nullptr);
+    return entry
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+        ->CreateReader(nullptr);
 }
 
 IIndexReaderBasePtr
@@ -538,7 +539,8 @@ TEST(VectorReaderContractTest, SparseRetrievalRespectsRuntimeCapability) {
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
             .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})->CreateReader(nullptr);
+                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vectors, nullptr);
@@ -603,7 +605,8 @@ TEST(VectorReaderContractTest, AllNullSparseIndexAcceptsEmptyRetrieval) {
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
             .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})->CreateReader(nullptr);
+                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vectors, nullptr);

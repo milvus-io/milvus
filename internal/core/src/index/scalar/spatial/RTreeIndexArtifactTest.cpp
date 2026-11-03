@@ -156,8 +156,7 @@ TEST(RTreeIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
                 if (!packed) {
                     return LegacyIndexSource{
                         std::make_shared<TestArtifactSource>(
-                            persisted,
-                            storage::Generation::V1V2),
+                            persisted, storage::Generation::V1V2),
                         async};
                 }
                 auto input = std::make_shared<storage::RemoteInputStream>(

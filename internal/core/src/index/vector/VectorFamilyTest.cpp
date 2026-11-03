@@ -177,7 +177,8 @@ BuildAndLoad(const AdaptedIndexType& adapted,
     options.mmap_dir_path = "/tmp";
     return LoaderRegistry::Instance()
         .Lookup(adapted.family)
-        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options})->CreateReader(nullptr);
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+        ->CreateReader(nullptr);
 }
 
 using SparseRow = VectorBuildInput<sparse_u32_f32>::value_type;
@@ -703,7 +704,8 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     auto base = LoaderRegistry::Instance()
                     .Lookup(adapted.family)
                     .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
-                           options})->CreateReader(nullptr);
+                           options})
+                    ->CreateReader(nullptr);
     ASSERT_NE(base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(base.get());
     ASSERT_NE(reader, nullptr);

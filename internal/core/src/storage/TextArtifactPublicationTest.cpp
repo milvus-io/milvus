@@ -61,7 +61,8 @@ TEST(TextArtifactPublicationTest, LegacyAndPackedPublishRelativeTextLogNames) {
                           .Lookup(index::families::kText)
                           .Load({index::IndexFiles{
                                      fixture.context, paths, storage_config},
-                                 options})->CreateReader(nullptr);
+                                 options})
+                          ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* text =
             dynamic_cast<const index::ITextMatchReader*>(reader.get());

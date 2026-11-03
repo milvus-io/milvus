@@ -97,8 +97,7 @@ PreparePackedJsonProjectedOpen(std::string_view family,
  * @pre Planned reads/writes are complete; this may read local staging files.
  */
 IndexPtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IndexPtr inner);
+FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan, IndexPtr inner);
 
 /** @brief Derive optional routing metadata without loading storage. */
 std::optional<JsonProjectedIndexSpec>

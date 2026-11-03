@@ -1012,8 +1012,8 @@ SortedIndexLoader::LoadLegacy(storage::FileSource& source,
         const auto& meta = state_->meta;
         auto state =
             co_await LoadStringState(use_async, source, opts, meta, params);
-        auto inner = std::make_shared<SortedIndex<std::string_view>>(
-            std::move(state));
+        auto inner =
+            std::make_shared<SortedIndex<std::string_view>>(std::move(state));
         co_return co_await FinishJsonProjectedOpenAsync(
             use_async, std::move(projection), source, std::move(inner));
     }

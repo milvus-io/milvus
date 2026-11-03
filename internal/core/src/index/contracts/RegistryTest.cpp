@@ -103,14 +103,20 @@ class EmptyReader final : public IIndexReaderBase {
 
 class EmptyIndex final : public IIndex {
  public:
-    explicit EmptyIndex(ReaderCaps caps = {}) : caps_(caps) {}
-    IndexMetadata Metadata() const override {
+    explicit EmptyIndex(ReaderCaps caps = {}) : caps_(caps) {
+    }
+    IndexMetadata
+    Metadata() const override {
         return {caps_, Domain::Row, DataType::INT64, 0};
     }
-    IIndexReaderBasePtr CreateReader(milvus::OpContext*) const override {
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext*) const override {
         return std::make_unique<EmptyReader>(caps_);
     }
-    void CancelWarmup() const override {}
+    void
+    CancelWarmup() const override {
+    }
+
  private:
     ReaderCaps caps_;
 };
@@ -372,11 +378,13 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
     options.params = {{"predicate", true}};
-    auto reader = loader_entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             false}},
-         options})->CreateReader(nullptr);
+    auto reader = loader_entry
+                      .Load({OpenedIndexSource{LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 false}},
+                             options})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_EQ(LoaderProbeA::create_thread, std::this_thread::get_id());
@@ -389,11 +397,13 @@ TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
     options.params = {{"predicate", true}};
-    auto reader = entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             true}},
-         options})->CreateReader(nullptr);
+    auto reader = entry
+                      .Load({OpenedIndexSource{LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 true}},
+                             options})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_NE(LoaderProbeA::create_thread, std::this_thread::get_id());
@@ -411,7 +421,8 @@ TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
     TestArtifactSource source(artifact);
     const LoaderEntry incomplete{&LoaderProbeA::DeriveCaps, nullptr};
     ExpectSegcoreError(ErrorCode::UnexpectedError, [&] {
-        static_cast<void>(incomplete.Load(ProbeLoadRequest(source))->CreateReader(nullptr));
+        static_cast<void>(
+            incomplete.Load(ProbeLoadRequest(source))->CreateReader(nullptr));
     });
 }
 
@@ -442,7 +453,8 @@ TEST(RegistryTest, LoaderCreationAndLoadFailuresPreserveErrorCode) {
                                   : ErrorCode::DataFormatBroken;
         ExpectSegcoreError(expected, [&] {
             static_cast<void>(
-                entry.Load(ProbeLoadRequest(source, {{"mode", mode}}))->CreateReader(nullptr));
+                entry.Load(ProbeLoadRequest(source, {{"mode", mode}}))
+                    ->CreateReader(nullptr));
         });
     }
 }

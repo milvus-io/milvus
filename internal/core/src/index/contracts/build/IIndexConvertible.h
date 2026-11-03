@@ -45,9 +45,8 @@ class IIndexConvertible {
 
         auto* convertible = dynamic_cast<IIndexConvertible*>(artifact.get());
         if (convertible == nullptr) {
-            ThrowInfo(
-                Unsupported,
-                "artifact does not support conversion to an index");
+            ThrowInfo(Unsupported,
+                      "artifact does not support conversion to an index");
         }
 
         auto index = std::move(*convertible).IntoIndex();

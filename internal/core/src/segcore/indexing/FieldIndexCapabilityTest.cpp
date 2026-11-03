@@ -280,10 +280,10 @@ TEST(IndexInventoryTest, FieldLookupResolvesOnlyRequestedField) {
     EXPECT_EQ(reader->Count(), 3);
     EXPECT_EQ(calls[2], 1);
     EXPECT_EQ(ResolvedIndexes(inventory).size(), 3);
-    EXPECT_TRUE(
-        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(10), 3).key) == nullptr);
-    EXPECT_TRUE(
-        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(12), 1).key) == nullptr);
+    EXPECT_TRUE(inventory.CreateIndexReader(
+                    nullptr, TestEntry(FieldId(10), 3).key) == nullptr);
+    EXPECT_TRUE(inventory.CreateIndexReader(
+                    nullptr, TestEntry(FieldId(12), 1).key) == nullptr);
 }
 
 TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
@@ -604,7 +604,8 @@ TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
 
     auto dropped_snapshot = old_snapshot;
     EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
-    EXPECT_TRUE(dropped_snapshot.CreateIndexReader(nullptr, entry.key) == nullptr);
+    EXPECT_TRUE(dropped_snapshot.CreateIndexReader(nullptr, entry.key) ==
+                nullptr);
     auto old_reader = old_snapshot.CreateIndexReader(nullptr, entry.key);
     ASSERT_TRUE(old_reader);
     EXPECT_EQ(old_reader->Count(), 7);

@@ -64,15 +64,23 @@ class TrackingReader final : public IIndexReaderBase {
 class TrackingIndex final : public IIndex {
  public:
     explicit TrackingIndex(std::shared_ptr<int> dependency)
-        : dependency_(std::move(dependency)) {}
-    IndexMetadata Metadata() const override {
-        return {{}, Domain::Row, DataType::INT64,
+        : dependency_(std::move(dependency)) {
+    }
+    IndexMetadata
+    Metadata() const override {
+        return {{},
+                Domain::Row,
+                DataType::INT64,
                 dependency_ == nullptr ? -1 : *dependency_};
     }
-    IIndexReaderBasePtr CreateReader(milvus::OpContext*) const override {
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext*) const override {
         return std::make_unique<TrackingReader>(dependency_);
     }
-    void CancelWarmup() const override {}
+    void
+    CancelWarmup() const override {
+    }
+
  private:
     std::shared_ptr<int> dependency_;
 };
@@ -147,8 +155,8 @@ class ConvertibleTrackingArtifact final : public storage::Artifact,
 void
 ExpectConsumeError(storage::ArtifactPtr artifact, ErrorCode expected) {
     try {
-        static_cast<void>(
-            IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr));
+        static_cast<void>(IIndexConvertible::FromArtifact(std::move(artifact))
+                              ->CreateReader(nullptr));
         FAIL() << "artifact conversion expected an error";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), expected);
@@ -177,7 +185,8 @@ TEST(ReaderConvertibleTest, SuccessTransfersDependencyToReader) {
     auto artifact = std::make_unique<ConvertibleTrackingArtifact>(
         destroyed, serialized, std::move(dependency), ConvertBehavior::Success);
 
-    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
+    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))
+                      ->CreateReader(nullptr);
     EXPECT_EQ(destroyed, 1);
     EXPECT_EQ(serialized, 0);
     ASSERT_NE(reader, nullptr);
@@ -230,7 +239,8 @@ TEST(ReaderConvertibleTest, TextRamArtifactConvertsWithoutPersistence) {
     const ScalarTestInput<std::string_view> input(data);
     auto artifact = backend.Build(input.View(), {.row_count = 2});
 
-    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
+    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 2);
     EXPECT_EQ(reader->CoordDomain(), Domain::Row);
@@ -254,7 +264,8 @@ TEST(ReaderConvertibleTest, PersistedArtifactCanThenBeConsumed) {
     sink.Finish();
     EXPECT_FALSE(persisted.entries.empty());
 
-    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
+    auto reader = IIndexConvertible::FromArtifact(std::move(artifact))
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 2);
     EXPECT_EQ(reader->CoordDomain(), Domain::Row);

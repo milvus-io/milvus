@@ -61,7 +61,8 @@ struct LoaderTestAccess {
     static IIndexReaderBasePtr
     Finish(IndexLoadPlan& plan, const storage::LoadOptions& options) {
         return folly::coro::blockingWait(
-            Loader::FinishPacked(plan, options, false))->CreateReader(nullptr);
+                   Loader::FinishPacked(plan, options, false))
+            ->CreateReader(nullptr);
     }
 };
 

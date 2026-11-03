@@ -80,10 +80,12 @@ BuildTantivyStringReader(const std::vector<std::string>& data) {
     const auto loader = LoaderRegistry::Instance().Lookup(families::kInverted);
     AssertInfo(static_cast<bool>(loader),
                "inverted benchmark loader is missing");
-    return loader.Load(
-        {OpenedIndexSource{PackedIndexSource{
-             std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         std::move(options)})->CreateReader(nullptr);
+    return loader
+        .Load({OpenedIndexSource{
+                   PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                       std::move(source))}},
+               std::move(options)})
+        ->CreateReader(nullptr);
 }
 
 std::vector<std::string>

@@ -197,7 +197,7 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
  private:
     friend class JsonFlatIndex;
     JsonFlatIndexReader(std::shared_ptr<const JsonFlatIndex> index,
-                       milvus::OpContext* op_ctx);
+                        milvus::OpContext* op_ctx);
 
     std::shared_ptr<const JsonFlatIndex> index_;
     milvus::OpContext* const op_ctx_;

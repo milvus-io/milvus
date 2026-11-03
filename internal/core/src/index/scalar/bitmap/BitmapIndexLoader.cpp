@@ -707,8 +707,8 @@ RebuildValidity(const BitmapRoaringPostingMap<T>& postings,
 
 BitmapReaderOptions
 MakeIndexOptions(TargetBitmap validity,
-                  const BitmapMeta& meta,
-                  const RuntimeParams& params) {
+                 const BitmapMeta& meta,
+                 const RuntimeParams& params) {
     return BitmapReaderOptions{.valid_bitset = std::move(validity),
                                .total_num_rows = meta.count,
                                .nested = meta.nested,

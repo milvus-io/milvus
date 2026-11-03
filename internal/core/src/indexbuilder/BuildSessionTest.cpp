@@ -319,12 +319,15 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
         auto loader =
             index::LoaderRegistry::Instance().Lookup(index::families::kText);
         ASSERT_TRUE(static_cast<bool>(loader));
-        auto reader = loader.Load(
-            {index::IndexFiles{prepared.file_manager_context,
-                               {stats.Files()[0].file_name},
-                               index::PackedIndexStorageConfig{
-                                   storage::ArtifactStorageNamespace::TextLog}},
-             options})->CreateReader(nullptr);
+        auto reader =
+            loader
+                .Load({index::IndexFiles{
+                           prepared.file_manager_context,
+                           {stats.Files()[0].file_name},
+                           index::PackedIndexStorageConfig{
+                               storage::ArtifactStorageNamespace::TextLog}},
+                       options})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);
         EXPECT_EQ(reader->Count(), texts.size());

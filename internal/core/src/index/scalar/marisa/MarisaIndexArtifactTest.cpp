@@ -427,11 +427,13 @@ TEST(MarisaIndexArtifactTest, AsyncCancellationRemovesPlannedFiles) {
         LoaderRegistry::Instance().Lookup(backend.Family());
     input->armed = true;
     ExpectSegcoreError(ErrorCode::FollyCancel, [&] {
-        static_cast<void>(loader_entry.Load(
-            {OpenedIndexSource{PackedIndexSource{
-                 std::shared_ptr<storage::AsyncIndexEntryReader>(
-                     std::move(source))}},
-             options})->CreateReader(nullptr));
+        static_cast<void>(
+            loader_entry
+                .Load({OpenedIndexSource{PackedIndexSource{
+                           std::shared_ptr<storage::AsyncIndexEntryReader>(
+                               std::move(source))}},
+                       options})
+                ->CreateReader(nullptr));
     });
     EXPECT_TRUE(cancellation.isCancellationRequested());
     EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));

@@ -287,9 +287,11 @@ TEST(CApiTest, LoadIndexSearch) {
         index::LoaderRegistry::Instance().Lookup(adapted.family);
     ASSERT_TRUE(static_cast<bool>(loader));
     auto reader =
-        loader.Load({index::OpenedIndexSource{index::LegacyIndexSource{
-                         std::make_shared<BinarySetSource>(binary_set), false}},
-                     options})->CreateReader(nullptr);
+        loader
+            .Load({index::OpenedIndexSource{index::LegacyIndexSource{
+                       std::make_shared<BinarySetSource>(binary_set), false}},
+                   options})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), N);
     auto* vectors = dynamic_cast<const index::IVectorReader*>(reader.get());

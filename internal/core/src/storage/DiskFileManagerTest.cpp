@@ -155,21 +155,23 @@ struct PublishedConsumerIndex {
             index::LoaderRegistry::Instance().Lookup(type.family);
         AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
         if (packed) {
-            return loader.Load(
-                {index::IndexFiles{std::move(context),
-                                   Files(),
-                                   index::PackedIndexStorageConfig{}},
-                 std::move(options)})->CreateReader(nullptr);
+            return loader
+                .Load({index::IndexFiles{std::move(context),
+                                         Files(),
+                                         index::PackedIndexStorageConfig{}},
+                       std::move(options)})
+                ->CreateReader(nullptr);
         }
-        return loader.Load(
-            {index::IndexFiles{
-                 std::move(context),
-                 Files(),
-                 index::LegacyIndexStorageConfig{
-                     type.family == index::families::kVectorDisk
-                         ? storage::V1SourceLayout::DiskFiles
-                         : storage::V1SourceLayout::MemoryEntries}},
-             std::move(options)})->CreateReader(nullptr);
+        return loader
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       Files(),
+                       index::LegacyIndexStorageConfig{
+                           type.family == index::families::kVectorDisk
+                               ? storage::V1SourceLayout::DiskFiles
+                               : storage::V1SourceLayout::MemoryEntries}},
+                   std::move(options)})
+            ->CreateReader(nullptr);
     }
 };
 
