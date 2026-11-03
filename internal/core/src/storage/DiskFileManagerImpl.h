@@ -43,6 +43,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    // Upload a local file like AddFile, but let a failure propagate with the
+    // original exception. AddFile logs the exception and returns false, which
+    // loses its error code (e.g. S3Error, which the index build scheduler
+    // retries).
+    void
+    AddFileOrThrow(const std::string& filename);
+
     bool
     AddFileMeta(const FileMeta& file_meta) override;
 
@@ -219,6 +226,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
+
+    void
+    UploadFileInternal(const std::string& file_name,
+                       const std::function<std::string(const std::string&,
+                                                       int)>& get_remote_path);
 
     bool
     AddFileInternal(const std::string& file_name,

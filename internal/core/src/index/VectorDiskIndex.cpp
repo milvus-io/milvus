@@ -412,7 +412,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
             if (dim.has_value()) {
                 SetDim(dim.value());
             }
-            file_manager_->AddFile(valid_data_path);
+            file_manager_->AddFileOrThrow(valid_data_path);
             local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
                 local_chunk_manager, segment_id, field_id));
             LOG_INFO("build all-null nullable disk index done, build_id: {}",
@@ -442,9 +442,9 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                                          empty_offsets_path,
                                          GetDim(),
                                          offsets.value());
-            file_manager_->AddFile(empty_offsets_path);
+            file_manager_->AddFileOrThrow(empty_offsets_path);
             if (local_chunk_manager->Exist(valid_data_path)) {
-                file_manager_->AddFile(valid_data_path);
+                file_manager_->AddFileOrThrow(valid_data_path);
             }
             local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
                 local_chunk_manager, segment_id, field_id));
@@ -490,7 +490,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     // Add valid_data file to index if it was created (nullable vector field)
     if (local_chunk_manager->Exist(valid_data_path)) {
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
     }
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
@@ -529,7 +529,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
             local_chunk_manager, valid_data_path, offset_mapping);
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
         auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
         if (dim.has_value()) {
             SetDim(dim.value());
@@ -553,7 +553,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                      empty_offsets_path,
                                      dataset->GetDim(),
                                      empty_offsets);
-        file_manager_->AddFile(empty_offsets_path);
+        file_manager_->AddFileOrThrow(empty_offsets_path);
         SetDim(dataset->GetDim());
         empty_emb_list_offsets_ = std::move(empty_offsets);
         local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
@@ -634,7 +634,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
         WriteDiskValidData(
             local_chunk_manager, valid_data_path, offset_mapping);
-        file_manager_->AddFile(valid_data_path);
+        file_manager_->AddFileOrThrow(valid_data_path);
     }
 
     local_chunk_manager->RemoveDir(storage::GenFieldRawDataPathPrefix(
