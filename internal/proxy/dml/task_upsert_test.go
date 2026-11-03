@@ -2207,20 +2207,20 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 	casErr := streamingstatus.NewPartialUpdateRetryable("conflict")
 	unknownErr := context.DeadlineExceeded
 
-	err := unwrapPartialUpdateAppendError(streaming.AppendResponses{
+	err := unwrapStreamingMutationError(streaming.AppendResponses{
 		Responses: []streaming.AppendResponse{
 			{Error: casErr},
 			{Error: unknownErr},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, unknownErr)
 
-	err = unwrapPartialUpdateAppendError(streaming.AppendResponses{
+	err = unwrapStreamingMutationError(streaming.AppendResponses{
 		Responses: []streaming.AppendResponse{
 			{Error: casErr},
 			{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, casErr)
 }
 

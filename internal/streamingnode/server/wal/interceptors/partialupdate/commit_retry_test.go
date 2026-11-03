@@ -9,17 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 // A CommitTxn that reached the WAL is resent when its response is lost. Its
 // write-set record is already gone, so admission must leave the decision to
-// TimeTick: the committed session answers INVALID_TRANSACTION_STATE, which the
-// producer does not replay. TRANSACTION_EXPIRED or PARTIAL_UPDATE_RETRYABLE
-// would make the producer or Proxy apply the same write a second time.
-func TestPartialUpdateChainRetriedCommitAfterSuccessIsNotReplayable(t *testing.T) {
+// TimeTick: its result tombstone answers with the original success without
+// running CAS validation or applying the same write a second time.
+func TestPartialUpdateChainRetriedCommitAfterSuccessReturnsOriginalResult(t *testing.T) {
 	for _, cas := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cas_%t", cas), func(t *testing.T) {
 			env := newPartialUpdateChainTestEnv(t)
@@ -31,20 +28,19 @@ func TestPartialUpdateChainRetriedCommitAfterSuccessIsNotReplayable(t *testing.T
 				}
 				return newCommitTxnMessage("v1", txnContext.TxnID, 0)
 			}
-			_, err := env.append(newCommit(), nil)
+			original, err := env.append(newCommit(), nil)
 			require.NoError(t, err)
 			require.True(t, env.hasPKVersionAfter("v1", 10, readTS))
 			require.Nil(t, env.partial.state.getTxn(txnContext.TxnID))
 
 			// The response is lost and the producer resends the same CommitTxn.
 			appended := false
-			_, err = env.append(newCommit(), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			result, err := env.append(newCommit(), func(context.Context, message.MutableMessage) (message.MessageID, error) {
 				appended = true
 				return env.nextMessageID(), nil
 			})
-			require.Error(t, err)
-			require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE,
-				status.AsStreamingError(err).Code, "retried commit returned: %v", err)
+			require.NoError(t, err)
+			require.Equal(t, original, result)
 			require.False(t, appended)
 			session, err := env.txnManager.GetSessionOfTxn(txnContext.TxnID)
 			require.NoError(t, err)

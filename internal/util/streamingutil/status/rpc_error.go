@@ -23,6 +23,7 @@ var streamingErrorToGRPCStatus = map[streamingpb.StreamingCode]codes.Code{
 	streamingpb.StreamingCode_STREAMING_CODE_INNER:                     codes.Internal,
 	streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT:          codes.InvalidArgument,
 	streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED:       codes.FailedPrecondition,
+	streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_NOT_FOUND:     codes.NotFound,
 	streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE: codes.FailedPrecondition,
 	streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN:                   codes.Unknown,
 	streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE:  codes.Aborted,

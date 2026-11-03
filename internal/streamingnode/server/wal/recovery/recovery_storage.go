@@ -20,6 +20,8 @@ type WALCheckpoint = utility.WALCheckpoint
 
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
+	// TxnTombstones contains bounded successful Commit results observed in startup replay.
+	TxnTombstones     *utility.TxnTombstones
 	WritePathRecovery *moduleapi.WritePathRecoveryModuleSnapshot
 	// Checkpoint is the in-memory completed frontier after bounded startup
 	// replay. It fences write-path recovery, but is not catalog-published until
