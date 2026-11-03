@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -35,7 +36,7 @@ func loadCollectionSchema(ctx context.Context, collection *milvuspb.DescribeColl
 	// shared and immutable; build the read indices once for this cache entry so
 	// name lookup has the same visibility as field enumeration.
 	schema := schemautil.ShallowSchema(full.CollectionSchema)
-	schema.Fields = nil
+	schema.Fields = make([]*schemapb.FieldSchema, 0, len(full.GetFields()))
 	for _, field := range full.GetFields() {
 		if !common.IsSystemField(field.GetFieldID()) {
 			schema.Fields = append(schema.Fields, field)

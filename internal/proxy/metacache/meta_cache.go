@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -927,13 +926,6 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	userFields := make([]*schemapb.FieldSchema, 0)
-	for _, field := range coll.Schema.Fields {
-		if field.FieldID >= common.StartOfUserFieldID {
-			userFields = append(userFields, field)
-		}
-	}
-	coll.Schema.Fields = userFields
 	return coll, nil
 }
 
