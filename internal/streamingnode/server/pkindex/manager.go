@@ -173,9 +173,9 @@ type IndexSpec struct {
 	VChannel     string
 	CollectionID int64
 	IndexID      int64
-	// EnableTimeTick is the time tick of the CreateIndex that enabled the
+	// CheckpointTimeTick is the time tick of the CreateIndex that enabled the
 	// index on the vchannel.
-	EnableTimeTick uint64
+	CheckpointTimeTick uint64
 }
 
 // New creates the primary key index of a pchannel and registers it, so that

@@ -56,7 +56,7 @@ func testMeta(vchannel string, collectionID int64, pk schemapb.DataType, autoID 
 		},
 	}
 	if !autoID {
-		meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: testIndexIDOf(collectionID), FieldId: 100, EnableTimeTick: 1}
+		meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: testIndexIDOf(collectionID), FieldId: 100, CheckpointTimeTick: 1}
 	}
 	return meta
 }

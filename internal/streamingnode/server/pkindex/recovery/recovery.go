@@ -171,10 +171,10 @@ func (r *Recovery) openIndex(ctx context.Context, vchannel string, collectionID 
 		return merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
 	}
 	idx, _, err := r.m.OpenIndex(ctx, pkindex.IndexSpec{
-		VChannel:       vchannel,
-		CollectionID:   collectionID,
-		IndexID:        pkIndex.GetIndexId(),
-		EnableTimeTick: pkIndex.GetEnableTimeTick(),
+		VChannel:           vchannel,
+		CollectionID:       collectionID,
+		IndexID:            pkIndex.GetIndexId(),
+		CheckpointTimeTick: pkIndex.GetCheckpointTimeTick(),
 	})
 	if err != nil {
 		return errors.Wrapf(err, "open the primary key index of vchannel %s", vchannel)

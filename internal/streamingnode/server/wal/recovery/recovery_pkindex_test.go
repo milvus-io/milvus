@@ -56,7 +56,7 @@ func pkTestMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {
 				{FieldID: pkTestFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 			}}}},
 			EverWritten: streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
-			PkIndex:     &streamingpb.PKIndexOfVChannel{IndexId: 1001, FieldId: pkTestFieldID, EnableTimeTick: 1},
+			PkIndex:     &streamingpb.PKIndexOfVChannel{IndexId: 1001, FieldId: pkTestFieldID, CheckpointTimeTick: 1},
 		},
 	}
 }
@@ -292,7 +292,7 @@ func TestPKIndexVChannelStateReadsTheVChannelModule(t *testing.T) {
 	assert.Equal(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER, state.EverWritten)
 	assert.EqualValues(t, 7, state.PKIndex.GetIndexId())
 	assert.EqualValues(t, 100, state.PKIndex.GetFieldId())
-	assert.EqualValues(t, 5, state.PKIndex.GetEnableTimeTick())
+	assert.EqualValues(t, 5, state.PKIndex.GetCheckpointTimeTick())
 	assert.NotNil(t, state.Schema)
 
 	_, ok = get("v2")

@@ -315,22 +315,22 @@ func (c *PChannelIndexManager) detachLocked(idx *index.Index) {
 func (c *PChannelIndexManager) indexConfig(spec IndexSpec) index.Config {
 	cfg := c.m.cfg
 	return index.Config{
-		VChannel:        spec.VChannel,
-		CollectionID:    spec.CollectionID,
-		IndexID:         spec.IndexID,
-		EnableTimeTick:  spec.EnableTimeTick,
-		Term:            c.info.Term,
-		Ctx:             c.ctx,
-		Logger:          c.logger,
-		Root:            cfg.Root,
-		StorageRootPath: cfg.StorageRootPath,
-		Shared:          cfg.Shared,
-		AllocID:         cfg.AllocID,
-		Store:           cfg.Store,
-		Committer:       cfg.Committer,
-		Params:          func() index.Params { return cfg.Params().Params },
-		LastObserved:    c.LastObserved,
-		OnRefresh:       c.refreshAcked,
+		VChannel:           spec.VChannel,
+		CollectionID:       spec.CollectionID,
+		IndexID:            spec.IndexID,
+		CheckpointTimeTick: spec.CheckpointTimeTick,
+		Term:               c.info.Term,
+		Ctx:                c.ctx,
+		Logger:             c.logger,
+		Root:               cfg.Root,
+		StorageRootPath:    cfg.StorageRootPath,
+		Shared:             cfg.Shared,
+		AllocID:            cfg.AllocID,
+		Store:              cfg.Store,
+		Committer:          cfg.Committer,
+		Params:             func() index.Params { return cfg.Params().Params },
+		LastObserved:       c.LastObserved,
+		OnRefresh:          c.refreshAcked,
 	}
 }
 

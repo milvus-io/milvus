@@ -254,7 +254,7 @@ func (s *fakeStates) get(vchannel string) (pkindex.VChannelState, bool) {
 
 // enable records the primary key index indexID as enabled on vchannel at tt.
 func (s *fakeStates) enable(vchannel string, indexID int64, tt uint64) {
-	s.set(vchannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER, &streamingpb.PKIndexOfVChannel{IndexId: indexID, FieldId: testPKFieldID, EnableTimeTick: tt})
+	s.set(vchannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER, &streamingpb.PKIndexOfVChannel{IndexId: indexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
 }
 
 // written records that rows were written to vchannel and no index is enabled.
@@ -408,7 +408,7 @@ func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	states := newFakeStates()
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
-	meta.CollectionInfo.PkIndex.EnableTimeTick = 11 // the vchannel meta was persisted after the CreateIndex
+	meta.CollectionInfo.PkIndex.CheckpointTimeTick = 11 // the vchannel meta was persisted after the CreateIndex
 	states.enable("v1", testIndexIDOf(1), 11)
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
 	m := env.Manager.GetForTest("p")
@@ -770,7 +770,7 @@ func TestRecoverOpensOnlyTheVChannelsWithAPKIndex(t *testing.T) {
 	m := rec.Manager()
 	require.NotNil(t, m.IndexForTest("a"))
 	assert.EqualValues(t, testIndexIDOf(1), m.IndexForTest("a").IndexID())
-	assert.EqualValues(t, 1, m.IndexForTest("a").EnableTimeTick())
+	assert.EqualValues(t, 1, m.IndexForTest("a").CheckpointTimeTick())
 	assert.Nil(t, m.Decider("b"))
 }
 
@@ -801,7 +801,7 @@ func TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend(t *testin
 	m := rec.Manager()
 
 	// the interceptor read a stale write history and opened the index
-	_, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, EnableTimeTick: 20})
+	_, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, CheckpointTimeTick: 20})
 	require.NoError(t, err)
 	require.True(t, created)
 	dir := index.Dir(env.Manager.Root(), "c", 8)
@@ -884,7 +884,7 @@ func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
 	env := pkindex.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
-	meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: 9, FieldId: testPKFieldID, EnableTimeTick: 30}
+	meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: 9, FieldId: testPKFieldID, CheckpointTimeTick: 30}
 	states.enable("v1", 9, 30)
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
 	m := rec.Manager()

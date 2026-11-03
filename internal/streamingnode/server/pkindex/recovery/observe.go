@@ -229,9 +229,9 @@ func (r *Recovery) observeTxn(ctx context.Context, txn message.ImmutableTxnMessa
 func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, header *message.CreateIndexMessageHeader, tt uint64) (func(context.Context), error) {
 	state, ok := r.m.VChannelState(vchannel)
 	pk := state.PKIndex
-	enabled := ok && pk.GetIndexId() == header.GetIndexId() && pk.GetEnableTimeTick() == tt
+	enabled := ok && pk.GetIndexId() == header.GetIndexId() && pk.GetCheckpointTimeTick() == tt
 	if t, ok := r.targets[vchannel]; ok {
-		if t.idx.IndexID() == header.GetIndexId() || t.idx.EnableTimeTick() > tt {
+		if t.idx.IndexID() == header.GetIndexId() || t.idx.CheckpointTimeTick() > tt {
 			// the index is open already, or a replay reached the CreateIndex
 			// of an index that a later index replaced
 			return nil, nil
@@ -260,7 +260,7 @@ func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, head
 // dropIndex.
 func (r *Recovery) observeDropIndex(vchannel string, indexIDs []int64, tt uint64) func(context.Context) {
 	t, ok := r.targets[vchannel]
-	if !ok || t.idx.EnableTimeTick() >= tt {
+	if !ok || t.idx.CheckpointTimeTick() >= tt {
 		return nil
 	}
 	if len(indexIDs) > 0 && !slices.Contains(indexIDs, t.idx.IndexID()) {

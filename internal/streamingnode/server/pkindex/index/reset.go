@@ -38,14 +38,14 @@ import (
 // covers tt, and the flush that committed it carried the reset or came after
 // the flush that did. This happens when the recovery replays the WAL from a
 // checkpoint before a truncate whose reset is committed. It also does nothing
-// for a truncate before EnableTimeTick: the Index holds no write before it.
+// for a truncate before CheckpointTimeTick: the Index holds no write before it.
 //
 // It reports whether the Index went from clean to dirty, so that the caller
 // adds it to the LastAcked heap of the pchannel.
 func (idx *Index) Reset(ctx context.Context, tt uint64) (dirtied bool, err error) {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
-	if tt <= idx.LastCommittedTimeTick() || tt < idx.cfg.EnableTimeTick {
+	if tt <= idx.LastCommittedTimeTick() || tt < idx.cfg.CheckpointTimeTick {
 		return false, nil
 	}
 	if err := idx.closedOr(nil); err != nil {

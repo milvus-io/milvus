@@ -50,7 +50,7 @@ func (r *recoveryStorageImpl) broadcastAckExtraLocked(msg message.ImmutableMessa
 		outcome = pkindexpb.CreateIndexAckResult_DISABLED
 	} else if state, ok := r.vchannelManager.PKIndexState(msg.VChannel()); ok &&
 		state.PKIndex.GetIndexId() == header.GetIndexId() &&
-		state.PKIndex.GetEnableTimeTick() == msg.TimeTick() {
+		state.PKIndex.GetCheckpointTimeTick() == msg.TimeTick() {
 		outcome = pkindexpb.CreateIndexAckResult_ENABLED
 	}
 	extra, err := anypb.New(&pkindexpb.CreateIndexAckResult{Outcome: outcome})

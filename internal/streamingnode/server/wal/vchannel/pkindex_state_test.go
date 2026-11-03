@@ -158,7 +158,7 @@ func requirePKState(t *testing.T, manager *PChannelRecoveryManager, everWritten 
 }
 
 func TestPKIndexState(t *testing.T) {
-	enabledAt5 := &streamingpb.PKIndexOfVChannel{IndexId: pkStateIndexID, FieldId: pkStateFieldID, EnableTimeTick: 5}
+	enabledAt5 := &streamingpb.PKIndexOfVChannel{IndexId: pkStateIndexID, FieldId: pkStateFieldID, CheckpointTimeTick: 5}
 	pk := common.PrimaryKeyIndexType
 	for _, tc := range []struct {
 		name        string
@@ -245,7 +245,7 @@ func TestPKIndexStateReplay(t *testing.T) {
 
 		restarted := newPKStateManager(t, map[string]*streamingpb.VChannelMeta{pkStateVChannel: meta})
 		observePKState(t, restarted, pkStateCreateIndex(5, pk), pkStateInsert(6))
-		requirePKState(t, restarted, written, &streamingpb.PKIndexOfVChannel{IndexId: pkStateIndexID, FieldId: pkStateFieldID, EnableTimeTick: 5})
+		requirePKState(t, restarted, written, &streamingpb.PKIndexOfVChannel{IndexId: pkStateIndexID, FieldId: pkStateFieldID, CheckpointTimeTick: 5})
 	})
 
 	t.Run("a write before a persisted truncate is skipped", func(t *testing.T) {

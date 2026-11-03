@@ -163,10 +163,10 @@ func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.M
 		return id, nil
 	}
 	spec := snpkindex.IndexSpec{
-		VChannel:       msg.VChannel(),
-		CollectionID:   header.GetCollectionId(),
-		IndexID:        header.GetIndexId(),
-		EnableTimeTick: msg.TimeTick(),
+		VChannel:           msg.VChannel(),
+		CollectionID:       header.GetCollectionId(),
+		IndexID:            header.GetIndexId(),
+		CheckpointTimeTick: msg.TimeTick(),
 	}
 	if err := i.registry.enable(ctx, spec, header.GetFieldId(), state.Schema); err != nil {
 		// The message is in the WAL. The reopen of the WAL enables the index

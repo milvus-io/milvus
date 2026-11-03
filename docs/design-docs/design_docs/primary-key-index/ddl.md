@@ -214,7 +214,7 @@ enum VChannelWriteHistory {
 message PKIndexOfVChannel {
   int64 index_id = 1;
   int64 field_id = 2;
-  uint64 enable_time_tick = 3;
+  uint64 checkpoint_time_tick = 3; // the time tick of the CreateIndex, like the checkpoint_time_tick of a partition or a schema
 }
 // CollectionInfoOfVChannel
 VChannelWriteHistory ever_written = 4;
@@ -323,7 +323,7 @@ the state at that message:
   recovery opened. An Index that the observe opens is ready at once: an index
   enabled after the checkpoint of the pchannel has no manifest. Otherwise it
   drops an Index of this index ID.
-- A CreateIndex or DropIndex at or before the enable time tick of the open
+- A CreateIndex or DropIndex at or before the checkpoint time tick of the open
   Index is the replay of an earlier index. It does nothing.
 - DropIndex that names the index, or names no index: it drops the Index.
 - DropCollection: it drops the Index with index ID 0, which matches any Index

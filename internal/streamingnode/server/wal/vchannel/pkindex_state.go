@@ -68,9 +68,9 @@ func (info *VChannelView) ObserveCreateIndexMessageV2(msg message.ImmutableCreat
 	}
 	if info.meta.CollectionInfo.GetEverWritten() == streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER {
 		info.meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{
-			IndexId:        header.GetIndexId(),
-			FieldId:        header.GetFieldId(),
-			EnableTimeTick: msg.TimeTick(),
+			IndexId:            header.GetIndexId(),
+			FieldId:            header.GetFieldId(),
+			CheckpointTimeTick: msg.TimeTick(),
 		}
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()

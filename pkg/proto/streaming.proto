@@ -876,7 +876,7 @@ enum VChannelWriteHistory {
 message PKIndexOfVChannel {
     int64 index_id = 1;
     int64 field_id = 2;
-    uint64 enable_time_tick = 3; // the time tick of the CreateIndex that enabled the index.
+    uint64 checkpoint_time_tick = 3; // The timetick of the CreateIndex that enabled the index. The replay does not apply the messages at or before it to the index.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.

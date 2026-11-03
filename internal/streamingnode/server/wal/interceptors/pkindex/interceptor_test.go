@@ -474,7 +474,7 @@ func newTestInterceptorOfSchema(t *testing.T, sessions txnSessions, schema *sche
 
 // testSpec is the index spec of the primary key index of testVChannel.
 func testSpec() snpkindex.IndexSpec {
-	return snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, EnableTimeTick: 1}
+	return snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: 1}
 }
 
 // enableForTest enables the primary key index of testVChannel over schema.
@@ -1527,7 +1527,7 @@ func TestCreateIndexOfAnEmptyVChannelEnablesTheIndex(t *testing.T) {
 	require.NotNil(t, i.ch.Decider(testVChannel))
 	idx := i.ch.IndexForTest(testVChannel)
 	require.Equal(t, testIndexID, idx.IndexID())
-	require.Equal(t, f.appended[0].TimeTick(), idx.EnableTimeTick())
+	require.Equal(t, f.appended[0].TimeTick(), idx.CheckpointTimeTick())
 
 	engines.of(t, testVChannel).put(t, 1, 100)
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -1567,8 +1567,8 @@ func TestCreateIndexOfAWrittenVChannelWaitsForTheObserve(t *testing.T) {
 	t.Run("unknown, the observe opens the index", func(t *testing.T) {
 		env, i, engines, tt := appendCreateIndex(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_UNKNOWN)
 		env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
-			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, EnableTimeTick: tt})
-		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, EnableTimeTick: tt})
+			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
+		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 		require.NoError(t, err)
 		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
 
@@ -1615,8 +1615,8 @@ func TestWriteAdoptsTheIndexThatTheObserveOpened(t *testing.T) {
 
 	tt := f.appended[0].TimeTick()
 	env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
-		&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, EnableTimeTick: tt})
-	_, _, err = i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, EnableTimeTick: tt})
+		&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
+	_, _, err = i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 	require.NoError(t, err)
 
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -1716,8 +1716,8 @@ func TestCreateIndexAppendWithAnUnknownResult(t *testing.T) {
 	t.Run("the observe opens the index", func(t *testing.T) {
 		env, i, tt := failedCreateIndex(t)
 		env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
-			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, EnableTimeTick: tt})
-		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, EnableTimeTick: tt})
+			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
+		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 		require.NoError(t, err)
 
 		f := newFakeAppender()
