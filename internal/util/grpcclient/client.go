@@ -570,7 +570,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		retry.Sleep(time.Duration(c.InitialBackoff*1000)*time.Millisecond),
 		retry.MaxSleepTime(time.Duration(c.MaxBackoff*1000)*time.Millisecond))
 	// default value list: MaxAttempts 10, InitialBackoff 0.2s, MaxBackoff 10s
-	// and consume 52.8s if all retry failed
+	// and consume 42.6s if all retry failed
 	if err != nil {
 		// make the error more friendly to user
 		if IsCrossClusterRoutingErr(err) {
