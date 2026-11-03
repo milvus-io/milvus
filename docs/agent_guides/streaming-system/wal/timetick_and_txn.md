@@ -165,11 +165,13 @@ An append interceptor can turn one append into a transaction with
 visible at the same TimeTick. Two independent top-level messages can never
 share a TimeTick. A transaction is the only way.
 
-- **Position**: the caller must sit above the TimeTick interceptor (every
+- **Position**: the caller must run before the TimeTick stage (every
   message of the group needs its own TimeTick, and BeginTxn must get the
   smallest one) and below the Lock interceptor (the whole group runs under the
   lock acquired for the original append, so an exclusive message cannot
-  force-fail it halfway).
+  force-fail it halfway). Shard provides this order by running primary key
+  decisions before its internal TimeTick and segment-assignment chain. The helper
+  receives that internal chain as appendOp. It does not re-enter shard decisions.
 - **Accepted input**: the message is an autocommit DML message (Insert, Delete)
   or a CommitTxn. Every derived message is an autocommit DML message of the same
   VChannel. Replicated messages (messages with a replicate header) are rejected,

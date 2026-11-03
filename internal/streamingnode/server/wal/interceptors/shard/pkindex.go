@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package shard
 
 import (
 	"context"
@@ -34,26 +34,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-var _ interceptors.InterceptorWithMetrics = (*appendInterceptor)(nil)
-
 // txnSessions is the part of *txn.TxnManager the interceptor needs.
 type txnSessions interface {
 	GetSessionOfTxn(id message.TxnID) (*txn.TxnSession, error)
 }
 
-// appendInterceptor translates WAL messages into primary key index requests and
+// pkIndexWriter translates WAL messages into primary key index requests and
 // appends what the decider asks for. It holds no index logic of its own.
-type appendInterceptor struct {
+type pkIndexWriter struct {
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
 }
 
-func (i *appendInterceptor) Name() string {
-	return interceptorName
-}
-
-func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) append(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	if i == nil {
+		return appendOp(ctx, msg)
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
 		return i.appendCreateCollection(ctx, msg, appendOp)
@@ -93,11 +90,14 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 	}
 }
 
-func (i *appendInterceptor) Close() {
+func (i *pkIndexWriter) Close() {
+	if i == nil {
+		return
+	}
 	i.registry.close(context.TODO())
 }
 
-func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	// The control channel copy of a DDL message only orders the DDL. It carries
 	// no write of a data vchannel, so the registry never sees it.
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -127,7 +127,7 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 	return id, nil
 }
 
-func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	id, err := appendOp(ctx, msg)
 	if err != nil {
 		// TODO: a DropCollection whose append fails but is persisted leaves the
@@ -142,7 +142,7 @@ func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg messag
 	return id, nil
 }
 
-func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendInsert(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	body, err := utility.DecodeInsertBody(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	return commit.MessageID(), nil
 }
 
-func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	body, err := utility.DecodeDeleteBody(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	return id, nil
 }
 
-func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendCommit(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	intent, err := i.decide(ctx, t, dedup.DecideRequest{
 		Kind:  dedup.KindCommitTxn,
 		TxnID: txnIDOf(msg),
@@ -277,7 +277,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 	return commit.MessageID(), nil
 }
 
-func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+func (i *pkIndexWriter) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	intent, err := i.decide(ctx, t, dedup.DecideRequest{
 		Kind:  dedup.KindRollbackTxn,
 		TxnID: txnIDOf(msg),
@@ -313,7 +313,7 @@ func discard(intent *dedup.WriteIntent, err error, tt uint64) {
 }
 
 // decide calls the decider and classifies its error for the WAL.
-func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.DecideRequest) (*dedup.WriteIntent, error) {
+func (i *pkIndexWriter) decide(ctx context.Context, t *target, req dedup.DecideRequest) (*dedup.WriteIntent, error) {
 	start := time.Now()
 	intent, err := t.decider.Decide(ctx, req)
 	if err != nil {
@@ -357,7 +357,7 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.Dec
 // existed when a body of it was applied, and every end of a session removes it
 // from the manager. So a failed lookup means the transaction is over and no
 // CommitTxn or RollbackTxn will drop the set.
-func (i *appendInterceptor) dropPendingOfEndedTxns() {
+func (i *pkIndexWriter) dropPendingOfEndedTxns() {
 	if i.sessions == nil {
 		return
 	}
@@ -369,7 +369,7 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 	})
 }
 
-func (i *appendInterceptor) rememberCipher(t *target, msg message.MutableMessage) {
+func (i *pkIndexWriter) rememberCipher(t *target, msg message.MutableMessage) {
 	if t.cipher.Load() != nil {
 		return
 	}

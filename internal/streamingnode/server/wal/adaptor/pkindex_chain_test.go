@@ -28,21 +28,20 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// The chain tests drive the primary key index interceptor through the production
+// The chain tests drive the primary key decisions in shard through the production
 // interceptor chain, in the order of walmanager.newInterceptorBuilders.
 //
-// The switch of the interceptor is read when the WAL opens, and it is a process
+// The primary key index switch is read when the WAL opens, and it is a process
 // wide config, so these tests must not run in parallel with each other.
 //
 // The index engine is the in-memory one that registers itself in an init() under
-// the "test" build tag. This package reaches it through the pkindex interceptor.
+// the "test" build tag. This package reaches it through shard.
 // The index starts empty on every WAL open, so no test may assume that an entry
 // survives a reopen.
 const (
@@ -53,13 +52,31 @@ const (
 	pkChainLastProperty = "pkindex-chain-last"
 )
 
-// openPKIndexWAL turns the index on, opens a WAL whose chain contains the index
-// interceptor and creates the collection the chain tests write to.
+// openPKIndexWAL turns the index on, opens a WAL whose shard owns the index and creates the collection the chain tests write to.
 func openPKIndexWAL(t *testing.T, name string) wal.WAL {
 	setPKIndexEnabled(t, "true")
-	w := openChainWAL(t, name, pkindex.NewInterceptorBuilder())
+	w := openChainWAL(t, name, nil)
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
 	return w
+}
+
+// Shard must provide deduplication without a separate pkindex interceptor.
+func TestPKIndexChainShardOwnsDedup(t *testing.T) {
+	setPKIndexEnabled(t, "true")
+	w := openChainWAL(t, "pkindex-shard-owner", nil)
+	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
+	_, err := w.Append(context.Background(), newPKChainInsert([]int64{7}, nil))
+	require.NoError(t, err)
+	_, err = w.Append(context.Background(), newPKChainInsert([]int64{7}, map[string]string{pkChainLastProperty: "true"}))
+	require.NoError(t, err)
+	messages := readPKChainMessages(t, w)
+	var transactions int
+	for _, msg := range messages {
+		if msg.MessageType() == message.MessageTypeTxn {
+			transactions++
+		}
+	}
+	require.Equal(t, 1, transactions)
 }
 
 // setPKIndexEnabled sets the switch of the index and restores it after the test.
@@ -72,7 +89,7 @@ func setPKIndexEnabled(t *testing.T, value string) {
 }
 
 // appendPKChainCreateCollection creates a collection with one user provided int64
-// primary key, which is what the index interceptor asks for.
+// primary key, which is what the primary key index requires.
 func appendPKChainCreateCollection(t *testing.T, w wal.WAL, collectionID int64, partitionID int64) {
 	t.Helper()
 	create := message.NewCreateCollectionMessageBuilderV1().
@@ -479,7 +496,7 @@ func TestPKIndexChainDeleteReachesTheWALUnchanged(t *testing.T) {
 
 func TestPKIndexChainDisabled(t *testing.T) {
 	setPKIndexEnabled(t, "false")
-	w := openChainWAL(t, "pkindex-disabled", pkindex.NewInterceptorBuilder())
+	w := openChainWAL(t, "pkindex-disabled", nil)
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
 	ctx := context.Background()
 

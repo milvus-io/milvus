@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -47,8 +46,8 @@ import (
 )
 
 // The contract tests drive txn.AppendInTxn through the production interceptor
-// chain. The test interceptor sits where the primary key index interceptor will
-// sit: between replicate and timetick.
+// chain. The test interceptor runs before shard, whose internal chain starts
+// with timetick.
 const (
 	inTxnKey         = "test-in-txn"
 	inTxnAsTxn       = "as-txn"       // append an autocommit insert as a transaction
@@ -201,7 +200,7 @@ func newInTxnDelete() message.MutableMessage {
 }
 
 // openChainWAL opens a WAL whose interceptor chain is the production one, with
-// extra between the replicate and the timetick interceptor. Every interceptor is
+// an optional extra before shard and its internal timetick stage. Every interceptor is
 // built while this function runs, so a caller that drives a builder by a config
 // value must set it beforehand.
 func openChainWAL(t *testing.T, name string, extra interceptors.InterceptorBuilder) wal.WAL {
@@ -212,16 +211,17 @@ func openChainWAL(t *testing.T, name string, extra interceptors.InterceptorBuild
 	pressureKey := paramtable.Get().StreamingCfg.WALRateLimitWABSlowdownRatio.Key
 	require.NoError(t, paramtable.Get().Save(pressureKey, "6553.6")) // 64 MiB / 10 KiB
 	t.Cleanup(func() { _ = paramtable.Get().Reset(pressureKey) })
-	b := registry.MustGetBuilder(message.WALNameTest,
+	builders := []interceptors.InterceptorBuilder{
 		idempotency.NewInterceptorBuilder(),
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),
-		extra,
-		timetick.NewInterceptorBuilder(),
-		shard.NewInterceptorBuilder(),
-		partialupdate.NewInterceptorBuilder(),
-	)
+	}
+	if extra != nil {
+		builders = append(builders, extra)
+	}
+	builders = append(builders, shard.NewInterceptorBuilder(), partialupdate.NewInterceptorBuilder())
+	b := registry.MustGetBuilder(message.WALNameTest, builders...)
 	message.RegisterDefaultWALName(message.WALNameTest)
 	o, err := b.Build()
 	require.NoError(t, err)

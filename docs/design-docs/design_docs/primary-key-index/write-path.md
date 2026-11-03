@@ -91,8 +91,19 @@ body before its CommitTxn.
 
 ## Position in the interceptor chain
 
+Shard owns logical write orchestration. Its builder creates the existing
+TimeTick interceptor and segment-assignment handler as an internal chain.
+Primary key decisions run before that chain. Each derived message enters the
+internal chain directly, without repeating the decision or the outer locks.
+The internal chain retains the TimeTick and shard metrics. Shard forwards
+TimeTick graceful shutdown and closes the internal chain after the index writer.
+There is no separate primary key index interceptor or top-level TimeTick builder.
+
 ```
-idempotency → redo → lock → replicate → [pkindex] → timetick → shard → partialupdate
+idempotency → redo → lock → replicate → shard → partialupdate
+                                      │
+                                      └─ primary key decision and transaction orchestration
+                                           └─ timetick → segment assignment → partialupdate
 ```
 
 - Above `timetick`: every message of the group needs its own TimeTick, and the
@@ -113,7 +124,7 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 ## Components
 
 ```
-internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
+internal/streamingnode/server/wal/interceptors/shard     the write coordinator
         │ translates WAL messages into DecideRequests, appends what the Decider asks for
         │ creates the engine of each vchannel (in-memory in this step)
         ▼
@@ -387,7 +398,7 @@ write passed this check, while the write waits for an earlier write of the
 same key, also makes that write wait: the decider removes its registration and
 returns a `*WaitError`.
 
-The wait can not block inside the pkindex interceptor. That interceptor runs
+The wait can not block inside the primary key writer in shard. That interceptor runs
 under `glock.RLock` of the lock interceptor. An exclusive message waits for
 `glock.Lock`. A TimeTick append also needs `glock.RLock`, and it queues behind
 the exclusive message. So observe never reaches `T`, and the waiting write,
@@ -400,7 +411,7 @@ holds no lock:
    CommitTxn with pending writes, while observe is below `T`. It registers
    nothing and probes nothing. A transaction body and a rollback do not wait,
    and an autocommit delete does not reach the decider.
-2. The pkindex interceptor returns `interceptors.WaitRequiredError` with the
+2. The primary key writer in shard returns `interceptors.WaitRequiredError` with the
    `Wait` of that error. Nothing of the message is appended.
 3. The lock interceptor releases `glock` when the inner chain returns.
 4. The redo interceptor calls `Wait` without a lock. `Wait` returns when

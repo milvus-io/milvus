@@ -10,11 +10,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -39,17 +37,14 @@ func OpenManager() (Manager, error) {
 // the window before anything downstream can retry it, or a retry of a write
 // that already landed would be redone as a second write.
 //
-// The primary key index interceptor sits between replicate and timetick: it may
-// turn one append into a transaction, whose messages each need their own time tick,
-// and it must run under the lock acquired for the original append.
+// Shard owns primary key decisions and transaction orchestration before its
+// internal timetick and segment-assignment stages.
 func newInterceptorBuilders() []interceptors.InterceptorBuilder {
 	return []interceptors.InterceptorBuilder{
 		idempotency.NewInterceptorBuilder(),
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),
-		pkindex.NewInterceptorBuilder(),
-		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 		partialupdate.NewInterceptorBuilder(),
 	}

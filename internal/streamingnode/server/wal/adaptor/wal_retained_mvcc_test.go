@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -51,7 +50,6 @@ func TestRetainedMVCCAppendAfterConfirmation(t *testing.T) {
 			redo.NewInterceptorBuilder(),
 			lock.NewInterceptorBuilder(),
 			replicate.NewInterceptorBuilder(),
-			timetick.NewInterceptorBuilder(),
 			shard.NewInterceptorBuilder(),
 		).Build()
 		require.NoError(t, err)

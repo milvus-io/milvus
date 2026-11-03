@@ -48,14 +48,13 @@ func TestShardInterceptorWriteBeforeMaterializationGate(t *testing.T) {
 	vchannel := "v1-gated"
 	collectionID := int64(99010)
 
-	b := NewInterceptorBuilder()
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Logger().Return(mlog.With()).Maybe()
 	// handleInsertMessage checks the collection schema version before the
 	// materialization gate; stub it to pass through so the tests exercise the
 	// gate itself.
 	shardManager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(0), nil)
-	i := b.Build(&interceptors.InterceptorBuildParam{
+	i := newShardInterceptor(&interceptors.InterceptorBuildParam{
 		ShardManager: shardManager,
 	})
 	defer i.Close()

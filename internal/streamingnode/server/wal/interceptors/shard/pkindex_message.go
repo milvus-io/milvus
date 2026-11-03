@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package shard
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
