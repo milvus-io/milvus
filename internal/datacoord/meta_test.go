@@ -1264,10 +1264,9 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 		}},
 	}
 
-	// catalog has no SaveDroppedSegmentsInBatch/MarkChannelDeleted
-	// expectation: if batchSaveDropSegments still called those directly (the
-	// old two-call path), mockery would fail the test with an
-	// unexpected-call panic.
+	// catalog has no SaveDroppedSegmentsInBatch expectation: if
+	// batchSaveDropSegments still called it directly (the old two-call path),
+	// mockery would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
@@ -1285,14 +1284,14 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments)
 	suite.NoError(err)
 
-	// One UpdateSegment per dropped segment (2), then the channel tombstone.
+	// One UpdateSegment per dropped segment (2), then the channel flag delete.
 	// catalog.Update called exactly once (.Once()).
 	suite.Require().Len(gotActions, 3, "expected two segment updates + one channel action")
 
-	// The channel tombstone is last (the visibility marker).
+	// The channel flag delete is last, after the dropped segments.
 	channelEntry, ok := gotActions[2].Entry.(metastore.ChannelEntry)
 	suite.Require().True(ok)
-	suite.Equal(metastore.ActionUpdate, gotActions[2].Type)
+	suite.Equal(metastore.ActionDelete, gotActions[2].Type)
 	suite.Require().Equal("ch-1", channelEntry.Channel)
 
 	var droppedIDs []int64
@@ -7141,4 +7140,29 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		assert.NotNil(t, am.GetTask(55))
 		assert.NotNil(t, psm.GetPartitionStats(1, 2, "ch-1", 100))
 	})
+}
+
+func TestUpdateStatusOperator_DroppedIsTerminal(t *testing.T) {
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:        1,
+		State:     commonpb.SegmentState_Dropped,
+		DroppedAt: 42,
+	})))
+
+	for _, target := range []commonpb.SegmentState{
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Flushing,
+		commonpb.SegmentState_Flushed,
+		commonpb.SegmentState_Importing,
+	} {
+		t.Run(target.String(), func(t *testing.T) {
+			require.NoError(t, meta.UpdateSegmentsInfo(context.TODO(), UpdateStatusOperator(1, target)))
+			segment := meta.GetSegment(context.TODO(), 1)
+			require.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+			require.EqualValues(t, 42, segment.GetDroppedAt())
+		})
+	}
 }

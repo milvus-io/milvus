@@ -22,6 +22,7 @@ knowhere	internal/core/src/exec/operator/RescoresNode.cpp
 knowhere	internal/core/src/exec/operator/search-groupby/StrictGroupFilteredSearch.cpp
 knowhere	internal/core/src/exec/operator/Utils.h
 knowhere	internal/core/src/exec/QueryContext.h
+knowhere	internal/core/src/index/vector/VectorDiskArtifact.cpp
 knowhere	internal/core/src/indexbuilder/VectorDiskBuildMaterializer.cpp
 knowhere	internal/core/src/index/contracts/build/VectorBuildInput.h
 knowhere	internal/core/src/index/contracts/query/IVectorReader.h
@@ -100,6 +101,8 @@ arrow	internal/core/src/common/init_c.cpp
 arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
 arrow	internal/core/src/common/Types.h
+arrow	internal/core/src/index/vector/VectorDiskBuildFileManager.cpp
+arrow	internal/core/src/index/vector/VectorDiskBuildFileManager.h
 arrow	internal/core/src/indexbuilder/BuildSession.cpp
 arrow	internal/core/src/segcore/json_stats/JsonKeyStats.cpp
 arrow	internal/core/src/segcore/json_stats/JsonKeyStats.h
@@ -135,6 +138,7 @@ arrow	internal/core/src/segcore/retrieve_result_export_c.h
 arrow	internal/core/src/segcore/search_result_export_c.cpp
 arrow	internal/core/src/segcore/segment_c.cpp
 arrow	internal/core/src/segcore/SegmentGrowingImpl.cpp
+arrow	internal/core/src/segcore/SegmentLoadInfo.cpp
 arrow	internal/core/src/segcore/storagev1translator/ChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev1translator/DefaultValueChunkTranslator.cpp
 arrow	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.cpp
@@ -145,6 +149,8 @@ arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
 arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
+arrow	internal/core/src/storage/artifact/FileSink.cpp
+arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp

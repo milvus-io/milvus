@@ -1963,3 +1963,7 @@ type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredenti
 func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
 	panic("mock FetchFileResources with mockey")
 }
+
+func (*MixCoordMock) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	panic("patch GetQueryViewSegmentLoadInfo with mockey")
+}

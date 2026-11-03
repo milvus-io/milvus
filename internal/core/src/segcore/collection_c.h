@@ -26,6 +26,11 @@ NewCollection(const void* schema_proto_blob,
               const int64_t length,
               CCollection* collection);
 
+// Create an independent index binding over the owner's parsed Schema.
+// The caller keeps the owner alive until this synchronous call returns.
+CStatus
+NewCollectionWithSharedSchema(CCollection owner, CCollection* collection);
+
 CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,

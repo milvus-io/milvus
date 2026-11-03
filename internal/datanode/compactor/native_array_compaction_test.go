@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -136,23 +137,32 @@ func w6bCompactionVectorRow(pk int64) *schemapb.VectorField {
 	}
 }
 
-func w6bWriteCompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema,
-	segmentID int64, pks []int64, sorted bool,
-) *datapb.CompactionSegmentBinlogs {
+func w6bCompactionRecord(t *testing.T, schema *schemapb.CollectionSchema, pks []int64) storage.Record {
 	t.Helper()
 	ts := int64(tsoutil.ComposeTSByTime(getMilvusBirthday()))
 	values := make([]*storage.Value, 0, len(pks))
 	for _, pk := range pks {
-		values = append(values, &storage.Value{Value: map[storage.FieldID]any{
+		row := map[storage.FieldID]any{
 			common.RowIDField:     pk + 10,
 			common.TimeStampField: ts,
 			w6bCompactionPK:       pk,
 			w6bCompactionArray:    w6bCompactionArrayRow(pk),
-			w6bCompactionVector:   w6bCompactionVectorRow(pk),
-		}})
+		}
+		if typeutil.GetField(schema, w6bCompactionVector) != nil {
+			row[w6bCompactionVector] = w6bCompactionVectorRow(pk)
+		}
+		values = append(values, &storage.Value{Value: row})
 	}
 	record, err := storage.ValueSerializer(values, schema)
 	require.NoError(t, err)
+	return record
+}
+
+func w6bWriteCompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema,
+	segmentID int64, pks []int64, sorted bool,
+) *datapb.CompactionSegmentBinlogs {
+	t.Helper()
+	record := w6bCompactionRecord(t, schema, pks)
 	defer record.Release()
 	writer, err := storage.NewBinlogRecordWriter(context.Background(), CollectionID, PartitionID, segmentID,
 		schema, allocator.NewLocalAllocator(100000+segmentID*100, math.MaxInt64), 1<<20, int64(len(pks)),
@@ -167,6 +177,86 @@ func w6bWriteCompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *
 		FieldBinlogs: storage.SortFieldBinlogs(logs), StorageVersion: storage.StorageV3,
 		Manifest: manifest, IsSorted: sorted,
 	}
+}
+
+// w6bWriteLegacyV2CompactionSource writes a StorageV2 packed segment shaped
+// like one flushed by 2.6.0/2.6.1: every column in column group 0, and no
+// FieldBinlog.ChildFields.
+func w6bWriteLegacyV2CompactionSource(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema,
+	segmentID int64, pks []int64,
+) *datapb.CompactionSegmentBinlogs {
+	t.Helper()
+	record := w6bCompactionRecord(t, schema, pks)
+	defer record.Release()
+	group := storagecommon.ColumnGroup{GroupID: 0}
+	for i, field := range typeutil.GetAllFieldSchemas(schema) {
+		group.Columns = append(group.Columns, i)
+		group.Fields = append(group.Fields, field.GetFieldID())
+	}
+	writer, err := storage.NewBinlogRecordWriter(context.Background(), CollectionID, PartitionID, segmentID,
+		schema, allocator.NewLocalAllocator(100000+segmentID*100, math.MaxInt64), 1<<20, int64(len(pks)),
+		storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(cfg),
+		storage.WithColumnGroups([]storagecommon.ColumnGroup{group}),
+		storage.WithUploader(func(context.Context, map[string][]byte) error { return nil }))
+	require.NoError(t, err)
+	require.NoError(t, writer.Write(record))
+	require.NoError(t, writer.Close())
+	logs, _, _, _, _ := writer.GetLogs()
+	require.Len(t, logs, 1)
+	for _, fieldBinlog := range logs {
+		fieldBinlog.ChildFields = nil
+	}
+	return &datapb.CompactionSegmentBinlogs{
+		CollectionID: CollectionID, PartitionID: PartitionID, SegmentID: segmentID,
+		FieldBinlogs: storage.SortFieldBinlogs(logs), StorageVersion: storage.StorageV2,
+	}
+}
+
+func w6bPartialStructSchemas() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+	target := w6bCompactionSchema()
+	source := proto.Clone(target).(*schemapb.CollectionSchema)
+	source.StructArrayFields[0].Fields = source.StructArrayFields[0].Fields[:1]
+	return source, target
+}
+
+func w6bAssertBackfilledVector(t *testing.T, cfg *indexpb.StorageConfig, schema *schemapb.CollectionSchema, segments []*datapb.CompactionSegment) {
+	t.Helper()
+	wantCounts := map[int64]int64{1: 3, 2: 0, 3: 0, 4: 1}
+	seen := make(map[int64]bool)
+	for _, segment := range segments {
+		present, err := packed.GetManifestFieldIDs(segment.GetManifest(), cfg)
+		require.NoError(t, err)
+		require.Contains(t, present, w6bCompactionVector, "backfilled child must be physically written")
+		rr, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), schema,
+			storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(cfg))
+		require.NoError(t, err)
+		for {
+			record, err := rr.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			pkCol := record.Column(w6bCompactionPK).(*array.Int64)
+			vector := record.Column(w6bCompactionVector).(*array.List)
+			for i := 0; i < record.Len(); i++ {
+				pk := pkCol.Value(i)
+				require.False(t, seen[pk])
+				seen[pk] = true
+				start, end := vector.ValueOffsets(i)
+				require.Equal(t, wantCounts[pk], end-start)
+				if pk == 2 {
+					require.True(t, vector.IsNull(i))
+				} else {
+					require.False(t, vector.IsNull(i))
+				}
+				for j := start; j < end; j++ {
+					require.True(t, vector.ListValues().IsNull(int(j)))
+				}
+			}
+		}
+		require.NoError(t, rr.Close())
+	}
+	require.Len(t, seen, 4)
 }
 
 func w14ArrowCompactionRecord(t *testing.T, schema *schemapb.CollectionSchema) storage.Record {
@@ -436,6 +526,40 @@ func (s *MixCompactionTaskStorageV3Suite) TestNativeArrayMergeSortWithDelete() {
 	s.nativeArrayCompaction(true, true)
 }
 
+func (s *MixCompactionTaskStorageV3Suite) TestPartialStructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.plan.MaxSize = 1 << 30
+	s.task.sortByFieldIDs = []int64{w6bCompactionPK}
+	cfg := s.task.compactionParams.StorageConfig
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteCompactionSource(s.T(), cfg, sourceSchema, 10, []int64{1, 2, 3, 4}, false),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
+}
+
+func (s *MixCompactionTaskStorageV3Suite) TestLegacyV2StructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.plan.MaxSize = 1 << 30
+	s.task.sortByFieldIDs = []int64{w6bCompactionPK}
+	cfg := s.task.compactionParams.StorageConfig
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteLegacyV2CompactionSource(s.T(), cfg, sourceSchema, 10, []int64{1, 2, 3, 4}),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
+}
+
 func (s *SortCompactionTaskSuite) nativeArraySort(withDelete bool) {
 	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
@@ -468,6 +592,48 @@ func (s *SortCompactionTaskSuite) TestNativeArraySortWithoutDelete() {
 
 func (s *SortCompactionTaskSuite) TestNativeArraySortWithDelete() {
 	s.nativeArraySort(true)
+}
+
+func (s *SortCompactionTaskSuite) TestPartialStructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	initcore.CleanArrowFileSystem()
+	s.Require().NoError(initcore.InitLocalArrowFileSystem(rootPath))
+	s.task.compactionParams = compaction.GenParams()
+	cfg := s.task.compactionParams.StorageConfig
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.sortByFieldIDs = []int64{w6bCompactionPK}
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteCompactionSource(s.T(), cfg, sourceSchema, 10, []int64{4, 2, 1, 3}, false),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
+}
+
+func (s *SortCompactionTaskSuite) TestLegacyV2StructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	initcore.CleanArrowFileSystem()
+	s.Require().NoError(initcore.InitLocalArrowFileSystem(rootPath))
+	s.task.compactionParams = compaction.GenParams()
+	cfg := s.task.compactionParams.StorageConfig
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.sortByFieldIDs = []int64{w6bCompactionPK}
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteLegacyV2CompactionSource(s.T(), cfg, sourceSchema, 10, []int64{4, 2, 1, 3}),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
 }
 
 func (s *ClusteringCompactionTaskStorageV3Suite) nativeArrayArrowCompaction(mixed, withDelete bool) {
@@ -521,4 +687,56 @@ func (s *ClusteringCompactionTaskStorageV3Suite) TestNativeArrayArrowCopyThrough
 
 func (s *ClusteringCompactionTaskStorageV3Suite) TestMixedArrowColumnsThroughClusteringCompaction() {
 	s.nativeArrayArrowCompaction(true, true)
+}
+
+func (s *ClusteringCompactionTaskStorageV3Suite) TestPartialStructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	initcore.CleanArrowFileSystem()
+	s.Require().NoError(initcore.InitLocalArrowFileSystem(rootPath))
+	s.task.compactionParams = compaction.GenParams()
+	cfg := s.task.compactionParams.StorageConfig
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.plan.ClusteringKeyField = w6bCompactionPK
+	s.task.plan.PreferSegmentRows = 10
+	s.task.plan.MaxSegmentRows = 10
+	s.task.plan.MaxSize = 1 << 30
+	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{Begin: 3000, End: 4000}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{Begin: 5000, End: 6000}
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteCompactionSource(s.T(), cfg, sourceSchema, 10, []int64{4, 2, 1, 3}, false),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
+}
+
+func (s *ClusteringCompactionTaskStorageV3Suite) TestLegacyV2StructChildBackfill() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	rootPath := paramtable.Get().LocalStorageCfg.Path.GetValue()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	initcore.CleanArrowFileSystem()
+	s.Require().NoError(initcore.InitLocalArrowFileSystem(rootPath))
+	s.task.compactionParams = compaction.GenParams()
+	cfg := s.task.compactionParams.StorageConfig
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	s.task.plan.Schema = targetSchema
+	s.task.plan.ClusteringKeyField = w6bCompactionPK
+	s.task.plan.PreferSegmentRows = 10
+	s.task.plan.MaxSegmentRows = 10
+	s.task.plan.MaxSize = 1 << 30
+	s.task.plan.PreAllocatedSegmentIDs = &datapb.IDRange{Begin: 3000, End: 4000}
+	s.task.plan.PreAllocatedLogIDs = &datapb.IDRange{Begin: 5000, End: 6000}
+	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
+		w6bWriteLegacyV2CompactionSource(s.T(), cfg, sourceSchema, 10, []int64{4, 2, 1, 3}),
+	}
+	s.task.plan.TotalRows = 4
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
 }

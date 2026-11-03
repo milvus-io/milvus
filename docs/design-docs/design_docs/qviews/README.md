@@ -145,12 +145,14 @@ derived by DataViewManager. The manager validates unique Segment-ID placement,
 but the projection decides when a Segment is loadable and must not report
 overlapping logical data under different Segment IDs.
 
-Each partition also carries a packed Manifest-version array parallel to its
-packed Segment-ID array. Version `0` keeps the Coordinator SegmentMeta watch
-and resolves full SegmentInfo for loading. A positive version denotes a
-canonical StorageV3 Manifest: QueryNode derives its object-storage path from
-Collection/Partition/Segment IDs and the version, loads all data metadata from
-the Manifest, and does not watch Coordinator SegmentMeta for that Segment.
+Each partition carries a packed Manifest-version array parallel to its Segment
+IDs. The QN resource path assumes StorageV3 and manifest-backed index artifacts.
+It obtains a complete loading snapshot through `GetQueryViewSegmentLoadInfo`
+when a View's requirements cannot reuse resident resources. Positive Manifest
+versions constrain that snapshot; version `0` supplies no explicit minimum,
+but does not enable a non-V3 loading path. SegmentMeta Watch is not used.
+New Manifest publication drives DataView and QueryView advancement. Full
+manifest-only loading without the metadata RPC is a separate capability.
 
 ### 5.2 Data Structures
 
@@ -466,3 +468,10 @@ consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
 uses a QueryView handoff fence (QueryCoord target update in the legacy model).
 The MVCC extension and distributed delivery are outside the current SN query
 extraction PR; a progress barrier alone does not implement DDL visibility.
+
+## QueryNode subsystem extraction
+
+See [implemented scope and production dependencies](querynode_extraction.md),
+[resource preparation](qnview/querynode_queryview_resource_preparation.md), and
+[query execution](query/query_execution.md). The node waits for applied Transform
+MVCC on the exact physical registrations retained by its query handles.

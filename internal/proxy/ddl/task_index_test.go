@@ -407,6 +407,30 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 	})
 }
 
+// The struct sub-field origin marker stays out of the index type params, so
+// it reaches neither index meta, DescribeIndex nor the index build.
+func Test_parseIndexParamsSkipsStructSubFieldOriginMarker(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	cit := &CreateIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: "MHJACCARD"}},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: DimKey, Value: "128"},
+				{Key: common.StructSubFieldAddedKey, Value: "true"},
+			},
+		},
+	}
+	assert.NoError(t, cit.parseIndexParams(context.TODO()))
+	assert.ElementsMatch(t, []*commonpb.KeyValuePair{{Key: DimKey, Value: "128"}}, cit.newTypeParams)
+}
+
 func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxIndexParamsSize.Key, strconv.Itoa(100*1024))

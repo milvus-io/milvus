@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -81,7 +82,7 @@ func TestLoadInfoSnapshotDoesNotBindIndex(t *testing.T) {
 		require.NoError(t, store.Ensure(context.Background(), cfg))
 		info, err := store.Get(context.Background(), cfg.CollectionID, loadInfoVersion(cfg))
 		require.NoError(t, err)
-		require.Zero(t, info.LoadFields[0].IndexId)
+		require.Zero(t, info.LoadFields[0].IndexIds)
 		require.Empty(t, info.IndexInfoList)
 		cfg.LoadFields[0].IndexId = 0
 		require.NoError(t, store.Ensure(context.Background(), cfg), "raw field loading requires no index")
@@ -113,8 +114,8 @@ func TestLoadInfoIncludesRequiredIndexesOutsideHints(t *testing.T) {
 	})
 	snapshot := &querypb.GetQueryViewLoadInfoResponse{
 		CollectionID:   1,
-		LoadFields:     []*messagespb.LoadFieldConfig{{FieldId: 100}},
-		RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+		LoadFields:     []*viewpb.LoadFieldConfig{{FieldId: 100}},
+		RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
 	}
 	got := store.withCurrentIndexes(snapshot)
 	require.Len(t, got.IndexInfoList, 2)
@@ -148,7 +149,7 @@ func TestLoadInfoRejectsMissingRequiredFields(t *testing.T) {
 				}
 				_, cached := store.cache.Load(loadInfoKey{1, version})
 				require.False(t, cached)
-				stored.RequiredFields = cfg.RequiredFields
+				stored.RequiredFields = loadInfoFields(cfg.RequiredFields)
 				require.NoError(t, store.Ensure(t.Context(), cfg))
 				info, err := store.Get(t.Context(), 1, version)
 				require.NoError(t, err)
@@ -178,10 +179,10 @@ func TestLoadInfoRecoveryNormalizesExistingQueryCoordMetadata(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, saved)
 		require.Equal(t, []int64{10}, saved.PartitionIDs)
-		requireFieldConfigsEqual(t, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}, saved.RequiredFields)
+		require.Equal(t, []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}}, saved.RequiredFields)
 		require.Equal(t, store.GetConfigVersion(1), saved.Version)
 		info, err := loadInfos.Get(t.Context(), 1, saved.Version)
 		require.NoError(t, err)
-		requireFieldConfigsEqual(t, saved.RequiredFields, info.RequiredFields)
+		require.True(t, proto.Equal(saved, info))
 	})
 }

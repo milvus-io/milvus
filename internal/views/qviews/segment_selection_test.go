@@ -95,3 +95,14 @@ func TestSegmentSelectionWirePreservesHybridSlots(t *testing.T) {
 	require.Empty(t, selections[0].SegmentIds)
 	require.Empty(t, selections[3].SegmentIds)
 }
+
+func TestWorkNodeSelectionMatchesNodeIdentity(t *testing.T) {
+	qn := &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 1}}}
+	sn := &viewpb.QueryPlanWorkNode{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{Pchannel: "p"}}}
+	plan := &viewpb.QueryPlan{WorkNodes: []*viewpb.QueryPlanWorkNode{qn, sn}}
+	require.Same(t, qn, WorkNodeSelection(plan, QueryNode{ID: 1}))
+	require.Same(t, sn, WorkNodeSelection(plan, StreamingNode{PChannel: "p"}))
+	require.Nil(t, WorkNodeSelection(plan, QueryNode{ID: 2}))
+	require.Nil(t, WorkNodeSelection(plan, StreamingNode{PChannel: "missing"}))
+	require.Nil(t, WorkNodeSelection(nil, QueryNode{ID: 1}))
+}
