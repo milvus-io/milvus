@@ -66,11 +66,11 @@ class PinnedValueLookup final {
             reader = &growing_pin_.Reader();
             covered_end_ = std::min(active_count, growing_pin_.CoveredRowEnd());
         } else {
-            root_pin_ = segment->CreateIndexReader(op_ctx, *decision.key);
-            if (!root_pin_) {
+            index_reader_ = segment->CreateIndexReader(op_ctx, *decision.key);
+            if (!index_reader_) {
                 return;
             }
-            reader = root_pin_.get();
+            reader = index_reader_.get();
             covered_end_ = active_count;
         }
         AssertInfo(segcore::SameCaps(entry->caps, reader->Caps()),
@@ -85,7 +85,7 @@ class PinnedValueLookup final {
     PinnedValueLookup&
     operator=(const PinnedValueLookup&) = delete;
     PinnedValueLookup(PinnedValueLookup&& other) noexcept
-        : root_pin_(std::move(other.root_pin_)),
+        : index_reader_(std::move(other.index_reader_)),
           growing_pin_(std::move(other.growing_pin_)),
           reader_(std::exchange(other.reader_, nullptr)),
           covered_end_(std::exchange(other.covered_end_, 0)) {
@@ -97,7 +97,7 @@ class PinnedValueLookup final {
         }
         reader_ = nullptr;
         covered_end_ = 0;
-        root_pin_ = std::move(other.root_pin_);
+        index_reader_ = std::move(other.index_reader_);
         growing_pin_ = std::move(other.growing_pin_);
         reader_ = std::exchange(other.reader_, nullptr);
         covered_end_ = std::exchange(other.covered_end_, 0);
@@ -179,7 +179,7 @@ class PinnedValueLookup final {
     }
 
     // Borrowed interfaces are destroyed before their owning reader or snapshot.
-    segcore::IndexReaderHandle root_pin_;
+    segcore::IndexReaderHandle index_reader_;
     index::GrowingIndexSnapshotPin growing_pin_;
     const index::IIndexReaderBase* reader_{nullptr};
     int64_t covered_end_{0};
