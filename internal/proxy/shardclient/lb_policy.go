@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -447,14 +446,9 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// A canceled or timed-out request is the caller's own termination,
-			// not a node fault: getClient returns the ctx error as soon as the
-			// request dies, and grpc wraps a mid-RPC cancel into a codes.Canceled
-			// status the shared ctx still testifies to. Retrying on any replica
-			// shares the same dead ctx, and blacklisting the (healthy) delegator
-			// would penalize it for the caller stopping. Abort immediately
-			// without touching the blacklist.
-			if !funcutil.CheckCtxValid(ctx) || merr.IsCanceledOrTimeout(err) {
+			// Caller cancellation must not blacklist the node. Deadline expiry
+			// can indicate a stalled delegator and keeps the existing policy.
+			if errors.Is(ctx.Err(), context.Canceled) {
 				return false, err
 			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
@@ -468,13 +462,10 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// A canceled or timed-out request is the caller's own termination:
-			// the shared ctx is already done -- the definitive signal even when
-			// grpc wraps a mid-RPC cancel into a codes.Canceled status that no
-			// longer unwraps to context.Canceled -- so retrying on any replica
-			// cannot succeed and the serving node did nothing wrong. Abort
-			// immediately without retrying or touching the blacklist.
-			if !funcutil.CheckCtxValid(ctx) || merr.IsCanceledOrTimeout(err) {
+			// Check the caller context: a gRPC cancellation error does not
+			// unwrap to context.Canceled. Internal cancellation and deadline
+			// expiry keep the existing blacklist policy.
+			if errors.Is(ctx.Err(), context.Canceled) {
 				return false, err
 			}
 			// An input error is the request's own fault: re-dispatching it to
