@@ -49,13 +49,23 @@ func allTokensTF(vocab int32) []byte {
 	return typeutil.CreateAndSortSparseFloatRow(all)
 }
 
+func flattenBM25Counts(rows bm25TokenCounts) map[uint32]int32 {
+	out := make(map[uint32]int32, rows.len())
+	for _, shard := range rows {
+		for token, count := range shard {
+			out[token] = count
+		}
+	}
+	return out
+}
+
 // nonZeroCounts drops the zero counts BM25Stats keeps when a merge brings a token back to zero;
 // ConcurrentBM25Stats drops a token whenever its count reaches zero.
-func nonZeroCounts(rows map[uint32]int32) map[uint32]int32 {
-	out := make(map[uint32]int32, len(rows))
-	for token, count := range rows {
-		if count != 0 {
-			out[token] = count
+func nonZeroCounts(rows bm25TokenCounts) map[uint32]int32 {
+	out := flattenBM25Counts(rows)
+	for token, count := range out {
+		if count == 0 {
+			delete(out, token)
 		}
 	}
 	return out
@@ -64,31 +74,31 @@ func nonZeroCounts(rows map[uint32]int32) map[uint32]int32 {
 // Taking back everything that was merged must leave no tokens, on every write path.
 func TestConcurrentBM25StatsDropsZeroCounts(t *testing.T) {
 	r := rand.New(rand.NewSource(21))
-	// Cover direct, split and internally parallel updates.
+	// Cover small and internally parallel updates.
 	for _, rows := range []int{20, 2000, 20000} {
 		s := randomBM25Stats(r, rows, int32(max(20000, rows*10)))
 
 		c := NewConcurrentBM25Stats()
 		c.Merge(s)
 		c.Minus(s)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "Minus, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "Minus, %d rows", rows)
 		assert.Zero(t, c.MemSize()-NewConcurrentBM25Stats().MemSize(), "Minus, %d rows", rows)
 
 		c.MergeUnlocked(s)
 		c.MinusUnlocked(s)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "MinusUnlocked, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "MinusUnlocked, %d rows", rows)
 
 		negative := NewConcurrentBM25Stats()
 		negative.Minus(s)
 		c.Merge(s)
 		c.MergeFrom(negative)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "MergeFrom, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "MergeFrom, %d rows", rows)
 		assert.Zero(t, c.NumRow())
 	}
 }
 
 func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
-	// both the per-token path (small stats) and the split path (large stats)
+	// Cover small updates and parallel updates from multiple callers.
 	for _, tc := range []struct {
 		name  string
 		rows  int
@@ -137,7 +147,7 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 			got := c.Snapshot()
 			assert.Equal(t, expected.NumRow(), c.NumRow())
 			assert.Equal(t, expected.NumToken(), c.NumToken())
-			assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
+			assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(got.rowsWithToken))
 			assert.Equal(t, expected.GetAvgdl(), c.GetAvgdl())
 			tf := allTokensTF(tc.vocab)
 			assert.Equal(t, expected.BuildIDF(tf), c.BuildIDF(tf))
@@ -162,7 +172,7 @@ func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
 		}
 		assert.Equal(t, expected.NumRow(), c.NumRow())
 		assert.Equal(t, expected.NumToken(), c.NumToken())
-		assert.Equal(t, nonZeroCounts(expected.rowsWithToken), c.Snapshot().rowsWithToken)
+		assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(c.Snapshot().rowsWithToken))
 		tf := allTokensTF(vocab)
 		assert.Equal(t, expected.BuildIDF(tf), c.BuildIDFUnlocked(tf))
 		assert.Equal(t, c.BuildIDF(tf), c.BuildIDFUnlocked(tf))
@@ -174,7 +184,7 @@ func TestConcurrentBM25StatsParallelApplyProgress(t *testing.T) {
 		t.Skip("internal parallelism needs at least two workers")
 	}
 	s := randomBM25Stats(rand.New(rand.NewSource(31)), 20000, 200000)
-	require.GreaterOrEqual(t, len(s.rowsWithToken), concurrentBM25StatsParallelThreshold)
+	require.GreaterOrEqual(t, s.rowsWithToken.len(), bm25StatsParallelThreshold)
 	for _, subtract := range []bool{false, true} {
 		name := "merge"
 		if subtract {
@@ -185,11 +195,10 @@ func TestConcurrentBM25StatsParallelApplyProgress(t *testing.T) {
 			if subtract {
 				c.MergeUnlocked(s)
 			}
-			c.nextShard.Store(concurrentBM25StatsShards - 1)
-			c.shards[0].Lock()
+			c.shardLocks[0].Lock()
 			done := make(chan struct{})
 			defer func() {
-				c.shards[0].Unlock()
+				c.shardLocks[0].Unlock()
 				<-done
 			}()
 			go func() {
@@ -202,9 +211,9 @@ func TestConcurrentBM25StatsParallelApplyProgress(t *testing.T) {
 			}()
 			// The first shard is blocked; another shard must still make progress.
 			require.Eventually(t, func() bool {
-				c.shards[1].RLock()
-				defer c.shards[1].RUnlock()
-				return (len(c.shards[1].rowsWithToken) == 0) == subtract
+				c.shardLocks[1].RLock()
+				defer c.shardLocks[1].RUnlock()
+				return (len(c.rowsWithToken[1]) == 0) == subtract
 			}, 5*time.Second, time.Millisecond)
 		})
 	}
@@ -229,7 +238,7 @@ func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	got := a.Snapshot()
 	assert.Equal(t, expected.NumRow(), a.NumRow())
 	assert.Equal(t, expected.NumToken(), a.NumToken())
-	assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
+	assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(got.rowsWithToken))
 }
 
 // A search during preload reads current while segments merge into it. It must never see a token in more
@@ -302,18 +311,18 @@ func TestConcurrentBM25StatsEmptyAndMemSize(t *testing.T) {
 
 	s := randomBM25Stats(rand.New(rand.NewSource(1)), 100, 1000)
 	c.Merge(s)
-	assert.Equal(t, s.MemSize(), c.MemSize())
+	assert.Equal(t, s.MemSize()+empty-NewBM25Stats().MemSize(), c.MemSize())
 	assert.Greater(t, c.MemSize(), empty)
 }
 
 func TestConcurrentBM25StatsShardBalance(t *testing.T) {
 	// sequential token IDs must still spread evenly over the shards
-	counts := make([]int, concurrentBM25StatsShards)
+	counts := make([]int, bm25StatsShards)
 	const n = 1 << 16
 	for i := uint32(0); i < n; i++ {
 		counts[shardOf(i)]++
 	}
 	for _, c := range counts {
-		require.InDelta(t, n/concurrentBM25StatsShards, c, n/concurrentBM25StatsShards/4)
+		require.InDelta(t, n/bm25StatsShards, c, n/bm25StatsShards/4)
 	}
 }
