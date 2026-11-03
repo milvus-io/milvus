@@ -54,13 +54,13 @@ type splitCollection struct {
 // shard_by, the properties and enable_namespace. The conversion goes through
 // model.UnmarshalCollectionModel, the one decoder of a persisted collection, so
 // the shard infos are read exactly as rootcoord reads them. The model is
-// always marked available. That is not a claim about the collection:
-// DescribeCollectionInternal also answers for a Dropping collection
-// (allowUnavailable), and such a collection reaches here as if available. It
-// is benign: nothing here applies anything. A write switch or an adoption
-// broadcast of a Dropping collection is ignored by its ack callback, which
-// loads the collection itself and stops on one that is not available, and a
-// dropped collection is answered CollectionNotFound, which finishes the task.
+// always marked available, and describeSplitCollection makes that true: it
+// asks RootCoord whether the collection is still available before it reads
+// the record, and answers a Dropping collection as CollectionNotFound, which
+// finishes the task (DescribeCollectionInternal alone would still answer for
+// a Dropping one). A write switch or an adoption broadcast that reaches a
+// collection as it goes Dropping is ignored by its ack callback, which loads
+// the collection itself and stops on one that is not available.
 func splitCollectionFromDescribe(resp *milvuspb.DescribeCollectionResponse, partitionIDs []int64) *splitCollection {
 	coll := model.UnmarshalCollectionModel(&etcdpb.CollectionInfo{
 		ID:                   resp.GetCollectionID(),

@@ -417,6 +417,7 @@ func TestIssueShardSplitAdoptionRefusals(t *testing.T) {
 	t.Run("the collection cannot be read", func(t *testing.T) {
 		svr := newShardSplitTestServer(t)
 		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, splitMgrCollection).Return(nil, merr.WrapErrCollectionNotFound(splitMgrCollection))
 		svr.broker = b
 		assert.ErrorIs(t, svr.issueShardSplitAdoption(ctx, adoptionTask()), merr.ErrCollectionNotFound)

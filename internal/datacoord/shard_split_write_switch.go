@@ -33,8 +33,25 @@ import (
 
 // describeSplitCollection reads rootcoord's current record of a collection and
 // its partition snapshot, as the model the split checks judge. A dropped
-// collection is answered with merr.ErrCollectionNotFound.
+// collection is answered with merr.ErrCollectionNotFound, and so is one that is
+// Dropping: DescribeCollectionInternal still answers for a Dropping collection
+// (allowUnavailable), but nothing of a split can be applied to one -- its ack
+// callbacks stop on it -- and a task kept alive on it would hold the garbage
+// collector off the collection's segments (every segment on a splitting
+// channel is kept) while the drop waits for exactly those segments to be gone
+// (GcConfirm) before it removes the collection: the task would wait for a
+// NotFound that waits for the task. The availability is read the way the
+// garbage collector and the split commit read it, off RootCoord's
+// DescribeCollection (HasCollection), which answers a Dropping collection as
+// not found.
 func (s *Server) describeSplitCollection(ctx context.Context, collectionID int64) (*splitCollection, error) {
+	available, err := s.broker.HasCollection(ctx, collectionID)
+	if err != nil {
+		return nil, merr.Wrapf(err, "check that collection %d is still available", collectionID)
+	}
+	if !available {
+		return nil, merr.WrapErrCollectionNotFound(collectionID, "the collection is dropping or gone")
+	}
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return nil, err

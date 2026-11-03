@@ -217,6 +217,8 @@ func TestSplitCollectionFromDescribe(t *testing.T) {
 func splitSwitchServer(t *testing.T, task *datapb.SplitShardTask, descs ...*milvuspb.DescribeCollectionResponse) *Server {
 	svr := newShardSplitTestServer(t)
 	b := broker.NewMockBroker(t)
+	// The collection is available unless a test says otherwise.
+	b.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
 	if len(descs) == 1 {
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, splitMgrCollection).Return(descs[0], nil).Maybe()
 	} else {
@@ -386,6 +388,7 @@ func TestIssueShardSplitReadFailures(t *testing.T) {
 	t.Run("a dropped collection says so", func(t *testing.T) {
 		svr := newShardSplitTestServer(t)
 		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, splitMgrCollection).Return(nil, merr.WrapErrCollectionNotFound(splitMgrCollection))
 		svr.broker = b
 		assert.ErrorIs(t, svr.issueShardSplit(ctx, task), merr.ErrCollectionNotFound)
@@ -401,6 +404,7 @@ func TestIssueShardSplitReadFailures(t *testing.T) {
 	t.Run("the partitions cannot be read under the keys", func(t *testing.T) {
 		svr := newShardSplitTestServer(t)
 		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
 		b.EXPECT().DescribeCollectionInternal(mock.Anything, splitMgrCollection).Return(splitTestDescribe([]string{splitMgrV0}, nil, 0), nil)
 		b.EXPECT().ShowPartitionsInternal(mock.Anything, splitMgrCollection).Return(nil, errors.New("rootcoord busy"))
 		svr.broker = b
@@ -416,6 +420,31 @@ func TestIssueShardSplitReadFailures(t *testing.T) {
 		coll, err := svr.describeSplitCollection(ctx, splitMgrCollection)
 		require.NoError(t, err)
 		assert.True(t, slices.Equal([]string{splitMgrV0}, coll.VirtualChannelNames))
+	})
+
+	// A Dropping collection is still described by DescribeCollectionInternal
+	// (allowUnavailable); the split reads it as gone, so the manager finishes
+	// the task instead of holding the garbage collector off the segments the
+	// drop waits for.
+	t.Run("a dropping collection is answered not found", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, splitMgrCollection).Return(false, nil).Once()
+		svr.broker = b
+		coll, err := svr.describeSplitCollection(ctx, splitMgrCollection)
+		assert.Nil(t, coll)
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	})
+
+	t.Run("an availability check that fails is retried, not read as gone", func(t *testing.T) {
+		svr := newShardSplitTestServer(t)
+		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, splitMgrCollection).Return(false, errors.New("rootcoord down")).Once()
+		svr.broker = b
+		coll, err := svr.describeSplitCollection(ctx, splitMgrCollection)
+		assert.Nil(t, coll)
+		assert.Error(t, err)
+		assert.NotErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
 }
 
