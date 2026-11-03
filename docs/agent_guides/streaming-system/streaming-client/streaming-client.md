@@ -45,6 +45,11 @@ immutable. Read-side Proxy code uses this cached schema with its existing field
 visibility; write-side code independently selects the current SN schema. Upsert
 internal reads and Search requery retain their selected published read snapshot.
 
+SN exact-version lookups first try ShardManager: a matching current write version
+is immediately available even before the recovery observer catches up. Other
+versions fall back to RecoveryStorage; a different write version is never used
+as a substitute.
+
 SN exact-version responses combine that version's fields/TTL with current
 non-versioned metadata; allocation-time WAL history remains unchanged.
 AlterCollection's consuming-side ACK precedes coordinator callback/invalidation,
