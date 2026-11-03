@@ -20,12 +20,17 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	etcdkv "github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 var baseParams = NewBaseTable(SkipRemote(true))
@@ -178,4 +183,62 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 	yaml = "not_exist.yaml"
 	gp = NewBaseTableFromYamlOnly(yaml)
 	assert.Empty(t, gp.Get("key"))
+}
+
+func TestBaseTableDeferredEmbeddedEtcdSource(t *testing.T) {
+	t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	prefix := "deferred-config-" + funcutil.GenRandomStr()
+	require.NoError(t, os.WriteFile(dir+"/milvus.yaml", []byte("etcd:\n  use:\n    embed: true\n  rootPath: "+prefix+"\n"), 0o600))
+
+	// Exercise the real initial skip even if another test already started the
+	// process-wide server. Only availability before startup is mocked.
+	unavailable := mockey.Mock(etcdkv.HasServer).Return(false).Build()
+	defer unavailable.UnPatch()
+	base := NewBaseTable(SkipEnv(true), Interval(time.Hour))
+	defer base.Manager().Close()
+	_, ok := base.Manager().GetEtcdSource()
+	require.False(t, ok)
+	params := &ComponentParam{}
+	params.Init(base)
+	key := params.StreamingCfg.WALBalancerPolicyAllowRebalance.Key
+	require.True(t, params.StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	unavailable.UnPatch()
+	client, _ := setupEmbedEtcd(t)
+	defer client.Close()
+	defer func() {
+		_, err := client.Delete(t.Context(), prefix+"/", clientv3.WithPrefix())
+		require.NoError(t, err)
+	}()
+
+	manager := base.Manager()
+	base.InitRemoteConfigs()
+	require.Same(t, manager, base.Manager())
+	source, ok := manager.GetEtcdSource()
+	require.True(t, ok)
+	defer base.etcdClient.Close()
+	base.InitRemoteConfigs()
+	again, ok := manager.GetEtcdSource()
+	require.True(t, ok)
+	require.Same(t, source, again, "startup retry must not replace the source or client")
+
+	require.NoError(t, manager.UpdateConfigInEtcd(source, key, "false"))
+	require.False(t, params.StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	reloaded := NewBaseTable(SkipEnv(true), Interval(time.Hour))
+	defer reloaded.etcdClient.Close()
+	defer reloaded.Manager().Close()
+	require.Equal(t, "false", reloaded.Get(key), "a new table must recover the durable setting")
+	require.NoError(t, manager.UpdateConfigInEtcd(source, key, "true"))
+	require.True(t, params.StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
+	stored, err := client.Get(t.Context(), prefix+"/config/"+config.EtcdConfigKey(key))
+	require.NoError(t, err)
+	require.Len(t, stored.Kvs, 1)
+	require.Equal(t, "true", string(stored.Kvs[0].Value))
+
+	skipped := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	defer skipped.Manager().Close()
+	skipped.InitRemoteConfigs()
+	_, ok = skipped.Manager().GetEtcdSource()
+	require.False(t, ok, "explicit SkipRemote must survive deferred initialization")
 }

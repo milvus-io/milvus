@@ -38,20 +38,18 @@ func newOpUpdateBalancePolicy(ctx context.Context, req *types.UpdateWALBalancePo
 				future.Set(response{err: err})
 				return
 			}
-			// Validate every node before applying any part of the request. This
-			// runs in the balance queue, including for callers other than REST.
-			if len(req.GetNodes().GetFreezeNodeIds()) > 0 || len(req.GetNodes().GetDefreezeNodeIds()) > 0 {
+			// Validate all freeze targets before applying any part of the request.
+			// Defreezing is idempotent cleanup, including for departed nodes.
+			if len(req.GetNodes().GetFreezeNodeIds()) > 0 {
 				nodes, err := impl.GetAllStreamingNodes(ctx)
 				if err != nil {
 					future.Set(response{err: err})
 					return
 				}
-				for _, ids := range [][]int64{req.GetNodes().GetFreezeNodeIds(), req.GetNodes().GetDefreezeNodeIds()} {
-					for _, id := range ids {
-						if _, ok := nodes[id]; !ok {
-							future.Set(response{err: merr.WrapErrNodeNotFound(id, "StreamingNode not found")})
-							return
-						}
+				for _, id := range req.GetNodes().GetFreezeNodeIds() {
+					if _, ok := nodes[id]; !ok {
+						future.Set(response{err: merr.WrapErrNodeNotFound(id, "StreamingNode not found")})
+						return
 					}
 				}
 			}

@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -13,6 +14,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -38,7 +40,22 @@ func TestStreamingBalanceConfigPersistence(t *testing.T) {
 	defer get.UnPatch()
 	getBase := mockey.Mock(paramtable.GetBaseTable).Return(base).Build()
 	defer getBase.UnPatch()
-	coord := &mixCoordImpl{} // No QueryCoord or WAL client: config is authoritative.
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	defer streaming.SetWALForTest(previous)
+	b := streaming.WAL().Balancer()
+	var operations []string
+	for _, operation := range []struct {
+		method  string
+		enabled bool
+	}{{"SuspendRebalance", false}, {"ResumeRebalance", true}} {
+		patch := mockey.Mock(mockey.GetMethod(b, operation.method)).To(func(context.Context) error {
+			operations = append(operations, operation.method)
+			return walbalancer.SetRebalanceEnabled(operation.enabled)
+		}).Build()
+		defer patch.UnPatch()
+	}
+	coord := &mixCoordImpl{}
 	put := func(state string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		coord.HandleStreamingBalanceStatus(w, httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{"status":"`+state+`"}`)))
@@ -85,6 +102,7 @@ func TestStreamingBalanceConfigPersistence(t *testing.T) {
 	check("active")
 	require.Equal(t, http.StatusOK, put("suspended").Code)
 	require.Equal(t, http.StatusOK, put("resumed").Code)
+	require.Equal(t, []string{"SuspendRebalance", "SuspendRebalance", "SuspendRebalance", "ResumeRebalance"}, operations)
 	check("active")
 	require.Equal(t, http.StatusBadRequest, put("invalid").Code)
 	patch := mockey.Mock((*config.Manager).UpdateConfigInEtcd).Return(merr.ErrServiceUnavailable).Build()
@@ -125,6 +143,8 @@ func TestStreamingNodeManagement(t *testing.T) {
 	w = invoke(coord.HandleStreamingNodeStatus, http.MethodPut, "/", `{"node_id":1,"status":"suspended"}`)
 	require.Equal(t, http.StatusOK, w.Code)
 	w = invoke(coord.HandleStreamingNodeStatus, http.MethodPut, "/", `{"node_id":1,"status":"active"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = invoke(coord.HandleStreamingNodeStatus, http.MethodPut, "/", `{"node_id":99,"status":"active"}`)
 	require.Equal(t, http.StatusOK, w.Code)
 	freeze.Return(merr.ErrNodeNotFound)
 	w = invoke(coord.HandleStreamingNodeStatus, http.MethodPut, "/", `{"node_id":99,"status":"suspended"}`)

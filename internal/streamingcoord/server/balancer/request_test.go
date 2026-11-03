@@ -2,17 +2,24 @@ package balancer
 
 import (
 	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/mock_manager"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -21,7 +28,7 @@ func TestUpdateBalancePolicyValidatesNodes(t *testing.T) {
 	mockey.PatchConvey("validate all SN identities before mutation", t, func() {
 		b := &balancerImpl{freezeNodes: typeutil.NewConcurrentSet[int64]()}
 		b.SetLogger(mlog.With())
-		mockey.Mock((*balancerImpl).GetAllStreamingNodes).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{1: {}, 2: {}}, nil).Build()
+		nodes := mockey.Mock((*balancerImpl).GetAllStreamingNodes).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{1: {}, 2: {}}, nil).Build()
 		var configured []bool
 		var configErr error
 		mockey.Mock(SetRebalanceEnabled).To(func(enabled bool) error { configured = append(configured, enabled); return configErr }).Build()
@@ -30,7 +37,7 @@ func TestUpdateBalancePolicyValidatesNodes(t *testing.T) {
 			r.apply(b)
 			return r.future.Get().err
 		}
-		for _, nodes := range []*streamingpb.WALBalancePolicyNodes{{FreezeNodeIds: []int64{1, 99}}, {DefreezeNodeIds: []int64{99}}} {
+		for _, nodes := range []*streamingpb.WALBalancePolicyNodes{{FreezeNodeIds: []int64{1, 99}}, {FreezeNodeIds: []int64{99}, DefreezeNodeIds: []int64{1}}} {
 			require.ErrorIs(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{Nodes: nodes}), merr.ErrNodeNotFound)
 			require.Empty(t, b.freezeNodes.Collect())
 			require.Empty(t, configured)
@@ -38,6 +45,11 @@ func TestUpdateBalancePolicyValidatesNodes(t *testing.T) {
 		require.NoError(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{}, Nodes: &streamingpb.WALBalancePolicyNodes{FreezeNodeIds: []int64{1}}}))
 		require.Equal(t, []int64{1}, b.freezeNodes.Collect())
 		require.Empty(t, configured, "freeze must not touch balance config")
+		require.ErrorIs(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{
+			Nodes: &streamingpb.WALBalancePolicyNodes{FreezeNodeIds: []int64{99}, DefreezeNodeIds: []int64{1}},
+		}), merr.ErrNodeNotFound)
+		require.Equal(t, []int64{1}, b.freezeNodes.Collect())
+		require.Empty(t, configured)
 		configErr = merr.ErrServiceUnavailable
 		require.ErrorIs(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{Nodes: &streamingpb.WALBalancePolicyNodes{DefreezeNodeIds: []int64{1}}}), configErr)
 		require.Equal(t, []int64{1}, b.freezeNodes.Collect())
@@ -45,11 +57,79 @@ func TestUpdateBalancePolicyValidatesNodes(t *testing.T) {
 		require.NoError(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{Config: &streamingpb.WALBalancePolicyConfig{AllowRebalance: true}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance}}, Nodes: &streamingpb.WALBalancePolicyNodes{DefreezeNodeIds: []int64{1}}}))
 		require.Empty(t, b.freezeNodes.Collect())
 		require.Equal(t, []bool{false, true}, configured)
+		// A departed node can still have a frozen marker. Cleanup must not
+		// depend on the current registry or fail on repeated requests.
+		b.freezeNodes.Upsert(99)
+		nodes.Return(nil, merr.ErrServiceUnavailable)
+		for range 2 {
+			require.NoError(t, apply(&streamingpb.UpdateWALBalancePolicyRequest{
+				UpdateMask: &fieldmaskpb.FieldMask{},
+				Nodes:      &streamingpb.WALBalancePolicyNodes{DefreezeNodeIds: []int64{99, 100}},
+			}))
+			require.Empty(t, b.freezeNodes.Collect())
+		}
+		require.Len(t, configured, 2)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		r := newOpUpdateBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 		r.apply(b)
 		require.ErrorIs(t, r.future.Get().err, context.Canceled)
 		require.Len(t, configured, 2)
+	})
+}
+
+func TestUpdateBalancePolicyWakesBalanceLoop(t *testing.T) {
+	paramtable.Init()
+	interval := paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue("1h")
+	defer paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.SwapTempValue(interval)
+	mockey.PatchConvey("policy updates wake the real request loop after persistence", t, func() {
+		client := &mock_manager.MockManagerClient{}
+		resource.InitForTest(resource.OptStreamingManagerClient(client))
+		mockey.Mock((*mock_manager.MockManagerClient).WatchNodeChanged).Return(make(chan struct{}), nil).Build()
+		mockey.Mock((*balancerImpl).blockUntilExpectedInitialStreamingNodeNumReached).Return(nil).Build()
+		channel.ResetStaticPChannelStatsManager()
+		channel.RecoverPChannelStatsManager(nil)
+		listener := syncutil.NewVersionedNotifier().Listen(syncutil.VersionedListenAtLatest)
+		mockey.Mock((*channel.PchannelStatsManager).WatchAtChannelCountChanged).Return(listener).Build()
+		mockey.Mock((*streamingutil.ConfigChannelProvider).NewIncomingChannels).Return((<-chan []string)(nil)).Build()
+		events := make(chan string, 4)
+		mockey.Mock(SetRebalanceEnabled).To(func(enabled bool) error {
+			events <- "persist:" + strconv.FormatBool(enabled)
+			return nil
+		}).Build()
+		mockey.Mock((*balancerImpl).balanceUntilNoChanged).To(func(*balancerImpl, context.Context) error {
+			events <- "balance"
+			return nil
+		}).Build()
+		b := &balancerImpl{
+			ctx: t.Context(), lifetime: typeutil.NewLifetime(),
+			provider:               &streamingutil.ConfigChannelProvider{},
+			reqCh:                  make(chan *request, 5),
+			backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+			freezeNodes:            typeutil.NewConcurrentSet[int64](),
+		}
+		b.SetLogger(mlog.With())
+		go b.execute(nil)
+		defer func() {
+			b.backgroundTaskNotifier.Cancel()
+			b.backgroundTaskNotifier.BlockUntilFinish()
+		}()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		for _, enabled := range []bool{false, true} {
+			_, err := b.UpdateBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+				Config:     &streamingpb.WALBalancePolicyConfig{AllowRebalance: enabled},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{types.UpdateMaskPathWALBalancePolicyAllowRebalance}},
+			})
+			require.NoError(t, err)
+			for _, want := range []string{"persist:" + strconv.FormatBool(enabled), "balance"} {
+				select {
+				case got := <-events:
+					require.Equal(t, want, got)
+				case <-ctx.Done():
+					t.Fatal("policy update did not trigger balance before the periodic timer")
+				}
+			}
+		}
 	})
 }

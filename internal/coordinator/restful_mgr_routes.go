@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
-	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
@@ -335,26 +334,6 @@ func (s *mixCoordImpl) HandleBatchBalanceStatus(w http.ResponseWriter, req *http
 	}
 }
 
-func (s *mixCoordImpl) getQueryCoordChannelBalanceActive(ctx context.Context) (bool, error) {
-	channelActivate, err := s.queryCoordServer.CheckChannelBalanceActive(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err2 := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
-		Base: commonpbutil.NewMsgBase(),
-	})
-	if err2 != nil {
-		return channelActivate, err2
-	}
-
-	if !merr.Ok(resp.GetStatus()) {
-		return channelActivate, merr.Error(resp.GetStatus())
-	}
-
-	return channelActivate && resp.IsActive, nil
-}
-
 func (s *mixCoordImpl) getQueryCoordBalanceActive(ctx context.Context) (bool, error) {
 	resp, err := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
 		Base: commonpbutil.NewMsgBase(),
@@ -387,36 +366,6 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
-}
-
-func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
-	// Call the appropriate MixCoord method based on the status.
-	var err error
-	var errMsg string
-
-	switch status {
-	case "suspended":
-		err = s.queryCoordServer.SuspendChannelBalance(ctx)
-		errMsg = "failed to suspend balance"
-	case "resumed", "active":
-		err = s.queryCoordServer.ResumeChannelBalance(ctx)
-		errMsg = "failed to resume balance"
-	default:
-		// If the status is not recognized, return an informative error immediately.
-		// This avoids proceeding with an invalid state.
-		err = merr.WrapErrParameterInvalidMsg("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
-	}
-
-	// --- Unified Error Handling ---
-	// After the switch, we handle potential errors from the called method.
-
-	// First, check if there was a low-level error during the method execution (e.g., network issue).
-	if err != nil {
-		// Wrap the original error with more context.
-		return merr.Wrap(err, errMsg)
-	}
-	// If no errors were encountered, the operation was successful. Return nil to indicate success.
-	return nil
 }
 
 // controlBatchBalanceStatus handles PUT requests to suspend or resume balance.
@@ -498,17 +447,17 @@ func (s *mixCoordImpl) controlStreamingBalanceStatus(w http.ResponseWriter, req 
 		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	var enabled bool
+	var err error
 	switch body.Status {
 	case "suspended":
-		enabled = false
+		err = streaming.WAL().Balancer().SuspendRebalance(req.Context())
 	case "resumed", "active":
-		enabled = true
+		err = streaming.WAL().Balancer().ResumeRebalance(req.Context())
 	default:
 		writeJSONError(w, "Invalid status value. Use 'suspended', 'resumed' or 'active'.", http.StatusBadRequest)
 		return
 	}
-	if err := walbalancer.SetRebalanceEnabled(enabled); err != nil {
+	if err != nil {
 		writeStreamingManagementError(w, err)
 		return
 	}
