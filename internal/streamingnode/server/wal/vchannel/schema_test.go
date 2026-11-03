@@ -98,6 +98,7 @@ func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 func TestAlterCollectionMetadataSnapshotRecovery(t *testing.T) {
 	meta := restoreSchemaTestMeta()
 	meta.CollectionInfo.Schemas[1].Schema.Name = "old"
+	before := proto.Clone(meta)
 	view := NewVChannelViewFromMeta(meta)
 	raw := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
 		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}}}).
@@ -108,6 +109,11 @@ func TestAlterCollectionMetadataSnapshotRecovery(t *testing.T) {
 	snapshot, savesSchemas := view.ConsumeDirtyAndGetSnapshot()
 	require.True(t, savesSchemas)
 	require.Len(t, snapshot.CollectionInfo.Schemas, 3)
+	require.True(t, proto.Equal(before, meta), "metadata ALTER must not mutate the previous snapshot")
+	require.NotSame(t, snapshot.CollectionInfo.Schemas[1].Schema, snapshot.CollectionInfo.Schemas[2].Schema)
+	require.NotSame(t, snapshot.CollectionInfo.Schemas[1].Schema.Fields[0], snapshot.CollectionInfo.Schemas[2].Schema.Fields[0])
+	require.Equal(t, snapshot.CollectionInfo.Schemas[1].Schema.Version, snapshot.CollectionInfo.Schemas[2].Schema.Version)
+	require.EqualValues(t, 20, snapshot.CollectionInfo.Schemas[1].CheckpointTimeTick)
 	require.Equal(t, "old", snapshot.CollectionInfo.Schemas[1].Schema.Name)
 	require.EqualValues(t, 40, snapshot.CollectionInfo.Schemas[2].CheckpointTimeTick)
 	recovered := NewVChannelViewFromMeta(snapshot)
@@ -122,7 +128,7 @@ func TestAlterCollectionMetadataSnapshotRecovery(t *testing.T) {
 	require.EqualValues(t, 1, state.Schema.Version)
 }
 
-func TestExactSchemaVersionUsesCurrentMetadata(t *testing.T) {
+func TestExactSchemaVersionPreservesSnapshot(t *testing.T) {
 	meta := restoreSchemaTestMeta()
 	old := meta.CollectionInfo.Schemas[0].Schema
 	old.Name = "before"
@@ -141,14 +147,7 @@ func TestExactSchemaVersionUsesCurrentMetadata(t *testing.T) {
 	selected, err := view.GetSchemaVersion(1, 0)
 	require.NoError(t, err)
 	require.Zero(t, selected.Schema.Version)
-	require.Equal(t, "renamed", selected.Schema.Name)
-	require.Equal(t, "newdb", selected.Schema.DbName)
-	require.Equal(t, "new description", selected.Schema.Description)
-	require.Equal(t, "s3://new", selected.Schema.ExternalSource)
-	require.Equal(t, "{}", selected.Schema.ExternalSpec)
-	require.Equal(t, old.Fields, selected.Schema.Fields)
-	require.Equal(t, map[string]string{
-		common.CollectionTTLConfigKey: "30", common.MaxFieldIDKey: "100", common.TimezoneKey: "Asia/Shanghai",
-	}, common.KeyValuePairs(selected.Schema.Properties).ToMap())
-	require.True(t, proto.Equal(before, meta), "response projection must not alter stored allocation-time history")
+	require.True(t, proto.Equal(old, selected.Schema), "historical versions retain their own metadata")
+	require.NotSame(t, old, selected.Schema)
+	require.True(t, proto.Equal(before, meta), "lookup must not alter stored allocation-time history")
 }

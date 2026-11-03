@@ -71,27 +71,3 @@ func ApplyCollectionSchemaUpdates(current *schemapb.CollectionSchema, header *me
 	})
 	return schema
 }
-
-// CopyCollectionSchemaMetadata updates an owned schema with current collection
-// metadata, preserving its versioned fields, TTL and field-ID allocation watermark.
-// Historical WAL snapshots must not be passed as the mutable destination.
-func CopyCollectionSchemaMetadata(schema, metadata *schemapb.CollectionSchema) {
-	schema.Name = metadata.GetName()
-	schema.DbName = metadata.GetDbName()
-	schema.Description = metadata.GetDescription()
-	schema.ExternalSource = metadata.GetExternalSource()
-	schema.ExternalSpec = metadata.GetExternalSpec()
-	properties := common.KeyValuePairs(metadata.GetProperties()).ToMap()
-	versioned := common.KeyValuePairs(schema.GetProperties()).ToMap()
-	// TTL and the field-ID allocation watermark belong to the WAL schema
-	// version, which may already lead the coordinator's published version.
-	for _, key := range []string{common.CollectionTTLConfigKey, common.CollectionTTLFieldKey, common.MaxFieldIDKey} {
-		if value, ok := versioned[key]; ok {
-			properties[key] = value
-		} else {
-			delete(properties, key)
-		}
-	}
-	delete(properties, common.CollectionOnTruncatingKey)
-	schema.Properties = common.NewKeyValuePairs(properties)
-}

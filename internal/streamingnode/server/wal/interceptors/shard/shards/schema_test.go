@@ -58,6 +58,7 @@ func TestAlterCollectionMetadataUpdatesWriteSchemaWithoutFencing(t *testing.T) {
 		"p_1v0": {CollectionID: 1, Schema: &schemapb.CollectionSchema{Version: 2, Name: "old"}, SchemaTimeTick: 10},
 	})}
 	previous := m.collections[1].Schema
+	before := proto.Clone(previous)
 	msg := message.NewAlterCollectionMessageBuilderV2().WithVChannel("p_1v0").
 		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}}}).
 		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{CollectionName: "renamed"}}).MustBuildMutable()
@@ -73,4 +74,7 @@ func TestAlterCollectionMetadataUpdatesWriteSchemaWithoutFencing(t *testing.T) {
 	require.EqualValues(t, 2, got.Schema.Version)
 	require.EqualValues(t, 20, got.CheckpointTimeTick)
 	require.Equal(t, "old", previous.Schema.Name)
+	require.True(t, proto.Equal(before, previous))
+	require.NotSame(t, previous, m.collections[1].Schema)
+	require.NotSame(t, previous.Schema, m.collections[1].Schema.Schema)
 }

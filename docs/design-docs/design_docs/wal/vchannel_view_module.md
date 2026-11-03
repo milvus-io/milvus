@@ -287,9 +287,9 @@ This change does not yet adjust WAL truncation. Backends that physically remove
 history independently of this conservative query position still need the
 separate truncation/retention integration before relying on older query seeks.
 
-Exact-version SchemaClient RPCs project the latest collection Name/DbName,
-Description, external tuple and non-versioned properties onto an owned response.
-Fields, functions, flags, SchemaVersion, TTL and field-ID watermark come from the
-selected version. This does not rewrite retained snapshots or allocation-time
-schema lookup. It lets Proxy cache the compiled SchemaInfo directly instead of
-rebuilding a metadata envelope on every access.
+Exact-version SchemaClient RPCs return an owned copy of the last retained NORMAL
+snapshot with that SchemaVersion. They do not overlay another version's metadata.
+Metadata-only ALTERs continue to clone the previous schema and append it at the
+new message TimeTick without changing SchemaVersion or mutating older snapshots.
+TODO(#40451): distinct schema snapshots sharing one SchemaVersion are a design
+limitation to address separately; allocation-time lookup remains unchanged.
