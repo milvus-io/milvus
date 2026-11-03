@@ -1785,16 +1785,35 @@ class TestImport2PCRestOperation(TestBase):
         assert rsp["code"] == 0, rsp
         return {row["id"] for row in rsp.get("data", [])}
 
-    def _query_base_rows_by_ids(self, collection_name, ids):
+    def _query_base_rows_by_ids(self, collection_name, ids, db_name="default", output_fields=None):
         payload = {
             "collectionName": collection_name,
             "filter": f"id in {sorted(ids)}",
-            "outputFields": ["id", "tag", "phase"],
+            "outputFields": output_fields if output_fields is not None else ["id", "tag", "phase"],
             "limit": len(ids),
         }
-        rsp = self.vector_client.vector_query(payload, timeout=1)
+        rsp = self.vector_client.vector_query(payload, db_name=db_name, timeout=1)
         assert rsp["code"] == 0, rsp
         return rsp.get("data", [])
+
+    def _assert_base_rows_match(self, collection_name, expected_rows, db_name="default"):
+        expected_by_id = {row["id"]: row for row in expected_rows}
+        actual = self._query_base_rows_by_ids(
+            collection_name, expected_by_id, db_name=db_name, output_fields=["id", "tag", "phase", "vector"]
+        )
+        assert len(actual) == len(expected_rows), actual
+        assert {row["id"] for row in actual} == set(expected_by_id), actual
+        for row in actual:
+            expected = expected_by_id[row["id"]]
+            assert set(row) == set(expected), row
+            for field in ("id", "tag", "phase"):
+                assert row[field] == expected[field], (row["id"], field, row[field], expected[field])
+            # Parquet stores Float32; normalize REST JSON numbers to the same representation.
+            np.testing.assert_array_equal(
+                np.asarray(row["vector"], dtype=np.float32),
+                np.asarray(expected["vector"], dtype=np.float32),
+                err_msg=f"id={row['id']}, database={db_name}",
+            )
 
     def _query_array_of_vector_rows_by_ids(self, collection_name, ids):
         payload = {
@@ -3864,6 +3883,7 @@ class TestImport2PCRestOperation(TestBase):
         target: import job and data isolation across databases
         method: create the same collection name in default and a custom DB, import different PK sets into both
         expected: each DB sees only its own import job result and same collection names do not leak data across DBs
+        case extension: IV3-CP-01 — add full scalar/vector comparisons; retain existing V2/V3 flow and L0 tag
         """
         db_name = f"imp2pc_iso_{uuid4().hex[:8]}"
         create_db_rsp = self.database_client.database_create({"dbName": db_name})
@@ -3922,6 +3942,8 @@ class TestImport2PCRestOperation(TestBase):
             )
             assert custom_visible, {"expected": custom_ids, "seen": seen_custom_after_commit}
 
+            self._assert_base_rows_match(collection_name, custom_rows, db_name=db_name)
+
             default_count, default_count_ok = self._wait_count(collection_name, 0, timeout=20)
             assert default_count_ok, {"expected_default_count": 0, "last_count": default_count}
             assert self._query_imported_ids(collection_name, sorted(custom_ids)) == set()
@@ -3947,6 +3969,8 @@ class TestImport2PCRestOperation(TestBase):
             assert custom_count_ok, {"expected_custom_count": len(custom_rows), "last_count": custom_count}
             assert self._query_imported_ids(collection_name, sorted(custom_ids)) == set()
             assert self._query_imported_ids(collection_name, sorted(default_ids), db_name=db_name) == set()
+            self._assert_base_rows_match(collection_name, default_rows)
+            self._assert_base_rows_match(collection_name, custom_rows, db_name=db_name)
         finally:
             for file_name in local_files:
                 file_path = f"/tmp/{file_name}"
