@@ -2074,3 +2074,212 @@ func newFixedFieldDataForTest(dataType schemapb.DataType, nullable bool, capacit
 	}
 	return field
 }
+
+// A nullable vector stores only valid rows physically. Copying into an existing
+// column must preserve logical order across nulls and repeated source rows.
+func TestFloatVectorFieldDataCopyFrom(t *testing.T) {
+	src := &FloatVectorFieldData{
+		Dim: 2, Nullable: true,
+		Data:      []float32{10, 11, 20, 21},
+		ValidData: []bool{true, false, true},
+	}
+	dst := &FloatVectorFieldData{Dim: 2, Nullable: true}
+	require.NoError(t, dst.AppendRow([]float32{1, 2}))
+	require.NoError(t, dst.CopyFrom(src, nil))
+	require.Equal(t, 1, dst.RowNum())
+
+	require.NoError(t, dst.CopyFrom(src, []int{2, 1, 0, 2}))
+	want := []any{[]float32{1, 2}, []float32{20, 21}, nil, []float32{10, 11}, []float32{20, 21}}
+	require.Equal(t, len(want), dst.RowNum())
+	for i, row := range want {
+		require.Equal(t, row, dst.GetRow(i), "row %d", i)
+	}
+	require.Equal(t, []bool{true, true, false, true, true}, dst.ValidData)
+
+	dst.Data[2] = 99
+	dst.ValidData[1] = false
+	require.Equal(t, []float32{10, 11, 20, 21}, src.Data)
+	require.Equal(t, []bool{true, false, true}, src.ValidData)
+}
+
+func TestDenseVectorFieldDataCopyFromDimMismatch(t *testing.T) {
+	for _, vector := range []struct {
+		name     string
+		newField func(dim int, nullable bool) (FieldData, any)
+	}{
+		{"Binary", func(dim int, nullable bool) (FieldData, any) {
+			return &BinaryVectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim/8)
+		}},
+		{"Float", func(dim int, nullable bool) (FieldData, any) {
+			return &FloatVectorFieldData{Dim: dim, Nullable: nullable}, make([]float32, dim)
+		}},
+		{"Float16", func(dim int, nullable bool) (FieldData, any) {
+			return &Float16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"BFloat16", func(dim int, nullable bool) (FieldData, any) {
+			return &BFloat16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"Int8", func(dim int, nullable bool) (FieldData, any) {
+			return &Int8VectorFieldData{Dim: dim, Nullable: nullable}, make([]int8, dim)
+		}},
+	} {
+		t.Run(vector.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				srcDim   int
+				dstDim   int
+				nullable bool
+			}{
+				{"wider source", 16, 8, false},
+				{"narrower source", 8, 16, false},
+				{"nullable wider source", 16, 8, true},
+				{"nullable narrower source", 8, 16, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					src, row := vector.newField(tc.srcDim, tc.nullable)
+					dst, original := vector.newField(tc.dstDim, tc.nullable)
+					require.NoError(t, src.AppendRow(row))
+					require.NoError(t, dst.AppendRow(original))
+
+					require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+					require.Equal(t, 1, dst.RowNum())
+					require.Equal(t, original, dst.GetRow(0))
+					if tc.nullable {
+						require.Equal(t, []bool{true}, dst.GetValidData())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestFieldDataCopyFromSourceValidation(t *testing.T) {
+	for _, tc := range []struct {
+		target    FieldData
+		nilSource FieldData
+	}{
+		{&BoolFieldData{}, (*BoolFieldData)(nil)},
+		{&Int8FieldData{}, (*Int8FieldData)(nil)},
+		{&Int16FieldData{}, (*Int16FieldData)(nil)},
+		{&Int32FieldData{}, (*Int32FieldData)(nil)},
+		{&Int64FieldData{}, (*Int64FieldData)(nil)},
+		{&FloatFieldData{}, (*FloatFieldData)(nil)},
+		{&DoubleFieldData{}, (*DoubleFieldData)(nil)},
+		{&TimestamptzFieldData{}, (*TimestamptzFieldData)(nil)},
+		{&StringFieldData{}, (*StringFieldData)(nil)},
+		{&ArrayFieldData{}, (*ArrayFieldData)(nil)},
+		{&JSONFieldData{}, (*JSONFieldData)(nil)},
+		{&GeometryFieldData{}, (*GeometryFieldData)(nil)},
+		{&BinaryVectorFieldData{}, (*BinaryVectorFieldData)(nil)},
+		{&FloatVectorFieldData{}, (*FloatVectorFieldData)(nil)},
+		{&Float16VectorFieldData{}, (*Float16VectorFieldData)(nil)},
+		{&BFloat16VectorFieldData{}, (*BFloat16VectorFieldData)(nil)},
+		{&SparseFloatVectorFieldData{}, (*SparseFloatVectorFieldData)(nil)},
+		{&Int8VectorFieldData{}, (*Int8VectorFieldData)(nil)},
+		{&VectorArrayFieldData{}, (*VectorArrayFieldData)(nil)},
+	} {
+		require.NoError(t, tc.target.CopyFrom(nil, nil))
+		require.NoError(t, tc.target.CopyFrom(tc.nilSource, []int{}))
+		require.ErrorIs(t, tc.target.CopyFrom(nil, []int{0}), merr.ErrServiceInternal)
+		require.ErrorIs(t, tc.target.CopyFrom(tc.nilSource, []int{0}), merr.ErrServiceInternal)
+		var wrongType FieldData = &BoolFieldData{}
+		if _, ok := tc.target.(*BoolFieldData); ok {
+			wrongType = &Int64FieldData{}
+		}
+		require.ErrorIs(t, tc.target.CopyFrom(wrongType, []int{0}), merr.ErrServiceInternal)
+	}
+}
+
+// Sparse vectors recompute the row dimension from the selected non-null rows,
+// skip nulls, and copy the contents by reference.
+func TestSparseFloatVectorFieldDataCopyFrom(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		name := "nullable=false"
+		if nullable {
+			name = "nullable=true"
+		}
+		t.Run(name, func(t *testing.T) {
+			small := typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1})
+			large := typeutil.CreateSparseFloatRow([]uint32{200}, []float32{2})
+			src := &SparseFloatVectorFieldData{Nullable: nullable}
+			require.NoError(t, src.AppendRow(small))
+			if nullable {
+				require.NoError(t, src.AppendRow(nil))
+			}
+			require.NoError(t, src.AppendRow(large))
+
+			dst := &SparseFloatVectorFieldData{Nullable: nullable}
+			indices := []int{1, 0, 1}
+			if nullable {
+				indices = []int{2, 1, 0, 2}
+			}
+			require.NoError(t, dst.CopyFrom(src, indices))
+			require.Equal(t, len(indices), dst.RowNum())
+			// The widest selected row sets the dimension; the unselected small
+			// row is narrower, so this also proves the dimension is recomputed.
+			require.Equal(t, int64(201), dst.Dim)
+			require.Equal(t, 3, len(dst.Contents))
+			if nullable {
+				require.Equal(t, []bool{true, false, true, true}, dst.ValidData)
+			}
+			require.Equal(t, large, dst.Contents[len(dst.Contents)-1])
+		})
+	}
+}
+
+func TestInsertDataCopyFrom(t *testing.T) {
+	src := &InsertData{Data: map[FieldID]FieldData{
+		100: &Int64FieldData{Data: []int64{1, 2, 3}},
+		101: &StringFieldData{Data: []string{"a", "b", "c"}, Nullable: true, ValidData: []bool{true, false, true}},
+	}}
+	t.Run("copies_selected_rows", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{},
+			101: &StringFieldData{Nullable: true},
+		}}
+		require.NoError(t, dst.CopyFrom(src, []int{2, 0}))
+		require.Equal(t, 2, dst.Data[100].RowNum())
+		require.Equal(t, []any{"c", "a"}, []any{dst.Data[101].GetRow(0), dst.Data[101].GetRow(1)})
+		require.Equal(t, []bool{true, true}, dst.Data[101].GetValidData())
+	})
+	t.Run("missing_field", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{100: &Int64FieldData{}}}
+		require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+	})
+	t.Run("incompatible_column_falls_back_to_append_row", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{},
+			101: &StringFieldData{Nullable: true},
+		}}
+		mismatched := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{Data: []int64{1}},
+			101: &Int64FieldData{Data: []int64{7}},
+		}}
+		require.ErrorIs(t, dst.CopyFrom(mismatched, []int{0}), merr.ErrParameterInvalid)
+	})
+}
+
+// CopyFrom must keep the incremental size cache equal to a full rescan.
+func TestFieldDataCopyFromTracksMemory(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nullable=%t", tc.dataType, nullable), func(t *testing.T) {
+				src := tc.newField(t, nullable, 0)
+				require.NoError(t, src.AppendRow(tc.row))
+				if nullable {
+					require.NoError(t, src.AppendRow(nil))
+				}
+				indices := []int{0, 0}
+				if nullable {
+					// Repeat a row and take the null one, so the validity bytes
+					// and the compacted vector payload both cross the copy.
+					indices = []int{1, 0, 1}
+				}
+				dst := tc.newField(t, nullable, 0)
+				require.NoError(t, dst.CopyFrom(src, indices))
+				require.Equal(t, len(indices), dst.RowNum())
+				require.Equal(t, scannedMemorySize(dst), dst.GetMemorySize())
+			})
+		}
+	}
+}
