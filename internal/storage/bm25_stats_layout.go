@@ -65,26 +65,43 @@ func (counts *bm25TokenCounts) clone() bm25TokenCounts {
 	return result
 }
 
-func (counts *bm25TokenCounts) apply(other *bm25TokenCounts, sign int32) {
-	applyBM25StatsShards(other.len(), func(i int) {
-		source := other[i]
-		if len(source) == 0 {
-			return
+func (counts *bm25TokenCounts) apply(other *bm25TokenCounts, sign int32, locks *[bm25StatsShards]sync.RWMutex, pruneZeros bool) {
+	tokens := other.len()
+	if tokens < bm25StatsParallelThreshold || runtime.GOMAXPROCS(0) == 1 {
+		// Keep small insert batches free of the parallel callback's heap allocation.
+		for i := 0; i < bm25StatsShards; i++ {
+			counts.applyShard(other[i], i, sign, locks, pruneZeros)
 		}
-		if counts[i] == nil {
-			counts[i] = make(map[uint32]int32, len(source))
-		}
-		if sign > 0 {
-			// Preserve BM25Stats.Merge's zero-count records for wire compatibility.
-			for token, count := range source {
-				counts[i][token] += count
-			}
-		} else {
-			for token, count := range source {
-				addTokenCount(counts[i], token, -count)
-			}
-		}
+		return
+	}
+	applyBM25StatsShards(tokens, func(i int) {
+		counts.applyShard(other[i], i, sign, locks, pruneZeros)
 	})
+}
+
+func (counts *bm25TokenCounts) applyShard(source map[uint32]int32, i int, sign int32, locks *[bm25StatsShards]sync.RWMutex, pruneZeros bool) {
+	if len(source) == 0 {
+		return
+	}
+	if locks != nil {
+		locks[i].Lock()
+	}
+	if counts[i] == nil {
+		counts[i] = make(map[uint32]int32, len(source))
+	}
+	if pruneZeros {
+		for token, count := range source {
+			addTokenCount(counts[i], token, sign*count)
+		}
+	} else {
+		// Plain Merge preserves zero-count records in the existing wire format.
+		for token, count := range source {
+			counts[i][token] += sign * count
+		}
+	}
+	if locks != nil {
+		locks[i].Unlock()
+	}
 }
 
 func addTokenCount(rows map[uint32]int32, token uint32, delta int32) {

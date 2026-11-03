@@ -392,13 +392,13 @@ func (m *BM25Stats) NumToken() int64 {
 }
 
 func (m *BM25Stats) Merge(meta *BM25Stats) {
-	m.rowsWithToken.apply(&meta.rowsWithToken, 1)
+	m.rowsWithToken.apply(&meta.rowsWithToken, 1, nil, false)
 	m.numRow += meta.numRow
 	m.numToken += meta.numToken
 }
 
 func (m *BM25Stats) Minus(meta *BM25Stats) {
-	m.rowsWithToken.apply(&meta.rowsWithToken, -1)
+	m.rowsWithToken.apply(&meta.rowsWithToken, -1, nil, true)
 	m.numRow -= meta.numRow
 	m.numToken -= meta.numToken
 }

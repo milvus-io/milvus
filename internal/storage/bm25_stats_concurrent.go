@@ -79,24 +79,11 @@ func (c *ConcurrentBM25Stats) MinusUnlocked(stats *BM25Stats) {
 }
 
 func (c *ConcurrentBM25Stats) apply(source *bm25TokenCounts, sign int32, lockShards bool) {
-	applyBM25StatsShards(source.len(), func(i int) {
-		rows := source[i]
-		if len(rows) == 0 {
-			return
-		}
-		if lockShards {
-			c.shardLocks[i].Lock()
-		}
-		if c.rowsWithToken[i] == nil {
-			c.rowsWithToken[i] = make(map[uint32]int32, len(rows))
-		}
-		for token, count := range rows {
-			addTokenCount(c.rowsWithToken[i], token, sign*count)
-		}
-		if lockShards {
-			c.shardLocks[i].Unlock()
-		}
-	})
+	var locks *[bm25StatsShards]sync.RWMutex
+	if lockShards {
+		locks = &c.shardLocks
+	}
+	c.rowsWithToken.apply(source, sign, locks, true)
 }
 
 // MergeFrom adds other into c, merging the shards in parallel. Safe for concurrent use,
