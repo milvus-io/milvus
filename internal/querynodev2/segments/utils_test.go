@@ -228,6 +228,16 @@ func TestGetFieldWarmupPolicy(t *testing.T) {
 		assert.Equal(t, common.WarmupDisable, policy)
 	})
 
+	t.Run("vector field TypeParams warmup is returned", func(t *testing.T) {
+		policy := getFieldWarmupPolicy(&schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.WarmupKey, Value: common.WarmupDisable},
+			},
+		})
+		assert.Equal(t, common.WarmupDisable, policy)
+	})
+
 	t.Run("fallback to global config for scalar field", func(t *testing.T) {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key, common.WarmupSync)
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.Key)

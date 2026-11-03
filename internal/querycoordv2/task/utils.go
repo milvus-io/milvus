@@ -288,6 +288,15 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 
 	schemaCloned = ApplyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
+
+	// Carry auto-warmup to segcore even when a vector has no IndexInfo.
+	if _, exist := common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schemaCloned.GetProperties()...); !exist &&
+		autoWarmupForNonPKIsolationCollection(collectionProperties) {
+		schemaCloned.Properties = append(schemaCloned.Properties, &commonpb.KeyValuePair{
+			Key:   common.WarmupVectorIndexKey,
+			Value: common.WarmupSync,
+		})
+	}
 	return schemaCloned
 }
 
