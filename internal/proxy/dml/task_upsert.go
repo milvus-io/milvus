@@ -2040,7 +2040,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.
-	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema)
 	if err != nil {
 		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err

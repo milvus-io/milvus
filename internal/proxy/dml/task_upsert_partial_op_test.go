@@ -447,7 +447,7 @@ func TestJSONPathReplaceValidationAndMaterialization(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "metadata", FieldID: 101, DataType: schemapb.DataType_JSON}}}
 	operand := jsonPathTestField(`null`, `18`)
 	req := &milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{operand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("metadata", `["age"]`)}}
-	plans, _, err := resolveFieldPartialUpdateOps(req, schema)
+	plans, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	old := jsonPathTestField(`{"age":1,"large":9007199254740993}`, `{}`)
 	oldBefore, operandBefore := proto.Clone(old), proto.Clone(operand)
@@ -464,7 +464,7 @@ func TestJSONPathReplaceValidationAndMaterialization(t *testing.T) {
 	typeutil.SetFieldDataValidData(operand, []bool{false, true})
 	require.Error(t, validateJSONReplaceOperand(operand, 2))
 	schema.Fields[0].IsDynamic = true
-	_, _, err = resolveFieldPartialUpdateOps(req, schema)
+	_, _, err = resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.ErrorContains(t, err, "dynamic JSON")
 	for _, stored := range []string{`null`, `[]`, `{"other":{}}`, `invalid`} {
 		path, err := parseJSONReplacePath(`["age"]["x"]`)
@@ -503,6 +503,20 @@ func TestJSONPathReplaceValidationAndMaterialization(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveFieldPartialUpdateOpsReusesSchemaHelper(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		arrayIntFieldSchema("scores", false, 8),
+	}})
+	patch := mockey.Mock(typeutil.CreateSchemaHelper).Return(nil, merr.ErrServiceInternal).Build()
+	defer patch.UnPatch()
+	plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+		NumRows: 1, FieldsData: []*schemapb.FieldData{arrayLongFieldData("scores", [][]int64{{42}})},
+		FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[0]")},
+	}, schema)
+	require.NoError(t, err)
+	require.Same(t, schema.Fields[0], plans["scores"].arrayParent)
 }
 
 func TestVectorArrayElementWidth(t *testing.T) {
@@ -765,7 +779,7 @@ func structVectorChildFieldData(name string, rows ...*schemapb.VectorField) *sch
 func TestValidateFieldPartialUpdateOps_NoOp(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{arrayIntFieldSchema("tags", false, 8)}}
 	req := &milvuspb.UpsertRequest{FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})}}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.False(t, seen)
 }
@@ -776,7 +790,7 @@ func TestValidateFieldPartialUpdateOps_ReplaceIgnored(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_REPLACE)},
 	}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.False(t, seen)
 }
@@ -787,7 +801,7 @@ func TestValidateFieldPartialUpdateOps_AppendOnArrayField(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1, 2}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.True(t, seen)
 }
@@ -798,7 +812,7 @@ func TestValidateFieldPartialUpdateOps_RemoveOnArrayField(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)},
 	}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.True(t, seen)
 }
@@ -827,7 +841,7 @@ func TestValidateFieldPartialUpdateOps_RejectsRecursiveArrayOps(t *testing.T) {
 				FieldsData: []*schemapb.FieldData{recursiveArrayLongFieldData("nested")},
 				FieldOps:   []*schemapb.FieldPartialUpdateOp{op("nested", partialOp)},
 			}
-			_, _, err := resolveFieldPartialUpdateOps(req, schema)
+			_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "not supported for recursive ARRAY field")
 		})
@@ -840,7 +854,7 @@ func TestValidateFieldPartialUpdateOps_RejectsEmptyFieldName(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "field_name is required")
 }
@@ -854,7 +868,7 @@ func TestValidateFieldPartialUpdateOps_RejectsDuplicateField(t *testing.T) {
 			op("tags", schemapb.FieldPartialUpdateOp_ARRAY_REMOVE),
 		},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate")
 }
@@ -865,7 +879,7 @@ func TestValidateFieldPartialUpdateOps_RejectsOpOnPK(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "primary key")
 }
@@ -876,7 +890,7 @@ func TestValidateFieldPartialUpdateOps_RejectsUnknownField(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("other", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -889,7 +903,7 @@ func TestValidateFieldPartialUpdateOps_RejectsNonArrayField(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Array field")
 }
@@ -910,14 +924,14 @@ func TestValidateFieldPartialUpdateOps_RejectsStructOps(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct}},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("profile", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not supported for struct field")
 
 	req = &milvuspb.UpsertRequest{
 		FieldOps: []*schemapb.FieldPartialUpdateOp{op("profile[age]", schemapb.FieldPartialUpdateOp_REPLACE)},
 	}
-	_, _, err = resolveFieldPartialUpdateOps(req, schema)
+	_, _, err = resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "partial struct update is not supported")
 }
@@ -930,7 +944,7 @@ func TestValidateFieldPartialUpdateOps_RejectsElementTypeMismatch(t *testing.T) 
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "element type")
 }
@@ -941,7 +955,7 @@ func TestValidateFieldPartialUpdateOps_RejectsUnsupportedOpEnum(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_OpType(9999))},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported partial update op")
 }
@@ -953,7 +967,7 @@ func TestValidateFieldPartialUpdateOps_RejectsOpWithoutFieldData(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not present in fields_data")
 }
@@ -964,7 +978,7 @@ func TestValidateFieldPartialUpdateOps_RejectsPayloadExceedingCapacity(t *testin
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1, 2, 3, 4}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max_capacity")
 }
@@ -975,7 +989,7 @@ func TestValidateFieldPartialUpdateOps_SkipsCapacityWhenUnset(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1, 2, 3, 4, 5}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.True(t, seen)
 }
@@ -993,7 +1007,7 @@ func TestValidateFieldPartialUpdateOps_RejectsNilArrayData(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{fdNoArray},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, _, err := resolveFieldPartialUpdateOps(req, schema)
+	_, _, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not an Array")
 }
@@ -1008,7 +1022,7 @@ func TestValidateFieldPartialUpdateOps_SkipsCapacityWhenMalformed(t *testing.T) 
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1, 2, 3, 4}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{op("tags", schemapb.FieldPartialUpdateOp_ARRAY_APPEND)},
 	}
-	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
+	_, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.True(t, seen)
 }
@@ -1074,7 +1088,7 @@ func TestResolveFieldPartialUpdateOps_ArrayPathReplace(t *testing.T) {
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[1]")},
 	}
 
-	plans, seen, err := resolveFieldPartialUpdateOps(req, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{fieldSchema}})
+	plans, seen, err := resolveFieldPartialUpdateOps(req, mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{fieldSchema}}))
 	require.NoError(t, err)
 	assert.True(t, seen)
 	require.NotNil(t, plans["scores"])
@@ -1099,7 +1113,7 @@ func TestResolveFieldPartialUpdateOps_RejectsInvalidArrayOperand(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 1, FieldsData: []*schemapb.FieldData{test.fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{test.op}}, schema)
+			_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 1, FieldsData: []*schemapb.FieldData{test.fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{test.op}}, mustNewSchemaInfo(schema))
 			assert.Error(t, err)
 		})
 	}
@@ -1108,7 +1122,10 @@ func TestResolveFieldPartialUpdateOps_RejectsInvalidArrayOperand(t *testing.T) {
 		NumRows:    1,
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("scores", [][]int64{{1}})},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{{FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND, Path: "[0]"}},
-	}, schema)
+	}, mustNewSchemaInfo(
+
+		schema))
+
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "only supported for PATH_REPLACE")
 }
@@ -1133,7 +1150,10 @@ func TestResolveFieldPartialUpdateOps_PathReplaceElementType(t *testing.T) {
 			_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 				NumRows: 1, FieldsData: []*schemapb.FieldData{fd},
 				FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[1]")},
-			}, schema)
+			}, mustNewSchemaInfo(
+
+				schema))
+
 			if test.wantError {
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			} else {
@@ -1158,7 +1178,7 @@ func TestPathReplaceSynthesizesOmittedNullableStructChild(t *testing.T) {
 		}}},
 	}
 	request := &milvuspb.UpsertRequest{NumRows: 1, FieldsData: []*schemapb.FieldData{operand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}
-	plans, _, err := resolveFieldPartialUpdateOps(request, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	plans, _, err := resolveFieldPartialUpdateOps(request, mustNewSchemaInfo(&schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}))
 	require.NoError(t, err)
 	require.Len(t, plans["profile"].operandChildren, 4)
 	missing := findStructChildFieldData(operand.GetStructArrays().GetFields(), structSchema.GetFields()[3])
@@ -1185,7 +1205,10 @@ func TestPathReplaceSynthesizesOmittedNullableStructChild(t *testing.T) {
 		structScalarChildFieldData("removed", &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}))
 	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{stale}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")},
-	}, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	}, mustNewSchemaInfo(
+
+		&schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}))
+
 	require.ErrorContains(t, err, "sub-field \"removed\" does not exist in struct field \"profile\"")
 }
 
@@ -1234,25 +1257,25 @@ func TestResolveFieldPartialUpdateOps_StructWholeElementAndExplicitChild(t *test
 	fd := &schemapb.FieldData{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{age, city}}}}
 	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
 
-	_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, schema)
+	_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, mustNewSchemaInfo(schema))
 	require.ErrorContains(t, err, "is required")
 
-	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1][age]")}}, schema)
+	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1][age]")}}, mustNewSchemaInfo(schema))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires exactly that child")
 
 	oneChild := &schemapb.FieldData{FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{age}}}}
-	plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{oneChild}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1][age]")}}, schema)
+	plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{oneChild}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1][age]")}}, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.Equal(t, "age", structChildRawName(plans["profile"].explicitChild))
-	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{oneChild}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, schema)
+	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{oneChild}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, mustNewSchemaInfo(schema))
 	require.ErrorContains(t, err, "is required")
 	embedding := structVectorChildFieldData("embedding",
 		&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}},
 		&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}},
 	)
 	fd.GetStructArrays().Fields = []*schemapb.FieldData{embedding, city, age}
-	plans, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, schema)
+	plans, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, mustNewSchemaInfo(schema))
 	require.NoError(t, err)
 	assert.Equal(t, structSchema.GetFields(), plans["profile"].operandChildren)
 }
@@ -1289,7 +1312,10 @@ func TestResolveFieldPartialUpdateOps_ValidatesStructOperandChildName(t *testing
 				NumRows:    1,
 				FieldsData: []*schemapb.FieldData{operand},
 				FieldOps:   []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][age]")},
-			}, schema)
+			}, mustNewSchemaInfo(
+
+				schema))
+
 			if test.valid {
 				require.NoError(t, err)
 				require.Len(t, plans["profile"].operandChildren, 1)
@@ -1314,7 +1340,10 @@ func TestResolveFieldPartialUpdateOps_RejectsStructChildElementValidData(t *test
 	}}
 	_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{ageOperand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][age]")},
-	}, schema)
+	}, mustNewSchemaInfo(
+
+		schema))
+
 	require.ErrorContains(t, err, "does not support Array element valid_data")
 
 	city := structStringChildFieldData("city", &schemapb.ScalarField{
@@ -1326,7 +1355,10 @@ func TestResolveFieldPartialUpdateOps_RejectsStructChildElementValidData(t *test
 	}}
 	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{cityOperand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][city]")},
-	}, schema)
+	}, mustNewSchemaInfo(
+
+		schema))
+
 	require.ErrorContains(t, err, "does not support Array element valid_data")
 
 	embedding := structVectorChildFieldData("embedding", &schemapb.VectorField{
@@ -1338,7 +1370,10 @@ func TestResolveFieldPartialUpdateOps_RejectsStructChildElementValidData(t *test
 	}}
 	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{embeddingOperand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][embedding]")},
-	}, schema)
+	}, mustNewSchemaInfo(
+
+		schema))
+
 	require.ErrorContains(t, err, "does not support ArrayOfVector element valid_data")
 }
 
@@ -1357,7 +1392,10 @@ func TestResolveFieldPartialUpdateOps_RejectsStructVectorDimensionMismatch(t *te
 	}
 	_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{operand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][embedding]")},
-	}, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	}, mustNewSchemaInfo(
+
+		&schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}))
+
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dimension")
 }
@@ -1368,7 +1406,10 @@ func TestResolveFieldPartialUpdateOps_RejectsDuplicateFieldData(t *testing.T) {
 		NumRows:    1,
 		FieldsData: []*schemapb.FieldData{fd, fd},
 		FieldOps:   []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[0]")},
-	}, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{arrayIntFieldSchema("scores", false, 8)}})
+	}, mustNewSchemaInfo(
+
+		&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{arrayIntFieldSchema("scores", false, 8)}}))
+
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate fields_data")
 }
@@ -1399,7 +1440,10 @@ func TestApplyStructPathReplacePreservesOmittedChildren(t *testing.T) {
 	plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
 		NumRows: 1, FieldsData: []*schemapb.FieldData{operand},
 		FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")},
-	}, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	}, mustNewSchemaInfo(
+
+		&schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}))
+
 	require.NoError(t, err)
 	oldBefore, operandBefore := proto.Clone(old), proto.Clone(operand)
 	dst = proto.Clone(old).(*schemapb.FieldData)
@@ -1538,7 +1582,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 			FieldsData:     requestFields,
 			FieldOps:       []*schemapb.FieldPartialUpdateOp{pathOp("scores", "[1]")},
 		}
-		plans, _, err := resolveFieldPartialUpdateOps(request, collectionSchema)
+		plans, _, err := resolveFieldPartialUpdateOps(request, mustNewSchemaInfo(collectionSchema))
 		require.NoError(t, err)
 		return &UpsertTask{
 			ctx:                     context.Background(),
@@ -1563,7 +1607,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		task.schema = mustNewSchemaInfo(appendSchema)
 		task.req.FieldsData[1].GetScalars().GetArrayData().ElementType = schemapb.DataType_Int64
 		task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{{FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}
-		plans, _, err := resolveFieldPartialUpdateOps(task.req, appendSchema)
+		plans, _, err := resolveFieldPartialUpdateOps(task.req, mustNewSchemaInfo(appendSchema))
 		require.NoError(t, err)
 		task.fieldPartialUpdatePlans = plans
 		existing := arrayLongFieldData("scores", [][]int64{{10, 11}, {20, 21}})
@@ -1612,7 +1656,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		task.req.FieldsData = []*schemapb.FieldData{idField(2, 1), jsonPathTestField(`null`, `{"age":18}`)}
 		task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{pathOp("metadata", `["profile"][0]`)}
 		task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
-		plans, _, err := resolveFieldPartialUpdateOps(task.req, jsonSchema)
+		plans, _, err := resolveFieldPartialUpdateOps(task.req, mustNewSchemaInfo(jsonSchema))
 		require.NoError(t, err)
 		task.fieldPartialUpdatePlans = plans
 		old := jsonPathTestField(`{"profile":[{"age":1,"city":"A"}],"large":9007199254740993}`, `{"profile":[{"age":2}]}`)
@@ -1701,7 +1745,7 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 			task.req.NumRows = rowCount
 			task.req.FieldsData = []*schemapb.FieldData{idField(1, 2), operand}
 			task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[0][age]")}
-			plans, _, err := resolveFieldPartialUpdateOps(task.req, structSchema)
+			plans, _, err := resolveFieldPartialUpdateOps(task.req, mustNewSchemaInfo(structSchema))
 			require.NoError(t, err)
 			task.fieldPartialUpdatePlans = plans
 			// Neither retrieval nor materialization should see this invalid request.

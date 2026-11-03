@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -75,15 +76,12 @@ func (p *fieldPartialUpdatePlan) isPathReplace() bool {
 
 // TODO: Recursive Array fields do not support ARRAY_APPEND, ARRAY_REMOVE, or
 // PATH_REPLACE.
-func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.CollectionSchema) (map[string]*fieldPartialUpdatePlan, bool, error) {
+func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *metacache.SchemaInfo) (map[string]*fieldPartialUpdatePlan, bool, error) {
 	fieldOps := req.GetFieldOps()
 	if len(fieldOps) == 0 {
 		return nil, false, nil
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return nil, false, err
-	}
+	schemaHelper := schema.SchemaHelper
 
 	// Precompute PK names and a lookup table of FieldData by name so we
 	// can validate payload alignment in O(1) per op.
@@ -146,7 +144,7 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 				return nil, false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("partial-update op targets field %q not present in fields_data", name))
 			}
-			if field, err := findFieldSchemaByName(schema, name); err == nil && field.GetDataType() == schemapb.DataType_JSON {
+			if field, err := findFieldSchemaByName(schema.CollectionSchema, name); err == nil && field.GetDataType() == schemapb.DataType_JSON {
 				if field.GetIsDynamic() || fd.GetIsDynamic() {
 					return nil, false, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support dynamic JSON fields")
 				}
@@ -184,7 +182,7 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 				continue
 			}
 
-			fieldSchema, err := findFieldSchemaByName(schema, name)
+			fieldSchema, err := findFieldSchemaByName(schema.CollectionSchema, name)
 			if err != nil {
 				return nil, false, err
 			}
@@ -208,7 +206,7 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 				"op %s is not supported for struct field %q", op.String(), name)
 		}
 
-		fieldSchema, err := findFieldSchemaByName(schema, name)
+		fieldSchema, err := findFieldSchemaByName(schema.CollectionSchema, name)
 		if err != nil {
 			return nil, false, err
 		}
