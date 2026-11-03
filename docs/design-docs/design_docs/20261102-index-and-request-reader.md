@@ -173,11 +173,11 @@ three-valued null behavior, old snapshots surviving replacement, lazy-load
 retry, query cancellation and warmup cancellation. Passing direct Bitmap tests
 alone does not verify the later cache and publication changes.
 
-Loader migration status: family loaders and `LoaderEntry::Load` now return
-`IndexPtr`. JSON path indexes own the child Index and share path/existence
-metadata across request readers. The segment inventory accepts Index owners
-and creates request readers. Reader cache slots remain temporarily supported
-for families that have not yet migrated their concrete storage loading.
+Family loaders and `LoaderEntry::Load` return `IndexPtr`. JSON path indexes own
+the child Index and share path/existence metadata across request readers. The
+segment inventory accepts Index owners and creates request readers. Cache slots,
+where needed, belong to the concrete Index implementations; no inventory entry
+or cache cell owns a request Reader.
 
 Marisa now supports resident storage or a typed `CacheSlot<MarisaIndexStorage>`.
 Its request reader pins storage once per operation, including the complete
