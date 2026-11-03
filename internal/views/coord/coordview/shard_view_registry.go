@@ -179,6 +179,20 @@ func (r *ShardViewRegistry) Close() {
 		return
 	}
 	r.flushScheduler.Close()
+	r.mu.RLock()
+	managers := make([]*ShardViewManager, 0, len(r.shards))
+	for _, manager := range r.shards {
+		managers = append(managers, manager)
+	}
+	r.mu.RUnlock()
+	for _, manager := range managers {
+		manager.mu.Lock()
+		manager.closed = true
+		for _, sm := range manager.views {
+			sm.failPreparation("shard registry closed")
+		}
+		manager.mu.Unlock()
+	}
 }
 
 // Begin opens an explicit cross-shard QueryView flush batch. Existing flush

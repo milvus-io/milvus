@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -451,74 +453,30 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 // if no channel_name specified, default to transfer all channel on the source node.
 // if no target_nodeId specified, default to move channel to all other nodes
 func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
-	log := mlog.With()
-
-	log.Info(ctx, "TransferChannel request received",
-		mlog.Int64("source", req.GetSourceNodeID()),
-		mlog.Int64("dest", req.GetTargetNodeID()),
-		mlog.String("channel", req.GetChannelName()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load balance"
-		log.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-	}
-
-	// check whether srcNode is healthy
-	srcNode := req.GetSourceNodeID()
-	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		err := merr.WrapErrNodeNotAvailable(srcNode, "the source node is invalid")
 		return merr.Status(err), nil
 	}
-
-	replicas := s.meta.GetByNode(ctx, req.GetSourceNodeID())
-	for _, replica := range replicas {
-		// when no dst node specified, default to use all other nodes in same
-		dstNodeSet := typeutil.NewUniqueSet()
-		if req.GetToAllNodes() {
-			if streamingutil.UseStreamingQueryNodeAsDelegator() {
-				dstNodeSet.Insert(replica.GetRWSQNodes()...)
-			} else {
-				dstNodeSet.Insert(replica.GetRWNodes()...)
-			}
-		} else {
-			// check whether dstNode is healthy
-			if err := s.isStoppingNode(ctx, req.GetTargetNodeID()); err != nil {
-				err := merr.WrapErrNodeNotAvailable(srcNode, "the target node is invalid")
-				return merr.Status(err), nil
-			}
-			dstNodeSet.Insert(req.GetTargetNodeID())
-		}
-		dstNodeSet.Remove(srcNode)
-
-		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
-		toBalance := typeutil.NewSet[*meta.DmChannel]()
-		if req.GetTransferAll() {
-			toBalance.Insert(channels...)
-		} else {
-			// check whether sealed segment exist
-			channel, ok := lo.Find(channels, func(ch *meta.DmChannel) bool { return ch.GetChannelName() == req.GetChannelName() })
-			if !ok {
-				err := merr.WrapErrChannelNotFound(req.GetChannelName(), "channel not found in source node")
-				return merr.Status(err), nil
-			}
-			existInTarget := s.targetMgr.GetDmChannel(ctx, channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget) != nil
-			if !existInTarget {
-				log.Info(ctx, "channel doesn't exist in current target, skip it", mlog.String("channelName", channel.GetChannelName()))
-			} else {
-				toBalance.Insert(channel)
-			}
-		}
-
-		err := s.balanceChannels(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), false, req.GetCopyMode())
-		if err != nil {
-			msg := "failed to balance channels"
-			log.Warn(ctx, msg, mlog.Err(err))
-			return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-		}
+	if req.GetCopyMode() {
+		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "WAL transfer does not support copy mode")), nil
 	}
-	return merr.Success(), nil
+	if req.GetSourceNodeID() <= 0 || (!req.GetToAllNodes() && (req.GetTargetNodeID() <= 0 || req.GetTargetNodeID() == req.GetSourceNodeID())) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("expected a positive source SN and a different positive target SN")), nil
+	}
+	if !req.GetTransferAll() && req.GetChannelName() == "" {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("channel_name is required unless transfer_all is set")), nil
+	}
+	transfer := walbalancer.TransferChannelsRequest{SourceNodeID: req.GetSourceNodeID()}
+	if !req.GetToAllNodes() {
+		transfer.TargetNodeID = req.GetTargetNodeID()
+	}
+	if !req.GetTransferAll() {
+		transfer.ChannelName = req.GetChannelName()
+	}
+	b, err := walbalance.GetWithContext(ctx)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Status(b.TransferChannels(ctx, transfer)), nil
 }
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
