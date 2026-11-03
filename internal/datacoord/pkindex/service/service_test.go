@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -277,8 +278,8 @@ func TestToMerr(t *testing.T) {
 		code      int32
 		retryable bool
 	}{
-		{"fenced", manifest.ErrFenced, merr.Code(merr.ErrChannelNotAvailable), false},
-		{"wrapped fenced", errors.Wrap(manifest.ErrFenced, "context"), merr.Code(merr.ErrChannelNotAvailable), false},
+		{"fenced", pkmanifest.ErrFenced, merr.Code(merr.ErrChannelNotAvailable), false},
+		{"wrapped fenced", errors.Wrap(pkmanifest.ErrFenced, "context"), merr.Code(merr.ErrChannelNotAvailable), false},
 		{"term not assigned", manifest.ErrTermNotAssigned, merr.Code(merr.ErrServiceInternal), false},
 		{"no manifest", manifest.ErrNoManifest, merr.Code(merr.ErrServiceInternal), false},
 		{"checkpoint regressed", manifest.ErrCheckpointRegressed, merr.Code(merr.ErrServiceInternal), false},
@@ -299,7 +300,7 @@ func TestToMerr(t *testing.T) {
 }
 
 func TestToMerrFencedKeepsCause(t *testing.T) {
-	cause := errors.Wrap(manifest.ErrFenced, "recorded term 5 is above request term 3")
+	cause := errors.Wrap(pkmanifest.ErrFenced, "recorded term 5 is above request term 3")
 	got := toMerr(cause, "v")
 	assert.Contains(t, fmt.Sprintf("%+v", got), "recorded term 5 is above request term 3")
 	assert.NotContains(t, got.Error(), "recorded term 5")

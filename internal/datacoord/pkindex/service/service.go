@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -176,7 +177,7 @@ func validateTerm(term int64) error {
 // no longer owns the channel and gets a code that is not retryable. Every
 // other error translates by its pkindex error category.
 func toMerr(err error, channel string) error {
-	if errors.Is(err, manifest.ErrFenced) {
+	if errors.Is(err, pkmanifest.ErrFenced) {
 		return errors.WithSecondaryError(merr.WrapErrChannelNotAvailable(channel, "pchannel term is fenced"), err)
 	}
 	return pkindex.ToMerr(err)

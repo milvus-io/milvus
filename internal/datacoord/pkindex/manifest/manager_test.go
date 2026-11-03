@@ -177,7 +177,7 @@ func TestFlushTermRules(t *testing.T) {
 
 	m, _, _ = assigned(t, 3)
 	_, err = m.CommitFlush(ctx, flush(2, 10, 1))
-	assert.True(t, errors.Is(err, ErrFenced), "a lower term is fenced")
+	assert.True(t, errors.Is(err, pkmanifest.ErrFenced), "a lower term is fenced")
 	_, err = m.CommitFlush(ctx, flush(4, 10, 1))
 	assert.True(t, errors.Is(err, ErrTermNotAssigned), "a higher term is not in the pchannel meta")
 	_, found, err := get(ctx, m, 1, 2, vch)
@@ -250,7 +250,7 @@ func TestFlushRetryVersusRegression(t *testing.T) {
 	_, err = m.CommitFlush(ctx, flush(4, 50, 10))
 	assert.True(t, errors.Is(err, ErrCheckpointRegressed))
 	_, err = m.CommitFlush(ctx, flush(3, 60, 10))
-	assert.True(t, errors.Is(err, ErrFenced))
+	assert.True(t, errors.Is(err, pkmanifest.ErrFenced))
 
 	up, err := m.CommitFlush(ctx, flush(4, 60, 10))
 	require.NoError(t, err)
@@ -267,7 +267,7 @@ func TestFlushReadsPChannelMetaEveryTime(t *testing.T) {
 	p.AssignPChannel(pch, 4)
 
 	_, err = m.CommitFlush(ctx, flush(3, 20, 2))
-	assert.True(t, errors.Is(err, ErrFenced))
+	assert.True(t, errors.Is(err, pkmanifest.ErrFenced))
 	got, err := m.CommitFlush(ctx, flush(4, 20, 2))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{2, 1}, sstIDs(got))
@@ -289,7 +289,7 @@ func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrFakeValueMismatch), "%v", err)
 
 		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
-		assert.True(t, errors.Is(err, ErrFenced))
+		assert.True(t, errors.Is(err, pkmanifest.ErrFenced))
 		got, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1}, sstIDs(got))

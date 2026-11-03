@@ -69,9 +69,6 @@ type ObjectStore interface {
 }
 
 var (
-	// ErrFenced reports a flush from a pchannel term below the term of the
-	// streamingcoord pchannel meta.
-	ErrFenced = errors.New("pchannel term is below the assigned term")
 	// ErrTermNotAssigned reports a flush whose pchannel has no streamingcoord
 	// pchannel meta, or whose term is above the term of that meta.
 	ErrTermNotAssigned = errors.New("pchannel term is not the assigned term")

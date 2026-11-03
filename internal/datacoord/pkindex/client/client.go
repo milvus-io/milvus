@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
@@ -27,6 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
@@ -41,33 +43,31 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-var _ Client = (*client)(nil)
+var (
+	_ Client            = (*client)(nil)
+	_ manifest.Committer = Client(nil)
+)
 
-// Client calls PKIndexCoordService. Every method returns a merr error, except
-// that a context cancel or deadline error, and a gRPC status error with code
-// DeadlineExceeded or Canceled, is returned unchanged.
+// Client calls PKIndexCoordService and implements manifest.Committer: it
+// translates the index types to the manifest proto and the merr codes of the
+// service to the errors of the Committer contract. It panics when a Manager
+// is built over a nil Client: a Manager without a working Committer must not
+// start.
 //
-// The caller decides whether to retry with merr.IsRetryableErr. The retryable
-// errors include merr.ErrServiceUnavailable, which also covers a connection
-// failure and a gRPC transport error that carries no merr code, and
-// merr.ErrServiceNotReady.
-//
-// A merr.ErrChannelNotAvailable error (code 503) that a method of Client
-// returns means the term of the caller is fenced by a newer owner of the
-// pchannel; the caller must stop writing that pchannel. Other components use
-// the same code for a retryable state, so the caller must classify the error
-// that Client returns at the call site, not on an error chain that has other
-// errors in it. With retry.Do, the caller must pass
-// retry.RetryErr(merr.IsRetryableErr); else retry.Do retries a fenced call.
+// Every error that is not fenced or rejected is retryable: a context cancel
+// or deadline error, a gRPC status error with code DeadlineExceeded or
+// Canceled, and merr.ErrServiceUnavailable, which also covers a connection
+// failure and a gRPC transport error that carries no merr code.
 type Client interface {
-	// CommitFlush commits a flush result to the manifest of a vchannel.
-	CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error)
+	// CommitFlush applies a flush and returns the complete manifest after it.
+	// A retry with the same arguments after a lost response returns the
+	// manifest that the first call committed.
+	CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error)
 
-	// GetRecoveryManifests returns the manifest pointer of each target of
-	// the request, in order; the caller reads the body from object storage.
-	// Each entry has its own status: the error of the call covers only the
-	// whole request.
-	GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error)
+	// GetRecoveryManifests returns one answer for each ref, in the order of
+	// refs. An item that fails has its own Err. The caller sends at most
+	// manifest.MaxRecoveryManifests refs in one call.
+	GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error)
 
 	// Close releases the connection of the client.
 	Close()
@@ -147,28 +147,96 @@ type client struct {
 	service lazygrpc.Service[pkindexpb.PKIndexCoordServiceClient]
 }
 
-func (c *client) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
+func (c *client) CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error) {
+	req := &pkindexpb.CommitFlushRequest{
+		CollectionId:       args.CollectionID,
+		Vchannel:           args.VChannel,
+		PchannelTerm:       args.PChannelTerm,
+		AddSsts:            manifest.SSTRefsOf(args.AddTables),
+		CheckpointTimeTick: args.CheckpointTimeTick,
+		IndexId:            args.IndexID,
+		ResetTimeTick:      args.ResetTimeTick,
+	}
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, toClientErr(err)
+		return manifest.View{}, fromServiceErr(toClientErr(err))
 	}
 	resp, err := svc.CommitFlush(ctx, req)
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, toClientErr(err)
+		return manifest.View{}, fromServiceErr(toClientErr(err))
 	}
-	return resp.GetManifest(), nil
+	m := resp.GetManifest()
+	if m == nil {
+		// A retry gets the same answer: the service broke its contract.
+		return manifest.View{}, errors.Wrapf(manifest.ErrRejected, "vchannel %s: the commit returned no manifest", args.VChannel)
+	}
+	return manifest.ViewOf(m), nil
 }
 
-func (c *client) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error) {
+func (c *client) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
+	targets := make([]*pkindexpb.ManifestTarget, len(refs))
+	for i, ref := range refs {
+		targets[i] = &pkindexpb.ManifestTarget{CollectionId: ref.CollectionID, Vchannel: ref.VChannel, IndexId: ref.IndexID}
+	}
 	svc, err := c.service.GetService(ctx)
 	if err != nil {
-		return nil, toClientErr(err)
+		return nil, fromServiceErr(toClientErr(err))
 	}
-	resp, err := svc.GetRecoveryManifests(ctx, req)
+	resp, err := svc.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{Targets: targets})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return nil, toClientErr(err)
+		return nil, fromServiceErr(toClientErr(err))
 	}
-	return resp.GetEntries(), nil
+	entries := resp.GetEntries()
+	if len(entries) != len(refs) {
+		return nil, errors.Wrapf(manifest.ErrRejected, "the manifest service returned %d entries for %d refs", len(entries), len(refs))
+	}
+	out := make([]manifest.RecoveryManifest, len(entries))
+	for i, e := range entries {
+		if err := merr.Error(e.GetStatus()); err != nil {
+			// A lookup carries no term, so the service never fences it: the
+			// fence branch of fromServiceErr matters only for CommitFlush.
+			out[i].Err = fromServiceErr(err)
+			continue
+		}
+		if !e.GetFound() {
+			continue
+		}
+		p := e.GetPointer()
+		if p.GetVersion() <= 0 || p.GetBodyKey() == "" {
+			out[i].Err = errors.Wrapf(manifest.ErrRejected, "vchannel %s: a found manifest with version %d and body key %q",
+				refs[i].VChannel, p.GetVersion(), p.GetBodyKey())
+			continue
+		}
+		out[i] = manifest.RecoveryManifest{Found: true, Version: p.GetVersion(), BodyKey: p.GetBodyKey()}
+	}
+	return out, nil
+}
+
+// fromServiceErr translates an error of the manifest service into the errors
+// of the Committer contract. The code of a fenced term becomes ErrFenced. Any
+// other merr code that is not retryable becomes ErrRejected: the service
+// rejected the request for good (an invalid request, a stale term, a
+// corrupted manifest, a failed disk of the coordinator). A retryable merr
+// code, a context cancel or deadline, and any other error stay as they are:
+// the caller retries them. The cause stays in the chain. The rule follows the
+// retriable bit of merr, so a code that the coordinator adds later is
+// classified without a change here; a code that merr marks permanent by
+// mistake ends the WAL instance, which is the safer failure.
+func fromServiceErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, merr.ErrChannelNotAvailable):
+		return errors.Mark(err, manifest.ErrFenced)
+	case merr.IsCanceledOrTimeout(err):
+		// A non-retryable merr error that wraps a context error is still a
+		// cancel or timeout of this call, not a rejection.
+		return err
+	case merr.IsMilvusError(err) && !merr.IsRetryableErr(err):
+		return errors.Mark(err, manifest.ErrRejected)
+	default:
+		return err
+	}
 }
 
 // toClientErr returns err unchanged when it is nil, a merr error, a context

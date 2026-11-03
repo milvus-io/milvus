@@ -26,9 +26,9 @@ import (
 
 	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -63,11 +63,11 @@ type fakeManifestClient struct {
 	closed bool
 }
 
-func (f *fakeManifestClient) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
-	return nil, merr.WrapErrServiceUnavailableMsg("not served in this test")
+func (f *fakeManifestClient) CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error) {
+	return manifest.View{}, merr.WrapErrServiceUnavailableMsg("not served in this test")
 }
 
-func (f *fakeManifestClient) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error) {
+func (f *fakeManifestClient) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
 	return nil, merr.WrapErrServiceUnavailableMsg("not served in this test")
 }
 

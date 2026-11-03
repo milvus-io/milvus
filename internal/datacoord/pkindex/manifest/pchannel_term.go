@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
@@ -31,9 +32,9 @@ import (
 // checkPChannelTerm checks that term is the current term of pchannel in the
 // streamingcoord pchannel meta, and returns the predicate that the pchannel
 // meta still holds the value that term was checked against. It returns
-// ErrFenced when term is below the current term, and ErrTermNotAssigned when
-// pchannel has no meta or term is still above the current term after a second
-// read. It reads the meta store on every call.
+// pkmanifest.ErrFenced when term is below the current term, and
+// ErrTermNotAssigned when pchannel has no meta or term is still above the
+// current term after a second read. It reads the meta store on every call.
 func checkPChannelTerm(ctx context.Context, meta MetaStore, pchannel string, term int64) (predicates.Predicate, error) {
 	key := streamingcoord.BuildPChannelInfoPath(pchannel)
 	value, cur, err := loadPChannelTerm(ctx, meta, key)
@@ -46,7 +47,7 @@ func checkPChannelTerm(ctx context.Context, meta MetaStore, pchannel string, ter
 	case cur == 0:
 		return nil, errors.Wrapf(ErrTermNotAssigned, "pchannel %s: no pchannel meta, term %d", pchannel, term)
 	case term < cur:
-		return nil, errors.Wrapf(ErrFenced, "pchannel %s: current term %d, term %d", pchannel, cur, term)
+		return nil, errors.Wrapf(pkmanifest.ErrFenced, "pchannel %s: current term %d, term %d", pchannel, cur, term)
 	case term > cur:
 		return nil, errors.Wrapf(ErrTermNotAssigned, "pchannel %s: current term %d, term %d", pchannel, cur, term)
 	}

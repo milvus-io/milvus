@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package client
 
 import (
 	"context"
@@ -30,26 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// fakeManifestService records the last request and answers what the test sets.
-type fakeManifestService struct {
-	flushReq   *pkindexpb.CommitFlushRequest
-	flushResp  *pkindexpb.Manifest
-	flushErr   error
-	lookupReq  *pkindexpb.GetRecoveryManifestsRequest
-	lookupResp []*pkindexpb.ManifestPointerEntry
-	lookupErr  error
-}
-
-func (f *fakeManifestService) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
-	f.flushReq = req
-	return f.flushResp, f.flushErr
-}
-
-func (f *fakeManifestService) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error) {
-	f.lookupReq = req
-	return f.lookupResp, f.lookupErr
-}
 
 func sampleManifest() *pkindexpb.Manifest {
 	return &pkindexpb.Manifest{
@@ -81,9 +61,9 @@ func sampleView() manifest.View {
 	}
 }
 
-func TestManifestServiceCommitterCommitFlush(t *testing.T) {
-	svc := &fakeManifestService{flushResp: sampleManifest()}
-	c := NewManifestServiceCommitter(svc)
+func TestClientCommitFlush(t *testing.T) {
+	svc := &fakeCoordClient{flushResp: sampleManifest()}
+	c := newTestClient(svc)
 
 	got, err := c.CommitFlush(context.Background(), manifest.FlushArgs{
 		CollectionID:       7,
@@ -109,14 +89,14 @@ func TestManifestServiceCommitterCommitFlush(t *testing.T) {
 	assert.True(t, proto.Equal(want, svc.flushReq), svc.flushReq.String())
 }
 
-func TestManifestServiceCommitterCommitFlushWithoutManifest(t *testing.T) {
-	c := NewManifestServiceCommitter(&fakeManifestService{})
+func TestClientCommitFlushWithoutManifest(t *testing.T) {
+	c := newTestClient(&fakeCoordClient{})
 	_, err := c.CommitFlush(context.Background(), manifest.FlushArgs{VChannel: "v"})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, manifest.ErrRejected), err)
 }
 
-func TestManifestServiceCommitterErrors(t *testing.T) {
+func TestClientErrorClassification(t *testing.T) {
 	cases := []struct {
 		name     string
 		err      error
@@ -137,8 +117,8 @@ func TestManifestServiceCommitterErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &fakeManifestService{flushErr: tc.err, lookupErr: tc.err}
-			c := NewManifestServiceCommitter(svc)
+			svc := &fakeCoordClient{flushErr: tc.err, lookupErr: tc.err}
+			c := newTestClient(svc)
 
 			_, err := c.CommitFlush(context.Background(), manifest.FlushArgs{VChannel: "v"})
 			require.Error(t, err)
@@ -158,8 +138,8 @@ func TestManifestServiceCommitterErrors(t *testing.T) {
 	}
 }
 
-func TestManifestServiceCommitterGetRecoveryManifests(t *testing.T) {
-	svc := &fakeManifestService{lookupResp: []*pkindexpb.ManifestPointerEntry{
+func TestClientGetRecoveryManifests(t *testing.T) {
+	svc := &fakeCoordClient{lookupResp: []*pkindexpb.ManifestPointerEntry{
 		{Status: merr.Success(), Found: true, Pointer: &pkindexpb.ManifestPointer{Version: 3, BodyKey: "root/pk_index/7/11/v0/manifest/3"}},
 		{Status: merr.Success(), Found: false},
 		{Status: merr.Status(merr.WrapErrServiceInternalMsg("x"))},
@@ -168,7 +148,7 @@ func TestManifestServiceCommitterGetRecoveryManifests(t *testing.T) {
 		{Status: merr.Success(), Found: true},
 		{Status: nil, Found: false},
 	}}
-	c := NewManifestServiceCommitter(svc)
+	c := newTestClient(svc)
 	refs := []manifest.VChannelRef{
 		{CollectionID: 7, IndexID: 11, VChannel: "v0"},
 		{CollectionID: 7, IndexID: 11, VChannel: "v1"},
@@ -206,14 +186,10 @@ func TestManifestServiceCommitterGetRecoveryManifests(t *testing.T) {
 	}
 }
 
-func TestManifestServiceCommitterGetRecoveryManifestsCountMismatch(t *testing.T) {
-	svc := &fakeManifestService{lookupResp: []*pkindexpb.ManifestPointerEntry{{Status: merr.Success()}}}
-	c := NewManifestServiceCommitter(svc)
+func TestClientGetRecoveryManifestsCountMismatch(t *testing.T) {
+	svc := &fakeCoordClient{lookupResp: []*pkindexpb.ManifestPointerEntry{{Status: merr.Success()}}}
+	c := newTestClient(svc)
 	_, err := c.GetRecoveryManifests(context.Background(), []manifest.VChannelRef{{VChannel: "a"}, {VChannel: "b"}})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, manifest.ErrRejected), err)
-}
-
-func TestManifestServiceCommitterPanicsWithoutParts(t *testing.T) {
-	assert.Panics(t, func() { NewManifestServiceCommitter(nil) })
 }

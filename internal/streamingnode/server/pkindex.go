@@ -37,8 +37,8 @@ import (
 // The manifest service client and the object store satisfy the interfaces
 // the index package defines for them.
 var (
-	_ snpkindex.ManifestService = pkindexclient.Client(nil)
-	_ manifest.ObjectReader     = (*objstore.Store)(nil)
+	_ manifest.Committer     = pkindexclient.Client(nil)
+	_ manifest.ObjectReader  = (*objstore.Store)(nil)
 )
 
 // openFileReserve is the number of file descriptors kept for everything other
@@ -89,7 +89,7 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager, newManif
 		},
 		Store:           store,
 		StorageRootPath: cm.RootPath(),
-		Committer:       snpkindex.NewManifestServiceCommitter(manifestClient),
+		Committer:       manifestClient,
 		Reader:          store,
 		Sched:           nodescheduler.Get(),
 		Params:          snpkindex.ParamsFromConfig,
