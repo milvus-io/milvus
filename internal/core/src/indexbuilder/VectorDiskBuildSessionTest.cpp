@@ -155,11 +155,8 @@ TEST_F(VectorDiskBuildSessionTest, ValidRowsKeepOffsetsAfterMissingPrefix) {
         .metric_type_ = knowhere::metric::L2,
         .topk_ = 1};
     SearchResult result;
-    reader->Search(GenDataset(1, kDim, query.data()),
-                   params,
-                   BitsetView{},
-                   nullptr,
-                   result);
+    reader->Search(
+        GenDataset(1, kDim, query.data()), params, BitsetView{}, result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_.front(), id);
 }

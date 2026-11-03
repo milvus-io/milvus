@@ -247,8 +247,7 @@ CheckQuery(const Profile& profile,
     EXPECT_EQ(reader.Metric(), profile.metric);
     EXPECT_EQ(reader.KnowhereIndexType(), profile.type);
     SearchResult result;
-    reader.Search(
-        query, SearchParams(profile, range), BitsetView{}, nullptr, result);
+    reader.Search(query, SearchParams(profile, range), BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 1);
     EXPECT_EQ(result.unity_topK_, 4);
     ASSERT_EQ(result.seg_offsets_.size(), 4);
@@ -354,6 +353,14 @@ TEST_P(VectorFamilyTest, QueryAndRangeAfterArtifactLoad) {
         try {
             (void)cold->Count();
             FAIL() << "cancelled cold load unexpectedly succeeded";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        try {
+            SearchResult rejected;
+            cold_vector->Search(
+                query, SearchParams(profile, false), BitsetView{}, rejected);
+            FAIL() << "query ignored its reader's cancelled context";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), FollyCancel);
         }
@@ -709,7 +716,6 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     reader->Search(GenDataset(1, kDim, values.data()),
                    SearchParams(profile),
                    BitsetView(filter),
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 4);
     for (auto row : result.seg_offsets_) {
@@ -740,7 +746,7 @@ TEST(VectorFamilyEdgeTest, IVFFlatCCIteratorYieldsOffsetsAndDistances) {
     ASSERT_NE(reader, nullptr);
     auto query = GenDataset(1, kDim, values.data() + 100 * kDim);
     auto prepared = reader->PrepareSearchParams(SearchParams(profile));
-    auto iterators = reader->Iterators(query, prepared, BitsetView{}, nullptr);
+    auto iterators = reader->Iterators(query, prepared, BitsetView{});
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 1);
     auto& iterator = iterators.value()[0];

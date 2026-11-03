@@ -136,7 +136,7 @@ SearchOnSealedIndex(const FieldMeta& field,
 
     if (search_info.iterator_v2_info_.has_value()) {
         CachedSearchIterator cached_iter(
-            reader, dataset, search_info, search_bitset, op_context);
+            reader, dataset, search_info, search_bitset);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());
@@ -149,13 +149,11 @@ SearchOnSealedIndex(const FieldMeta& field,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      reader,
-                                                      op_context);
+                                                      reader);
     if (!use_iterator) {
         reader.Search(dataset,
                       milvus::exec::ProjectVectorSearchParams(search_info),
                       search_bitset,
-                      op_context,
                       search_result);
     }
     FinalizeVectorSearchOffsets(

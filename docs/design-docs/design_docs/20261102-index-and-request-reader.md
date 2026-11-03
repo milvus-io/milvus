@@ -229,3 +229,5 @@ JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings �
 临时向量构建也以 KnowhereEngine 为缓存 cell。InterimSealedIndexTranslator 从原始列构建 engine，segment 注册持有该 slot 的 VectorIndex；不再缓存请求 Reader。DataView 回调继续持有原始 chunk 的 pin，迭代器则通过 engine pin 保留整条生命周期。该路径保留不可淘汰策略与原有 warmup 行为。
 
 本地 Text 构建完成后直接把 TextIndexStorage 安装到缓存，并由 TextIndex 创建请求 Reader。Storage 持有 Tantivy snapshot、validity 和可选 mmap 目录；这条一次性构建路径保留同步 warmup 与不可淘汰策略，资源统计由 Storage 提供。
+
+向量 Search、Iterators 和 CalcDistByIDs 与标量查询一样，只使用 CreateReader 时绑定的 OpContext。sealed 的 IndexInventory 和 growing 的 snapshot pin 均按请求创建 Reader；查询执行层不再为这些方法另传上下文。返回的迭代器仍要求请求上下文与查询输入存活至迭代结束。

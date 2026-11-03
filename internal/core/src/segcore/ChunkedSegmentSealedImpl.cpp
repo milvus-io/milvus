@@ -7207,7 +7207,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     // Callers pass logical offsets, and knowhere's IdMap compacts them to
     // storage ids inside CalcDistByIDs (#50524).
     auto res = reader->CalcDistByIDs(
-        query_dataset, BitsetView(), seg_offsets, count, is_cosine, op_ctx);
+        query_dataset, BitsetView(), seg_offsets, count, is_cosine);
     if (!res.has_value()) {
         return false;
     }

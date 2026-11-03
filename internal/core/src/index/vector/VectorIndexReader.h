@@ -132,14 +132,12 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     Search(const DatasetPtr& dataset,
            const VectorSearchParams& params,
            const BitsetView& bitset,
-           milvus::OpContext* op_ctx,
            SearchResult& result) const override;
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,
-              const BitsetView& bitset,
-              milvus::OpContext* op_ctx) const override;
+              const BitsetView& bitset) const override;
 
     bool
     RefineEnabled() const override;
@@ -189,8 +187,7 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
                   const BitsetView& bitset,
                   const int64_t* labels,
                   size_t labels_len,
-                  bool is_cosine,
-                  milvus::OpContext* op_ctx) const override;
+                  bool is_cosine) const override;
 
     std::pair<std::vector<uint8_t>, std::vector<size_t>>
     GetEmbListByIds(const DatasetPtr& dataset,

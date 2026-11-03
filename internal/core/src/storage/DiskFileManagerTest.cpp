@@ -2239,11 +2239,8 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     search_info.topk_ = 2;
 
     SearchResult search_result;
-    vector.Search(query_dataset,
-                  search_info,
-                  milvus::BitsetView{},
-                  nullptr,
-                  search_result);
+    vector.Search(
+        query_dataset, search_info, milvus::BitsetView{}, search_result);
     EXPECT_EQ(search_result.total_nq_, num_rows);
     ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
     for (auto offset : search_result.seg_offsets_) {

@@ -216,7 +216,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                       *reader,
                       search_conf,
                       bitset,
-                      op_context,
                       search_result,
                       is_sparse);
         // A growing segment's only vector index is the interim index.

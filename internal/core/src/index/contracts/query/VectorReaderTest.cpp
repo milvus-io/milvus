@@ -167,8 +167,7 @@ TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
     const std::array<float, 2> query{0, 0};
     auto iterators = vector->Iterators(GenDataset(1, kDim, query.data()),
                                        {{"metric_type", "L2"}, {"ef", 64}},
-                                       BitsetView{},
-                                       nullptr);
+                                       BitsetView{});
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 1);
     EXPECT_EQ(loads, 2);
@@ -213,8 +212,7 @@ TEST(VectorIndexOwnershipTest, IteratorRetainsEngineAfterReadersAreReleased) {
     const std::array<float, 2> query{0, 0};
     auto iterators = vectors->Iterators(GenDataset(1, kDim, query.data()),
                                         {{"metric_type", "L2"}, {"ef", 64}},
-                                        BitsetView{},
-                                        nullptr);
+                                        BitsetView{});
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 1);
     auto iterator = std::move(iterators.value().front());
@@ -263,16 +261,15 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     const auto prepared = vectors->PrepareSearchParams(params);
     EXPECT_TRUE(prepared.is_object());
     const auto dataset = GenDataset(1, kDim, query.data());
-    auto iterators =
-        vectors->Iterators(dataset, prepared, BitsetView{}, nullptr);
+    auto iterators = vectors->Iterators(dataset, prepared, BitsetView{});
     if (iterators.has_value()) {
         EXPECT_EQ(iterators.value().size(), 1);
     } else {
         EXPECT_EQ(iterators.error(), knowhere::Status::not_implemented);
     }
     const int64_t refine_id = 2;
-    auto refined = vectors->CalcDistByIDs(
-        dataset, BitsetView{}, &refine_id, 1, false, nullptr);
+    auto refined =
+        vectors->CalcDistByIDs(dataset, BitsetView{}, &refine_id, 1, false);
     if (refined.has_value()) {
         EXPECT_EQ(refined.value()->GetRows(), 1);
     } else {
@@ -280,11 +277,8 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
         EXPECT_EQ(refined.error(), knowhere::Status::not_implemented);
     }
     SearchResult result;
-    vectors->Search(GenDataset(1, kDim, query.data()),
-                    params,
-                    BitsetView{},
-                    nullptr,
-                    result);
+    vectors->Search(
+        GenDataset(1, kDim, query.data()), params, BitsetView{}, result);
     ASSERT_EQ(result.seg_offsets_.size(), 3);
     ASSERT_EQ(result.distances_.size(), 3);
     EXPECT_EQ(result.total_nq_, 1);
@@ -296,20 +290,16 @@ TEST(VectorReaderContractTest, SearchAndRetrievalUseLogicalRowIds) {
     VectorSearchParams zero_topk = params;
     zero_topk.topk_ = 0;
     SearchResult invalid_result;
+    EXPECT_ANY_THROW(
+        vectors->Search(dataset, zero_topk, BitsetView{}, invalid_result));
     EXPECT_ANY_THROW(vectors->Search(
-        dataset, zero_topk, BitsetView{}, nullptr, invalid_result));
-    EXPECT_ANY_THROW(vectors->Search(GenDataset(1, 1, query.data()),
-                                     params,
-                                     BitsetView{},
-                                     nullptr,
-                                     invalid_result));
+        GenDataset(1, 1, query.data()), params, BitsetView{}, invalid_result));
 
     const std::array<uint8_t, 1> excluded{1U};
     SearchResult filtered;
     vectors->Search(GenDataset(1, kDim, query.data()),
                     params,
                     BitsetView(excluded.data(), kLogicalRows),
-                    nullptr,
                     filtered);
     ASSERT_EQ(filtered.seg_offsets_.size(), 3);
     EXPECT_EQ(filtered.seg_offsets_[0], 2);
@@ -420,11 +410,8 @@ TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
         .topk_ = 2,
     };
     SearchResult result;
-    vectors->Search(GenDataset(1, kDim, query.data()),
-                    params,
-                    BitsetView{},
-                    nullptr,
-                    result);
+    vectors->Search(
+        GenDataset(1, kDim, query.data()), params, BitsetView{}, result);
     ASSERT_EQ(result.seg_offsets_.size(), 2);
     EXPECT_EQ(result.seg_offsets_[0], INVALID_SEG_OFFSET);
     EXPECT_EQ(result.seg_offsets_[1], INVALID_SEG_OFFSET);
@@ -434,8 +421,7 @@ TEST(VectorReaderContractTest, AllNullRowsRemainInLogicalValidityDomain) {
     const auto iterators =
         vectors->Iterators(GenDataset(1, kDim, query.data()),
                            vectors->PrepareSearchParams(params),
-                           BitsetView{},
-                           nullptr);
+                           BitsetView{});
     ASSERT_TRUE(iterators.has_value());
     ASSERT_EQ(iterators.value().size(), 1);
 }

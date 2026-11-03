@@ -52,6 +52,7 @@ struct VectorSearchParams {
     tracer::TraceContext trace_ctx_;
 };
 
+/** @brief Vector operations use the context bound by IIndex::CreateReader. */
 class IVectorReader {
  public:
     virtual ~IVectorReader() = default;
@@ -60,7 +61,6 @@ class IVectorReader {
     Search(const DatasetPtr& dataset,
            const VectorSearchParams& params,
            const BitsetView& bitset,
-           milvus::OpContext* op_ctx,
            SearchResult& result) const = 0;
 
     // Iterators retain their exact engine pin, including the IdMap and file
@@ -68,8 +68,7 @@ class IVectorReader {
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,
-              const BitsetView& bitset,
-              milvus::OpContext* op_ctx) const = 0;
+              const BitsetView& bitset) const = 0;
 
     virtual bool
     RefineEnabled() const = 0;
@@ -133,8 +132,7 @@ class IVectorReader {
                   const BitsetView& bitset,
                   const int64_t* labels,
                   size_t labels_len,
-                  bool is_cosine,
-                  milvus::OpContext* op_ctx) const = 0;
+                  bool is_cosine) const = 0;
 
     // VECTOR_ARRAY retrieval returns concatenated vectors and one terminal
     // offset after the requested lists.

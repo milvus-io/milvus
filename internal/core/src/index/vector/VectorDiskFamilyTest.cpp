@@ -425,7 +425,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false, bool cached = false) {
     };
     auto query = GenDataset(2, kDim, values.data() + 100 * kDim);
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     ASSERT_EQ(result.seg_offsets_.size(), 8);
     EXPECT_EQ(result.unity_topK_, 4);
@@ -436,7 +436,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false, bool cached = false) {
     params.search_params_[knowhere::meta::RADIUS] = 0.2;
     params.search_params_[knowhere::meta::RANGE_FILTER] = 0.1;
     SearchResult range_result;
-    reader->Search(query, params, BitsetView{}, nullptr, range_result);
+    reader->Search(query, params, BitsetView{}, range_result);
     EXPECT_EQ(range_result.total_nq_, 2);
     EXPECT_EQ(range_result.seg_offsets_.size(), 8);
     if constexpr (std::is_same_v<T, float>) {
@@ -794,11 +794,8 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
         .topk_ = 4,
     };
     SearchResult result;
-    EXPECT_ANY_THROW(reader->Search(GenDataset(1, kDim, values.data()),
-                                    params,
-                                    BitsetView{},
-                                    nullptr,
-                                    result));
+    EXPECT_ANY_THROW(reader->Search(
+        GenDataset(1, kDim, values.data()), params, BitsetView{}, result));
 }
 
 TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
@@ -847,7 +844,7 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
         .topk_ = 4,
     };
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.unity_topK_, 4);
     EXPECT_EQ(result.seg_offsets_.size(), 8);
@@ -935,7 +932,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data()),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    unfiltered_result);
     ASSERT_EQ(unfiltered_result.seg_offsets_.size(), 1);
     EXPECT_GE(unfiltered_result.seg_offsets_[0], 0);
@@ -948,7 +944,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data() + allowed * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], allowed);

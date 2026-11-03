@@ -213,16 +213,14 @@ class FailingIteratorReader final : public index::IVectorReader {
     Search(const DatasetPtr& dataset,
            const index::VectorSearchParams& params,
            const BitsetView& filter,
-           milvus::OpContext* ctx,
            SearchResult& result) const override {
-        reader_->Search(dataset, params, filter, ctx, result);
+        reader_->Search(dataset, params, filter, result);
     }
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr&,
               const knowhere::Json& params,
-              const BitsetView&,
-              milvus::OpContext*) const override {
+              const BitsetView&) const override {
         received = params;
         if (unsupported_status) {
             return knowhere::
@@ -294,10 +292,8 @@ class FailingIteratorReader final : public index::IVectorReader {
                   const BitsetView& filter,
                   const int64_t* labels,
                   size_t count,
-                  bool cosine,
-                  milvus::OpContext* ctx) const override {
-        return reader_->CalcDistByIDs(
-            dataset, filter, labels, count, cosine, ctx);
+                  bool cosine) const override {
+        return reader_->CalcDistByIDs(dataset, filter, labels, count, cosine);
     }
     std::pair<std::vector<uint8_t>, std::vector<size_t>>
     GetEmbListByIds(const DatasetPtr& dataset,

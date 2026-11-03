@@ -319,7 +319,6 @@ TEST(CApiTest, LoadIndexSearch) {
     vectors->Search(query_dataset,
                     {conf, knowhere::metric::L2, TOPK, {}},
                     milvus::BitsetView{},
-                    nullptr,
                     loaded_result);
     ASSERT_EQ(loaded_result.seg_offsets_.size(), num_query * TOPK);
     ASSERT_EQ(loaded_result.distances_.size(), num_query * TOPK);
@@ -574,7 +573,6 @@ Test_Indexing_Without_Predicate() {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -708,7 +706,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -839,7 +836,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -972,7 +968,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1103,7 +1098,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1234,7 +1228,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1369,7 +1362,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1504,7 +1496,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1639,7 +1630,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1784,7 +1774,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();

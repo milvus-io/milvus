@@ -1279,7 +1279,7 @@ TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
         1,
         {}};
     SearchResult result;
-    reader->Search(query, search_params, nullptr, nullptr, result);
+    reader->Search(query, search_params, nullptr, result);
     ASSERT_EQ(result.distances_.size(), 1);
     EXPECT_FLOAT_EQ(result.distances_.front(), 0.0F);
     ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
@@ -1382,13 +1382,13 @@ TEST_P(SealedCardinalWarmupTest, WarmupAndFirstSearch) {
         1,
         {}};
     SearchResult result;
-    reader->Search(query, search_params, nullptr, nullptr, result);
+    reader->Search(query, search_params, nullptr, result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_.front(), 0);
     ASSERT_EQ(result.distances_.size(), 1);
     // Cardinal returns quantized distances; compare cold and warm searches.
     SearchResult warmed_result;
-    reader->Search(query, search_params, nullptr, nullptr, warmed_result);
+    reader->Search(query, search_params, nullptr, warmed_result);
     EXPECT_EQ(warmed_result.seg_offsets_, result.seg_offsets_);
     ASSERT_EQ(warmed_result.distances_.size(), 1);
     EXPECT_FLOAT_EQ(warmed_result.distances_.front(),
@@ -1564,7 +1564,7 @@ TEST(SealedLazyIndexSlot, SparseInvertedArtifactStaysColdUntilFirstSearch) {
         1,
         {}};
     SearchResult result;
-    reader->Search(query, search_params, nullptr, nullptr, result);
+    reader->Search(query, search_params, nullptr, result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     ASSERT_EQ(result.distances_.size(), 1);
     EXPECT_EQ(result.seg_offsets_.front(), 2);
@@ -1790,7 +1790,7 @@ TEST(Sealed, without_predicate) {
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, result);
     auto ref_result = SearchResultToJson(result);
 
     LoadIndexInfo load_info{};
@@ -1972,7 +1972,7 @@ TEST(Sealed, with_predicate) {
     searchInfo.metric_type_ = knowhere::metric::L2;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, result);
 
     LoadIndexInfo load_info{};
     load_info.field_id = fake_id.get();
@@ -3985,7 +3985,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     searchInfo.metric_type_ = metric_type;
     searchInfo.search_params_ = search_conf;
     SearchResult result;
-    vec_index->Search(query_dataset, searchInfo, nullptr, nullptr, result);
+    vec_index->Search(query_dataset, searchInfo, nullptr, result);
     auto ref_result = SearchResultToJson(result);
     std::cout << ref_result.dump(1) << std::endl;
     EXPECT_EQ(result.total_nq_, 2);

@@ -620,7 +620,6 @@ TEST(GrowingIndexContractTest, VectorPinFreezesLogicalAndPhysicalPrefixes) {
     first_vector->Search(GenDataset(1, dim, query.data()),
                          search_params,
                          BitsetView{},
-                         nullptr,
                          old_search);
     ASSERT_EQ(old_search.seg_offsets_.size(), 4);
     for (const auto id : old_search.seg_offsets_) {
@@ -630,7 +629,6 @@ TEST(GrowingIndexContractTest, VectorPinFreezesLogicalAndPhysicalPrefixes) {
     latest_vector->Search(GenDataset(1, dim, query.data()),
                           search_params,
                           BitsetView{},
-                          nullptr,
                           new_search);
     ASSERT_EQ(new_search.seg_offsets_.size(), 4);
     EXPECT_EQ(new_search.seg_offsets_[0], 5);

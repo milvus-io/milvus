@@ -121,8 +121,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 const DatasetPtr dataset,
                                 SearchResult& search_result,
                                 const BitsetView& bitset,
-                                const index::IVectorReader& reader,
-                                milvus::OpContext* op_context = nullptr) {
+                                const index::IVectorReader& reader) {
     // when we use group by, we will use vector iterator to continously get results and group on them
     // when we use iterative filtered search, we will use vector iterator to continously get results and check scalar attr on them
     // until we get valid topk results
@@ -132,8 +131,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 ProjectVectorSearchParams(search_info));
             query::ApplyStrictGroupSkipRefine(search_info, nq, search_conf);
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-                iterators_val =
-                    reader.Iterators(dataset, search_conf, bitset, op_context);
+                iterators_val = reader.Iterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
                     PositivelyRelated(search_info.metric_type_);

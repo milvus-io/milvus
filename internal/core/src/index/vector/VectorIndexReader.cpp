@@ -339,16 +339,14 @@ void
 VectorIndexReader::Search(const DatasetPtr& dataset,
                           const VectorSearchParams& params,
                           const BitsetView& bitset,
-                          milvus::OpContext* op_ctx,
                           SearchResult& result) const {
-    op_ctx = op_ctx ? op_ctx : op_ctx_;
-    const auto engine_pin = index_->PinEngine(op_ctx);
+    const auto engine_pin = index_->PinEngine(op_ctx_);
     const auto& engine = *engine_pin;
     if (!IsGrowingGeneration()) {
         if (index_->backend_ == Backend::Disk) {
-            SearchDisk(engine, dataset, params, bitset, op_ctx, result);
+            SearchDisk(engine, dataset, params, bitset, op_ctx_, result);
         } else {
-            SearchMemory(engine, dataset, params, bitset, op_ctx, result);
+            SearchMemory(engine, dataset, params, bitset, op_ctx_, result);
         }
         return;
     }
@@ -360,16 +358,14 @@ VectorIndexReader::Search(const DatasetPtr& dataset,
     TargetBitmap prefix_storage;
     const auto bounded = BoundSearchBitset(bitset, prefix_storage);
     const auto effective = EffectiveSearchParams(engine, params);
-    SearchMemory(engine, dataset, effective, bounded, op_ctx, result);
+    SearchMemory(engine, dataset, effective, bounded, op_ctx_, result);
 }
 
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorIndexReader::Iterators(const DatasetPtr& dataset,
                              const knowhere::Json& json,
-                             const BitsetView& bitset,
-                             milvus::OpContext* op_ctx) const {
-    op_ctx = op_ctx ? op_ctx : op_ctx_;
-    const auto engine_pin = index_->PinEngine(op_ctx);
+                             const BitsetView& bitset) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
     const auto& engine = *engine_pin;
     const auto shape = detail::ValidateQueryDataset(
         dataset, engine.PhysicalType(), engine.Dim());
@@ -378,7 +374,7 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
     }
     const auto bounded = BoundIteratorBitset(bitset);
     auto result =
-        engine.native_index.AnnIterator(dataset, json, bounded, false, op_ctx);
+        engine.native_index.AnnIterator(dataset, json, bounded, false, op_ctx_);
     if (!result.has_value()) {
         return result;
     }
@@ -647,14 +643,12 @@ VectorIndexReader::CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                                  const BitsetView& bitset,
                                  const int64_t* labels,
                                  size_t labels_len,
-                                 bool is_cosine,
-                                 milvus::OpContext* op_ctx) const {
-    op_ctx = op_ctx ? op_ctx : op_ctx_;
-    const auto engine_pin = index_->PinEngine(op_ctx);
+                                 bool is_cosine) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
     const auto& engine = *engine_pin;
     ValidateGenerationIds(engine, labels, labels_len, "calculate distance");
     return engine.native_index.CalcDistByIDs(
-        query_dataset, bitset, labels, labels_len, is_cosine, op_ctx);
+        query_dataset, bitset, labels, labels_len, is_cosine, op_ctx_);
 }
 
 std::pair<std::vector<uint8_t>, std::vector<size_t>>
