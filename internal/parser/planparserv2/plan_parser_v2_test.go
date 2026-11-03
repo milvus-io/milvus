@@ -1758,6 +1758,52 @@ func TestExpr_BinaryArith(t *testing.T) {
 	}
 }
 
+// TestExpr_ArithTypeMismatchErrorDetail asserts that modulo/bitwise
+// type-mismatch errors name the offending field and its actual data type,
+// instead of a generic "can only apply on integer types" message that gives
+// the user no way to tell which field caused the error.
+func TestExpr_ArithTypeMismatchErrorDetail(t *testing.T) {
+	schema := newTestSchema(true)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	t.Run("modulo on a non-integer field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `DoubleField % 10 == 1`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo requires an integer field")
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
+
+	t.Run("bitwise op on a non-integer field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `(DoubleField & 4) == 4`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
+
+	t.Run("shift op on a non-arithmetic field names the field and its type", func(t *testing.T) {
+		// VarChar fails the broader canArithmetic check before reaching the
+		// integer-only check, but it must still name the offending field.
+		_, err := ParseExpr(helper, `(VarCharField << 1) == 0`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot perform arithmetic")
+		assert.Contains(t, err.Error(), "field 'VarCharField' is VarChar")
+	})
+
+	t.Run("shift op on an integer-incompatible numeric field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `(DoubleField << 1) == 0`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
+
+	t.Run("bitnot on a non-integer field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `~DoubleField == 0`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
+}
+
 // TestExpr_BitwiseArith asserts the generated plan structure for bitwise
 // operators, not merely that the expression parses. A bitwise op over a field
 // must fuse into a BinaryArithOpEvalRangeExpr carrying the matching ArithOpType,
