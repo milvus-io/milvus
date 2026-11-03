@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -726,15 +727,10 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Will load bloom filter with sealed segments
+	// Regular sealed workers do not load PK candidates.
+	suite.Require().Len(segments, suite.segmentNum)
 	for _, segment := range segments {
-		for pk := 0; pk < 100; pk++ {
-			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.Require().True(pkReady)
-			exist := segment.MayPkExist(lc)
-			suite.Require().True(exist)
-		}
+		suite.False(segment.PkCandidateExist())
 	}
 
 	// Load growing
@@ -1097,6 +1093,11 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
+	for _, field := range suite.schema.GetFields() {
+		if !field.GetIsPrimaryKey() && field.GetFieldID() >= common.StartOfUserFieldID {
+			field.ExternalField = field.GetName()
+		}
+	}
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	msgLength := 100
@@ -1130,6 +1131,118 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	suite.Require().NoError(err)
 	suite.Require().Len(segments, 1)
 	suite.Equal(int64(msgLength-2), segments[0].RowNum())
+	suite.False(segments[0].PkCandidateExist())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() {
+	ctx := context.Background()
+	suite.schema.ExternalSource = "s3://bucket/source"
+	suite.schema.ExternalSpec = `{"format":"milvus-table"}`
+	pkField := GetPkField(suite.schema)
+	pkField.ExternalField = pkField.GetName()
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+
+	loader := suite.loader.(*segmentLoader)
+	// Isolate candidate loading from segcore and delta-file I/O.
+	loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+	defer loadData.UnPatch()
+	loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+	defer loadDeltas.UnPatch()
+	loadBF := mockey.Mock((*segmentLoader).loadSingleBloomFilterSet).
+		Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+	defer loadBF.UnPatch()
+
+	segments, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+		SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	})
+	suite.Require().NoError(err)
+	suite.Require().Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+	suite.Zero(loadBF.Times())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadGrowingPKCandidateFallback() {
+	for i, tc := range []struct {
+		name       string
+		external   bool
+		realPK     bool
+		disabled   bool
+		loadError  bool
+		emptyStats bool
+	}{
+		{name: "internal"},
+		{name: "internal_disabled", disabled: true},
+		{name: "internal_load_error", loadError: true},
+		{name: "virtual_pk", external: true},
+		{name: "real_pk", external: true, realPK: true},
+		{name: "real_pk_disabled", external: true, realPK: true, disabled: true},
+		{name: "real_pk_load_error", external: true, realPK: true, loadError: true},
+		{name: "real_pk_missing_stats", external: true, realPK: true, emptyStats: true},
+	} {
+		suite.Run(tc.name, func() {
+			ctx := context.Background()
+			schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+			schema.Version = int32(i + 1)
+			if tc.external {
+				schema.ExternalSource = "s3://bucket/source"
+				schema.ExternalSpec = `{"format":"milvus-table"}`
+				for _, field := range schema.GetFields() {
+					if !field.GetIsPrimaryKey() && field.GetFieldID() >= common.StartOfUserFieldID {
+						field.ExternalField = field.GetName()
+					}
+				}
+				if tc.realPK {
+					GetPkField(schema).ExternalField = GetPkField(schema).GetName()
+				} else {
+					GetPkField(schema).Name = common.VirtualPKFieldName
+				}
+			}
+			suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, schema, uint64(i+1)))
+			cfg := &paramtable.Get().CommonCfg.BloomFilterEnabled
+			oldValue := cfg.GetValue()
+			suite.Require().NoError(paramtable.Get().Save(cfg.Key, fmt.Sprint(!tc.disabled)))
+			defer paramtable.Get().Save(cfg.Key, oldValue)
+
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+			defer loadDeltas.UnPatch()
+			bfs := pkoracle.NewBloomFilterSet(suite.segmentID, suite.partitionID, SegmentTypeGrowing)
+			if !tc.emptyStats {
+				bfs.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)})
+			}
+			var loadErr error
+			if tc.loadError {
+				loadErr = errors.New("stats read failed")
+			}
+			loadBF := mockey.Mock((*segmentLoader).loadSingleBloomFilterSet).Return(bfs, loadErr).Build()
+			defer loadBF.UnPatch()
+
+			segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
+				SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			})
+			if tc.loadError || tc.emptyStats {
+				suite.Require().Error(err)
+				suite.Equal(1, loadBF.Times())
+				return
+			}
+			suite.Require().NoError(err)
+			suite.Require().Len(segments, 1)
+			defer suite.manager.Segment.Remove(ctx, suite.segmentID, querypb.DataScope_All)
+			suite.Equal(!tc.disabled || tc.realPK, segments[0].PkCandidateExist())
+			if tc.external && !tc.realPK {
+				suite.IsType(&pkoracle.ExternalSegmentCandidate{}, segments[0].(*LocalSegment).pkCandidate)
+			}
+			if tc.realPK || (!tc.external && !tc.disabled) {
+				suite.Same(bfs, segments[0].(*LocalSegment).pkCandidate)
+				suite.Equal(1, loadBF.Times())
+			} else {
+				suite.Zero(loadBF.Times())
+			}
+		})
+	}
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
