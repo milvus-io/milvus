@@ -6337,7 +6337,7 @@ EnSegmentPath(const std::string& name) {
 // Builds the element-level index of `layout` through the production
 // materializer: it flattens the stored vectors and passes the element-domain
 // validity, so the IdMap maps internal ids to logical element ids.
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 BuildElementNullableIndex(const ElementNullableLayout& layout,
                           const std::string& index_type,
                           Config params) {
@@ -6399,13 +6399,13 @@ BuildElementNullableIndex(const ElementNullableLayout& layout,
 inline void
 LoadElementNullableIndex(SegmentSealed* segment,
                          FieldId vec,
-                         index::IIndexReaderBasePtr reader) {
+                         BuiltTestIndex built) {
     LoadIndexInfo info{};
     info.field_id = vec.get();
-    SetTestIndexMetadata(info, *reader, milvus::index::families::kVectorMem);
-    info.index_params = GenIndexParams(reader.get());
+    SetTestIndexMetadata(info, *built, milvus::index::families::kVectorMem);
+    info.index_params = GenIndexParams(built.get());
     info.index_params["metric_type"] = knowhere::metric::L2;
-    info.cache_index = CreateTestCacheIndex("test", std::move(reader));
+    info.index = CreateTestIndex("test", std::move(built));
     info.field_type = DataType::VECTOR_ARRAY;
     info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(info);
