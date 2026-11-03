@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -465,9 +467,12 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	})
 	s.NoError(err)
 
-	// test exec timeout
+	// test exec canceled: aborts immediately without retrying or blacklisting
 	s.mgr.ExpectedCalls = nil
 	s.lbBalancer.ExpectedCalls = nil
+	// earlier scenarios in this test blacklisted nodes; clear so the
+	// not-blacklisted assertion below judges only this scenario.
+	s.lbPolicy.blacklist.Clear(s.channels[0])
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil)
 	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, s.channels[0]).Return(s.nodes, nil).Maybe()
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
@@ -478,7 +483,6 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	s.qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.Canceled).Once()
-	s.qn.EXPECT().Search(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
 		Db:             s.dbName,
 		CollectionName: s.collectionName,
@@ -491,6 +495,7 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 		},
 	})
 	s.True(merr.IsCanceledOrTimeout(err))
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(s.channels[0]), int64(1))
 }
 
 func (s *LBPolicySuite) TestExecuteWithRetryFieldNotLoadedUsesRequestLevelRetry() {
@@ -741,6 +746,166 @@ func (s *LBPolicySuite) TestExecuteWithRetryUnsupportedSkipsBlacklist() {
 	// not retried across replicas despite retryOnReplica=3
 	s.Equal(1, execCount)
 	// the serving node is not blacklisted: every replica would answer the same
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+// TestExecuteWithRetryCancelSkipsBlacklist verifies that a client-canceled
+// request -- the caller's ctx is already done, so retrying on any replica
+// cannot help and the serving node did nothing wrong -- aborts immediately
+// without retrying and without blacklisting the (healthy) delegator.
+func (s *LBPolicySuite) TestExecuteWithRetryCancelSkipsBlacklist() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Maybe()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Maybe()
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(context.Canceled, "search canceled on QueryNode %d", nodeID)
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, context.Canceled)
+	// not retried across replicas despite retryOnReplica=3
+	s.Equal(1, execCount)
+	// the healthy serving node is not blacklisted for the caller's cancel
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+// TestExecuteWithRetryTimeoutSkipsBlacklist is the deadline counterpart of
+// TestExecuteWithRetryCancelSkipsBlacklist: once the caller's deadline has
+// fired the shared ctx is done, so retrying on any replica cannot succeed and
+// the serving node is not at fault.
+func (s *LBPolicySuite) TestExecuteWithRetryTimeoutSkipsBlacklist() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Maybe()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Maybe()
+
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			return errors.Wrapf(context.DeadlineExceeded, "search timed out on QueryNode %d", nodeID)
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, context.DeadlineExceeded)
+	// not retried across replicas despite retryOnReplica=3
+	s.Equal(1, execCount)
+	// the healthy serving node is not blacklisted for the caller's timeout
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+// TestExecuteWithRetryGetClientCancelSkipsBlacklist verifies that a client
+// cancel surfacing while acquiring the delegator client (getClient returns
+// ctx.Err() as soon as the request dies) aborts without blacklisting the node,
+// just like the same cancel surfacing at Exec time.
+func (s *LBPolicySuite) TestExecuteWithRetryGetClientCancelSkipsBlacklist() {
+	ctx := context.Background()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, context.Canceled).Maybe()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Maybe()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Maybe()
+
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			s.T().Fatalf("Exec must not run when getting the client already fails with a cancel")
+			return nil
+		},
+	})
+
+	s.Error(err)
+	s.ErrorIs(err, context.Canceled)
+	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+// TestExecuteWithRetryGrpcCancelSkipsBlacklist pins the real production shape
+// of a client cancel landing mid-RPC: grpc returns a codes.Canceled status
+// error that does NOT unwrap to context.Canceled, so only the shared ctx being
+// done testifies that the caller stopped. The healthy delegator must still not
+// be blacklisted, and the request must not be retried.
+func (s *LBPolicySuite) TestExecuteWithRetryGrpcCancelSkipsBlacklist() {
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil).Maybe()
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything).Maybe()
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything).Maybe()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	execCount := 0
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db:             s.dbName,
+		CollectionName: s.collectionName,
+		CollectionID:   s.collectionID,
+		Channel:        channel,
+		Nq:             1,
+		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+			execCount++
+			// the client cancels while the QueryNode RPC is in flight
+			cancel()
+			return status.Error(codes.Canceled, "context canceled")
+		},
+	})
+
+	s.Error(err)
+	s.Equal(codes.Canceled, status.Convert(err).Code())
+	// not retried across replicas despite retryOnReplica=3
+	s.Equal(1, execCount)
+	// the healthy serving node is not blacklisted for the caller's cancel
 	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
 }
 
