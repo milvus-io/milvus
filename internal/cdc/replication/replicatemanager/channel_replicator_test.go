@@ -210,6 +210,90 @@ func TestChannelReplicatorConsumeLoopReturnsScannerError(t *testing.T) {
 	}
 }
 
+func TestChannelReplicatorConsumeLoopClosedMessageChannelWithScanner(t *testing.T) {
+	scannerDone := make(chan struct{})
+	scannerDoneCalls := make(chan struct{}, 2)
+	scannerErr := errors.New("source scanner failed")
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Done().
+		Run(func() { scannerDoneCalls <- struct{}{} }).
+		Return(scannerDone).Twice()
+	scanner.EXPECT().Error().Return(scannerErr).Once()
+
+	replicator := &channelReplicator{
+		channel:       &meta.ReplicateChannel{},
+		msgChan:       make(adaptor.ChanMessageHandler),
+		msgScanner:    scanner,
+		asyncNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- replicator.startConsumeLoop()
+	}()
+
+	select {
+	case <-scannerDoneCalls:
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not initialize scanner completion channel")
+	}
+	close(replicator.msgChan)
+	select {
+	case <-scannerDoneCalls:
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not wait for scanner completion after channel close")
+	}
+	close(scannerDone)
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, scannerErr)
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not return the scanner error")
+	}
+}
+
+func TestChannelReplicatorConsumeLoopClosedMessageChannelCancellation(t *testing.T) {
+	scannerDone := make(chan struct{})
+	scannerDoneCalls := make(chan struct{}, 2)
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Done().
+		Run(func() { scannerDoneCalls <- struct{}{} }).
+		Return(scannerDone).Twice()
+
+	replicator := &channelReplicator{
+		channel:       &meta.ReplicateChannel{},
+		msgChan:       make(adaptor.ChanMessageHandler),
+		msgScanner:    scanner,
+		asyncNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- replicator.startConsumeLoop()
+	}()
+
+	select {
+	case <-scannerDoneCalls:
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not initialize scanner completion channel")
+	}
+	close(replicator.msgChan)
+	select {
+	case <-scannerDoneCalls:
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not wait for scanner completion after channel close")
+	}
+	replicator.asyncNotifier.Cancel()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not stop after cancellation")
+	}
+}
+
 func TestChannelReplicatorInitMetricFromInitializedCheckpoint(t *testing.T) {
 	source, target := "TestInitMetric-source", "TestInitMetric-target"
 	checkpoint := tsoutil.ComposeTSByTime(time.Now().Add(-5 * time.Minute))
