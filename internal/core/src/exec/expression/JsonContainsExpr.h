@@ -496,16 +496,14 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
-    bool
-    SupportsJsonStatsExecPath() const override {
-        return true;
-    }
-
     void
     DetermineExecPath() override {
-        // JsonStats is the fallback applied by EnsureExecPathDetermined()
-        // when no index below serves this expression; see SegmentExpr::
-        // FallbackToJsonStatsIfEligible().
+        if (CanUseJsonStatsAtInit()) {
+            // shortcut: array projection validity is unavailable before pinning
+            // on this branch; keep stats until metadata can select a safe index.
+            exec_path_ = ExprExecPath::JsonStats;
+            return;
+        }
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -524,21 +522,17 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         }
         SegmentExpr::DetermineExecPath();
         if (exec_path_ != ExprExecPath::ScalarIndex ||
-            expr_->column_.data_type_ != DataType::JSON) {
+            expr_->column_.data_type_ != DataType::JSON ||
+            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
             return;
         }
-        if (!PinnedJsonIndexIsFlat() && CanUseJsonStatsAtInit() &&
-            pinned_index_[0]->Type() != index::ASCENDING_SORT) {
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
-        if (value_type_ == DataType::INT64 && !PinnedJsonIndexIsFlat() &&
-            std::any_of(expr_->vals_.begin(),
-                        expr_->vals_.end(),
-                        [this](const auto& value) {
-                            return !IsInt64SafeForJsonDoubleIndex(
-                                value.int64_val());
-                        })) {
+        const auto has_unsafe_int_literal = std::any_of(
+            expr_->vals_.begin(),
+            expr_->vals_.end(),
+            [this](const auto& value) {
+                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
+            });
+        if (has_unsafe_int_literal) {
             exec_path_ = ExprExecPath::RawData;
         }
     }
