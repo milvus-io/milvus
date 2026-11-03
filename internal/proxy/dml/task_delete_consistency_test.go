@@ -50,7 +50,7 @@ func TestDeleteQuerySnapshotConsistency(t *testing.T) {
 			plan, fields := []byte{1, 2, 3}, []int64{100, 1}
 			execute := runner.getStreamingQueryAndDelteFunc(plan, fields)
 			// Fan-out and a retry must construct independent requests with
-			// the same guarantee, and let Strong reads select their snapshot.
+			// the same guarantee, and let the delegator select their snapshot.
 			channels := []string{"p0_20v0", "p1_20v1", "p0_20v0"}
 			for _, channel := range channels {
 				require.ErrorIs(t, execute(context.Background(), 40, &deleteConsistencyQueryClient{}, channel), context.Canceled)
@@ -60,11 +60,7 @@ func TestDeleteQuerySnapshotConsistency(t *testing.T) {
 				inner := request.GetReq()
 				require.Equal(t, consistency, inner.GetConsistencyLevel())
 				require.Equal(t, dql.ParseGuaranteeTsFromConsistency(runner.ts, runner.ts, consistency), inner.GetGuaranteeTimestamp())
-				if consistency == commonpb.ConsistencyLevel_Strong {
-					require.Zero(t, inner.GetMvccTimestamp())
-				} else {
-					require.Equal(t, runner.ts, inner.GetMvccTimestamp(), "preserve non-Strong snapshot behavior")
-				}
+				require.Zero(t, inner.GetMvccTimestamp())
 				require.Equal(t, runner.collectionID, inner.GetCollectionID())
 				require.Equal(t, runner.partitionIDs, inner.GetPartitionIDs())
 				require.Equal(t, plan, inner.GetSerializedExprPlan())

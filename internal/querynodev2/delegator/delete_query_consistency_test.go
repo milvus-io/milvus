@@ -17,25 +17,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-func TestDeleteQueryStreamStrongSnapshot(t *testing.T) {
+func TestDeleteQueryStreamSnapshot(t *testing.T) {
 	paramtable.Init()
 	oldWAL := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	defer streaming.SetWALForTest(oldWAL)
 	for _, tc := range []struct {
-		name        string
-		mvcc, tsafe uint64
-		unavailable bool
-		wait        bool
+		name                   string
+		consistency            commonpb.ConsistencyLevel
+		guarantee, mvcc, tsafe uint64
+		unavailable            bool
+		wait                   bool
 	}{
-		{name: "consumed writes need no new heartbeat", tsafe: 120},
-		{name: "explicit snapshot still waits", mvcc: 1000, tsafe: 120, wait: true},
-		{name: "unconsumed completed write still waits", tsafe: 110, wait: true},
-		{name: "unavailable local WAL falls back", tsafe: 120, unavailable: true, wait: true},
-		{name: "fallback succeeds after original guarantee", tsafe: 1000, unavailable: true},
+		{name: "consumed writes need no new heartbeat", guarantee: 1000, tsafe: 120},
+		{name: "explicit snapshot still waits", guarantee: 1000, mvcc: 1000, tsafe: 120, wait: true},
+		{name: "unconsumed completed write still waits", guarantee: 1000, tsafe: 110, wait: true},
+		{name: "unavailable local WAL falls back", guarantee: 1000, tsafe: 120, unavailable: true, wait: true},
+		{name: "fallback succeeds after original guarantee", guarantee: 1000, tsafe: 1000, unavailable: true},
+		{name: "bounded uses consumed snapshot", consistency: commonpb.ConsistencyLevel_Bounded, guarantee: 100, tsafe: 110},
+		{name: "bounded still waits for guarantee", consistency: commonpb.ConsistencyLevel_Bounded, guarantee: 100, tsafe: 90, wait: true},
+		{name: "eventual uses consumed snapshot", consistency: commonpb.ConsistencyLevel_Eventually, guarantee: 1, tsafe: 110},
+		{name: "session does not lower guarantee", consistency: commonpb.ConsistencyLevel_Session, guarantee: 1000, tsafe: 120, wait: true},
+		{name: "session can use later snapshot", consistency: commonpb.ConsistencyLevel_Session, guarantee: 1000, tsafe: 1100},
+		{name: "customized does not lower guarantee", consistency: commonpb.ConsistencyLevel_Customized, guarantee: 1000, tsafe: 120, wait: true},
+		{name: "customized uses consumed snapshot", consistency: commonpb.ConsistencyLevel_Customized, guarantee: 1000, tsafe: 1000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			walCalls := 0
 			patch := mockey.Mock(mockey.GetMethod(streaming.WAL().Local(), "GetLatestMVCCTimestampIfLocal")).To(func(context.Context, string) (uint64, error) {
+				walCalls++
 				if tc.unavailable {
 					return 0, context.Canceled
 				}
@@ -49,8 +59,8 @@ func TestDeleteQueryStreamStrongSnapshot(t *testing.T) {
 			sd.tsCond = syncutil.NewContextCond(&sync.Mutex{})
 			req := &querypb.QueryRequest{
 				Req: &internalpb.RetrieveRequest{
-					ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
-					GuaranteeTimestamp: 1000,
+					ConsistencyLevel:   tc.consistency,
+					GuaranteeTimestamp: tc.guarantee,
 					MvccTimestamp:      tc.mvcc,
 				},
 				DmlChannels: []string{channel},
@@ -69,7 +79,11 @@ func TestDeleteQueryStreamStrongSnapshot(t *testing.T) {
 				require.NotErrorIs(t, err, context.Canceled)
 				require.Equal(t, tc.tsafe, req.GetReq().GetMvccTimestamp())
 			}
-			require.Equal(t, uint64(1000), sd.latestRequiredMVCCTimeTick.Load())
+			require.Equal(t, tc.guarantee, sd.latestRequiredMVCCTimeTick.Load())
+			if tc.consistency != commonpb.ConsistencyLevel_Strong {
+				require.Zero(t, walCalls, "non-Strong reads must retain their guarantee")
+				require.Equal(t, tc.guarantee, req.GetReq().GetGuaranteeTimestamp())
+			}
 		})
 	}
 }
