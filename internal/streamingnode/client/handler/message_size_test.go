@@ -34,7 +34,7 @@ func TestHandlerMessageSizeFailureStopsRetry(t *testing.T) {
 				return &streamingpb.StreamingNodeRunAnalyzerResponse{Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: []*milvuspb.AnalyzerResult{{Tokens: []*milvuspb.AnalyzerToken{{Token: strings.Repeat("z", 1024)}}}}}}}, nil
 			}).Build()
 			listener := bufconn.Listen(16 * 1024)
-			serverOptions := []grpc.ServerOption{grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor())}
+			serverOptions := []grpc.ServerOption{grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor())}
 			if scenario == "server receive" {
 				serverOptions = append(serverOptions, grpc.MaxRecvMsgSize(256))
 			}
@@ -45,7 +45,7 @@ func TestHandlerMessageSizeFailureStopsRetry(t *testing.T) {
 			streamingpb.RegisterStreamingNodeHandlerServiceServer(server, streamingpb.UnimplementedStreamingNodeHandlerServiceServer{})
 			go server.Serve(listener)
 			defer server.Stop()
-			conn, err := grpc.NewClient("passthrough:///size-test", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+			conn, err := grpc.NewClient("passthrough:///size-test", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 			require.NoError(t, err)
 			defer conn.Close()
 			rpc := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
