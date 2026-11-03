@@ -70,9 +70,6 @@ ifeq ($(USE_TSAN), ON)
 ifneq ($(OS),Linux)
 $(error USE_TSAN currently requires Linux)
 endif
-ifneq ($(filter build-cpp-gpu milvus-gpu gpu-install,$(MAKECMDGOALS)),)
-$(error USE_TSAN does not support GPU builds)
-endif
 ifeq ($(USE_ASAN), ON)
 $(error USE_ASAN and USE_TSAN are mutually exclusive)
 endif
@@ -161,6 +158,9 @@ endif
 unexport WITH_GPU
 
 ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
+    ifeq ($(USE_TSAN),ON)
+        $(error USE_TSAN does not support GPU builds)
+    endif
     ifneq ($(index_engine),cardinal)
         MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
     endif

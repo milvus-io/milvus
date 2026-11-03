@@ -87,15 +87,17 @@ done
 )
 
 # Verify configure-time guards without compiling C/C++ or resolving dependencies.
-cmake_module="${scripts_dir}/../internal/core/cmake/Sanitizers.cmake"
-printf 'include("%s")\n' "${cmake_module}" > "${test_root}/check.cmake"
-for guard in conflict dependency-asan platform gpu dependencies cache; do
+cmake_dir="${scripts_dir}/../internal/core/cmake"
+printf 'include("%s/DefineOptions.cmake")\ninclude("%s/Sanitizers.cmake")\n' \
+    "${cmake_dir}" "${cmake_dir}" > "${test_root}/check.cmake"
+for guard in conflict dependency-asan platform gpu gpu-default dependencies cache; do
     args=(-DUSE_ASAN=OFF -DUSE_TSAN=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SIZEOF_VOID_P=8)
     case "${guard}" in
         conflict) args+=(-DUSE_ASAN=ON); expected='mutually exclusive' ;;
         dependency-asan) args+=(-DWITH_ASAN=ON); expected='mutually exclusive' ;;
         platform) args+=(-DCMAKE_SYSTEM_NAME=Darwin); expected='64-bit Linux only' ;;
-        gpu) args+=(-DMILVUS_GPU_VERSION=ON); expected='GPU builds' ;;
+        gpu) args+=(-DWITH_GPU=ON); expected='GPU builds' ;;
+        gpu-default) args+=(-DINDEX_ENGINE=cardinal); expected='GPU builds' ;;
         dependencies) args+=(-DUSE_TSAN=OFF -DMILVUS_CONAN_SANITIZER=thread); expected='require USE_TSAN=ON' ;;
         cache) args+=(-DUSE_TSAN=OFF -DMILVUS_CONFIGURED_SANITIZER=thread); expected='fresh build' ;;
     esac
@@ -107,12 +109,34 @@ for guard in conflict dependency-asan platform gpu dependencies cache; do
 done
 
 # Reject invalid shell options before the script creates a build directory.
-for args in '-T invalid' '-T ON -a ON' '-T ON -g'; do
+for args in '-T invalid' '-T ON -a ON' '-T ON -G ON' '-T ON -x cardinal'; do
     if bash "${scripts_dir}/core_build.sh" ${args} > "${test_root}/script.log" 2>&1; then
         echo "Expected core_build.sh ${args} to fail" >&2
         exit 1
     fi
-    grep -q 'ERROR:' "${test_root}/script.log"
+    case "${args}" in
+        '-T invalid') expected='ERROR: -T must be ON or OFF' ;;
+        *) expected='ERROR: ThreadSanitizer cannot be combined with AddressSanitizer or GPU builds' ;;
+    esac
+    grep -q "${expected}" "${test_root}/script.log"
+done
+
+# GPU defaults are engine-specific; reject TSan after resolving those defaults.
+for args in 'WITH_GPU=ON' 'index_engine=cardinal'; do
+    if GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
+        USE_TSAN=ON ${args} build-cpp > "${test_root}/make.log" 2>&1; then
+        echo "Expected make ${args} with TSan to fail" >&2
+        exit 1
+    fi
+    grep -q 'USE_TSAN does not support GPU builds' "${test_root}/make.log"
+done
+
+# Preserve both sanitizer and upstream GPU/TLS arguments on every build target.
+for target in build-cpp build-cpp-with-unittest build-cpp-with-coverage; do
+    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
+        USE_TSAN=ON index_engine=cardinal WITH_GPU=OFF TANTIVY_ANALYZER_REMOTE_TLS=OFF \
+        -o generated-proto -o plan-parser-lib "${target}" > "${test_root}/make.log" 2>&1
+    grep -q 'TANTIVY_ANALYZER_REMOTE_TLS=OFF .*core_build.sh .* -T ON .* -G OFF ' "${test_root}/make.log"
 done
 
 # Exercise the parser's Go and handwritten C++ commands without compiling. This
