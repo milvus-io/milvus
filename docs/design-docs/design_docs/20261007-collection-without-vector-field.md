@@ -83,11 +83,23 @@ func HasVectorField(schema *schemapb.CollectionSchema) bool {
 ```
 
 One config, `common.enableCollectionWithoutVector` (default `true` on
-master), gates `CreateCollection` only. With it off, the Proxy returns the
-existing `schema does not contain vector field`. Operators keep it off during
-a rolling upgrade until Proxy, DataCoord and QueryCoord are all new. An old
-DataCoord would never compact such a collection, and an old Proxy would reject
-its load.
+master), gates `CreateCollection` only. RootCoord enforces it in
+`validateSchema`; the Proxy repeats the check so the client gets the existing
+`schema does not contain vector field` error before the request leaves it.
+Nothing else reads the gate: a collection created while it was on keeps
+loading, serving and compacting after it is turned off (Appendix B.4).
+
+The gate is a permanent operator switch. It lets a deployment disallow
+vectorless collections as a matter of policy, and it stops new ones from
+being created if the feature misbehaves in production, without a rollback
+and without touching the collections that already exist. Both uses follow
+the existing creation-time switches such as
+`common.enableVectorClusteringKey`. The gate is not an upgrade mechanism:
+left at its default it gives no protection during a rolling upgrade, and a
+vectorless collection created while an old DataCoord or Proxy is still
+running is only not compacted and not loadable until every role is new,
+after which it works. Turning the gate off before the upgrade avoids even
+that; it is optional.
 
 With the predicate in place, the behaviour changes are:
 
@@ -290,8 +302,11 @@ old target are merged once, the same as when an operator raises `maxSize`.
 
 - No change to proto, etcd layout, binlog format or `DescribeCollection`
   output.
-- Rolling upgrade: keep the gate off until the control plane is upgraded
-  (Section 2). After a downgrade, such a collection can still be read and
+- `common.enableCollectionWithoutVector` is a permanent switch (Section 2)
+  with no planned removal. Rolling upgrade: turning it off until the control
+  plane is upgraded is optional; a vectorless collection created in the
+  window is not compacted or loadable until every role is new, and works
+  normally after. After a downgrade, such a collection can still be read and
   dropped, but it is not compacted.
 - Older pymilvus ORM rejects the schema on the client. `MilvusClient` and the
   Java, Go and Node SDKs work. Restore or CDC into an older cluster fails at
@@ -365,7 +380,7 @@ evolution rows, which are from `3df0cbcdd68`.
 
 | Site | Today | Change |
 |---|---|---|
-| `proxy/task.go:432` `createCollectionTask.PreExecute` | no vector → reject | reject only when the gate is off |
+| `proxy/task.go:432` `createCollectionTask.PreExecute`; RootCoord `create_collection_task.go` `validateSchema` | no vector → reject (Proxy only) | reject only when the gate is off; RootCoord decides, the Proxy checks early |
 | `proxy/util.go:1048` `validateLoadFieldsList`, `metacache/meta_cache.go:298` | at least one vector must be loaded | only if the schema has vectors |
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
 | `querynodev2/services.go:206` `WatchDmChannels`, `:497` `LoadSegments` | an empty `IndexInfoList` returns `ErrIndexNotFound`, so the channel watch retries forever and the load times out after `loadTimeoutSeconds` | the check applies only when the schema has vector fields |
