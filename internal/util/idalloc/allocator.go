@@ -38,6 +38,7 @@ func NewTSOAllocator(mix *syncutil.Future[types.MixCoordClient]) Allocator {
 		cond:            syncutil.NewContextCond(&sync.Mutex{}),
 		remoteAllocator: newTSOAllocator(mix),
 		localAllocator:  newLocalAllocator(),
+		asyncRefresh:    true,
 	}
 }
 
@@ -61,11 +62,13 @@ type Allocator interface {
 	// BarrierUtil make a barrier, next allocate call will generate id greater than barrier.
 	BarrierUntil(ctx context.Context, barrier uint64) error
 
-	// Sync expire the local allocator messages,
-	// syncs the local allocator and remote allocator.
+	// Sync invalidates the cache and any in-flight range. The next allocation
+	// must use a remote request started after Sync.
 	Sync()
 
-	// SyncIfExpired syncs the local allocator and remote allocator if the duration since last sync operation is greater than expire.
+	// SyncIfExpired refreshes an expired TSO cache in the background, retaining
+	// usable timestamps until completion. ID allocators expire their cache.
+	// Use Sync when the next allocation must fence earlier remote requests.
 	SyncIfExpired(expire time.Duration)
 }
 
@@ -75,6 +78,17 @@ type allocatorImpl struct {
 	lastSyncTime    time.Time
 	lastAllocated   uint64
 	localAllocator  *localAllocator
+	asyncRefresh    bool
+	generation      uint64
+	refresh         *allocationRequest
+	lastRefreshTime time.Time // Limits periodic retries, including failed refreshes.
+}
+
+type allocationRequest struct {
+	generation uint64
+	done       chan struct{}
+	cancel     context.CancelFunc
+	err        error
 }
 
 func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
@@ -121,36 +135,59 @@ func (ta *allocatorImpl) barrierFastPath(ctx context.Context, barrier uint64) er
 		if i == 0 {
 			// force to syncup the local allocator and remote allocator at first time.
 			// It's the fast path if the barrier is allocated from same remote allocator.
-			ta.localAllocator.exhausted()
+			ta.invalidate()
 		}
 	}
 	return errFastPathFailed
 }
 
 func (ta *allocatorImpl) allocateOne(ctx context.Context) (uint64, error) {
-	// allocate one from local allocator first.
-	if id, err := ta.localAllocator.allocateOne(); err == nil {
-		ta.lastAllocated = id
-		ta.cond.UnsafeBroadcast()
-		return id, nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, context.Cause(ctx)
+		}
+		if id, err := ta.localAllocator.allocateOne(); err == nil {
+			ta.lastAllocated = id
+			ta.cond.UnsafeBroadcast()
+			return id, nil
+		}
+		request := ta.refresh
+		if request == nil {
+			request = ta.startRefresh(ctx)
+		}
+		// Actual exhaustion joins the in-flight RPC without holding the mutex.
+		// Each waiter can cancel independently of the request's owner.
+		ta.cond.L.Unlock()
+		select {
+		case <-ctx.Done():
+		case <-request.done:
+		}
+		ta.cond.L.Lock()
+		if request.generation == ta.generation && request.err != nil {
+			return 0, request.err
+		}
+		// Sync may have invalidated the response, or another caller may have
+		// consumed the range. Recheck the cache before issuing another RPC.
 	}
-	// allocate from remote.
-	id, err := ta.allocateRemote(ctx)
-	if err != nil {
-		return 0, err
-	}
-	ta.lastAllocated = id
-	ta.cond.UnsafeBroadcast()
-	return id, nil
 }
 
-// Sync expire the local allocator messages,
-// syncs the local allocator and remote allocator.
+// Sync invalidates the cache and fences any in-flight remote request.
 func (ta *allocatorImpl) Sync() {
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
+	ta.invalidate()
+}
+
+// invalidate fences both cached IDs and responses to earlier requests.
+// The old request retains the single-flight slot until it exits, so repeated
+// Sync calls cannot leave an unbounded number of canceled RPCs behind.
+func (ta *allocatorImpl) invalidate() {
 	ta.localAllocator.exhausted()
+	ta.generation++
+	if ta.refresh != nil {
+		ta.refresh.cancel()
+	}
 }
 
 func (ta *allocatorImpl) SyncIfExpired(expire time.Duration) {
@@ -158,20 +195,41 @@ func (ta *allocatorImpl) SyncIfExpired(expire time.Duration) {
 	defer ta.cond.L.Unlock()
 
 	if time.Since(ta.lastSyncTime) > expire {
-		ta.localAllocator.exhausted()
+		if !ta.asyncRefresh {
+			ta.invalidate()
+			return
+		}
+		if ta.refresh == nil && time.Since(ta.lastRefreshTime) > expire {
+			ta.startRefresh(context.Background())
+		}
 	}
 }
 
-// allocateRemote allocates timestamp from remote root coordinator.
-func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
-	// Update local allocator from remote.
-	start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
-	if err != nil {
-		return 0, err
+// startRefresh is called with the mutex held. There is at most one remote
+// request, shared by periodic refreshes and allocations on an exhausted cache.
+func (ta *allocatorImpl) startRefresh(ctx context.Context) *allocationRequest {
+	// Allocator has process lifetime and no persistent worker. Bound each task
+	// even when there are no subsequent allocations or expiration checks.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	request := &allocationRequest{
+		generation: ta.generation,
+		done:       make(chan struct{}),
+		cancel:     cancel,
 	}
-	ta.localAllocator.update(start, count)
-	ta.lastSyncTime = time.Now()
-
-	// Get from local again.
-	return ta.localAllocator.allocateOne()
+	ta.refresh = request
+	ta.lastRefreshTime = time.Now()
+	go func() {
+		defer cancel()
+		start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
+		ta.cond.L.Lock()
+		defer ta.cond.L.Unlock()
+		request.err = err
+		if err == nil && request.generation == ta.generation {
+			ta.localAllocator.update(start, count)
+			ta.lastSyncTime = time.Now()
+		}
+		ta.refresh = nil
+		close(request.done)
+	}()
+	return request
 }
