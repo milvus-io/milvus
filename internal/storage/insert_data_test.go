@@ -2074,3 +2074,173 @@ func newFixedFieldDataForTest(dataType schemapb.DataType, nullable bool, capacit
 	}
 	return field
 }
+
+// A nullable vector stores only valid rows physically. Copying into an existing
+// column must preserve logical order across nulls and repeated source rows.
+func TestFloatVectorFieldDataCopyFrom(t *testing.T) {
+	src := &FloatVectorFieldData{
+		Dim: 2, Nullable: true,
+		Data:      []float32{10, 11, 20, 21},
+		ValidData: []bool{true, false, true},
+	}
+	dst := &FloatVectorFieldData{Dim: 2, Nullable: true}
+	require.NoError(t, dst.AppendRow([]float32{1, 2}))
+	require.NoError(t, dst.CopyFrom(src, nil))
+	require.Equal(t, 1, dst.RowNum())
+
+	require.NoError(t, dst.CopyFrom(src, []int{2, 1, 0, 2}))
+	want := []any{[]float32{1, 2}, []float32{20, 21}, nil, []float32{10, 11}, []float32{20, 21}}
+	require.Equal(t, len(want), dst.RowNum())
+	for i, row := range want {
+		require.Equal(t, row, dst.GetRow(i), "row %d", i)
+	}
+	require.Equal(t, []bool{true, true, false, true, true}, dst.ValidData)
+
+	dst.Data[2] = 99
+	dst.ValidData[1] = false
+	require.Equal(t, []float32{10, 11, 20, 21}, src.Data)
+	require.Equal(t, []bool{true, false, true}, src.ValidData)
+}
+
+func TestDenseVectorFieldDataCopyFromDimMismatch(t *testing.T) {
+	for _, vector := range []struct {
+		name     string
+		newField func(dim int, nullable bool) (FieldData, any)
+	}{
+		{"Binary", func(dim int, nullable bool) (FieldData, any) {
+			return &BinaryVectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim/8)
+		}},
+		{"Float", func(dim int, nullable bool) (FieldData, any) {
+			return &FloatVectorFieldData{Dim: dim, Nullable: nullable}, make([]float32, dim)
+		}},
+		{"Float16", func(dim int, nullable bool) (FieldData, any) {
+			return &Float16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"BFloat16", func(dim int, nullable bool) (FieldData, any) {
+			return &BFloat16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"Int8", func(dim int, nullable bool) (FieldData, any) {
+			return &Int8VectorFieldData{Dim: dim, Nullable: nullable}, make([]int8, dim)
+		}},
+	} {
+		t.Run(vector.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				srcDim   int
+				dstDim   int
+				nullable bool
+			}{
+				{"wider source", 16, 8, false},
+				{"narrower source", 8, 16, false},
+				{"nullable wider source", 16, 8, true},
+				{"nullable narrower source", 8, 16, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					src, row := vector.newField(tc.srcDim, tc.nullable)
+					dst, original := vector.newField(tc.dstDim, tc.nullable)
+					require.NoError(t, src.AppendRow(row))
+					require.NoError(t, dst.AppendRow(original))
+
+					require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+					require.Equal(t, 1, dst.RowNum())
+					require.Equal(t, original, dst.GetRow(0))
+					if tc.nullable {
+						require.Equal(t, []bool{true}, dst.GetValidData())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestFieldDataCopyFromSourceValidation(t *testing.T) {
+	for _, tc := range []struct {
+		target    FieldData
+		nilSource FieldData
+	}{
+		{&BoolFieldData{}, (*BoolFieldData)(nil)},
+		{&Int8FieldData{}, (*Int8FieldData)(nil)},
+		{&Int16FieldData{}, (*Int16FieldData)(nil)},
+		{&Int32FieldData{}, (*Int32FieldData)(nil)},
+		{&Int64FieldData{}, (*Int64FieldData)(nil)},
+		{&FloatFieldData{}, (*FloatFieldData)(nil)},
+		{&DoubleFieldData{}, (*DoubleFieldData)(nil)},
+		{&TimestamptzFieldData{}, (*TimestamptzFieldData)(nil)},
+		{&StringFieldData{}, (*StringFieldData)(nil)},
+		{&ArrayFieldData{}, (*ArrayFieldData)(nil)},
+		{&JSONFieldData{}, (*JSONFieldData)(nil)},
+		{&GeometryFieldData{}, (*GeometryFieldData)(nil)},
+		{&BinaryVectorFieldData{}, (*BinaryVectorFieldData)(nil)},
+		{&FloatVectorFieldData{}, (*FloatVectorFieldData)(nil)},
+		{&Float16VectorFieldData{}, (*Float16VectorFieldData)(nil)},
+		{&BFloat16VectorFieldData{}, (*BFloat16VectorFieldData)(nil)},
+		{&SparseFloatVectorFieldData{}, (*SparseFloatVectorFieldData)(nil)},
+		{&Int8VectorFieldData{}, (*Int8VectorFieldData)(nil)},
+		{&VectorArrayFieldData{}, (*VectorArrayFieldData)(nil)},
+	} {
+		require.NoError(t, tc.target.CopyFrom(nil, nil))
+		require.NoError(t, tc.target.CopyFrom(tc.nilSource, []int{}))
+		require.ErrorIs(t, tc.target.CopyFrom(nil, []int{0}), merr.ErrServiceInternal)
+		require.ErrorIs(t, tc.target.CopyFrom(tc.nilSource, []int{0}), merr.ErrServiceInternal)
+		var wrongType FieldData = &BoolFieldData{}
+		if _, ok := tc.target.(*BoolFieldData); ok {
+			wrongType = &Int64FieldData{}
+		}
+		require.ErrorIs(t, tc.target.CopyFrom(wrongType, []int{0}), merr.ErrServiceInternal)
+	}
+}
+
+func TestFieldDataCopyFromMemoryTracking(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
+					src := tc.newField(t, nullable, capacity)
+					dst := tc.newField(t, nullable, capacity)
+					require.NoError(t, src.AppendRow(tc.row))
+					if nullable {
+						require.NoError(t, src.AppendRow(nil))
+					}
+					require.NoError(t, dst.AppendRow(tc.row))
+					checkedMemorySize(t, dst)
+					for _, indices := range [][]int{nil, {}, {0, 0}, {0}} {
+						require.NoError(t, dst.CopyFrom(src, indices))
+						checkedMemorySize(t, dst)
+					}
+					if nullable {
+						for _, indices := range [][]int{{1}, {1, 0, 1, 0}} {
+							require.NoError(t, dst.CopyFrom(src, indices))
+							checkedMemorySize(t, dst)
+						}
+					}
+					size := checkedMemorySize(t, dst)
+					require.Error(t, dst.CopyFrom(nil, []int{0}))
+					require.Equal(t, size, checkedMemorySize(t, dst))
+				})
+			}
+		}
+	}
+}
+
+func TestSparseFloatVectorFieldDataCopyFromTrackedEncoding(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nullable=%t", nullable), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector, Nullable: nullable}
+			dst := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, true)
+			src := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, false)
+			require.NoError(t, dst.AppendRow(typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1})))
+			for _, index := range []uint32{126, 127, 16383} {
+				require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow([]uint32{index}, []float32{1})))
+			}
+			indices, values := make([]uint32, 16), make([]float32, 16)
+			for i := range indices {
+				indices[i], values[i] = uint32(i), 1
+			}
+			require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+			for _, selection := range [][]int{{0}, {1}, {2}, {3, 1, 3}} {
+				require.NoError(t, dst.CopyFrom(src, selection))
+				checkedMemorySize(t, dst)
+			}
+		})
+	}
+}
