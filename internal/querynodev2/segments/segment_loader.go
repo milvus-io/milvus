@@ -41,7 +41,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
