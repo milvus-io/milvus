@@ -4585,6 +4585,110 @@ func TestSearchTask_Requery(t *testing.T) {
 	})
 }
 
+// TestSearchTask_RequeryKeepsSearchTimestamp checks that the requery keeps the
+// search timestamp through the scheduler, so the collection TTL cutoff sent to
+// QueryNode matches the search. Otherwise a row that expires between the search
+// and the requery is missing from the requery and the search fails with
+// ErrInconsistentRequery.
+func TestSearchTask_RequeryKeepsSearchTimestamp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const (
+		dim        = 128
+		collection = "test_requery_ts"
+		pkField    = "pk"
+		vecField   = "vec"
+		channel    = "dml_ch"
+	)
+	collectionTTL := time.Hour
+	// The scheduler stamps the requery with the current time, so keep the
+	// search timestamp well in the past.
+	searchTime := time.UnixMilli(time.Now().Add(-time.Minute).UnixMilli())
+	searchTS := tsoutil.ComposeTSByTime(searchTime, 0)
+
+	factory := dependency.NewDefaultFactory(true)
+	node, err := NewProxy(ctx, factory)
+	require.NoError(t, err)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator)
+	require.NoError(t, err)
+	require.NoError(t, node.sched.Start())
+	defer node.sched.Close()
+	require.NoError(t, node.initRateCollector())
+	node.mixCoord = mocks.NewMockMixCoordClient(t)
+
+	schema := newSchemaInfo(constructCollectionSchema(pkField, vecField, dim, collection))
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(0), nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{schema: schema, collectionTTL: uint64(collectionTTL)}, nil).Maybe()
+	cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+	cache.EXPECT().AllocID(mock.Anything).Return(UniqueID(1), nil).Maybe()
+	originalCache := globalMetaCache
+	globalMetaCache = cache
+	defer func() { globalMetaCache = originalCache }()
+
+	mgr := shardclient.NewMockShardClientManager(t)
+	mgr.EXPECT().InvalidateShardLeaderCache(mock.Anything).Return().Maybe()
+	node.shardMgr = mgr
+
+	ids := []int64{1}
+	var sentTTL uint64
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, request *querypb.QueryRequest, _ ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+			sentTTL = request.GetReq().GetCollectionTtlTimestamps()
+			return &internalpb.RetrieveResults{
+				Status: merr.Success(),
+				Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+				FieldsData: []*schemapb.FieldData{{
+					Type:      schemapb.DataType_Int64,
+					FieldName: pkField,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+					}},
+				}},
+			}, nil
+		}).Maybe()
+	lb := shardclient.NewMockLBPolicy(t)
+	lb.EXPECT().Execute(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+		return workload.Exec(ctx, 0, qn, channel)
+	}).Maybe()
+	lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything).Return().Maybe()
+	node.lbPolicy = lb
+
+	for _, level := range []commonpb.ConsistencyLevel{commonpb.ConsistencyLevel_Strong, commonpb.ConsistencyLevel_Bounded} {
+		t.Run(level.String(), func(t *testing.T) {
+			sentTTL = 0
+			qt := &searchTask{
+				ctx: ctx,
+				SearchRequest: &internalpb.SearchRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Search,
+						Timestamp: searchTS,
+					},
+					ConsistencyLevel:   level,
+					GuaranteeTimestamp: searchTS,
+				},
+				request:         &milvuspb.SearchRequest{CollectionName: collection},
+				schema:          schema,
+				tr:              timerecord.NewTimeRecorder("search"),
+				node:            node,
+				shardClientMgr:  mgr,
+				queryChannelsTs: map[string]Timestamp{channel: searchTS},
+			}
+			op, err := newRequeryOperator(qt, nil)
+			require.NoError(t, err)
+			_, _, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}, []string{pkField})
+			require.NoError(t, err)
+			require.Equal(t, tsoutil.ComposeTSByTime(searchTime.Add(-collectionTTL), 0), sentTTL)
+		})
+	}
+}
+
 func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
 	ctx := context.Background()
 	const channel = "by-dev-rootcoord-dml_0_100v0"
