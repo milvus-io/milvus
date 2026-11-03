@@ -21,9 +21,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// alignCollectionSchema replaces the latest retained schema with the coordinator
-// snapshot once when upgrading recovery metadata. Older nodes did not apply all
-// AlterCollection updates. Align before module construction and WAL replay.
+// alignCollectionSchema replaces the latest retained normal schema of the
+// coordinator's version once when upgrading recovery metadata. Other versions
+// remain available for segment recovery and WAL replay.
 func (r *recoveryStorageImpl) alignCollectionSchema(ctx context.Context, vchannels map[string]*streamingpb.VChannelMeta) error {
 	if r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned {
 		return nil
@@ -52,11 +52,21 @@ func (r *recoveryStorageImpl) alignCollectionSchema(ctx context.Context, vchanne
 		if metadata == nil {
 			continue
 		}
+		index := -1
+		for i := len(meta.CollectionInfo.Schemas) - 1; i >= 0; i-- {
+			entry := meta.CollectionInfo.Schemas[i]
+			if entry.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL && entry.GetSchema().GetVersion() == metadata.GetVersion() {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			continue
+		}
 		updated := proto.Clone(meta).(*streamingpb.VChannelMeta)
-		schemas := updated.CollectionInfo.Schemas
-		latest := schemas[len(schemas)-1]
-		latest.Schema = proto.Clone(metadata).(*schemapb.CollectionSchema)
-		latest.Schema.Properties = slices.DeleteFunc(latest.Schema.Properties, func(property *commonpb.KeyValuePair) bool {
+		matched := updated.CollectionInfo.Schemas[index]
+		matched.Schema = proto.Clone(metadata).(*schemapb.CollectionSchema)
+		matched.Schema.Properties = slices.DeleteFunc(matched.Schema.Properties, func(property *commonpb.KeyValuePair) bool {
 			return property.GetKey() == common.CollectionOnTruncatingKey
 		})
 		aligned[name] = updated

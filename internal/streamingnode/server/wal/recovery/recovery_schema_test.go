@@ -16,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -38,7 +40,7 @@ func TestSchemaAlignmentPublishesMagicAfterPersistence(t *testing.T) {
 			})
 			meta := legacySchemaMigrationVChannel()
 			if tc.beforeTTL != "" {
-				meta.CollectionInfo.Schemas[2].Schema.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: tc.beforeTTL}}
+				meta.CollectionInfo.Schemas[1].Schema.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: tc.beforeTTL}}
 			}
 			coordinatorSchema := &schemapb.CollectionSchema{
 				Name: "renamed", DbName: "moved", Description: "current", Version: 1,
@@ -90,10 +92,11 @@ func TestSchemaAlignmentPublishesMagicAfterPersistence(t *testing.T) {
 			require.NoError(t, store.alignCollectionSchema(ctx, vchannels))
 			require.Equal(t, 2, calls)
 			require.True(t, proto.Equal(persisted, vchannels["v1"]))
-			require.True(t, proto.Equal(expectedSchema, persisted.CollectionInfo.Schemas[2].Schema), "the full Coord schema is authoritative during recovery alignment")
+			require.True(t, proto.Equal(expectedSchema, persisted.CollectionInfo.Schemas[1].Schema), "the full Coord schema replaces the matching retained version")
 			require.Len(t, coordinatorSchema.Properties, len(expectedSchema.Properties)+1, "alignment must not mutate the shared Describe response")
-			require.NotSame(t, coordinatorSchema.Fields[0], persisted.CollectionInfo.Schemas[2].Schema.Fields[0])
+			require.NotSame(t, coordinatorSchema.Fields[0], persisted.CollectionInfo.Schemas[1].Schema.Fields[0])
 			require.True(t, proto.Equal(meta.CollectionInfo.Schemas[0], persisted.CollectionInfo.Schemas[0]))
+			require.True(t, proto.Equal(meta.CollectionInfo.Schemas[2], persisted.CollectionInfo.Schemas[2]), "a newer WAL version must remain intact")
 			require.True(t, proto.Equal(before, meta), "migration replaces rather than mutates borrowed metadata")
 			require.EqualValues(t, 900, persistedCheckpoint.TimeTick)
 			require.EqualValues(t, 7, persistedCheckpoint.Term)
@@ -104,6 +107,87 @@ func TestSchemaAlignmentPublishesMagicAfterPersistence(t *testing.T) {
 			require.Equal(t, 2, calls)
 			restart.pchannelControl.CheckpointTimeTick++
 			require.EqualValues(t, utility.RecoveryMagicSchemaMetadataAligned, restart.consumeDirtySnapshot().Checkpoint.Magic)
+		})
+	}
+}
+
+func TestSchemaAlignmentPreservesSegmentVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int32
+		retired bool
+	}{
+		{name: "version zero", version: 0},
+		{name: "WAL ahead of Coord", version: 1},
+		{name: "same latest version", version: 2},
+		{name: "Coord ahead of snapshot", version: 3},
+		{name: "retired matching version", version: 1, retired: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := &legacyMigrationCatalog{}
+			resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+			store := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(90), TimeTick: 900, Magic: utility.RecoveryMagicRecoveryStorageV2,
+			})
+			meta := legacySchemaMigrationVChannel()
+			coordinatorSchema := proto.Clone(meta.CollectionInfo.Schemas[min(int(tc.version), 2)].Schema).(*schemapb.CollectionSchema)
+			coordinatorSchema.Version = tc.version
+			coordinatorSchema.Description = "aligned metadata"
+			if tc.retired {
+				meta.CollectionInfo.Schemas[1].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
+				meta.CollectionInfo.Schemas[1].Schema = nil
+			}
+			before := proto.Clone(meta).(*streamingpb.VChannelMeta)
+			describe := mockey.Mock((*recoveryStorageImpl).describeCollectionSchema).Return(coordinatorSchema, nil).Build()
+			defer describe.UnPatch()
+			save := mockey.Mock((*legacyMigrationCatalog).SaveRecoverySnapshot).To(func(_ *legacyMigrationCatalog, _ context.Context, _ string, snapshot *metastore.WALRecoverySnapshot) error {
+				if tc.version > 2 || tc.retired {
+					require.Empty(t, snapshot.VChannels, "a missing version must not overwrite another version")
+				}
+				return nil
+			}).Build()
+			defer save.UnPatch()
+			metas := map[string]*streamingpb.VChannelMeta{"v1": meta}
+			require.NoError(t, store.alignCollectionSchema(context.Background(), metas))
+			require.EqualValues(t, utility.RecoveryMagicSchemaMetadataAligned, store.checkpoint.Magic)
+			for i, entry := range metas["v1"].CollectionInfo.Schemas {
+				require.Equal(t, before.CollectionInfo.Schemas[i].CheckpointTimeTick, entry.CheckpointTimeTick)
+				if int32(i) == tc.version && !tc.retired {
+					require.True(t, proto.Equal(coordinatorSchema, entry.Schema))
+				} else {
+					require.True(t, proto.Equal(before.CollectionInfo.Schemas[i], entry))
+				}
+			}
+			// Exercise real module restoration after alignment. Both growing and
+			// legacy sealed assignments must retain their version-2 encoding schema.
+			var restored []*schemapb.CollectionSchema
+			var original func(*streamingpb.SegmentAssignmentMeta, *schemapb.CollectionSchema, segment.ViewConfig) *segment.SegmentView
+			patch := mockey.Mock(segment.NewSegmentViewFromMetaWithConfig).Origin(&original).
+				To(func(meta *streamingpb.SegmentAssignmentMeta, schema *schemapb.CollectionSchema, config segment.ViewConfig) *segment.SegmentView {
+					require.NotNil(t, schema)
+					restored = append(restored, proto.Clone(schema).(*schemapb.CollectionSchema))
+					return original(meta, schema, config)
+				}).Build()
+			defer patch.UnPatch()
+			_, err := vchannel.NewModule(vchannel.ModuleConfig{
+				PChannel: "p", VChannel: "v1", VChannelMeta: metas["v1"],
+				Segments: map[int64]*streamingpb.SegmentAssignmentMeta{
+					1: {
+						CollectionId: 10, PartitionId: 20, SegmentId: 1, Vchannel: "v1", SchemaVersion: 2,
+						State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+						Stat:  &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 210},
+					},
+					2: {
+						CollectionId: 10, PartitionId: 20, SegmentId: 2, Vchannel: "v1", SchemaVersion: 2,
+						State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED,
+					},
+				},
+			})
+			require.NoError(t, err)
+			require.Len(t, restored, 2)
+			for _, schema := range restored {
+				require.True(t, proto.Equal(metas["v1"].CollectionInfo.Schemas[2].Schema, schema))
+			}
 		})
 	}
 }

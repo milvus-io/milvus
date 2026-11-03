@@ -15,10 +15,12 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 Recovery magic 3 records a one-time collection schema alignment.
 After legacy-format migration and metadata validation, before module creation
 and WAL replay, older checkpoints fetch each active collection through
-`DescribeCollectionInternal`. The latest retained schema is replaced with an
-owned copy of the complete Coord schema, including fields, functions,
-SchemaVersion, TTL and the field-ID watermark; `collection.on.truncating` is
-excluded. Earlier history entries are retained. This directly repairs schema
+`DescribeCollectionInternal`. The last retained NORMAL schema with the same
+SchemaVersion is replaced with an owned copy of the complete Coord schema,
+including fields, functions, TTL and the field-ID watermark;
+`collection.on.truncating` is excluded. Other history entries and all effective
+timestamps are retained. If no matching version exists, history is unchanged;
+WAL replay supplies newer versions. This directly repairs schema
 updates that older nodes missed, including legacy property-only TTL changes.
 Aligned snapshots are saved before the new magic; failed saves leave the old
 marker and can be retried. Fresh checkpoints start at magic 3. Ordinary
@@ -28,7 +30,7 @@ This upgrade uses an ordinary Describe snapshot, without an additional
 coordinator DDL completion barrier. It does not provide an atomic snapshot of
 in-flight coordinator callbacks and the recovering WAL. Subsequent retained
 WAL messages use the normal mask application path. Alignment uses Coord as the
-authority; it does not reconcile an ahead-of-Coord WAL schema separately.
+authority only for the matching version; it never rolls a newer WAL version back.
 
 TODO(#40451): support mixed-version assignment and rollback after magic 3 is
 persisted. Older StreamingNodes reject this marker and cannot reopen an upgraded
