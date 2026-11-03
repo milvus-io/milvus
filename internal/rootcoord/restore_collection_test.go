@@ -351,11 +351,15 @@ func TestRestoringCollectionReservesAdmissionCapacity(t *testing.T) {
 					require.NoError(t, mt.CompleteRestoreCollection(t.Context(), 2))
 					require.NoError(t, mt.CompleteRestoreCollection(t.Context(), 2))
 					count(2)
+				} else {
+					require.ErrorIs(t, mt.DropCollection(t.Context(), 2, 300), merr.ErrServiceNotReady)
+					count(2)
+					require.NoError(t, mt.CompleteRestoreCollection(t.Context(), 2))
 				}
 				require.NoError(t, mt.DropCollection(t.Context(), 2, 300))
 				require.NoError(t, mt.DropCollection(t.Context(), 2, 300))
 				count(1)
-				require.NoError(t, task.validate(t.Context()), "drop releases capacity whether or not restore completed")
+				require.NoError(t, task.validate(t.Context()), "dropping a completed restore releases capacity")
 			})
 		})
 	}

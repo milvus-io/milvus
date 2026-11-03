@@ -745,6 +745,11 @@ func (mt *MetaTable) persistCollectionDropping(ctx context.Context, collectionID
 	if !ok || coll.State == pb.CollectionState_CollectionDropping {
 		return "", false, nil
 	}
+	// Check again when replaying a previously admitted Drop broadcast. Holding
+	// ddLock also serializes this decision with restore completion.
+	if coll.State == pb.CollectionState_CollectionRestoring {
+		return "", false, merr.WrapErrServiceNotReadyMsg("collection %s is being restored", coll.Name)
+	}
 
 	// Resolve the database before persistence so a lookup failure remains
 	// retryable without changing the collection state or its counters.
@@ -1309,9 +1314,9 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 		return merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(newDBName, newName))
 	}
 
-	// check new collection already exists
-	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, false)
-	if coll != nil {
+	// Restoring reserves the name too; Dropping/Dropped names remain reusable.
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, true)
+	if coll != nil && (coll.Available() || coll.State == pb.CollectionState_CollectionRestoring) {
 		mlog.Warn(context.TODO(), "duplicated new collection name, already taken by another collection or alias.")
 		return merr.WrapErrParameterInvalidMsg("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}

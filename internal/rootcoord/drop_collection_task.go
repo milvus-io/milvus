@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -53,6 +54,9 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 			return errIgnoredDropCollection
 		}
 		return err
+	}
+	if collMeta.State == etcdpb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %s is being restored", collMeta.Name)
 	}
 
 	// meta cache of all aliases should also be cleaned.
