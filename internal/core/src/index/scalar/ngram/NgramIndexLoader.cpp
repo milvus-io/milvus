@@ -500,19 +500,16 @@ NgramIndexLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached ngram construction consumed this loader");
     if (cache) {
-        AssertInfo(
-            !DeriveCaps(options_.params).json_paths,
-            "JSON projection cache migration is separate from ngram storage");
         std::optional<int64_t> count;
         const auto rows =
             GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
         if (rows && *rows > 0)
             count = *rows;
         const auto runtime = ParseRuntimeParams(options_.params);
-        const IndexMetadata metadata{DeriveCaps(options_.params),
-                                     Domain::Row,
-                                     runtime.value_type,
-                                     count};
+        auto caps = DeriveCaps(options_.params);
+        caps.json_paths = false;
+        const IndexMetadata metadata{
+            caps, Domain::Row, runtime.value_type, count};
         const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
         const bool use_async =
             legacy ? legacy->use_async
@@ -532,8 +529,13 @@ NgramIndexLoader::Load(milvus::OpContext* context,
                         SingleCellIndexStorageTranslator<NgramIndexStorage>>(
                         *cache, use_async, std::move(load)),
                     context);
-        co_return std::make_shared<NgramIndex>(
+        auto index = std::make_shared<NgramIndex>(
             std::move(slot), metadata, runtime.min_gram, runtime.max_gram);
+        if (auto spec = JsonProjectedSpec(options_.params, count)) {
+            co_return JsonPathIndex::FromStorage(std::move(index),
+                                                 std::move(*spec));
+        }
+        co_return index;
     }
     if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
         co_return co_await RunPackedIndexLoad(
@@ -558,10 +560,15 @@ NgramIndexLoader::LoadStorage(OpenedIndexSource& source,
            const storage::LoadOptions& opts,
            bool use_async)
             -> folly::coro::Task<std::unique_ptr<NgramIndexStorage>> {
-            co_return MakeStorage(
+            auto projection =
+                PrepareJsonProjectedOpen(families::kNgram, files, opts);
+            auto storage = MakeStorage(
                 co_await LoadState(
                     use_async, files, opts, ParseRuntimeParams(opts.params)),
                 opts);
+            storage->json_exists = co_await LoadJsonExists(
+                use_async, std::move(projection), files, storage->count_);
+            co_return storage;
         },
         context);
 }
@@ -664,7 +671,10 @@ NgramIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     loaded.mmap = state->effective.mmap;
     loaded.engine_bytes = materialized_bytes;
     loaded.avg_row_size = *state->avg_row_size;
-    co_return MakeStorage(loaded, opts);
+    auto storage = MakeStorage(loaded, opts);
+    storage->json_exists =
+        FinishPackedJsonExists(std::move(state->projection), storage->count_);
+    co_return storage;
 }
 
 folly::coro::Task<IndexPtr>
@@ -672,11 +682,12 @@ NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                const storage::LoadOptions& opts,
                                bool use_async) {
     auto storage = co_await FinishPackedStorage(plan, opts, use_async);
-    const auto& state = std::any_cast<const std::shared_ptr<PackedNgramState>&>(
-        plan.load_context);
-    co_return FinishPackedJsonProjectedOpen(
-        std::move(state->projection),
-        std::make_shared<NgramIndex>(std::move(storage)));
+    auto index = std::make_shared<NgramIndex>(std::move(storage));
+    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
+        co_return JsonPathIndex::FromStorage(std::move(index),
+                                             std::move(*spec));
+    }
+    co_return index;
 }
 
 namespace {

@@ -286,6 +286,13 @@ NgramIndexStorage::MemoryUsage() const {
         ThrowInfo(DataFormatBroken, "NGRAM reader memory size overflows");
     }
     auto total = kKnownMetadataBytes + validity_bytes;
+    if (json_exists) {
+        const auto bytes = sizeof(TargetBitmap) + json_exists->size_in_bytes();
+        if (bytes > std::numeric_limits<size_t>::max() - total) {
+            ThrowInfo(DataFormatBroken, "NGRAM reader memory size overflows");
+        }
+        total += bytes;
+    }
     if (directory_ != nullptr) {
         const auto directory_bytes = directory_->HeapBytes();
         if (directory_bytes > std::numeric_limits<size_t>::max() - total) {

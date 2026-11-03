@@ -172,9 +172,9 @@ CheckCachedJsonFlat() {
 }
 
 void
-CheckCachedMarisaProjection(bool corrupt = false) {
+CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
     const auto& backend =
-        ScalarReaderBackends().Get<std::string_view>("MarisaVarchar");
+        ScalarReaderBackends().Get<std::string_view>(backend_name);
     ScalarTestData<std::string_view> data({"apple", "pear", "", ""});
     data.validity.reset(2);
     data.validity.reset(3);
@@ -238,7 +238,10 @@ CheckCachedMarisaProjection(bool corrupt = false) {
                     storage::LoadOptions options;
                     options.params = backend.LoadParams({.row_count = 4});
                     options.params["field_type"] = DataType::JSON;
-                    options.params[INDEX_TYPE] = HYBRID_INDEX_TYPE;
+                    options.params[INDEX_TYPE] =
+                        backend.Family() == families::kMarisa
+                            ? HYBRID_INDEX_TYPE
+                            : NGRAM_INDEX_TYPE;
                     options.params[JSON_PATH] = "/a";
                     options.params[JSON_CAST_TYPE] = "VARCHAR";
                     options.enable_mmap = mmap;
@@ -286,12 +289,14 @@ CheckCachedMarisaProjection(bool corrupt = false) {
                                      .Lookup(backend.Family())
                                      .Load({std::move(source), options, cache});
                     EXPECT_EQ(index->Metadata().count.has_value(),
-                              known_count || packed);
+                              known_count || (packed && backend.Family() ==
+                                                            families::kMarisa));
                     folly::CancellationSource cancellation;
                     cancellation.requestCancellation();
                     OpContext cancelled(cancellation.getToken());
                     auto reader = index->CreateReader(&cancelled);
-                    if (known_count || packed)
+                    if (known_count ||
+                        (packed && backend.Family() == families::kMarisa))
                         EXPECT_EQ(reader->Count(), 4);
                     else
                         ExpectSegcoreError(ErrorCode::FollyCancel,
@@ -316,13 +321,23 @@ CheckCachedMarisaProjection(bool corrupt = false) {
                     ExpectBitmap(json->Exists("/a"), Hits(4, {0, 1, 2}));
                     auto path = json->Resolve(
                         "/a", JsonCastType::FromString("VARCHAR"));
-                    const auto* predicate = dynamic_cast<
-                        const IScalarPredicateReader<std::string_view>*>(
-                        path.get());
-                    ASSERT_NE(predicate, nullptr);
-                    const std::string_view value = "apple";
-                    ExpectBitmap(predicate->In(1, &value), Hits(4, {0}));
-                    ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {1}));
+                    if (backend.Family() == families::kNgram) {
+                        const auto* ngram =
+                            dynamic_cast<const INgramReader*>(path.get());
+                        ASSERT_NE(ngram, nullptr);
+                        TargetBitmap candidates(4, true);
+                        ngram->Candidates(
+                            "app", PatternOp::InnerMatch, candidates);
+                        ExpectBitmap(candidates, Hits(4, {0}));
+                    } else {
+                        const auto* predicate = dynamic_cast<
+                            const IScalarPredicateReader<std::string_view>*>(
+                            path.get());
+                        ASSERT_NE(predicate, nullptr);
+                        const std::string_view value = "apple";
+                        ExpectBitmap(predicate->In(1, &value), Hits(4, {0}));
+                        ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {1}));
+                    }
                 }
             }
         }
@@ -330,12 +345,20 @@ CheckCachedMarisaProjection(bool corrupt = false) {
 }
 
 TEST(JsonPathIndexCacheTest, MarisaStorageLoadsExistenceWithRequestContext) {
-    CheckCachedMarisaProjection();
+    CheckCachedStringProjection("MarisaVarchar");
 }
 
 TEST(JsonPathIndexCacheTest,
      MarisaWarmupRejectsInvalidExistenceBeforePublication) {
-    CheckCachedMarisaProjection(true);
+    CheckCachedStringProjection("MarisaVarchar", true);
+}
+
+TEST(JsonPathIndexCacheTest, NgramStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("NgramVarcharMin2Max4Heap");
+}
+TEST(JsonPathIndexCacheTest,
+     NgramWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("NgramVarcharMin2Max4Heap", true);
 }
 
 TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {

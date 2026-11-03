@@ -74,6 +74,7 @@ struct NgramIndexStorage {
     // or a field with no nulls.
     bool all_valid_{false};
     TargetBitmap valid_bitmap_;
+    std::shared_ptr<const TargetBitmap> json_exists;
     DataType value_type_{DataType::VARCHAR};
 
     uintptr_t min_gram_{0};
@@ -119,6 +120,7 @@ class NgramIndex final : public IIndex,
 
  private:
     friend class NgramIndexReader;
+    friend class JsonPathIndex;
     std::shared_ptr<const NgramIndexStorage>
     PinStorage(milvus::OpContext* op_ctx) const;
     std::pair<uintptr_t, uintptr_t>
