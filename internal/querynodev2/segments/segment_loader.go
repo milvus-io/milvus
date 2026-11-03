@@ -27,9 +27,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2050,11 +2050,25 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 // already been applied. Child manifests are not kept in the runtime load info,
 // so their presence always forces a replay.
 func deltaSourceUnchanged(current, incoming *querypb.SegmentLoadInfo) bool {
-	return len(incoming.GetChildManifestPaths()) == 0 &&
-		current.GetManifestPath() == incoming.GetManifestPath() &&
-		slices.EqualFunc(current.GetDeltalogs(), incoming.GetDeltalogs(), func(a, b *datapb.FieldBinlog) bool {
-			return proto.Equal(a, b)
-		})
+	if len(incoming.GetChildManifestPaths()) != 0 || current.GetManifestPath() != incoming.GetManifestPath() {
+		return false
+	}
+	// Files are immutable; ordering and repeated references do not change their contents.
+	type identity struct {
+		fieldID int64
+		logID   int64
+		path    string
+	}
+	sources := func(info *querypb.SegmentLoadInfo) map[identity]struct{} {
+		result := make(map[identity]struct{})
+		for _, field := range info.GetDeltalogs() {
+			for _, log := range field.GetBinlogs() {
+				result[identity{field.GetFieldID(), log.GetLogID(), log.GetLogPath()}] = struct{}{}
+			}
+		}
+		return result
+	}
+	return maps.Equal(sources(current), sources(incoming))
 }
 
 func getBinlogDataDiskSize(fieldBinlog *datapb.FieldBinlog) int64 {
