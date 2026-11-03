@@ -567,6 +567,14 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 			mlog.String("channel", channel),
 			mlog.FieldNodeID(nodeID))
 
+		mvccTimestamp := dr.ts
+		if dr.req.GetConsistencyLevel() == commonpb.ConsistencyLevel_Strong {
+			// Let the delegator select a Strong snapshot from the local WAL.
+			// Pinning dr.ts bypasses that path and waits for a fresh TimeTick
+			// even when all completed writes are already queryable. Deletes
+			// receive their own later WAL timestamps, not this query timestamp.
+			mvccTimestamp = 0
+		}
 		queryReq := &querypb.QueryRequest{
 			Req: &internalpb.RetrieveRequest{
 				Base: commonpbutil.NewMsgBase(
@@ -575,7 +583,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					commonpbutil.WithTargetID(nodeID),
 				),
-				MvccTimestamp:      dr.ts,
+				MvccTimestamp:      mvccTimestamp,
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
@@ -584,6 +592,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
 				GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				ConsistencyLevel:   dr.req.GetConsistencyLevel(),
 				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
