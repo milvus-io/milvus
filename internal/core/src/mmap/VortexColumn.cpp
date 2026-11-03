@@ -2229,7 +2229,6 @@ VortexColumn::ArrayValueViews(
                   "VortexColumn::ArrayValueViews only supports native-list "
                   "ARRAY fields");
     }
-    RejectNullableArrayElements();
     auto chunk = MaterializeChunk(op_ctx, chunk_id, offset_len);
     auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
     AssertInfo(array_chunk != nullptr,
@@ -2403,7 +2402,6 @@ VortexColumn::ArrayValueViewsByOffsets(
                   "VortexColumn::ArrayValueViewsByOffsets only supports "
                   "native-list ARRAY fields");
     }
-    RejectNullableArrayElements();
     CheckChunkId(chunk_id);
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> views;
     views.first.resize(offsets.size());
@@ -3204,10 +3202,10 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
     return TakeUnchecked(op_ctx, std::move(options));
 }
 
+// ArrayValueView exposes element validity; the legacy ArrayView cannot.
 void
 VortexColumn::ValidateArrayViewTarget(TargetType target_type) const {
-    if (target_type == TargetType::ArrayView ||
-        target_type == TargetType::ArrayValueView) {
+    if (target_type == TargetType::ArrayView) {
         RejectNullableArrayElements();
     }
 }

@@ -1682,6 +1682,65 @@ func TestHybridSearchWithRerank(t *testing.T) {
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
 
+// TestSearchStructVectorOnlyWithoutAnnsField: on a collection whose only vector
+// is a struct sub-field, search and hybrid sub-searches without annsField build
+// the placeholder from that sub-field and leave anns_field empty, so the proxy
+// picks the same default.
+func TestSearchStructVectorOnlyWithoutAnnsField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	isDefaultSubFieldSearch := func(params []*commonpb.KeyValuePair, placeholderGroup []byte) bool {
+		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(proxy.AnnsFieldKey, params)
+		if err != nil || annsField != "" {
+			return false
+		}
+		group := &commonpb.PlaceholderGroup{}
+		if proto.Unmarshal(placeholderGroup, group) != nil || len(group.GetPlaceholders()) != 1 {
+			return false
+		}
+		placeholder := group.GetPlaceholders()[0]
+		return placeholder.GetType() == commonpb.PlaceholderType_FloatVector &&
+			len(placeholder.GetValues()) == 1 && len(placeholder.GetValues()[0]) == 16
+	}
+	emptyResults := &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}},
+	}}
+
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         buildStructVectorOnlyTestSchema(),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		return isDefaultSubFieldSearch(req.GetSearchParams(), req.GetPlaceholderGroup())
+	})).Return(emptyResults, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		if len(req.GetRequests()) != 2 {
+			return false
+		}
+		for _, sub := range req.GetRequests() {
+			if !isDefaultSubFieldSearch(sub.GetSearchParams(), sub.GetPlaceholderGroup()) {
+				return false
+			}
+		}
+		return true
+	})).Return(emptyResults, nil).Once()
+
+	sendReqAndVerify(t, testEngine, "search", http.MethodPost, requestBodyTestCase{
+		path:        versionalV2(EntityCategory, SearchAction),
+		requestBody: []byte(`{"collectionName": "c_test", "data": [[0.1, 0.2, 0.3, 0.4]], "limit": 3}`),
+	})
+	sendReqAndVerify(t, testEngine, "hybrid_search", http.MethodPost, requestBodyTestCase{
+		path:        versionalV2(EntityCategory, HybridSearchAction),
+		requestBody: []byte(`{"collectionName": "c_test", "search": [{"data": [[0.1, 0.2, 0.3, 0.4]], "metricType": "IP", "limit": 3}, {"data": [[0.4, 0.3, 0.2, 0.1]], "metricType": "IP", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k": 1}}}`),
+	})
+}
+
 func TestHybridSearchWithFunctionChain(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")

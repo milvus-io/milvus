@@ -170,10 +170,12 @@ func (s *StructSubFieldSuite) TestDropProviderMiddleAndLastGuards() {
 	s.Require().Equal([]int64{11, 12}, s.child(ctx, name, 1, "mid").GetScalars().GetArrayData().GetData()[0].GetLongData().GetData())
 	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 1, "tail").GetScalars().GetArrayData().GetData()[0].GetValidData())
 	s.assertDirectChild(ctx, name, 1, "tail")
+	// tail is [21, NULL]: the null element is UNKNOWN, the first one matches.
 	for _, expression := range []string{"element_filter(S, $[tail] > 0)", "MATCH_ANY(S, $[tail] > 0)"} {
 		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{CollectionName: name, Expr: expression, OutputFields: []string{"pk"}})
-		s.Require().NoError(err)
-		s.Require().ErrorContains(merr.Error(resp.GetStatus()), "not supported")
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expression)
+		s.Require().NotEmpty(resp.GetFieldsData(), expression)
+		s.Require().Equal([]int64{1}, resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), expression)
 	}
 	s.Require().ErrorContains(s.insert(ctx, name, 2, true, children...), `sub-field "vec" does not exist in struct field "S"`)
 	s.Require().NoError(s.insert(ctx, name, 2, true, children[1:]...))

@@ -85,11 +85,13 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 		minRowsToEnableIndex: Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64(),
 	}
 
-	vectorFieldIDs := make([]UniqueID, 0, len(collection.Schema.GetFields()))
+	vectorFields := typeutil.GetVectorFieldSchemas(collection.Schema)
+	vectorFieldIDs := make([]UniqueID, 0, len(vectorFields))
+	for _, field := range vectorFields {
+		vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
+	}
+	// Text and JSON key stats are only built on top-level fields.
 	for _, field := range collection.Schema.GetFields() {
-		if typeutil.IsVectorType(field.GetDataType()) {
-			vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
-		}
 		h := typeutil.CreateFieldSchemaHelper(field)
 		if h.EnableMatch() {
 			r.textStatsFieldIDs = append(r.textStatsFieldIDs, field.GetFieldID())
@@ -101,9 +103,10 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 	r.requireTextStats = len(r.textStatsFieldIDs) > 0
 	r.requireJSONKeyStats = len(r.jsonKeyStatsFieldIDs) > 0
 
-	// Index term: all vector fields must be indexed; when DVForceAllIndexReady
-	// every scalar-indexed field must be too (the same target set as
-	// FilterInIndexedSegments). A pure-scalar collection leaves the vector set
+	// Index term: all vector fields, struct vector sub-fields included, must be
+	// indexed; when DVForceAllIndexReady every scalar-indexed field must be too
+	// (the same target set as FilterInIndexedSegments). A pure-scalar
+	// collection, with no top-level or sub-field vector, leaves the vector set
 	// empty: the term would otherwise be vacuously satisfied, so degrade to
 	// "every scalar index on the collection is Finished" (design §5.3, O3).
 	if m.indexMeta != nil && m.indexMeta.HasIndex(collection.ID) {

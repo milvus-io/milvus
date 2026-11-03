@@ -606,12 +606,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       "[StorageV2] ArrayValueViews only supports recursive "
                       "ARRAY columns");
         }
-        if (field_meta_.has_nullable_array_element()) {
-            ThrowInfo(ErrorCode::NotImplemented,
-                      "expressions on element-nullable array field {} are "
-                      "not supported yet",
-                      field_meta_.get_name().get());
-        }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
         auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
@@ -706,12 +700,6 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] ArrayValueViewsByOffsets only supports "
                       "recursive ARRAY columns");
-        }
-        if (field_meta_.has_nullable_array_element()) {
-            ThrowInfo(ErrorCode::NotImplemented,
-                      "expressions on element-nullable array field {} are "
-                      "not supported yet",
-                      field_meta_.get_name().get());
         }
         auto chunk_wrapper = group_->GetGroupChunk(op_ctx, chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
@@ -1086,9 +1074,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
  private:
     void
+    // ArrayValueView exposes element validity; the legacy ArrayView cannot.
     ValidateArrayViewTarget(TargetType target_type) const override {
-        if ((target_type == TargetType::ArrayView ||
-             target_type == TargetType::ArrayValueView) &&
+        if (target_type == TargetType::ArrayView &&
             field_meta_.has_nullable_array_element()) {
             ThrowInfo(ErrorCode::NotImplemented,
                       "expressions on element-nullable array field {} are "
