@@ -1155,9 +1155,16 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 		collInfo, err := cache.GetCollectionInfo(ctx, "", collName, 0)
 		assert.NoError(t, err)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now())
+		st.SetTs(enqueueTs)
 
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.Equal(t, collInfo.UpdateTimestamp, st.GuaranteeTimestamp)
+		// Under Eventually the guarantee is the last DDL; the entity TTL cutoff must still be now (#55069).
+		enqueuePhysicalMs, _ := tsoutil.ParseHybridTs(enqueueTs)
+		assert.Equal(t, uint64(enqueuePhysicalMs*1000), st.GetEntityTtlPhysicalTime())
+		updatePhysicalMs, _ := tsoutil.ParseHybridTs(collInfo.UpdateTimestamp)
+		assert.NotEqual(t, uint64(updatePhysicalMs*1000), st.GetEntityTtlPhysicalTime())
 	})
 	t.Run("search with rerank", func(t *testing.T) {
 		collName := "search_with_rerank" + funcutil.GenRandomStr()
@@ -1176,12 +1183,10 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NotNil(t, st.rerankMeta)
 		assert.Equal(t, false, st.GetIsAdvanced())
 
-		// Verify EntityTtlPhysicalTime is set (issue #47413)
-		assert.NotZero(t, st.GetEntityTtlPhysicalTime(),
-			"EntityTtlPhysicalTime should be set from GuaranteeTimestamp")
-		expectedPhysicalMs, _ := tsoutil.ParseHybridTs(st.GetGuaranteeTimestamp())
+		// The entity TTL cutoff is the search's own timestamp (issue #47413, #55069)
+		expectedPhysicalMs, _ := tsoutil.ParseHybridTs(enqueueTs)
 		assert.Equal(t, uint64(expectedPhysicalMs*1000), st.GetEntityTtlPhysicalTime(),
-			"EntityTtlPhysicalTime should equal physical time in microseconds")
+			"EntityTtlPhysicalTime should equal the physical time of the search timestamp in microseconds")
 	})
 
 	t.Run("advance search with rerank", func(t *testing.T) {
