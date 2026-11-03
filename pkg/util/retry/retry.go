@@ -109,6 +109,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 			lastErr = err
 
+			// No attempt follows the last one, so sleeping the backoff only
+			// delays returning the final error.
+			if c.attempts != 0 && i+1 >= c.attempts {
+				break
+			}
+
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
@@ -208,6 +214,12 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 			}
 
 			lastErr = err
+
+			// No attempt follows the last one, so sleeping the backoff only
+			// delays returning the final error.
+			if c.attempts != 0 && i+1 >= c.attempts {
+				break
+			}
 
 			select {
 			case <-time.After(c.sleep):
