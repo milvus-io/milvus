@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1455,6 +1456,86 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayUsesValidElementCount(
 			} else {
 				s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 			}
+		})
+	}
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestJSONAutoIndexUpgrade() {
+	resetJSONVersionTargets(s.T())
+	config := &Params.AutoIndexConfig.ScalarAutoIndexParams
+	previous := config.SwapTempValue(`{"json":"HYBRID"}`)
+	s.T().Cleanup(func() { config.SwapTempValue(previous) })
+	for _, tc := range []struct {
+		name, userType, cast string
+		version              int32
+		gate                 bool
+		want                 string
+	}{
+		{"old version", "AUTOINDEX", "DOUBLE", 3, true, "INVERTED"},
+		{"upgrade", "AUTOINDEX", "DOUBLE", 4, true, "HYBRID"},
+		{"old node caps target", "AUTOINDEX", "DOUBLE", 3, true, "INVERTED"},
+		{"implicit autoindex", "", "DOUBLE", 4, true, "HYBRID"},
+		{"missing intent", "", "DOUBLE", 4, true, "INVERTED"},
+		{"config remains inverted", "AUTOINDEX", "DOUBLE", 4, true, "INVERTED"},
+		{"explicit inverted", "INVERTED", "DOUBLE", 4, true, "INVERTED"},
+		{"full json", "AUTOINDEX", "JSON", 4, true, "INVERTED"},
+		{"array disabled", "AUTOINDEX", "ARRAY_DOUBLE", 4, false, "INVERTED"},
+		{"array enabled", "AUTOINDEX", "ARRAY_DOUBLE", 4, true, "HYBRID"},
+	} {
+		s.Run(tc.name, func() {
+			setJSONArrayIndexGate(s.T(), tc.gate)
+			catalog := catalogmocks.NewDataCoordCatalog(s.T())
+			mt := &meta{indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID)}
+			definition := mt.indexMeta.indexes[s.collID][s.indexID]
+			definition.IsAutoIndex = tc.userType == "AUTOINDEX" || tc.name == "implicit autoindex"
+			definition.UserIndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: tc.userType}}
+			definition.IndexParams = []*commonpb.KeyValuePair{
+				{Key: common.IndexTypeKey, Value: "INVERTED"},
+				{Key: common.JSONPathKey, Value: "/price"},
+				{Key: common.JSONCastTypeKey, Value: tc.cast},
+				{Key: common.JSONCastFunctionKey, Value: "STRING_TO_DOUBLE"},
+			}
+			segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+			s.Require().True(ok)
+			handler := NewNMockHandler(s.T())
+			handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+				ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: s.fieldID, DataType: schemapb.DataType_JSON}}},
+			}, nil)
+			cm := mocks.NewChunkManager(s.T())
+			cm.EXPECT().RootPath().Return("root")
+			versions := jsonArrayVersionManager(s.T(), tc.version)
+			if tc.name == "old node caps target" {
+				versions.AddNode(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{
+					ServerID: 2, ScalarIndexEngineVersion: sessionutil.IndexEngineVersion{
+						CurrentIndexVersion: 3, MaximumIndexVersion: 3,
+					},
+				}})
+				previous := Params.DataCoordCfg.TargetScalarIndexVersion.SwapTempValue("4")
+				s.T().Cleanup(func() { Params.DataCoordCfg.TargetScalarIndexVersion.SwapTempValue(previous) })
+			}
+			if tc.name == "config remains inverted" {
+				previous := config.SwapTempValue(`{"json":"INVERTED"}`)
+				s.T().Cleanup(func() { config.SwapTempValue(previous) })
+			}
+			it := newIndexBuildTask(segIndex, 1, mt, handler, cm, versions)
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4}}
+			req, err := it.prepareJobRequest(context.Background(), segment, segIndex, mt.indexMeta.GetIndexParams(s.collID, s.indexID), "INVERTED")
+			s.Require().NoError(err)
+			s.Equal(tc.want, GetIndexType(req.IndexParams))
+			s.Equal(tc.version, req.CurrentScalarIndexVersion)
+			if tc.want == "HYBRID" {
+				limit, err := getIndexParam(req.IndexParams, common.BitmapCardinalityLimitKey)
+				s.NoError(err)
+				s.Equal(Params.AutoIndexConfig.BitmapCardinalityLimit.GetValue(), limit)
+			}
+			for _, key := range []string{common.JSONPathKey, common.JSONCastTypeKey, common.JSONCastFunctionKey} {
+				before, _ := getIndexParam(definition.IndexParams, key)
+				after, err := getIndexParam(req.IndexParams, key)
+				s.NoError(err)
+				s.Equal(before, after)
+			}
+			s.Equal("INVERTED", GetIndexType(definition.IndexParams))
+			s.Equal(tc.userType, GetIndexType(definition.UserIndexParams))
 		})
 	}
 }

@@ -92,3 +92,15 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
 }
+
+func TestSegmentIndex_MixedJSONAutoIndexTypes(t *testing.T) {
+	for _, indexType := range []string{"", "INVERTED", "HYBRID"} {
+		t.Run(indexType, func(t *testing.T) {
+			original := &SegmentIndex{BuildID: 1000, IndexType: indexType, CurrentScalarIndexVersion: 4}
+			cloned := CloneSegmentIndex(original)
+			restored := UnmarshalSegmentIndexModel(MarshalSegmentIndexModel(cloned))
+			assert.Equal(t, indexType, restored.IndexType)
+			assert.Equal(t, int32(4), restored.CurrentScalarIndexVersion)
+		})
+	}
+}

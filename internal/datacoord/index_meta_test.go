@@ -1513,20 +1513,51 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID, nodeID, "INVERTED")
 		assert.NoError(t, err)
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
-		err := m.UpdateVersion(buildID, nodeID)
+		err := m.UpdateVersion(buildID, nodeID, "INVERTED")
 		assert.Error(t, err)
 	})
 
 	t.Run("not exist", func(t *testing.T) {
-		err := m.UpdateVersion(buildID+1, nodeID)
+		err := m.UpdateVersion(buildID+1, nodeID, "INVERTED")
 		assert.Error(t, err)
 	})
+}
+
+// A retry may select a different type, but failed persistence must not publish it.
+func TestMeta_UpdateVersionIndexType(t *testing.T) {
+	m := updateSegmentIndexMeta(t)
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m.catalog = catalog
+	before, ok := m.GetIndexJob(buildID)
+	require.True(t, ok)
+	var persisted *model.SegmentIndex
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, indexes []*model.SegmentIndex) error {
+			require.Len(t, indexes, 1)
+			persisted = model.UnmarshalSegmentIndexModel(model.MarshalSegmentIndexModel(indexes[0]))
+			return nil
+		}).Once()
+	require.NoError(t, m.UpdateVersion(buildID, nodeID, "HYBRID"))
+	require.Equal(t, "HYBRID", persisted.IndexType)
+	require.Equal(t, before.IndexVersion+1, persisted.IndexVersion)
+	require.Equal(t, nodeID, persisted.NodeID)
+	finished, _, err := m.buildFinishedSegmentIndex(persisted, &workerpb.IndexTaskInfo{
+		BuildID: buildID, State: commonpb.IndexState_Finished,
+		CurrentScalarIndexVersion: 4,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "HYBRID", finished.IndexType)
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(errors.New("persist failed")).Once()
+	require.Error(t, m.UpdateVersion(buildID, nodeID+1, "INVERTED"))
+	after, ok := m.GetIndexJob(buildID)
+	require.True(t, ok)
+	require.Equal(t, persisted, after)
 }
 
 func TestMeta_FinishTask(t *testing.T) {

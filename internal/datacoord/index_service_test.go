@@ -2809,6 +2809,31 @@ func TestServer_GetIndexInfos(t *testing.T) {
 			assert.Equal(t, []string{expected}, infos[0].GetIndexFilePaths())
 		})
 	}
+	t.Run("mixed JSON autoindex segment types", func(t *testing.T) {
+		definition := s.meta.indexMeta.indexes[collID][indexID]
+		definition.IndexParams = []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "INVERTED"},
+			{Key: common.JSONPathKey, Value: "/price"},
+			{Key: common.JSONCastTypeKey, Value: "DOUBLE"},
+		}
+		for _, savedType := range []string{"", "INVERTED", "HYBRID"} {
+			segIdx := s.meta.indexMeta.GetSegmentIndexes(collID, segID)[indexID]
+			segIdx.IndexStorePathVersion = 0
+			segIdx.IndexType = savedType
+			segIdx1.Insert(indexID, segIdx)
+			resp, err := s.GetIndexInfos(ctx, req)
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(resp.GetStatus()))
+			infos := resp.GetSegmentInfo()[segID].GetIndexInfos()
+			require.Len(t, infos, 1)
+			want := savedType
+			if want == "" {
+				want = "INVERTED"
+			}
+			assert.Equal(t, want, GetIndexType(infos[0].IndexParams))
+			assert.Equal(t, "INVERTED", GetIndexType(definition.IndexParams))
+		}
+	})
 }
 
 func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
