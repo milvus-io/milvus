@@ -177,6 +177,99 @@ RunStringSortV3PatternMatchRoundtrip(const storage::FileManagerContext& context,
     VerifyStringSortPatternMatches(load_index, values.size());
 }
 
+// Delegates to a real chunk manager, but fails every write whose path contains
+// `fail_substr` with the error a transient object storage failure raises
+// (S3Error), so a test can check which code reaches the caller.
+class FailingWriteChunkManager : public ChunkManager {
+ public:
+    FailingWriteChunkManager(ChunkManagerPtr inner, std::string fail_substr)
+        : inner_(std::move(inner)), fail_substr_(std::move(fail_substr)) {
+    }
+
+    bool
+    Exist(const std::string& filepath) override {
+        return inner_->Exist(filepath);
+    }
+
+    uint64_t
+    Size(const std::string& filepath) override {
+        return inner_->Size(filepath);
+    }
+
+    uint64_t
+    Read(const std::string& filepath, void* buf, uint64_t len) override {
+        return inner_->Read(filepath, buf, len);
+    }
+
+    void
+    Write(const std::string& filepath, void* buf, uint64_t len) override {
+        MaybeFail(filepath);
+        inner_->Write(filepath, buf, len);
+    }
+
+    uint64_t
+    Read(const std::string& filepath,
+         uint64_t offset,
+         void* buf,
+         uint64_t len) override {
+        return inner_->Read(filepath, offset, buf, len);
+    }
+
+    void
+    Write(const std::string& filepath,
+          uint64_t offset,
+          void* buf,
+          uint64_t len) override {
+        MaybeFail(filepath);
+        inner_->Write(filepath, offset, buf, len);
+    }
+
+    std::vector<std::string>
+    ListWithPrefix(const std::string& filepath) override {
+        return inner_->ListWithPrefix(filepath);
+    }
+
+    void
+    Remove(const std::string& filepath) override {
+        inner_->Remove(filepath);
+    }
+
+    std::string
+    GetName() const override {
+        return inner_->GetName();
+    }
+
+    std::string
+    GetRootPath() const override {
+        return inner_->GetRootPath();
+    }
+
+    std::string
+    GetBucketName() const override {
+        return inner_->GetBucketName();
+    }
+
+    int
+    FailedWrites() const {
+        return failed_writes_.load();
+    }
+
+ private:
+    void
+    MaybeFail(const std::string& filepath) {
+        if (filepath.find(fail_substr_) != std::string::npos) {
+            ++failed_writes_;
+            ThrowInfo(ErrorCode::S3Error,
+                      "injected object storage write failure for {}",
+                      filepath);
+        }
+    }
+
+    ChunkManagerPtr inner_;
+    std::string fail_substr_;
+    std::atomic<int> failed_writes_{0};
+};
+
 }  // namespace
 
 class DiskAnnFileManagerTest : public testing::Test {
@@ -252,6 +345,41 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     for (auto& file : local_files) {
         cm_->Remove(file);
     }
+}
+
+TEST_F(DiskAnnFileManagerTest, AddFileOrThrowKeepsUploadErrorCode) {
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    std::string local_dir = TestLocalPath + "diskann/add_file_or_throw/";
+    std::string local_file = local_dir + milvus::index::VALID_DATA_KEY;
+    lcm->CreateFile(local_file);
+    std::vector<uint8_t> data(1024, 1);
+    lcm->Write(local_file, data.data(), data.size());
+
+    FieldDataMeta field_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1001, 1, "index"};
+    auto failing_cm = std::make_shared<FailingWriteChunkManager>(
+        cm_, milvus::index::VALID_DATA_KEY);
+    auto file_manager =
+        std::make_shared<DiskFileManagerImpl>(storage::FileManagerContext(
+            field_data_meta, index_meta, failing_cm, fs_));
+
+    try {
+        file_manager->AddFileOrThrow(local_file);
+        FAIL() << "expected the injected upload failure to propagate";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::S3Error) << e.what();
+    }
+    EXPECT_GT(failing_cm->FailedWrites(), 0);
+    EXPECT_TRUE(file_manager->GetRemotePathsToFileSize().empty());
+
+    try {
+        file_manager->AddFileOrThrow(local_dir + "missing_file");
+        FAIL() << "expected a missing local file to fail the upload";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::PathNotExist) << e.what();
+    }
+
+    lcm->Remove(local_file);
 }
 
 TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
@@ -1684,6 +1812,138 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     for (const auto& file : files) {
         cm_->Remove(file);
     }
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       BuildAllNullNullableDiskVectorIndexFailsWhenValidDataUploadFails) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3101;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 100;
+
+    FieldDataMeta field_data_meta = {
+        collection_id, partition_id, segment_id, field_id};
+    field_data_meta.field_schema.set_nullable(true);
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vec_field",
+                            DataType::VECTOR_FLOAT,
+                            dim};
+    auto failing_cm = std::make_shared<FailingWriteChunkManager>(
+        cm_, milvus::index::VALID_DATA_KEY);
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, failing_cm, fs_);
+    milvus::index::VectorDiskAnnIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
+    std::fill_n(valid_data.get(), num_rows, false);
+    index.UpdateValidData(valid_data.get(), num_rows);
+
+    std::vector<float> vec_data(dim, 0.0f);
+    auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
+
+    milvus::Config config;
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+    try {
+        index.BuildWithDataset(dataset, config);
+        FAIL() << "expected the valid_data upload failure to fail the build";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::S3Error) << e.what();
+    }
+    EXPECT_GT(failing_cm->FailedWrites(), 0);
+}
+
+TEST_F(DiskAnnFileManagerTest,
+       BuildAllValidEmptyEmbListDiskIndexFailsWhenOffsetsUploadFails) {
+    const int64_t collection_id = 1;
+    const int64_t partition_id = 2;
+    const int64_t segment_id = 3104;
+    const int64_t field_id = 100;
+    const int64_t dim = 128;
+    const int64_t num_rows = 3;
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, false, dim);
+    auto vector_array_data =
+        std::dynamic_pointer_cast<milvus::FieldData<milvus::VectorArray>>(
+            field_data);
+    ASSERT_NE(vector_array_data, nullptr);
+
+    std::vector<milvus::VectorArray> empty_lists;
+    empty_lists.reserve(num_rows);
+    for (int64_t i = 0; i < num_rows; ++i) {
+        empty_lists.emplace_back(nullptr, 0, dim, DataType::VECTOR_FLOAT);
+    }
+    vector_array_data->FillFieldData(empty_lists.data(), num_rows);
+
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    auto field_data_meta =
+        milvus::segcore::gen_field_meta(collection_id,
+                                        partition_id,
+                                        segment_id,
+                                        field_id,
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        false);
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
+
+    std::string insert_file_path =
+        TestLocalPath + "diskann/empty_emb_list_upload_fail_binlog";
+    boost::filesystem::remove_all(insert_file_path);
+    cm_->Write(
+        insert_file_path, serialized_data.data(), serialized_data.size());
+
+    IndexMeta index_meta = {segment_id,
+                            field_id,
+                            1000,
+                            1,
+                            "test",
+                            "vector_array_field",
+                            DataType::VECTOR_ARRAY,
+                            dim};
+    auto failing_cm = std::make_shared<FailingWriteChunkManager>(
+        cm_, "empty_emb_list_offsets");
+    storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, failing_cm, fs_);
+    milvus::index::VectorDiskAnnIndex<float> index(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_DISKANN,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        file_manager_context);
+
+    milvus::Config config;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
+    config[DIM_KEY] = dim;
+    config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+
+    try {
+        index.Build(config);
+        FAIL() << "expected the empty-offset upload failure to fail the build";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::S3Error) << e.what();
+    }
+    EXPECT_GT(failing_cm->FailedWrites(), 0);
+
+    cm_->Remove(insert_file_path);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheRawDataToDiskNoValidDataForNonNullable) {
