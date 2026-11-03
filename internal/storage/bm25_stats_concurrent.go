@@ -188,21 +188,18 @@ func (c *ConcurrentBM25Stats) applySharded(rows map[uint32]int32, sign int32, lo
 }
 
 func parallelBM25StatsShards(apply func(int)) {
-	workers := min(runtime.GOMAXPROCS(0), concurrentBM25StatsShards)
-	if workers == 1 {
+	if runtime.GOMAXPROCS(0) == 1 {
 		for i := 0; i < concurrentBM25StatsShards; i++ {
 			apply(i)
 		}
 		return
 	}
 	var wg sync.WaitGroup
-	wg.Add(workers)
-	for worker := 0; worker < workers; worker++ {
+	wg.Add(concurrentBM25StatsShards)
+	for i := 0; i < concurrentBM25StatsShards; i++ {
 		go func() {
 			defer wg.Done()
-			for i := worker; i < concurrentBM25StatsShards; i += workers {
-				apply(i)
-			}
+			apply(i)
 		}()
 	}
 	wg.Wait()
