@@ -1,24 +1,9 @@
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "segcore/storagev1translator/IndexLoadUtils.h"
 
 #include "common/EasyAssert.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::segcore::storagev1translator {
-
-const index::IndexFamily&
-IndexReaderTranslator::Family() const noexcept {
-    return family_;
-}
-
-DataType
-IndexReaderTranslator::ValueType() const noexcept {
-    return value_type_;
-}
-
-const index::ReaderCaps&
-IndexReaderTranslator::Caps() const noexcept {
-    return caps_;
-}
 
 std::string
 LocalStagingRoot(const std::string& configured_root) {

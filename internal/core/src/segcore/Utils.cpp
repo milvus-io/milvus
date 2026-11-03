@@ -57,7 +57,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "segcore/storagev1translator/SealedIndexLoader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
@@ -1677,30 +1677,15 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         field_meta, index_meta, remote_chunk_manager, fs);
     file_manager_context.set_for_loading_index(true);
 
-    // use cache layer to load vector/scalar index
-    auto translator = std::make_unique<
-        milvus::segcore::storagev1translator::SealedIndexTranslator>(
+    // Each index owns the cache for its storage.
+    auto loader = std::make_unique<
+        milvus::segcore::storagev1translator::SealedIndexLoader>(
         load_index_info, ctx, file_manager_context, config, op_ctx);
-    load_index_info->index_family = translator->Family();
-    load_index_info->index_value_type = translator->ValueType();
-    load_index_info->index_caps = translator->Caps();
+    load_index_info->index_family = loader->Family();
+    load_index_info->index_value_type = loader->ValueType();
+    load_index_info->index_caps = loader->Caps();
 
-    if (translator->Family() == index::families::kJsonFlat ||
-        translator->Family() == index::families::kMarisa ||
-        translator->Family() == index::families::kNgram ||
-        translator->Family() == index::families::kInverted ||
-        translator->Family() == index::families::kSort ||
-        translator->Family() == index::families::kFmIndex ||
-        translator->Family() == index::families::kRTree ||
-        translator->Family() == index::families::kBitmap ||
-        translator->Family() == index::families::kVectorMem ||
-        translator->Family() == index::families::kVectorDisk) {
-        load_index_info->index = translator->CreateIndex(op_ctx);
-    } else {
-        load_index_info->index = milvus::cachinglayer::Manager::GetInstance()
-                                     .CreateCacheSlot<index::IIndexReaderBase>(
-                                         std::move(translator), op_ctx);
-    }
+    load_index_info->index = loader->CreateIndex(op_ctx);
 }
 
 FieldDataPtr

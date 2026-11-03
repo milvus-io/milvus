@@ -132,7 +132,7 @@ EstimateLoadIndexResourceFromLoadInfo(
     }
 
     // Keep admission estimation metadata-only: exact scalar V3 directory
-    // inspection belongs to SealedIndexTranslator, where the result is used
+    // inspection belongs to SealedIndexLoader, where the result is used
     // for the actual MCL loading reservation.
     return milvus::index::IndexLoadResource(
         field_type,

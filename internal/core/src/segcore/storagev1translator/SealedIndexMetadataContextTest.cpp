@@ -24,8 +24,8 @@
 #include "common/OpContext.h"
 #include "index/Meta.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
-#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
+#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/storagev1translator/TextMatchIndexLoader.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -95,11 +95,11 @@ TEST_F(MetadataOpenCancellationTest, SealedSyncFailedOpenReportsCancellation) {
     info.warmup_policy = "disable";
     OpContext operation(cancelled_.getToken());
     try {
-        SealedIndexTranslator translator(&info,
-                                         tracer::TraceContext{},
-                                         context_,
-                                         Config(info.index_params),
-                                         &operation);
+        SealedIndexLoader translator(&info,
+                                     tracer::TraceContext{},
+                                     context_,
+                                     Config(info.index_params),
+                                     &operation);
         FAIL() << "cancelled failed open must report cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
@@ -117,7 +117,7 @@ TEST_F(MetadataOpenCancellationTest, TextAsyncFailedOpenReportsCancellation) {
         {index::INDEX_FILES, std::vector<std::string>{"metadata.v3"}}};
     OpContext operation(cancelled_.getToken());
     try {
-        TextMatchIndexTranslator translator(info, context_, config, &operation);
+        TextMatchIndexLoader translator(info, context_, config, &operation);
         FAIL() << "cancelled failed open must report cancellation";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);

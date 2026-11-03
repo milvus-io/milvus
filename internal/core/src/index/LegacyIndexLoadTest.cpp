@@ -38,7 +38,7 @@
 #include "index/LegacyIndexLoad.h"
 #include "index/LoadResource.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "segcore/storagev1translator/SealedIndexLoader.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorDiskLoader.h"
@@ -294,13 +294,23 @@ TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
                 SCOPED_TRACE(failure);
                 folly::CancellationSource construction;
                 OpContext creation(construction.getToken());
-                segcore::storagev1translator::SealedIndexTranslator translator(
+                segcore::storagev1translator::SealedIndexLoader translator(
                     &info,
                     tracer::TraceContext{},
                     context_,
                     Config(info.index_params),
                     &creation);
                 construction.requestCancellation();
+                const auto open_reader = [&](OpContext* ctx) {
+                    auto owner = translator.CreateIndex(ctx);
+                    auto reader = owner->CreateReader(ctx);
+                    if (vector) {
+                        dynamic_cast<const IVectorReader&>(*reader).Dim();
+                    } else {
+                        dynamic_cast<const INullReader&>(*reader).IsNotNull();
+                    }
+                    return reader;
+                };
                 const auto probes = [&] {
                     size_t count = 0;
                     for (const auto& [_, file] : fs_->files) {
@@ -316,8 +326,7 @@ TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
                     folly::CancellationSource cancelled;
                     cancelled.requestCancellation();
                     OpContext rejected(cancelled.getToken());
-                    ExpectError(FollyCancel,
-                                [&] { translator.get_cells(&rejected, {0}); });
+                    ExpectError(FollyCancel, [&] { open_reader(&rejected); });
                     EXPECT_EQ(probes(), inspected);
                 } else if (failure == 2) {
                     auto file = DataFile();
@@ -325,24 +334,23 @@ TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
                     file->SetNextCompletion(
                         arrow::Status::IOError("payload read failed"));
                     OpContext failed;
-                    ExpectError(StorageError,
-                                [&] { translator.get_cells(&failed, {0}); });
+                    ExpectError(StorageError, [&] { open_reader(&failed); });
                     EXPECT_EQ(probes(), inspected);
                 }
                 OpContext load;
-                auto cells = translator.get_cells(&load, {0});
-                ASSERT_EQ(cells.size(), 1);
-                EXPECT_EQ(cells.front().second->Count(), 4);
+                auto cells = open_reader(&load);
+                ASSERT_NE(cells, nullptr);
+                EXPECT_EQ(cells->Count(), 4);
                 if (failure != 0 || !retain_preparation) {
                     EXPECT_GT(probes(), inspected);
                 } else {
                     EXPECT_EQ(probes(), inspected);
                 }
-                cells.clear();
+                cells.reset();
                 // The preparation source ends with the first load, so eviction/reload
                 // does not retain its metadata outside the reader's cache lifetime.
-                cells = translator.get_cells(&load, {0});
-                EXPECT_EQ(cells.front().second->Count(), 4);
+                cells = open_reader(&load);
+                EXPECT_EQ(cells->Count(), 4);
                 EXPECT_GT(probes(), inspected);
             }
         }

@@ -35,7 +35,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
-#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
+#include "segcore/storagev1translator/TextMatchIndexLoader.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
@@ -143,17 +143,16 @@ TEST_F(TextIndexTranslatorTest, CachedIndexCreatesRequestReaders) {
             for (const bool warmup : {false, true}) {
                 SCOPED_TRACE(::testing::Message() << packed << async << warmup);
                 auto config = fixture.LoadConfig(stats, true);
-                TextMatchIndexTranslator translator(
-                    {true,
-                     3,
-                     101,
-                     "{}",
-                     stats.MemSize(),
-                     3,
-                     warmup ? "sync" : "disable",
-                     ""},
-                    fixture.context,
-                    config);
+                TextMatchIndexLoader translator({true,
+                                                 3,
+                                                 101,
+                                                 "{}",
+                                                 stats.MemSize(),
+                                                 3,
+                                                 warmup ? "sync" : "disable",
+                                                 ""},
+                                                fixture.context,
+                                                config);
                 auto index = translator.CreateIndex(nullptr);
                 ASSERT_NE(index, nullptr);
                 EXPECT_EQ(index->Metadata().count, 3);
@@ -176,12 +175,12 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
         static_cast<int64_t>(TargetBitmap(3).size_in_bytes());
     for (const bool mmap : {false, true}) {
         auto config = fixture.LoadConfig(stats, mmap);
-        TextMatchIndexTranslator translator(
+        TextMatchIndexLoader translator(
             {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
             fixture.context,
             config);
         auto [loaded, private_overhead, shared_overhead] =
-            translator.estimated_loading_usage({0});
+            translator.EstimatedResources();
         const auto overhead = private_overhead + shared_overhead;
         EXPECT_EQ(loaded.memory_bytes,
                   (mmap ? bitmap_bytes : stats.MemSize() + bitmap_bytes) +
@@ -190,21 +189,21 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
         EXPECT_EQ(overhead.memory_bytes, mmap ? stats.MemSize() : 0);
         EXPECT_EQ(overhead.file_bytes, mmap ? 0 : stats.MemSize());
         // Zero index size adds no disk overhead, even with nullable rows.
-        TextMatchIndexTranslator zero_size_translator(
+        TextMatchIndexLoader zero_size_translator(
             {mmap, 3, 101, "{}", 0, 3, "", ""}, fixture.context, config);
         const auto [zero_loaded, zero_private, zero_shared] =
-            zero_size_translator.estimated_loading_usage({0});
+            zero_size_translator.EstimatedResources();
         const auto zero_overhead = zero_private + zero_shared;
         EXPECT_EQ(zero_loaded.memory_bytes,
                   bitmap_bytes + index::kScalarIndexFixedResidentBytes);
         EXPECT_EQ(zero_overhead.file_bytes, 0);
-        auto cells = translator.get_cells(nullptr, {0});
-        ASSERT_EQ(cells.size(), 1);
-        CheckTextReader(*cells.front().second);
+        auto cells = translator.CreateIndex(nullptr)->CreateReader(nullptr);
+        ASSERT_NE(cells, nullptr);
+        CheckTextReader(*cells);
         // The fixed reservation covers the known reader and directory metadata;
         // the legacy admission formula remains an estimate, not a heap census.
-        EXPECT_GE(cells.front().second->MemoryUsage(), bitmap_bytes);
-        EXPECT_EQ(cells.front().second->CellByteSize().file_bytes > 0, mmap);
+        EXPECT_GE(cells->MemoryUsage(), bitmap_bytes);
+        EXPECT_EQ(cells->CellByteSize().file_bytes > 0, mmap);
     }
 }
 
@@ -219,35 +218,38 @@ TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
             storagev2translator::SetStorageV2AsyncLoadEnabled(planned_async);
             fs->ResetCounts();
             auto config = fixture.LoadConfig(stats, mmap);
-            TextMatchIndexTranslator translator(
+            TextMatchIndexLoader translator(
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
                 fixture.context,
                 config);
-            const auto estimate = translator.estimated_loading_usage({0});
+            const auto estimate = translator.EstimatedResources();
             storagev2translator::SetStorageV2AsyncLoadEnabled(!planned_async);
-            auto first = translator.get_cells(nullptr, {0});
-            CheckTextReader(*first.front().second);
+            auto first = translator.CreateIndex(nullptr)->CreateReader(nullptr);
+            CheckTextReader(*first);
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
             // Sync legacy reads use ChunkManager rather than Arrow.
             EXPECT_EQ(fs->sync_opens.load(), 0);
             EXPECT_GE(estimate.resident.memory_bytes,
-                      first.front().second->CellByteSize().memory_bytes);
+                      first->CellByteSize().memory_bytes);
             EXPECT_GE(estimate.resident.file_bytes,
-                      first.front().second->CellByteSize().file_bytes);
+                      first->CellByteSize().file_bytes);
             fs->ResetCounts();
             folly::CancellationSource cancel;
             cancel.requestCancellation();
             OpContext operation(cancel.getToken());
-            EXPECT_THROW(translator.get_cells(&operation, {0}), SegcoreError);
+            EXPECT_THROW(
+                translator.CreateIndex(&operation)->CreateReader(&operation),
+                SegcoreError);
             EXPECT_EQ(fs->async_opens.load(), 0);
             EXPECT_EQ(fs->sync_opens.load(), 0);
-            auto second = translator.get_cells(nullptr, {0});
-            first.clear();
-            CheckTextReader(*second.front().second);
+            auto second =
+                translator.CreateIndex(nullptr)->CreateReader(nullptr);
+            first.reset();
+            CheckTextReader(*second);
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
             // Sync legacy reads use ChunkManager rather than Arrow.
             EXPECT_EQ(fs->sync_opens.load(), 0);
-            const auto repeated = translator.estimated_loading_usage({0});
+            const auto repeated = translator.EstimatedResources();
             EXPECT_EQ(estimate.resident, repeated.resident);
             EXPECT_EQ(estimate.private_overhead, repeated.private_overhead);
             EXPECT_EQ(estimate.shared_overhead, repeated.shared_overhead);
@@ -266,13 +268,13 @@ TEST_F(TextIndexTranslatorTest, LegacyPreparationReleasedWhenWarmupDisabled) {
         int cold_opens = 0;
         int warm_opens = 0;
         for (const auto* policy : {"disable", "sync"}) {
-            TextMatchIndexTranslator translator(
+            TextMatchIndexLoader translator(
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, policy, ""},
                 fixture.context,
                 fixture.LoadConfig(stats, mmap));
             fs->ResetCounts();
-            auto cells = translator.get_cells(nullptr, {0});
-            CheckTextReader(*cells.front().second);
+            auto cells = translator.CreateIndex(nullptr)->CreateReader(nullptr);
+            CheckTextReader(*cells);
             if (std::string_view(policy) == "disable") {
                 cold_opens = fs->async_opens.load();
             } else {
@@ -318,7 +320,7 @@ TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
                 }
                 ASSERT_NE(held, nullptr);
                 fixture.context.fs = fs;
-                TextMatchIndexTranslator translator(
+                TextMatchIndexLoader translator(
                     {mmap, 3, 101, "{}", stats.MemSize(), 3, "sync", ""},
                     fixture.context,
                     config);
@@ -327,7 +329,10 @@ TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
                 folly::CancellationSource cancel;
                 OpContext operation(cancel.getToken());
                 auto pending = std::async(std::launch::async, [&] {
-                    return translator.get_cells(&operation, {0});
+                    auto reader = translator.CreateIndex(&operation)
+                                      ->CreateReader(&operation);
+                    CheckTextReader(*reader);
+                    return reader;
                 });
                 auto complete = [&] {
                     held->SetAutoComplete(true);
@@ -366,8 +371,8 @@ TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
                     }
                 } else {
                     auto cells = pending.get();
-                    ASSERT_EQ(cells.size(), 1);
-                    CheckTextReader(*cells.front().second);
+                    ASSERT_NE(cells, nullptr);
+                    CheckTextReader(*cells);
                     EXPECT_EQ(!std::filesystem::is_empty(loaded), mmap);
                 }
                 EXPECT_TRUE(std::filesystem::is_empty(loaded));
@@ -384,12 +389,12 @@ TEST_F(TextIndexTranslatorTest, LegacyPreparationHonorsCancellation) {
     folly::CancellationSource cancel;
     cancel.requestCancellation();
     OpContext operation(cancel.getToken());
-    EXPECT_THROW((TextMatchIndexTranslator(
-                     {false, 3, 101, "{}", stats.MemSize(), 3, "", ""},
-                     fixture.context,
-                     fixture.LoadConfig(stats, false),
-                     &operation)),
-                 SegcoreError);
+    EXPECT_THROW(
+        (TextMatchIndexLoader({false, 3, 101, "{}", stats.MemSize(), 3, "", ""},
+                              fixture.context,
+                              fixture.LoadConfig(stats, false),
+                              &operation)),
+        SegcoreError);
     EXPECT_EQ(fs->async_opens.load(), 0);
     EXPECT_EQ(fs->sync_opens.load(), 0);
 }
@@ -404,29 +409,30 @@ TEST_F(TextIndexTranslatorTest,
         auto config = fixture.LoadConfig(stats, mmap);
         for (const bool planned_async : {false, true}) {
             storagev2translator::SetStorageV2AsyncLoadEnabled(planned_async);
-            TextMatchIndexTranslator translator(
+            TextMatchIndexLoader translator(
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
                 fixture.context,
                 config);
-            const auto estimate = translator.estimated_loading_usage({0});
+            const auto estimate = translator.EstimatedResources();
             for (const bool current_async : {true, false}) {
                 storagev2translator::SetStorageV2AsyncLoadEnabled(
                     current_async);
                 fs->ResetCounts();
-                auto cells = translator.get_cells(nullptr, {0});
-                ASSERT_EQ(cells.size(), 1);
-                CheckTextReader(*cells.front().second);
+                auto cells =
+                    translator.CreateIndex(nullptr)->CreateReader(nullptr);
+                ASSERT_NE(cells, nullptr);
+                CheckTextReader(*cells);
                 EXPECT_EQ(fs->sync_opens, planned_async ? 0 : 1);
                 EXPECT_EQ(fs->async_opens, planned_async ? 1 : 0);
-                const auto repeated = translator.estimated_loading_usage({0});
+                const auto repeated = translator.EstimatedResources();
                 EXPECT_EQ(estimate.resident, repeated.resident);
                 EXPECT_EQ(estimate.private_overhead, repeated.private_overhead);
                 EXPECT_EQ(estimate.shared_overhead, repeated.shared_overhead);
                 EXPECT_GE(estimate.resident.memory_bytes,
-                          cells.front().second->CellByteSize().memory_bytes);
+                          cells->CellByteSize().memory_bytes);
                 EXPECT_GE(estimate.resident.file_bytes,
-                          cells.front().second->CellByteSize().file_bytes);
-                EXPECT_EQ(cells.front().second->CellByteSize().file_bytes > 0,
+                          cells->CellByteSize().file_bytes);
+                EXPECT_EQ(cells->CellByteSize().file_bytes > 0,
                           mmap);
 
                 // Direct registry callers can pin a mode too; an unpinned
@@ -489,7 +495,7 @@ TEST_F(TextIndexTranslatorTest,
                     std::move(bytes)));
         }
         fixture.context.fs = fs;
-        TextMatchIndexTranslator translator(
+        TextMatchIndexLoader translator(
             {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
             fixture.context,
             config);
@@ -499,7 +505,10 @@ TEST_F(TextIndexTranslatorTest,
         folly::CancellationSource cancel;
         OpContext operation(cancel.getToken());
         auto pending = std::async(std::launch::async, [&] {
-            return translator.get_cells(&operation, {0});
+            auto reader =
+                translator.CreateIndex(&operation)->CreateReader(&operation);
+            CheckTextReader(*reader);
+            return reader;
         });
         auto drain = folly::makeGuard([&] {
             cancel.requestCancellation();

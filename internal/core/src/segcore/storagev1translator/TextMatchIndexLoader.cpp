@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
+#include "segcore/storagev1translator/TextMatchIndexLoader.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -71,7 +71,7 @@ EstimateValidityBitmapBytes(int64_t num_rows) {
 
 }  // namespace
 
-TextMatchIndexTranslator::TextMatchIndexTranslator(
+TextMatchIndexLoader::TextMatchIndexLoader(
     TextMatchIndexLoadInfo load_info,
     milvus::storage::FileManagerContext file_manager_context,
     milvus::Config config,
@@ -110,14 +110,15 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
     AssertInfo(static_cast<bool>(loader_entry),
                "no index loader is registered for family {}",
                family);
-    SetReaderContract(
-        std::move(family), value_type, loader_entry.derive_caps(config_));
+    family_ = std::move(family);
+    value_type_ = value_type;
+    caps_ = loader_entry.derive_caps(config_);
     const auto files = index::GetValueFromConfig<std::vector<std::string>>(
         config_, index::INDEX_FILES);
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
             storagev2translator::StorageV2AsyncLoadEnabled());
-    IndexLoadContext metadata_ctx(
+    index::IndexLoadContext metadata_ctx(
         op_ctx,
         index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY).value_or(0));
     if (files && files->size() == 1 && files->front().ends_with(".v3")) {
@@ -175,22 +176,8 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
     }
 }
 
-size_t
-TextMatchIndexTranslator::num_cells() const {
-    return 1;
-}
-
-milvus::cachinglayer::cid_t
-TextMatchIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
-    return 0;
-}
-
 milvus::cachinglayer::LoadingResourceUsage
-TextMatchIndexTranslator::estimated_loading_usage(
-    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
-    if (cids.empty()) {
-        return {};
-    }
+TextMatchIndexLoader::EstimatedResources() const {
     if (file_load_resource_request_) {
         const auto& request = *file_load_resource_request_;
         return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
@@ -217,44 +204,19 @@ TextMatchIndexTranslator::estimated_loading_usage(
 }
 
 int64_t
-TextMatchIndexTranslator::cells_storage_bytes(
-    const std::vector<milvus::cachinglayer::cid_t>&) const {
+TextMatchIndexLoader::StorageBytes() const {
     // ignore the cids checking, because there is only one cell
     constexpr int64_t MIN_STORAGE_BYTES = 1 * 1024 * 1024;
     return std::max(load_info_.index_size, MIN_STORAGE_BYTES);
 }
 
-const std::string&
-TextMatchIndexTranslator::key() const {
-    return key_;
-}
-
 index::IndexPtr
-TextMatchIndexTranslator::CreateIndex(milvus::OpContext* ctx) {
-    return LoadIndex(ctx, true);
-}
-
-std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<milvus::index::IIndexReaderBase>>>
-TextMatchIndexTranslator::get_cells(
-    milvus::OpContext* ctx,
-    const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    auto index = LoadIndex(ctx, false);
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
-        result;
-    result.emplace_back(0, index->CreateReader(nullptr));
-    return result;
-}
-
-index::IndexPtr
-TextMatchIndexTranslator::LoadIndex(milvus::OpContext* ctx,
-                                    bool cache_storage) {
+TextMatchIndexLoader::CreateIndex(milvus::OpContext* ctx) {
     // Preparation belongs only to the first attempt, including cancellation.
     auto prepared_source = std::move(prepared_source_);
     // Check for cancellation before loading text match index
     CheckCancellation(
-        ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
+        ctx, load_info_.segment_id, "TextMatchIndexLoader::CreateIndex()");
 
     const auto files =
         milvus::index::GetValueFromConfig<std::vector<std::string>>(
@@ -266,7 +228,7 @@ TextMatchIndexTranslator::LoadIndex(milvus::OpContext* ctx,
     options.enable_mmap = load_info_.enable_mmap;
     options.estimated_bytes = load_info_.index_size;
     options.params = config_;
-    IndexLoadContext load_ctx(
+    index::IndexLoadContext load_ctx(
         ctx,
         index::GetValueFromConfig<int32_t>(config_, "load_priority")
             .value_or(0));
@@ -284,18 +246,15 @@ TextMatchIndexTranslator::LoadIndex(milvus::OpContext* ctx,
                "no index loader is registered for family {}",
                Family());
 
-    std::optional<index::IndexCacheConfig> cache;
-    if (cache_storage) {
-        const auto [loaded, overhead] = estimated_byte_size_of_cell(0);
-        cache.emplace(index::IndexCacheConfig{
-            key_,
-            meta_,
-            loaded,
-            overhead,
-            cells_storage_bytes({0}),
-            index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY)
-                .value_or(0)});
-    }
+    const auto [loaded, overhead, shared_overhead] = EstimatedResources();
+    const index::IndexCacheConfig cache{
+        key_,
+        meta_,
+        loaded,
+        overhead,
+        StorageBytes(),
+        index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY).value_or(0),
+        shared_overhead};
     index::IndexPtr index;
     {
         milvus::ScopedTimer timer(
@@ -338,11 +297,6 @@ TextMatchIndexTranslator::LoadIndex(milvus::OpContext* ctx,
              load_info_.segment_id);
 
     return index;
-}
-
-milvus::cachinglayer::Meta*
-TextMatchIndexTranslator::meta() {
-    return &meta_;
 }
 
 }  // namespace milvus::segcore::storagev1translator

@@ -54,7 +54,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/RemoteInputStream.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "index/IndexLoadContext.h"
 #include "folly/futures/Future.h"
 #include "futures/Executor.h"
 #include "index/Utils.h"
@@ -2428,7 +2428,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
             segcore::storagev2translator::StorageV2AsyncLoadEnabled());
-    segcore::storagev1translator::IndexLoadContext preparation_ctx(
+    index::IndexLoadContext preparation_ctx(
         op_ctx, GetValueFromConfig<int32_t>(config, LOAD_PRIORITY).value_or(0));
     auto* context = &preparation_ctx.ctx;
     storage::ThrowIfCancelled(context->cancellation_token,

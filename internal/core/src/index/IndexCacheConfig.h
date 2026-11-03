@@ -28,6 +28,7 @@ struct IndexCacheConfig {
     cachinglayer::ResourceUsage loading_overhead;
     int64_t storage_bytes;
     int32_t load_priority{0};
+    cachinglayer::ResourceUsage shared_loading_overhead;
 };
 
 }  // namespace milvus::index

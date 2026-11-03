@@ -35,7 +35,7 @@
 #include "pb/common.pb.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "index/IndexLoadContext.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
@@ -68,7 +68,7 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
         file_manager_context_.use_async_load.value_or(
             storagev2translator::StorageV2AsyncLoadEnabled());
     if (*file_manager_context_.use_async_load) {
-        IndexLoadContext load_ctx(op_ctx, load_info_.load_priority);
+        index::IndexLoadContext load_ctx(op_ctx, load_info_.load_priority);
         storage::LoadOptions options;
         options.op_ctx = &load_ctx.ctx;
         const std::map<std::string, std::string> params{
@@ -170,7 +170,7 @@ BsonInvertedIndexTranslator::get_cells(
     CheckCancellation(
         ctx, load_info_.segment_id, "BsonInvertedIndexTranslator::get_cells()");
 
-    IndexLoadContext load_ctx(ctx, load_info_.load_priority);
+    index::IndexLoadContext load_ctx(ctx, load_info_.load_priority);
     const auto priority = load_ctx.ctx.runtime_load_priority.value_or(0) != 0
                               ? proto::common::LoadPriority::LOW
                               : proto::common::LoadPriority::HIGH;

@@ -144,7 +144,7 @@
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 #include "index/vector/VectorIndexReader.h"
-#include "segcore/storagev1translator/TextMatchIndexTranslator.h"
+#include "segcore/storagev1translator/TextMatchIndexLoader.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
@@ -6291,7 +6291,7 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
         shard};
 
     auto translator = std::make_unique<
-        milvus::segcore::storagev1translator::TextMatchIndexTranslator>(
+        milvus::segcore::storagev1translator::TextMatchIndexLoader>(
         load_info, file_ctx, config, op_ctx);
     IndexInventory::ResolvedData resolved{translator->Family(),
                                           translator->ValueType(),
