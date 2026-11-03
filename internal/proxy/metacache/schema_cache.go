@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// GetWriteSchema confirms write admission against the current SN schema. Unlike
+// GetWriteSchema returns the cached current write schema, refreshing from SN on a miss. Unlike
 // the published read schema in CollectionInfo, this schema includes system fields.
 func (info *CollectionInfo) GetWriteSchema(ctx context.Context) (*SchemaInfo, error) {
 	if len(info.VChannels) == 0 {

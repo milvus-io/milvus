@@ -23,7 +23,7 @@ func testSchema(version int32) *schemapb.CollectionSchema {
 	}}
 }
 
-func TestSchemaClientSharedBodyAndFreshWriteVersion(t *testing.T) {
+func TestSchemaClientSharedBodyAndCachedWriteVersion(t *testing.T) {
 	var calls atomic.Int32
 	var current atomic.Int32
 	p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
@@ -48,16 +48,58 @@ func TestSchemaClientSharedBodyAndFreshWriteVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, write.Fields[0], system)
 	current.Store(1)
+	for range 100 {
+		hit, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v1"})
+		require.NoError(t, err)
+		require.Same(t, write, hit)
+	}
+	require.EqualValues(t, 1, calls.Load(), "hot writes must not issue schema RPCs")
+	w := &walAccesserImpl{schemaClient: c}
+	w.onSchemaVersionMismatch("p_1v1")
+	_, ok := c.writeVersions.load(1)
+	require.False(t, ok)
 	next, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, next.Version)
-	c.invalidateWriteSchema("p_1v1")
-	_, ok := c.writeVersions.load(1)
-	require.False(t, ok)
 	retained, err := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 1})
 	require.NoError(t, err)
 	require.Equal(t, next.Version, retained.Version)
 	require.Zero(t, read.Version)
+	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestSchemaClientWriteCacheExpiry(t *testing.T) {
+	for _, expired := range []string{"body", "selector", "epoch", "disabled"} {
+		t.Run(expired, func(t *testing.T) {
+			ttl := time.Hour
+			if expired == "disabled" {
+				ttl = 0
+			}
+			c := newSchemaClient(nil, ttl)
+			defer c.close()
+			var calls atomic.Int32
+			p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(*schemaClient, context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
+				return testSchema(calls.Add(1)), nil
+			}).Build()
+			defer p.UnPatch()
+			_, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
+			require.NoError(t, err)
+			c.mu.Lock()
+			switch expired {
+			case "body":
+				c.bodies.expire(time.Now().Add(2 * time.Hour))
+			case "selector":
+				c.writeVersions.expire(time.Now().Add(2 * time.Hour))
+			case "epoch":
+				c.epochs.expire(time.Now().Add(2 * time.Hour))
+			}
+			c.mu.Unlock()
+			fresh, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
+			require.NoError(t, err)
+			require.EqualValues(t, 2, fresh.Version)
+			require.EqualValues(t, 2, calls.Load())
+		})
+	}
 }
 
 func TestSchemaCacheIdleExpiryAndIndependentSelectors(t *testing.T) {

@@ -21,14 +21,18 @@ See [Analyzer execution](analyzer.md) for routing, schema and lifetime rules.
 including the complete schema and derived field indices. Native node consumers
 and write-side Proxy validation use the complete schema, including RowID/Timestamp.
 Write-side validation enforces the user-column constraints locally.
-Current-write lookups confirm write admission with SN on every call but reuse the
-compiled object for the same cached collection/version. Exact-version reads,
-including zero, use the cache directly.
+Current-write lookups cache both the selected version and its compiled schema,
+so cache hits require no schema RPC. An append schema mismatch invalidates the
+selector before the error reaches the caller; the next lookup refreshes from SN.
+The failed mutation is not automatically rebuilt or retried by SchemaClient.
+Exact-version reads, including zero, also use the cache directly.
 
 Both request types accept `BypassCache`. A refresh uses a new collection epoch,
 bypasses older flights and logically invalidates metadata in all cached versions
 of that collection without scanning other entries. Older RPC completions cannot
-publish over the new epoch. Cache bodies and epochs expire when idle.
+publish over the new epoch. Refresh also clears the write selector: fetching an
+exact read version does not establish the current write version. Cache bodies,
+write selectors and epochs expire when idle.
 
 On a miss, Proxy MetaCache fetches the published version from Coord, then obtains
 that exact version through SchemaClient with `BypassCache`. It shallow-copies the

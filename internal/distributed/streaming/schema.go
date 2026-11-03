@@ -30,8 +30,8 @@ type (
 // SchemaClient returns shared immutable SchemaInfo values. Callers must not
 // mutate their protobufs or indices. The schema includes system fields.
 type SchemaClient interface {
-	// GetCurrentWriteSchema confirms write admission with SN and reuses the
-	// immutable body and derived indices for the returned collection/version.
+	// GetCurrentWriteSchema caches the current write version and immutable body.
+	// A schema mismatch on append invalidates the selector for the next lookup.
 	GetCurrentWriteSchema(context.Context, GetCurrentWriteSchemaRequest) (*schemautil.SchemaInfo, error)
 	// GetSchemaVersion resolves an exact retained version, including zero.
 	// BypassCache also invalidates other versions' non-versioned metadata.
@@ -121,10 +121,24 @@ func (c *schemaClient) GetCurrentWriteSchema(ctx context.Context, req GetCurrent
 	}
 	c.mu.Lock()
 	key := writeFlightKey{req.VChannel, c.schemaEpochLocked(id, req.BypassCache), req.BypassCache}
+	if !req.BypassCache {
+		if info := c.cachedWriteSchemaLocked(id, key.generation); info != nil {
+			c.mu.Unlock()
+			return info, nil
+		}
+	}
 	c.mu.Unlock()
-	// Confirm on every operation, including after a local validation failure.
-	// Concurrent callers share the RPC; no published read version is required.
+	// Concurrent misses share the RPC. Recheck after joining the flight in case
+	// an earlier flight populated the cache after the initial lookup.
 	return c.writes.Do(ctx, key, func(ctx context.Context) (*schemautil.SchemaInfo, error) {
+		if !req.BypassCache {
+			c.mu.Lock()
+			info := c.cachedWriteSchemaLocked(id, key.generation)
+			c.mu.Unlock()
+			if info != nil {
+				return info, nil
+			}
+		}
 		response, err := c.getCollectionSchema(ctx, &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: req.VChannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}})
 		if err != nil {
 			return nil, err
@@ -140,6 +154,17 @@ func (c *schemaClient) GetCurrentWriteSchema(ctx context.Context, req GetCurrent
 		}
 		return body, err
 	})
+}
+
+func (c *schemaClient) cachedWriteSchemaLocked(id int64, epoch uint64) *schemautil.SchemaInfo {
+	version, ok := c.writeVersions.load(id)
+	if !ok {
+		return nil
+	}
+	if cached, ok := c.bodies.load(schemaIdentity{id, version}); ok && cached.epoch == epoch {
+		return cached.info
+	}
+	return nil
 }
 
 func (c *schemaClient) GetSchemaVersion(ctx context.Context, req GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
@@ -193,6 +218,9 @@ func (c *schemaClient) schemaEpochLocked(id int64, refresh bool) uint64 {
 	}
 	c.generation++
 	c.epochs.store(id, c.generation)
+	// An exact-version refresh can populate a body without confirming that it
+	// is still writable. Never combine that body with an older write selector.
+	c.writeVersions.erase(id)
 	return c.generation
 }
 
@@ -246,7 +274,6 @@ func (c *schemaClient) invalidateWriteSchema(channel string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.writeVersions.erase(id)
 	// Changing the flight generation prevents an RPC predating this error from
 	// publishing a stale write selector or being joined by a later request.
 	c.schemaEpochLocked(id, true)

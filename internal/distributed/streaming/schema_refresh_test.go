@@ -189,6 +189,37 @@ func TestSchemaClientRefreshInvalidatesOlderVersions(t *testing.T) {
 	require.Equal(t, "before alter", old.Description)
 	again, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
 	require.NoError(t, err)
-	require.Same(t, write, again, "ordinary write confirmation reuses the compiled SchemaInfo")
+	require.Same(t, write, again, "write cache hits reuse the compiled SchemaInfo without RPCs")
 	require.Same(t, write.FieldMap, again.FieldMap)
+	require.Equal(t, 3, calls)
+}
+
+func TestSchemaClientReadRefreshInvalidatesWriteSelector(t *testing.T) {
+	c := newSchemaClient(nil, time.Hour)
+	defer c.close()
+	var calls atomic.Int32
+	var current atomic.Int32
+	p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
+		calls.Add(1)
+		version := req.GetSchemaVersion()
+		if req.GetCurrentWrite() {
+			version = current.Load()
+		}
+		return testSchema(version), nil
+	}).Build()
+	defer p.UnPatch()
+	old, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+	require.NoError(t, err)
+	current.Store(1)
+	read, err := fetchTestSchema(t.Context(), c, "p_1v0", false, true)
+	require.NoError(t, err)
+	require.Zero(t, read.Version, "Coord's published version can lag SN's write version")
+	require.NotSame(t, old, read)
+	fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, fresh.Version, "a refreshed read body must not resurrect an old write selector")
+	hit, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+	require.NoError(t, err)
+	require.Same(t, fresh, hit)
+	require.EqualValues(t, 3, calls.Load())
 }
