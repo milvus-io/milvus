@@ -76,6 +76,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -8462,6 +8463,7 @@ func TestPartialUpsertSubsetRetryPreservesNullablePayloads(t *testing.T) {
 					defer read.UnPatch()
 					insertAttempts, deleteAttempts, commits := map[int64]int{}, map[int64]int{}, map[int64]int{}
 					wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+						require.EqualValues(t, 3, task.req.NumRows, "retry must not change the shared request row count")
 						responses := streamingtypes.NewAppendResponseN(len(msgs))
 						for i, msg := range msgs {
 							if wal.appendCalls > 1 {
@@ -8545,8 +8547,32 @@ func TestPartialUpsertSubsetRetryPreservesNullablePayloads(t *testing.T) {
 					require.NoError(t, task.prepareUpsert(ctx))
 					require.NoError(t, task.insertPreExecute(ctx))
 					require.NoError(t, task.deletePreExecute(ctx))
+					requestSize := proto.Size(task.req)
+					mutationSize := task.upsertMsg.InsertMsg.Size() + task.upsertMsg.DeleteMsg.Size()
+					readerCtx, stopReader := context.WithCancel(ctx)
+					defer stopReader()
+					rowsUnchanged := make(chan bool, 1)
+					go func() {
+						unchanged := true
+						for {
+							select {
+							case <-readerCtx.Done():
+								rowsUnchanged <- unchanged
+								return
+							default:
+								unchanged = unchanged && task.req.GetNumRows() == 3
+							}
+						}
+					}()
 					require.NoError(t, task.Execute(ctx))
+					stopReader()
+					require.True(t, <-rowsUnchanged)
 					require.NoError(t, task.PostExecute(ctx))
+					gotRequestSize, gotMutationSize := task.AccountingSizes()
+					require.Equal(t, requestSize, gotRequestSize)
+					require.Equal(t, mutationSize, gotMutationSize)
+					require.Less(t, proto.Size(task.req), gotRequestSize, "the final subset must not determine request accounting")
+					require.Less(t, task.upsertMsg.InsertMsg.Size()+task.upsertMsg.DeleteMsg.Size(), gotMutationSize, "earlier successful rows must remain accounted for")
 					require.Equal(t, 2, wal.appendCalls)
 					require.Equal(t, 2, reads)
 					require.Equal(t, map[int64]int{pks[0]: 1, pks[1]: 2, pks[2]: 2}, insertAttempts)
@@ -8561,6 +8587,82 @@ func TestPartialUpsertSubsetRetryPreservesNullablePayloads(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestConditionalUpsertWaitToFinishProjection(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, submitted := range []bool{false, true} {
+			for _, deadline := range []bool{false, true} {
+				t.Run(fmt.Sprintf("conditional=%t/submitted=%t/deadline=%t", conditional, submitted, deadline), func(t *testing.T) {
+					base, state := requestutil.WithConditionalWriteState(context.Background())
+					if submitted {
+						require.True(t, state.TryAppend())
+					}
+					ctx, cancel := context.WithCancel(base)
+					cause := context.Canceled
+					if deadline {
+						cancel()
+						ctx, cancel = context.WithDeadline(base, time.Now().Add(-time.Second))
+						cause = context.DeadlineExceeded
+					}
+					cancel()
+					task := createTestUpdateTask()
+					task.ctx, task.Condition = ctx, NewTaskCondition(ctx)
+					if conditional {
+						task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+					}
+					err := task.WaitToFinish()
+					require.ErrorIs(t, err, cause)
+					want := merr.Code(cause)
+					if conditional && submitted {
+						want = 112
+					}
+					require.Equal(t, want, merr.Code(err))
+					if conditional && !submitted {
+						require.False(t, state.TryAppend())
+					}
+				})
+			}
+		}
+	}
+	task := createTestUpdateTask()
+	task.req.WriteCondition = &milvuspb.WriteCondition{Op: milvuspb.WriteCondition_GT}
+	task.Notify(merr.ErrParameterInvalid)
+	require.ErrorIs(t, task.WaitToFinish(), merr.ErrParameterInvalid)
+}
+
+func TestConditionalUpsertCanceledWaitPreventsLateAppend(t *testing.T) {
+	for _, waitFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wait_first=%t", waitFirst), func(t *testing.T) {
+			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			task.ctx, task.Condition = ctx, NewTaskCondition(ctx)
+			task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+			task.req.FieldOps = nil
+			cancel()
+			if waitFirst {
+				require.ErrorIs(t, task.WaitToFinish(), context.Canceled)
+			}
+			wal := newPartialUpdateCASTestWAL(t, 9)
+			old := streaming.WAL()
+			streaming.SetWALForTest(wal)
+			defer streaming.SetWALForTest(old)
+			preparePartialUpdateCASTestGroups(t, task)
+			inserts, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, []int64{10}, nil, task.partialUpdateCASGroups)
+			pack := mockey.Mock((*UpsertTask).packInsertMessage).Return(inserts, nil).Build()
+			defer pack.UnPatch()
+			deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
+			defer deletePack.UnPatch()
+			executeCtx := ctx
+			if waitFirst {
+				executeCtx = context.Background()
+			}
+			err := task.Execute(executeCtx)
+			require.Equal(t, merr.CanceledCode, merr.Code(err))
+			require.Zero(t, wal.appendCalls)
+			require.False(t, task.partialState.appendAttempted)
+		})
 	}
 }
 

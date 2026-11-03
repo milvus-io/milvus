@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -95,6 +96,9 @@ type UpsertTask struct {
 
 	partialState *partialUpsertState
 	storageCost  segcore.StorageCost
+	writeState   requestutil.ConditionalWriteState
+	requestSize  int
+	mutationSize int
 }
 
 // NewUpsertTask constructs an upsert task. It takes the host node and the
@@ -132,6 +136,32 @@ func (ut *UpsertTask) Result() *milvuspb.MutationResult {
 // Request returns the original upsert request.
 func (ut *UpsertTask) Request() *milvuspb.UpsertRequest {
 	return ut.req
+}
+
+// AccountingSizes retains the first prepared partial batch across subset retries.
+func (ut *UpsertTask) AccountingSizes() (int, int) {
+	if ut.partialState != nil {
+		return ut.requestSize, ut.mutationSize
+	}
+	msg := ut.UpsertMsg()
+	return proto.Size(ut.req), msg.InsertMsg.Size() + msg.DeleteMsg.Size()
+}
+
+func (ut *UpsertTask) conditionalWriteState() *requestutil.ConditionalWriteState {
+	if ut.ctx != nil {
+		if state := requestutil.ConditionalWriteStateFromContext(ut.ctx); state != nil {
+			return state
+		}
+	}
+	return &ut.writeState
+}
+
+func (ut *UpsertTask) WaitToFinish() error {
+	err := ut.Condition.WaitToFinish()
+	if ut.req.GetWriteCondition() != nil && merr.IsCanceledOrTimeout(err) {
+		return ut.conditionalWriteState().Cancel(err)
+	}
+	return err
 }
 
 // UpsertMsg returns the underlying upsert message.
@@ -322,7 +352,6 @@ func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
 			if len(it.partialState.rows) != int(it.partialState.originalCount) {
 				fields = selectPartialFields(fields, it.partialState.rows)
 			}
-			it.req.NumRows = uint32(len(it.partialState.rows))
 			it.upsertMsg.InsertMsg.NumRows = uint64(len(it.partialState.rows))
 			it.partialState.writeRows = nil
 		}
@@ -412,9 +441,13 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 
 	upsertIDSize := typeutil.GetSizeOfIDs(upsertIDs)
-	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && uint64(it.req.GetNumRows()) != uint64(upsertIDSize) {
+	rowCount := it.req.GetNumRows()
+	if it.partialState != nil {
+		rowCount = uint32(len(it.partialState.rows))
+	}
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && uint64(rowCount) != uint64(upsertIDSize) {
 		return nil, merr.WrapErrParameterInvalidMsg(
-			"PATH_REPLACE num_rows %d does not match primary key count %d", it.req.GetNumRows(), upsertIDSize)
+			"PATH_REPLACE num_rows %d does not match primary key count %d", rowCount, upsertIDSize)
 	}
 	if upsertIDSize == 0 {
 		if err := generateFunctions(); err != nil {
