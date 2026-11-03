@@ -2189,3 +2189,58 @@ func TestFieldDataCopyFromSourceValidation(t *testing.T) {
 		require.ErrorIs(t, tc.target.CopyFrom(wrongType, []int{0}), merr.ErrServiceInternal)
 	}
 }
+
+func TestFieldDataCopyFromMemoryTracking(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
+					src := tc.newField(t, nullable, capacity)
+					dst := tc.newField(t, nullable, capacity)
+					require.NoError(t, src.AppendRow(tc.row))
+					if nullable {
+						require.NoError(t, src.AppendRow(nil))
+					}
+					require.NoError(t, dst.AppendRow(tc.row))
+					checkedMemorySize(t, dst)
+					for _, indices := range [][]int{nil, {}, {0, 0}, {0}} {
+						require.NoError(t, dst.CopyFrom(src, indices))
+						checkedMemorySize(t, dst)
+					}
+					if nullable {
+						for _, indices := range [][]int{{1}, {1, 0, 1, 0}} {
+							require.NoError(t, dst.CopyFrom(src, indices))
+							checkedMemorySize(t, dst)
+						}
+					}
+					size := checkedMemorySize(t, dst)
+					require.Error(t, dst.CopyFrom(nil, []int{0}))
+					require.Equal(t, size, checkedMemorySize(t, dst))
+				})
+			}
+		}
+	}
+}
+
+func TestSparseFloatVectorFieldDataCopyFromTrackedEncoding(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nullable=%t", nullable), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector, Nullable: nullable}
+			dst := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, true)
+			src := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, false)
+			require.NoError(t, dst.AppendRow(typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1})))
+			for _, index := range []uint32{126, 127, 16383} {
+				require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow([]uint32{index}, []float32{1})))
+			}
+			indices, values := make([]uint32, 16), make([]float32, 16)
+			for i := range indices {
+				indices[i], values[i] = uint32(i), 1
+			}
+			require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+			for _, selection := range [][]int{{0}, {1}, {2}, {3, 1, 3}} {
+				require.NoError(t, dst.CopyFrom(src, selection))
+				checkedMemorySize(t, dst)
+			}
+		})
+	}
+}

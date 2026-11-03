@@ -64,7 +64,7 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 
 // NewInsertDataWithMemoryTracking creates an empty batch including function output fields.
 // Variable-width fields use incremental sizing; the batch total sums its current fields.
-// Use Append* methods to change tracked fields; appended payloads and getter views are read-only.
+// Use Append* or CopyFrom methods to change tracked fields; appended payloads and getter views are read-only.
 func NewInsertDataWithMemoryTracking(schema *schemapb.CollectionSchema) (*InsertData, error) {
 	return newInsertDataWithCap(schema, 0, true, true)
 }
@@ -223,12 +223,12 @@ func (i *InsertData) GetRowSize(idx int) int {
 //
 // Memory tracking is disabled by default.
 // NewFieldDataWithMemoryTracking and NewInsertDataWithMemoryTracking enable it for variable-width fields.
-// Append* methods update the size cache, including changes retained after an error.
+// Append* and CopyFrom methods update the size cache, including changes retained after an error.
 // GetMemorySize returns the cache when enabled; otherwise, it scans variable-width data.
 // Fixed-width scalars and dense vectors always calculate their sizes in constant time.
 //
 // Tracking is fixed at construction.
-// With tracking enabled, only Append* methods may change the field's data and metadata.
+// With tracking enabled, only Append* and CopyFrom methods may change the field's data and metadata.
 // Appended payloads and backing data returned by getters must remain unchanged.
 type FieldData interface {
 	RowNum() int
@@ -269,7 +269,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 
 // NewFieldDataWithMemoryTracking creates an empty FieldData.
 // Variable-width fields use incremental sizing; capacity follows NewFieldData.
-// Use Append* methods to change tracked fields; appended payloads and getter views are read-only.
+// Use Append* or CopyFrom methods to change tracked fields; appended payloads and getter views are read-only.
 func NewFieldDataWithMemoryTracking(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	return newFieldData(dataType, fieldSchema, cap, true)
 }
@@ -1332,6 +1332,10 @@ func (data *StringFieldData) CopyFrom(src FieldData, indices []int) error {
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("StringFieldData.CopyFrom requires a non-nil StringFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	for _, i := range indices {
 		data.Data = append(data.Data, source.Data[i])
 		if data.Nullable {
@@ -1372,6 +1376,10 @@ func (data *ArrayFieldData) CopyFrom(src FieldData, indices []int) error {
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("ArrayFieldData.CopyFrom requires a non-nil ArrayFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	for _, i := range indices {
 		data.Data = append(data.Data, source.Data[i])
 		if data.Nullable {
@@ -1410,6 +1418,10 @@ func (data *JSONFieldData) CopyFrom(src FieldData, indices []int) error {
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("JSONFieldData.CopyFrom requires a non-nil JSONFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	for _, i := range indices {
 		data.Data = append(data.Data, source.Data[i])
 		if data.Nullable {
@@ -1451,6 +1463,10 @@ func (data *GeometryFieldData) CopyFrom(src FieldData, indices []int) error {
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("GeometryFieldData.CopyFrom requires a non-nil GeometryFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	for _, i := range indices {
 		data.Data = append(data.Data, source.Data[i])
 		if data.Nullable {
@@ -1716,6 +1732,11 @@ func (data *SparseFloatVectorFieldData) CopyFrom(src FieldData, indices []int) e
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("SparseFloatVectorFieldData.CopyFrom requires a non-nil SparseFloatVectorFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
+			data.Dim, data.L2PMapping.GetMemorySize())
+	}
+
 	for _, i := range indices {
 		if data.Nullable {
 			valid := source.ValidData[i]
@@ -1820,6 +1841,10 @@ func (data *VectorArrayFieldData) CopyFrom(src FieldData, indices []int) error {
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("VectorArrayFieldData.CopyFrom requires a non-nil VectorArrayFieldData source")
 	}
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	for _, i := range indices {
 		data.Data = append(data.Data, source.Data[i])
 		if data.Nullable {
