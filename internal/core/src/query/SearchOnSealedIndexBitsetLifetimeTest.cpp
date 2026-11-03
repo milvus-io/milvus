@@ -600,15 +600,8 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
                                             : knowhere::Json(ef);
         const auto original_params = info.search_params_;
         SearchResult result;
-        SearchOnSealedIndex(*schema,
-                            entry,
-                            info,
-                            vectors.data(),
-                            nullptr,
-                            1,
-                            {},
-                            nullptr,
-                            result);
+        SearchOnSealedIndex(
+            *schema, entry, info, vectors.data(), nullptr, 1, {}, result);
         // VectorSearchNode normally supplies the segment row count.
         result.total_data_cnt_ = n;
         ASSERT_TRUE(result.CanSearchFilteredVectors());
@@ -653,16 +646,10 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
         info.search_params_ = {{"ef", ef}};
         SearchResult result;
         result.total_data_cnt_ = n;
-        EXPECT_THROW(SearchOnSealedIndex(*schema,
-                                         entry,
-                                         info,
-                                         vectors.data(),
-                                         nullptr,
-                                         1,
-                                         {},
-                                         nullptr,
-                                         result),
-                     SegcoreError);
+        EXPECT_THROW(
+            SearchOnSealedIndex(
+                *schema, entry, info, vectors.data(), nullptr, 1, {}, result),
+            SegcoreError);
     }
 }
 
@@ -686,7 +673,7 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
     SearchResult result;
     result.total_data_cnt_ = n;
     SearchOnSealedIndex(
-        *schema, entry, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+        *schema, entry, info, vectors.data(), nullptr, 1, {}, result);
     ASSERT_TRUE(result.CanSearchFilteredVectors());
     auto filter = std::make_shared<TargetBitmap>(n, false);
     (*filter)[0] = true;
@@ -739,7 +726,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         search_result);
 
     // Indexed nullable search now passes the caller's logical bitset directly
@@ -762,7 +748,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         non_strict_result);
     EXPECT_FALSE(non_strict_result.CanSearchFilteredVectors());
 
@@ -776,7 +761,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         single_group_result);
     EXPECT_FALSE(single_group_result.CanSearchFilteredVectors());
 
@@ -790,7 +774,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         2,
                         logical_bitset,
-                        nullptr,
                         multiple_query_result);
     EXPECT_FALSE(multiple_query_result.CanSearchFilteredVectors());
 }
@@ -939,7 +922,6 @@ TEST(SearchOnSealedIndexNullableNoFilter,
                         nullptr,
                         1,
                         BitsetView{},
-                        nullptr,
                         search_result);
 
     ASSERT_EQ(search_result.seg_offsets_.size(), topk);
@@ -992,7 +974,6 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
                         nullptr,
                         1,
                         BitsetView{},
-                        nullptr,
                         search_result);
 
     ASSERT_EQ(search_result.seg_offsets_.size(), batch_size);
@@ -1862,7 +1843,6 @@ TEST(ElementNullableVectorArraySearch, RejectsEmbeddingListSearch) {
                                          nullptr,
                                          1,
                                          BitsetView{},
-                                         nullptr,
                                          sealed_index_result));
 
     SearchResult sealed_column_result;

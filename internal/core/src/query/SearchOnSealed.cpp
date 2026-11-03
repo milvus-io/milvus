@@ -52,7 +52,6 @@ SearchOnSealedIndex(const FieldMeta& field,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    milvus::OpContext* op_context,
                     SearchResult& search_result) {
     // The reader stays pinned for the lifetime of the SearchResult that owns
     // the recreator.
@@ -70,10 +69,9 @@ SearchOnSealedIndex(const FieldMeta& field,
              phase1_search_info = search_info,
              query_data,
              query_offsets,
-             num_queries,
-             op_context](const BitsetView& combined_filter,
-                         int64_t remaining_topk,
-                         SearchResult& filtered_result) {
+             num_queries](const BitsetView& combined_filter,
+                          int64_t remaining_topk,
+                          SearchResult& filtered_result) {
                 SearchOnSealedIndex(
                     field,
                     *reader_ptr,
@@ -82,7 +80,6 @@ SearchOnSealedIndex(const FieldMeta& field,
                     query_offsets,
                     num_queries,
                     combined_filter,
-                    op_context,
                     filtered_result);
             });
     };

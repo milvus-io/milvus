@@ -4184,7 +4184,6 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_offsets,
                                    query_count,
                                    bitset,
-                                   op_context,
                                    output);
         if (output.vector_iterators_.has_value()) {
             output.resource_pins_.emplace_back(
@@ -4214,7 +4213,6 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_offsets,
                                    query_count,
                                    bitset,
-                                   op_context,
                                    output);
         if (output.vector_iterators_.has_value()) {
             output.resource_pins_.emplace_back(
