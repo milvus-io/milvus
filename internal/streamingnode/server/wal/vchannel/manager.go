@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -361,16 +362,12 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 // their genesis. The SOURCE replica of the same broadcast is not -- it fences
 // a vchannel this pchannel already holds -- and neither is the control channel
 // replica, which the dispatch drops before this point.
+//
+// The predicate is shared with the MVCC managers (messageutil), which register
+// a vchannel as live on the same record, so a target born by a split gets a
+// query MVCC and a tsafe target exactly as one born by CreateCollection does.
 func isVChannelGenesisMessage(msg message.ImmutableMessage) bool {
-	switch msg.MessageType() {
-	case message.MessageTypeCreateCollection:
-		return true
-	case message.MessageTypeSplitShard:
-		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
-		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleTarget
-	default:
-		return false
-	}
+	return messageutil.IsVChannelGenesisMessage(msg)
 }
 
 func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryModule, error) {

@@ -501,7 +501,12 @@ Five principles work around §2:
      is one, exactly as `CreateCollection` is -- and seeds its meta from the
      body, which carries the schema in `CreateCollection`'s body shape, and
      from the header's partition snapshot. The target's first checkpoint is
-     this message.
+     this message. The same record registers the target in the pchannel's
+     MVCC managers (`messageutil.IsVChannelGenesisMessage`, shared with the
+     recovery manager): master registers a vchannel only at its genesis, and
+     a vchannel it never saw born reads as the retired/recovery fence, which
+     would lower a Strong read's guarantee below a write the target already
+     acknowledged.
    - **control channel**: no effect in any consumer; it orders the ack
      callback.
    - **anything else**: a misroute. It is refused on the append path, and
