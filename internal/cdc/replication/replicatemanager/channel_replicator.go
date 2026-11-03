@@ -94,46 +94,24 @@ func (r *channelReplicator) StartReplication() {
 			}
 			r.asyncNotifier.Finish(struct{}{})
 		}()
+	INIT_LOOP:
 		for {
-			for {
-				select {
-				case <-r.asyncNotifier.Context().Done():
-					return
-				default:
-					err := r.init()
-					if err != nil {
-						logger.Warn(context.TODO(), "initialize replicator failed", mlog.Err(err))
-						continue
-					}
-				}
-				break
-			}
-
-			err := r.startConsumeLoop()
-			if r.asyncNotifier.Context().Err() != nil || errors.Is(err, context.Canceled) {
-				r.closeFinishedScanner()
-				return
-			}
-			if errors.Is(err, replicatestream.ErrReplicationRemoved) {
-				return
-			}
-			if err == nil {
-				return
-			}
-
-			logger.Warn(context.TODO(), "replication source scanner stopped, retrying", mlog.Err(err))
-			// startConsumeLoop waits for the scanner to finish before returning.
-			// Keep the stream client and its pending message queue so confirmed and
-			// unconfirmed target-side state can continue across scanner recovery.
-			r.resetScanner()
-
-			timer := time.NewTimer(100 * time.Millisecond)
 			select {
 			case <-r.asyncNotifier.Context().Done():
-				timer.Stop()
 				return
-			case <-timer.C:
+			default:
+				err := r.init()
+				if err != nil {
+					logger.Warn(context.TODO(), "initialize replicator failed", mlog.Err(err))
+					continue
+				}
+				break INIT_LOOP
 			}
+		}
+		if err := r.startConsumeLoop(); err != nil &&
+			!errors.Is(err, context.Canceled) &&
+			!errors.Is(err, replicatestream.ErrReplicationRemoved) {
+			logger.Warn(context.TODO(), "replication source scanner stopped", mlog.Err(err))
 		}
 	}()
 }
@@ -256,26 +234,6 @@ func (r *channelReplicator) scannerStoppedError(scannerDone bool) error {
 		return errors.Wrap(err, "replication source scanner stopped")
 	}
 	return errScannerClosed
-}
-
-func (r *channelReplicator) resetScanner() {
-	if r.msgScanner != nil {
-		r.msgScanner.Close()
-	}
-	r.msgScanner = nil
-	r.msgChan = nil
-}
-
-func (r *channelReplicator) closeFinishedScanner() {
-	if r.msgScanner == nil {
-		return
-	}
-	select {
-	case <-r.msgScanner.Done():
-		r.msgScanner.Close()
-		r.msgScanner = nil
-	default:
-	}
 }
 
 func (r *channelReplicator) getReplicateCheckpoint() (*utility.ReplicateCheckpoint, error) {

@@ -66,7 +66,7 @@ func TestChannelReplicator_StartReplicateChannel(t *testing.T) {
 
 	scanner := mock_streaming.NewMockScanner(t)
 	scanner.EXPECT().Close().Return()
-	scanner.EXPECT().Done().Return(make(chan struct{})).Twice()
+	scanner.EXPECT().Done().Return(make(chan struct{})).Once()
 	wal := mock_streaming.NewMockWALAccesser(t)
 	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner)
 	streaming.SetWALForTest(wal)
@@ -208,67 +208,6 @@ func TestChannelReplicatorConsumeLoopReturnsScannerError(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("consume loop did not stop after scanner was done")
 	}
-}
-
-func TestChannelReplicatorRecreatesScannerAfterScannerFailure(t *testing.T) {
-	previousWAL := streaming.WAL()
-	t.Cleanup(func() { streaming.SetWALForTest(previousWAL) })
-
-	scannerDone := make(chan struct{})
-	close(scannerDone)
-	scannerErr := errors.New("source scanner failed")
-	scanner1 := mock_streaming.NewMockScanner(t)
-	scanner1.EXPECT().Done().Return(scannerDone).Once()
-	scanner1.EXPECT().Error().Return(scannerErr).Once()
-	scanner1.EXPECT().Close().Return()
-
-	scanner2Done := make(chan struct{})
-	scanner2 := mock_streaming.NewMockScanner(t)
-	scanner2.EXPECT().Done().Return(scanner2Done).Twice()
-	scanner2.EXPECT().Close().Return()
-
-	readSecondScanner := make(chan struct{})
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner1).Once()
-	wal.EXPECT().Read(mock.Anything, mock.Anything).
-		Run(func(context.Context, streaming.ReadOption) { close(readSecondScanner) }).
-		Return(scanner2).Once()
-	streaming.SetWALForTest(wal)
-
-	mockMilvusClient := cluster.NewMockMilvusClient(t)
-	mockMilvusClient.EXPECT().Close(mock.Anything).Return(nil)
-
-	replicateStream := replicatestream.NewMockReplicateStreamClient(t)
-	replicateStream.EXPECT().Close().Return()
-
-	replicator := NewChannelReplicator(&meta.ReplicateChannel{
-		Value: &streamingpb.ReplicatePChannelMeta{
-			SourceChannelName:          "source-channel",
-			TargetChannelName:          "target-channel",
-			TargetCluster:              &commonpb.MilvusCluster{ClusterId: "target-cluster"},
-			SkipGetReplicateCheckpoint: true,
-			InitializedCheckpoint: &commonpb.ReplicateCheckpoint{
-				MessageId: newMockPulsarMessageID(),
-			},
-		},
-	})
-	channelReplicator := replicator.(*channelReplicator)
-	channelReplicator.createMcFunc = func(context.Context, *commonpb.MilvusCluster) (cluster.MilvusClient, error) {
-		return mockMilvusClient, nil
-	}
-	channelReplicator.createRscFunc = func(context.Context, cluster.MilvusClient, *meta.ReplicateChannel) replicatestream.ReplicateStreamClient {
-		return replicateStream
-	}
-
-	channelReplicator.StartReplication()
-	t.Cleanup(channelReplicator.StopReplication)
-
-	select {
-	case <-readSecondScanner:
-	case <-time.After(2 * time.Second):
-		t.Fatal("replicator did not recreate the source scanner")
-	}
-	channelReplicator.StopReplication()
 }
 
 func TestChannelReplicatorInitMetricFromInitializedCheckpoint(t *testing.T) {
