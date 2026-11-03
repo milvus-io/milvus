@@ -43,13 +43,10 @@ type ackCallbackScheduler struct {
 	// resource-key scheduling run after releasing it.
 	pendingMu         sync.Mutex
 	pending           *typeutil.MultipartQueue[*broadcastTask]
-	pendingAckedTasks []*broadcastTask // should already sorted by the broadcastID
-	// For the task that hold the conflicted resource-key (which is protected by the resource-key lock),
-	// broadcastID is always increasing,
-	// the task which broadcastID is smaller happens before the task which broadcastID is larger.
-	// Meanwhile the timetick order of any vchannel of those two tasks are same with the order of broadcastID,
-	// so the smaller broadcastID task is always acked before the larger broadcastID task.
-	// so we can exeucte the tasks by the order of the broadcastID to promise the ack order is same with wal order.
+	pendingAckedTasks []*broadcastTask // Ordered by the control-channel ACK.
+	// Callbacks acquire their keys in control-channel order before waiting for
+	// business-channel ACKs. Conflicting tasks can span different business
+	// channels, so all-key dependencies must also be retained while pending.
 	rkLockerMu sync.Mutex // because batch lock operation will be executed on rkLocker,
 	// so we may encounter following cases:
 	// 1. task A, B, C are competing with rkLocker, and we want the operation is executed in order of A -> B -> C.
@@ -160,6 +157,10 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 	defer s.rkLockerMu.Unlock()
 
 	pendingTasks := make([]*broadcastTask, 0, len(s.pendingAckedTasks))
+	// An earlier task may be blocked on just one of its keys. Reserve its
+	// other conflicting keys for this pass too, or a later callback can
+	// overtake it (for example, Restore can pass a blocked CreateSnapshot).
+	blockedKeys := make(map[resourceLockKey]bool) // whether a pending writer needs the key
 	for _, task := range s.pendingAckedTasks {
 		if task.IsForcePromoteMessage() {
 			// Force promote: handle fix + ack callback entirely in background goroutine.
@@ -169,9 +170,24 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 			continue
 		}
 
-		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
+		keys := task.Header().ResourceKeys.Collect()
+		var g *lockGuards
+		var err error
+		for _, key := range keys {
+			if exclusive, pending := blockedKeys[newResourceLockKey(key)]; pending && (exclusive || !key.Shared) {
+				err = errFastLockFailed
+				break
+			}
+		}
+		if err == nil {
+			g, err = s.rkLocker.FastLock(keys...)
+		}
 		if err != nil {
 			pendingTasks = append(pendingTasks, task)
+			for _, key := range keys {
+				k := newResourceLockKey(key)
+				blockedKeys[k] = blockedKeys[k] || !key.Shared
+			}
 			continue
 		}
 

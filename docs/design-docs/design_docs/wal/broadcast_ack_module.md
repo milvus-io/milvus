@@ -241,3 +241,10 @@ CreateSnapshot callback that publishes its source, including when that callback
 is retrying behind an earlier asynchronous Restore. The same dependency orders
 DropSnapshot after source pin admission. External restores read their immutable
 external bundle and do not acquire this local source key.
+
+A callback blocked on one resource key retains its ordering dependency on all
+its other keys for that scheduling pass. Later conflicting callbacks wait behind
+it, including transitive dependencies; independent keys and compatible shared
+readers can still run concurrently. Control-channel order therefore also covers
+a Snapshot blocked behind Load and a Restore waiting for that Snapshot, even
+before their business-channel ACKs have all arrived.

@@ -96,3 +96,117 @@ func TestAckQueueRejectsEnqueueAfterClose(t *testing.T) {
 	s.Close()
 	require.Panics(t, func() { s.AddTask(nil) }, "preserve the existing closed-scheduler contract")
 }
+
+func TestAckQueueBlockedDependenciesCannotBeOvertaken(t *testing.T) {
+	mockey.PatchConvey("a blocked multi-key callback retains its place on every conflicting key", t, func() {
+		s := newAckCallbackScheduler(mlog.With())
+		order := make(chan uint64, 4)
+		mockey.Mock((*ackCallbackScheduler).doAckCallback).To(func(s *ackCallbackScheduler, task *broadcastTask, guards *lockGuards) error {
+			id := task.Header().BroadcastID
+			s.rkLockerMu.Lock()
+			guards.Unlock()
+			s.rkLockerMu.Unlock()
+			order <- id
+			return nil
+		}).Build()
+		key := func(name string) message.ResourceKey {
+			return message.NewExclusiveCollectionNameResourceKey("db", name)
+		}
+		first := s.rkLocker.Lock(key("collection"))
+		var release sync.Once
+		defer release.Do(first.Unlock)
+		// Load holds collection. Snapshot waits for collection + snapshot;
+		// Restore waits for snapshot + target. Its successor also waits on target.
+		s.pendingAckedTasks = []*broadcastTask{
+			{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, key("collection"), key("snapshot")).WithBroadcastID(1)},
+			{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, key("snapshot"), key("target")).WithBroadcastID(2)},
+			{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, key("target")).WithBroadcastID(3)},
+			{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, key("independent")).WithBroadcastID(4)},
+		}
+		run := func(want uint64, remaining int) {
+			t.Helper()
+			count := len(s.pendingAckedTasks)
+			s.triggerAckCallback()
+			got := make([]uint64, 0, count-len(s.pendingAckedTasks))
+			for range count - len(s.pendingAckedTasks) {
+				select {
+				case id := <-order:
+					got = append(got, id)
+				case <-time.After(5 * time.Second):
+					t.Fatal("scheduled callback did not finish")
+				}
+			}
+			require.Equal(t, []uint64{want}, got)
+			require.Len(t, s.pendingAckedTasks, remaining)
+		}
+		run(4, 3)
+		release.Do(first.Unlock)
+		run(1, 2)
+		run(2, 1)
+		run(3, 0)
+	})
+}
+
+func TestAckQueuePendingReadersKeepCompatibleConcurrency(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		firstShared, nextShared bool
+		concurrent              bool
+	}{
+		{name: "reader reader", firstShared: true, nextShared: true, concurrent: true},
+		{name: "reader writer", firstShared: true},
+		{name: "writer reader", nextShared: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey("only conflicting accesses inherit the earlier wait", t, func() {
+				s := newAckCallbackScheduler(mlog.With())
+				order := make(chan uint64, 2)
+				mockey.Mock((*ackCallbackScheduler).doAckCallback).To(func(s *ackCallbackScheduler, task *broadcastTask, guards *lockGuards) error {
+					id := task.Header().BroadcastID
+					s.rkLockerMu.Lock()
+					guards.Unlock()
+					s.rkLockerMu.Unlock()
+					order <- id
+					return nil
+				}).Build()
+				blocked := message.NewExclusiveCollectionNameResourceKey("db", "collection")
+				firstKey := message.NewExclusiveSnapshotNameResourceKey(100, "snapshot")
+				firstKey.Shared = tc.firstShared
+				nextKey := firstKey
+				nextKey.Shared = tc.nextShared
+				guard := s.rkLocker.Lock(blocked)
+				var release sync.Once
+				defer release.Do(guard.Unlock)
+				s.pendingAckedTasks = []*broadcastTask{
+					{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, blocked, firstKey).WithBroadcastID(1)},
+					{msg: createNewBroadcastMsg([]string{"p0_vcchan"}, nextKey).WithBroadcastID(2)},
+				}
+				pass := func() []uint64 {
+					count := len(s.pendingAckedTasks)
+					s.triggerAckCallback()
+					ids := make([]uint64, 0, count-len(s.pendingAckedTasks))
+					for range count - len(s.pendingAckedTasks) {
+						select {
+						case id := <-order:
+							ids = append(ids, id)
+						case <-time.After(5 * time.Second):
+							t.Fatal("scheduled callback did not finish")
+						}
+					}
+					return ids
+				}
+				if tc.concurrent {
+					require.Equal(t, []uint64{2}, pass())
+				} else {
+					require.Empty(t, pass())
+				}
+				release.Do(guard.Unlock)
+				require.Equal(t, []uint64{1}, pass())
+				if !tc.concurrent {
+					require.Equal(t, []uint64{2}, pass())
+				}
+				require.Empty(t, s.pendingAckedTasks)
+			})
+		})
+	}
+}
