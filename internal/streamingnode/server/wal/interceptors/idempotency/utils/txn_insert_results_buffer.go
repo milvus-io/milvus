@@ -48,7 +48,34 @@ func (bs *TxnInsertResultBuffers) Add(msg message.MutableMessage, result *messag
 	if !hasTxnKey {
 		return
 	}
-	expiredTimeTick := txnExpiredTimeTick(msg.TxnContext(), timeTick)
+	bs.add(key, bufferTxnContext(msg.TxnContext(), msg.ReplicateHeader() != nil), result, timeTick)
+}
+
+// Restore records the insert result of a txn body that is already in the WAL,
+// for a transaction that is still open after a restart.
+func (bs *TxnInsertResultBuffers) Restore(body message.ImmutableMessage, result *messagespb.IdempotentInsertResult) {
+	txnCtx := body.TxnContext()
+	if txnCtx == nil {
+		return
+	}
+	bs.add(txnKey{vchannel: body.VChannel(), txnID: txnCtx.TxnID}, bufferTxnContext(txnCtx, body.ReplicateHeader() != nil), result, body.TimeTick())
+}
+
+// bufferTxnContext returns the txn context whose keepalive bounds a body's
+// buffered result. A replicated body carries the source cluster's finite
+// keepalive, but the source owns a replicated transaction's lifecycle: it cannot
+// expire locally, so its buffer is reclaimed only through the txn-active check,
+// never by a keepalive measured from a body timetick that a restart leaves far
+// behind.
+func bufferTxnContext(txnCtx *message.TxnContext, replicated bool) *message.TxnContext {
+	if txnCtx == nil || !replicated || txnCtx.Keepalive == message.TxnKeepaliveInfinite {
+		return txnCtx
+	}
+	return &message.TxnContext{TxnID: txnCtx.TxnID, Keepalive: message.TxnKeepaliveInfinite}
+}
+
+func (bs *TxnInsertResultBuffers) add(key txnKey, txnCtx *message.TxnContext, result *messagespb.IdempotentInsertResult, timeTick uint64) {
+	expiredTimeTick := txnExpiredTimeTick(txnCtx, timeTick)
 	currentTimeTick, hasCurrentTimeTick := bs.vchannelTimeTick(key.vchannel)
 
 	bs.mu.Lock()
@@ -80,6 +107,30 @@ func (bs *TxnInsertResultBuffers) Build(msg message.MutableMessage) *messagespb.
 	bs.clearExpiredLocked(key.vchannel, currentTimeTick, hasCurrentTimeTick)
 	builder := bs.builders[key.vchannel][key.txnID]
 	if builder == nil {
+		return nil
+	}
+	return builder.build()
+}
+
+// BuildIfComplete merges buffered insert results for a txn commit message, but
+// only when every body of the transaction contributed one: the number of
+// buffered results must equal bodyCnt, the body count the commit carries. It
+// returns nil when bodyCnt is 0 (unknown) or when results are missing, for
+// example after a restart emptied the buffer while the transaction itself
+// survived. A caller that records the result must not record a partial one,
+// which would answer a later retry with missing primary keys.
+func (bs *TxnInsertResultBuffers) BuildIfComplete(msg message.MutableMessage, bodyCnt uint64) *messagespb.IdempotentInsertResult {
+	key, hasTxnKey := keyOfTxnMessage(msg)
+	if !hasTxnKey || bodyCnt == 0 {
+		return nil
+	}
+	currentTimeTick, hasCurrentTimeTick := bs.vchannelTimeTick(key.vchannel)
+
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+	bs.clearExpiredLocked(key.vchannel, currentTimeTick, hasCurrentTimeTick)
+	builder := bs.builders[key.vchannel][key.txnID]
+	if builder == nil || uint64(len(builder.insertResults)) != bodyCnt {
 		return nil
 	}
 	return builder.build()
@@ -126,7 +177,8 @@ func (bs *TxnInsertResultBuffers) clearExpiredLocked(vchannel string, currentTim
 		// manager. These transactions ended without a commit/rollback message
 		// reaching the interceptor (abort, expiry, failover), so the
 		// timetick-based expiry below cannot reclaim them -- in particular it
-		// never fires for infinite-keepalive (replicated) transactions.
+		// never fires for replicated transactions, whose bodies are buffered
+		// with an infinite keepalive (bufferTxnContext).
 		if bs.txnActive != nil && !bs.txnActive(txnID) {
 			delete(builders, txnID)
 			continue

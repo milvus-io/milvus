@@ -130,6 +130,10 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithReplicateHeader(rh *ReplicateHeader) MutableMessage
 
+	// WithoutIdempotencyKey removes the idempotency key of current message.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	WithoutIdempotencyKey() MutableMessage
+
 	// IntoImmutableMessage converts the mutable message to immutable message.
 	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }
