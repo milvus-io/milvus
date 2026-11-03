@@ -354,12 +354,12 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return merr.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		schema := collection.Schema()
-		isExternalCollection := typeutil.IsExternalCollection(schema)
-		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-			HasExternalPrimaryKey(schema)
 		// Regular sealed segments use the delegator's independently loaded candidate.
 		if segment.Type() == SegmentTypeGrowing && !segment.PkCandidateExist() {
+			schema := collection.Schema()
+			isExternalCollection := typeutil.IsExternalCollection(schema)
+			isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
+				HasExternalPrimaryKey(schema)
 			mlog.Debug(context.TODO(), "loading PK candidate for segment", mlog.Int64("segmentID", segment.ID()))
 			if isExternalCollection {
 				var candidate pkoracle.Candidate

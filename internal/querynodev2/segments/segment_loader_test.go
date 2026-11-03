@@ -696,6 +696,42 @@ func (suite *SegmentLoaderSuite) TestLoadFail() {
 	suite.Error(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
+	for _, stage := range []string{"data", "delta"} {
+		suite.Run(stage, func() {
+			ctx := context.Background()
+			loader := suite.loader.(*segmentLoader)
+			loadErr := errors.New("injected load failure")
+			var captured *LocalSegment
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).To(
+				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo) error {
+					captured = segment.(*LocalSegment)
+					suite.Nil(captured.pkCandidate)
+					if stage == "data" {
+						return loadErr
+					}
+					return nil
+				}).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(loadErr).Build()
+			defer loadDeltas.UnPatch()
+
+			loaded, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+				SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			})
+			suite.Require().ErrorIs(err, loadErr)
+			suite.Empty(loaded)
+			suite.Require().NotNil(captured)
+			suite.False(captured.ptrLock.PinIfNotReleased())
+			suite.NotPanics(func() { captured.Release(ctx) })
+			suite.Nil(loader.manager.Segment.GetWithType(suite.segmentID, SegmentTypeSealed))
+			suite.False(loader.loadingSegments.Contain(suite.segmentID))
+			suite.True(loader.committedResource.IsZero())
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
