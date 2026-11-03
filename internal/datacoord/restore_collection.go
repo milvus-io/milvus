@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // RestoreCollectionManager is wired directly to RootCoord inside Coordinator.
@@ -105,6 +106,9 @@ func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snaps
 			IndexParams: source.GetIndexParams(), UserIndexParams: source.GetUserIndexParams(), IsAutoIndex: source.GetIsAutoIndex(),
 		}
 		if err := indexparamcheck.ValidateIndexParams(index); err != nil {
+			return 0, err
+		}
+		if err := checkOrdinaryArraySortIndex(typeutil.GetField(schema, index.FieldID), GetIndexType(index.IndexParams), sm.indexEngineVersionManager); err != nil {
 			return 0, err
 		}
 		if err := sm.checkJSONPathIndexVersion(index); err != nil {

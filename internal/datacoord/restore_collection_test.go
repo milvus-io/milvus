@@ -375,6 +375,63 @@ func TestRestoreIndexRecipeValidationAndIdentity(t *testing.T) {
 	}
 }
 
+func TestRestoreBroadcastChecksOrdinaryArraySortGate(t *testing.T) {
+	for _, tc := range []struct {
+		name, enabled, fieldName string
+		dataType                 schemapb.DataType
+		version                  int32
+		expected                 error
+	}{
+		{"gate disabled", "false", "values", schemapb.DataType_Array, 5, merr.ErrServiceNotReady},
+		{"version too old", "true", "values", schemapb.DataType_Array, 2, merr.ErrParameterInvalid},
+		{"supported", "true", "values", schemapb.DataType_Array, 3, nil},
+		{"existing scalar", "false", "value", schemapb.DataType_Int64, 2, nil},
+		{"existing nested array", "false", "items[value]", schemapb.DataType_Array, 2, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey(tc.name, t, func() {
+				require.NoError(t, Params.Save(Params.DataCoordCfg.EnableArraySortIndex.Key, tc.enabled))
+				defer Params.Reset(Params.DataCoordCfg.EnableArraySortIndex.Key)
+				mockey.Mock((*versionManagerImpl).ResolveScalarIndexVersion).Return(tc.version).Build()
+				schema := &schemapb.CollectionSchema{Name: "source", Fields: []*schemapb.FieldSchema{
+					{FieldID: 101, Name: tc.fieldName, DataType: tc.dataType, ElementType: schemapb.DataType_Int64},
+				}}
+				body := &messagespb.RestoreSnapshotMessageBody{
+					CollectionHeader: &message.CreateCollectionMessageHeader{CollectionId: 10},
+					Collection:       &message.CreateCollectionRequest{CollectionID: 10, CollectionSchema: schema, VirtualChannelNames: []string{"v1"}},
+				}
+				mockey.Mock((*rootcoord.Core).CheckRestoreTargetAbsent).Return(merr.ErrCollectionNotFound).Build()
+				cleaned := 0
+				mockey.Mock((*rootcoord.Core).PrepareRestoreCollection).Return(body, func() { cleaned++ }, nil).Build()
+				allocated := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(77), nil).Build()
+				api := &captureBroadcastAPI{}
+				mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, nil).Build()
+				snapshot := &snapshotstorage.SnapshotData{
+					Collection: &datapb.CollectionDescription{Schema: schema},
+					Indexes: []*indexpb.IndexInfo{{FieldID: 101, IndexName: "sort", IndexParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT},
+					}}},
+				}
+				sm := &snapshotManager{collectionRestorer: &rootcoord.Core{}, allocator: &restoreAllocatorTarget{}, indexEngineVersionManager: &versionManagerImpl{}}
+				job, err := sm.broadcastRestoreCollection(t.Context(), snapshot, "snapshot", 1, "target", "default", 0, false, "", "")
+				if tc.expected != nil {
+					require.ErrorIs(t, err, tc.expected)
+					require.Zero(t, job)
+					require.Nil(t, api.captured, "reject before creating the durable Restore broadcast or Job")
+					require.Equal(t, 1, allocated.Times(), "only the prospective index ID was allocated")
+					require.Equal(t, 1, cleaned, "release the prepared collection's file resources")
+				} else {
+					require.NoError(t, err)
+					require.EqualValues(t, 77, job)
+					require.NotNil(t, api.captured)
+					require.Equal(t, 2, allocated.Times())
+					require.Zero(t, cleaned, "the durable broadcast now owns the resources")
+				}
+			})
+		})
+	}
+}
+
 func TestRestoreIndexPersistencePrecedesCopyJob(t *testing.T) {
 	mockey.PatchConvey("index persistence failure cannot start data copying", t, func() {
 		mockey.Mock((*rootcoord.Core).ApplyRestoreCollection).Return(nil).Build()
