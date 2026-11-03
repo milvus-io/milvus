@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ func inlineAnalyzerRequest(params string) *streamingpb.StreamingNodeRunAnalyzerR
 
 func TestAnalyzerNativeTransport(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.MaxSendMsgSize(2048), grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 	handler := NewHandlerService(nil) // Inline analyzers do not require any WAL or QN.
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, handler)
 	go server.Serve(listener)
@@ -102,6 +103,21 @@ func TestAnalyzerNativeTransport(t *testing.T) {
 	require.Nil(t, resp.GetTokenize())
 	require.Equal(t, []bool{true, true, false}, resp.GetPhraseMatch().GetIsMatch())
 	require.Equal(t, []int64{0, 2, -1}, resp.GetPhraseMatch().GetSlops())
+	highlightReq := inlineAnalyzerRequest(`{"tokenizer":"standard"}`)
+	highlightReq.Placeholder = [][]byte{[]byte("missing"), []byte(strings.Repeat("z ", 2000))}
+	highlightReq.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
+		SearchTextNum: 1, CorpusTextNum: 1, Topks: []int64{1}, FragmentSize: 32, NumOfFragments: 1,
+	}}
+	highlighted, err := client.RunAnalyzer(ctx, highlightReq)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(highlighted.GetStatus()))
+	require.Nil(t, highlighted.GetTokenize())
+	require.Len(t, highlighted.GetHighlight().GetResults(), 1)
+	require.Empty(t, highlighted.GetHighlight().GetResults()[0].GetFragments())
+	// Returning the same corpus as detailed tokens really exceeds this RPC limit.
+	highlightReq.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{WithDetail: true}}
+	_, err = client.RunAnalyzer(ctx, highlightReq)
+	require.Equal(t, codes.ResourceExhausted, grpcstatus.Code(err))
 	phrase.Operation = nil
 	resp, err = client.RunAnalyzer(ctx, phrase)
 	require.NoError(t, err)

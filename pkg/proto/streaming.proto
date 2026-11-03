@@ -1042,6 +1042,7 @@ message StreamingNodeRunAnalyzerRequest {
     oneof operation {
         TokenizeOptions tokenize = 4;
         PhraseMatchOptions phrase_match = 5;
+        HighlightOptions highlight = 6;
     }
 }
 message TokenizeOptions {
@@ -1068,6 +1069,7 @@ message StreamingNodeRunAnalyzerResponse {
     oneof result {
         TokenizeResult tokenize = 1;
         PhraseMatchResult phrase_match = 3;
+        HighlightResult highlight = 4;
     }
     common.Status status = 2;
 }
@@ -1263,3 +1265,28 @@ message CloseReplicaWatchSubscriptionResponse {
 }
 
 message CloseReplicaWatchStreamResponse {}
+
+// Texts are in placeholder order: search texts, query texts, then corpus texts.
+// Analyzer selection belongs to source, including per-text analyzer names.
+message HighlightOptions {
+    int64 search_text_num = 1;
+    int64 corpus_text_num = 2;
+    // All extra query texts currently use lexical token matching.
+    int64 query_text_num = 3;
+    int64 fragment_size = 4;
+    int64 fragment_offset = 5;
+    int64 num_of_fragments = 6;
+    repeated int64 topks = 7;
+}
+message HighlightFragment {
+    // Rune offsets in the original corpus text, not byte offsets.
+    int64 start_offset = 1;
+    int64 end_offset = 2;
+    repeated int64 offsets = 3;
+}
+message HighlightRowResult {
+    repeated HighlightFragment fragments = 1;
+}
+message HighlightResult {
+    repeated HighlightRowResult results = 1;
+}
