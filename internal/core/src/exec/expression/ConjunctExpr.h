@@ -186,11 +186,6 @@ class PhyConjunctFilterExpr : public Expr {
         return null_rejecting_;
     }
 
-    void
-    ClearBitmapInput(EvalCtx& context) {
-        context.clear_bitmap_input();
-    }
-
     bool
     IsAnd() {
         return is_and_;
