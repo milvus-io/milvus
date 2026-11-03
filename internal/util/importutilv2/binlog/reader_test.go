@@ -2662,12 +2662,12 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer nextPatch.UnPatch()
 
-			data, err := storage.NewInsertDataWithFunctionOutputField(r.schema, true)
+			data, err := storage.NewInsertDataWithMemoryTracking(r.schema)
 			require.NoError(t, err)
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
-			batchPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).To(func(_ *schemapb.CollectionSchema, _ ...bool) (*storage.InsertData, error) {
+			batchPatch := mockey.Mock(storage.NewInsertDataWithMemoryTracking).To(func(_ *schemapb.CollectionSchema) (*storage.InsertData, error) {
 				if name == "allocate_batch" {
 					return nil, cause
 				}
@@ -2675,7 +2675,7 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer batchPatch.UnPatch()
 			if name == "allocate_field" {
-				fieldPatch := mockey.Mock(storage.NewFieldData).Return(nil, cause).Build()
+				fieldPatch := mockey.Mock(storage.NewFieldDataWithMemoryTracking).Return(nil, cause).Build()
 				defer fieldPatch.UnPatch()
 			}
 

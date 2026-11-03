@@ -19,6 +19,7 @@ package storage
 import (
 	"encoding/binary"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -49,15 +50,27 @@ type InsertData struct {
 	Infos []BlobInfo
 }
 
-func NewInsertData(schema *schemapb.CollectionSchema, trackMemory ...bool) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0, false, trackMemory...)
+func NewInsertData(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, false)
 }
 
-func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema, trackMemory ...bool) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0, true, trackMemory...)
+func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, true)
 }
 
-func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool, trackMemory ...bool) (*InsertData, error) {
+func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
+	return newInsertDataWithCap(schema, cap, withFunctionOutput, false)
+}
+
+// NewInsertDataWithMemoryTracking creates an empty batch including function
+// output fields, with incremental memory accounting for variable-width fields.
+// Callers must use append methods rather than modify backing slices or payloads
+// directly.
+func NewInsertDataWithMemoryTracking(schema *schemapb.CollectionSchema) (*InsertData, error) {
+	return newInsertDataWithCap(schema, 0, true, true)
+}
+
+func newInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput, trackMemory bool) (*InsertData, error) {
 	if schema == nil {
 		// A nil schema here is an internal invariant violation (callers within
 		// Milvus always pass a schema), not a client-supplied missing parameter.
@@ -88,7 +101,7 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 				return nil
 			}
 		}
-		fieldData, err := NewFieldData(field.DataType, field, cap, trackMemory...)
+		fieldData, err := newFieldData(field.DataType, field, cap, trackMemory)
 		if err != nil {
 			return err
 		}
@@ -217,8 +230,19 @@ type FieldData interface {
 // only appends ValidData (see AppendNullableDefaultFieldsData), so a
 // dim-scaled Data reservation would stay invisible to GetMemorySize and never
 // trigger spill.
-// The optional final flag enables memory tracking for variable-width fields.
-func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int, trackMemory ...bool) (FieldData, error) {
+func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
+	return newFieldData(dataType, fieldSchema, cap, false)
+}
+
+// NewFieldDataWithMemoryTracking creates an empty FieldData with incremental
+// memory accounting for variable-width fields. Capacity is expressed in rows,
+// as in NewFieldData. Callers must use append methods rather than modify backing
+// slices or appended payloads directly.
+func NewFieldDataWithMemoryTracking(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
+	return newFieldData(dataType, fieldSchema, cap, true)
+}
+
+func newFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int, trackMemory bool) (FieldData, error) {
 	typeParams := fieldSchema.GetTypeParams()
 	// nullableDataCap keeps the master row-count reservation for nullable
 	// vector columns; non-nullable columns keep the dim-scaled reservation.
@@ -286,7 +310,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	case schemapb.DataType_SparseFloatVector:
-		return NewSparseFloatVectorFieldData(fieldSchema.GetNullable(), cap, trackMemory...), nil
+		return newSparseFloatVectorFieldData(fieldSchema, cap, trackMemory)
 	case schemapb.DataType_Int8Vector:
 		dim, err := GetDimFromParams(typeParams)
 		if err != nil {
@@ -379,19 +403,15 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return data, nil
 	case schemapb.DataType_JSON:
-		return NewJSONFieldData(fieldSchema.GetNullable(), cap, trackMemory...), nil
+		return newJSONFieldData(fieldSchema, cap, trackMemory)
 	case schemapb.DataType_Geometry:
-		return NewGeometryFieldData(fieldSchema.GetNullable(), cap, trackMemory...), nil
+		return newGeometryFieldData(fieldSchema, cap, trackMemory)
 	case schemapb.DataType_Array:
-		return NewArrayFieldData(fieldSchema.GetElementType(), fieldSchema.GetNullable(), fieldSchema.GetElementNullable(), cap, trackMemory...), nil
+		return newArrayFieldData(fieldSchema, cap, trackMemory)
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
-		return NewStringFieldData(dataType, fieldSchema.GetNullable(), cap, trackMemory...), nil
+		return newStringFieldData(dataType, fieldSchema, cap, trackMemory)
 	case schemapb.DataType_ArrayOfVector:
-		dim, err := GetDimFromParams(typeParams)
-		if err != nil {
-			return nil, err
-		}
-		return NewVectorArrayFieldData(fieldSchema.GetElementType(), int64(dim), fieldSchema.GetNullable(), fieldSchema.GetElementNullable(), cap, trackMemory...), nil
+		return newVectorArrayFieldData(fieldSchema, cap, trackMemory)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unexpected schema data type: %d", dataType)
 	}
@@ -441,6 +461,23 @@ type StringFieldData struct {
 	trackMemory bool
 	memorySize  int
 }
+
+func newStringFieldData(dataType schemapb.DataType, schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	data := &StringFieldData{
+		Data:     make([]string, 0, capacity),
+		DataType: dataType,
+		Nullable: schema.GetNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 1 // Nullable; same accounting as GetMemorySize.
+	}
+	return data, nil
+}
+
 type ArrayFieldData struct {
 	ElementType     schemapb.DataType
 	Data            []*schemapb.ScalarField
@@ -451,6 +488,24 @@ type ArrayFieldData struct {
 	trackMemory bool
 	memorySize  int
 }
+
+func newArrayFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	data := &ArrayFieldData{
+		ElementType:     schema.GetElementType(),
+		Data:            make([]*schemapb.ScalarField, 0, capacity),
+		Nullable:        schema.GetNullable(),
+		ElementNullable: schema.GetElementNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 2 // Nullable and ElementNullable.
+	}
+	return data, nil
+}
+
 type JSONFieldData struct {
 	Data      [][]byte
 	ValidData []bool
@@ -459,6 +514,22 @@ type JSONFieldData struct {
 	trackMemory bool
 	memorySize  int
 }
+
+func newJSONFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	data := &JSONFieldData{
+		Data:     make([][]byte, 0, capacity),
+		Nullable: schema.GetNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 1
+	}
+	return data, nil
+}
+
 type TimestamptzFieldData struct {
 	Data      []int64
 	ValidData []bool
@@ -471,6 +542,21 @@ type GeometryFieldData struct {
 
 	trackMemory bool
 	memorySize  int
+}
+
+func newGeometryFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	data := &GeometryFieldData{
+		Data:     make([][]byte, 0, capacity),
+		Nullable: schema.GetNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 1
+	}
+	return data, nil
 }
 
 // LogicalToPhysicalMapping maps logical offset to physical offset for nullable vector
@@ -573,6 +659,20 @@ type SparseFloatVectorFieldData struct {
 	memorySize  int
 }
 
+func newSparseFloatVectorFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	data := &SparseFloatVectorFieldData{
+		Nullable: schema.GetNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 9 // Nullable and empty L2PMapping.
+	}
+	return data, nil
+}
+
 type Int8VectorFieldData struct {
 	Data       []int8
 	ValidData  []bool
@@ -591,6 +691,28 @@ type VectorArrayFieldData struct {
 
 	trackMemory bool
 	memorySize  int
+}
+
+func newVectorArrayFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bool) (FieldData, error) {
+	dim, err := GetDimFromParams(schema.GetTypeParams())
+	if err != nil {
+		return nil, err
+	}
+	data := &VectorArrayFieldData{
+		Dim:             int64(dim),
+		ElementType:     schema.GetElementType(),
+		Data:            make([]*schemapb.VectorField, 0, capacity),
+		Nullable:        schema.GetNullable(),
+		ElementNullable: schema.GetElementNullable(),
+	}
+	if schema.GetNullable() {
+		data.ValidData = make([]bool, 0, capacity)
+	}
+	if trackMemory {
+		data.trackMemory = true
+		data.memorySize = 2 // Nullable and ElementNullable.
+	}
+	return data, nil
 }
 
 func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
@@ -613,7 +735,7 @@ func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.
 func (data *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
-			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+			data.Dim, data.L2PMapping.GetMemorySize())
 	}
 
 	if data.Dim < src.Dim {
@@ -1167,7 +1289,7 @@ func (data *BFloat16VectorFieldData) AppendRow(row interface{}) error {
 func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
-			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+			data.Dim, data.L2PMapping.GetMemorySize())
 	}
 
 	if data.GetNullable() && row == nil {
@@ -1649,7 +1771,7 @@ func (data *BFloat16VectorFieldData) AppendDataRows(rows interface{}) error {
 func (data *SparseFloatVectorFieldData) AppendDataRows(rows interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
-			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+			data.Dim, data.L2PMapping.GetMemorySize())
 	}
 
 	v, ok := rows.(*SparseFloatVectorFieldData)
@@ -1936,7 +2058,7 @@ func (data *BFloat16VectorFieldData) AppendValidDataRows(rows interface{}) error
 func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
-			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+			data.Dim, data.L2PMapping.GetMemorySize())
 	}
 
 	if rows == nil {
@@ -2345,22 +2467,6 @@ func (data *SparseFloatVectorFieldData) GetValidData() []bool { return data.Vali
 func (data *Int8VectorFieldData) GetValidData() []bool        { return data.ValidData }
 func (data *VectorArrayFieldData) GetValidData() []bool       { return data.ValidData }
 
-// NewStringFieldData creates an empty string field with size tracking initialized.
-// dataType is String, VarChar, or Text; capacity reserves rows and is not charged.
-func NewStringFieldData(dataType schemapb.DataType, nullable bool, capacity int, trackMemory ...bool) *StringFieldData {
-	data := &StringFieldData{
-		trackMemory: len(trackMemory) > 0 && trackMemory[0],
-		Data:        make([]string, 0, capacity),
-		DataType:    dataType,
-		Nullable:    nullable,
-		memorySize:  1, // Nullable; same accounting as GetMemorySize.
-	}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
-}
-
 // getMemorySize calculates the size independently of the incremental cache.
 func (data *StringFieldData) getMemorySize() int {
 	var size int
@@ -2375,15 +2481,6 @@ func (data *StringFieldData) trackAppendedSize(oldRows, oldValid int) {
 		data.memorySize += len(value) + 16
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-}
-
-// NewJSONFieldData creates an empty field with size tracking initialized.
-func NewJSONFieldData(nullable bool, capacity int, trackMemory ...bool) *JSONFieldData {
-	data := &JSONFieldData{trackMemory: len(trackMemory) > 0 && trackMemory[0], Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
 }
 
 // getMemorySize calculates the size independently of the incremental cache.
@@ -2402,15 +2499,6 @@ func (data *JSONFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// NewGeometryFieldData creates an empty field with size tracking initialized.
-func NewGeometryFieldData(nullable bool, capacity int, trackMemory ...bool) *GeometryFieldData {
-	data := &GeometryFieldData{trackMemory: len(trackMemory) > 0 && trackMemory[0], Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
-}
-
 // getMemorySize calculates the size independently of the incremental cache.
 func (data *GeometryFieldData) getMemorySize() int {
 	var size int
@@ -2426,21 +2514,6 @@ func (data *GeometryFieldData) trackAppendedSize(oldRows, oldValid int) {
 		data.memorySize += len(value) + 16
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-}
-
-// NewArrayFieldData creates an empty field with size tracking initialized.
-func NewArrayFieldData(elementType schemapb.DataType, nullable, elementNullable bool, capacity int, trackMemory ...bool) *ArrayFieldData {
-	data := &ArrayFieldData{
-		trackMemory: len(trackMemory) > 0 && trackMemory[0],
-		Data:        make([]*schemapb.ScalarField, 0, capacity),
-		ElementType: elementType,
-		Nullable:    nullable, ElementNullable: elementNullable,
-		memorySize: 2, // Nullable and ElementNullable.
-	}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
 }
 
 // getMemorySize calculates the size independently of the incremental cache.
@@ -2462,19 +2535,6 @@ func (data *ArrayFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// NewSparseFloatVectorFieldData creates an empty field with size tracking initialized.
-// Capacity reserves validity entries; sparse contents grow on append, as in NewFieldData.
-func NewSparseFloatVectorFieldData(nullable bool, capacity int, trackMemory ...bool) *SparseFloatVectorFieldData {
-	data := &SparseFloatVectorFieldData{
-		trackMemory: len(trackMemory) > 0 && trackMemory[0],
-		Nullable:    nullable, memorySize: 9, // Nullable and empty L2PMapping.
-	}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
-}
-
 // getMemorySize calculates the size independently of the incremental cache.
 func (data *SparseFloatVectorFieldData) getMemorySize() int {
 	// TODO(SPARSE): should this be the memory size of serialzied size?
@@ -2482,28 +2542,24 @@ func (data *SparseFloatVectorFieldData) getMemorySize() int {
 	return proto.Size(&data.SparseFloatArray) + binary.Size(data.ValidData) + 1 + data.L2PMapping.GetMemorySize()
 }
 
-func (data *SparseFloatVectorFieldData) trackAppendedSize(oldRows, oldValid, oldDimSize, oldMappingSize int) {
-	// Size only the new rows and the change in the shared Dim encoding.
-	data.memorySize += proto.Size(&schemapb.SparseFloatArray{
-		Contents: data.Contents[oldRows:], Dim: data.Dim,
-	}) - oldDimSize
+func (data *SparseFloatVectorFieldData) trackAppendedSize(oldRows, oldValid int, oldDim int64, oldMappingSize int) {
+	// +-------+--------+----------+-------+--------+----------+-----+-------+-------+
+	// | tag 1 | length | row 0    | tag 1 | length | row 1    | ... | tag 2 | Dim   |
+	// +-------+--------+----------+-------+--------+----------+-----+-------+-------+
+	// |<----- Contents[0] ------->|<----- Contents[1] ------->| ... |<---- Dim ---->|
+	for _, row := range data.Contents[oldRows:] {
+		data.memorySize += protowire.SizeTag(1) + protowire.SizeBytes(len(row))
+	}
+	if data.Dim != oldDim {
+		if data.Dim != 0 {
+			data.memorySize += protowire.SizeTag(2) + protowire.SizeVarint(uint64(data.Dim))
+		}
+		if oldDim != 0 {
+			data.memorySize -= protowire.SizeTag(2) + protowire.SizeVarint(uint64(oldDim))
+		}
+	}
 	data.memorySize += len(data.ValidData) - oldValid
 	data.memorySize += data.L2PMapping.GetMemorySize() - oldMappingSize
-}
-
-// NewVectorArrayFieldData creates an empty field with size tracking initialized.
-func NewVectorArrayFieldData(elementType schemapb.DataType, dim int64, nullable, elementNullable bool, capacity int, trackMemory ...bool) *VectorArrayFieldData {
-	data := &VectorArrayFieldData{
-		trackMemory: len(trackMemory) > 0 && trackMemory[0],
-		Data:        make([]*schemapb.VectorField, 0, capacity),
-		ElementType: elementType, Dim: dim,
-		Nullable: nullable, ElementNullable: elementNullable,
-		memorySize: 2, // Nullable and ElementNullable.
-	}
-	if nullable {
-		data.ValidData = make([]bool, 0, capacity)
-	}
-	return data
 }
 
 // getMemorySize calculates the size independently of the incremental cache.

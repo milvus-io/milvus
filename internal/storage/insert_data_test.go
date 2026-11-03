@@ -923,10 +923,10 @@ func (c fieldMemoryCase) newField(t *testing.T, nullable bool, capacity int) Fie
 	if c.dataType == schemapb.DataType_ArrayOfVector {
 		element = schemapb.DataType_FloatVector
 	}
-	field, err := NewFieldData(c.dataType, &schemapb.FieldSchema{
+	field, err := NewFieldDataWithMemoryTracking(c.dataType, &schemapb.FieldSchema{
 		DataType: c.dataType, Nullable: nullable, ElementType: element,
 		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
-	}, capacity, true)
+	}, capacity)
 	require.NoError(t, err)
 	return field
 }
@@ -1023,7 +1023,10 @@ func TestStringFieldDataTrackedAppend(t *testing.T) {
 		for _, nullable := range []bool{false, true} {
 			for _, capacity := range []int{0, 64} {
 				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", dataType, nullable, capacity), func(t *testing.T) {
-					field := NewStringFieldData(dataType, nullable, capacity, true)
+					field := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+						DataType: dataType,
+						Nullable: nullable,
+					}, capacity, true)
 					legacy := &StringFieldData{Data: make([]string, 0, capacity), DataType: dataType, Nullable: nullable}
 					if nullable {
 						legacy.ValidData = make([]bool, 0, capacity)
@@ -1069,7 +1072,10 @@ func TestStringFieldDataTrackedAppend(t *testing.T) {
 }
 
 func TestStringFieldDataTrackedSizeBaseline(t *testing.T) {
-	field := NewStringFieldData(schemapb.DataType_VarChar, true, 64, true)
+	field := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+	}, 64, true)
 	require.Equal(t, 1, checkedMemorySize(t, field))
 	require.NoError(t, field.AppendRow(nil))
 	require.Equal(t, 18, checkedMemorySize(t, field))
@@ -1099,9 +1105,24 @@ func TestScalarFieldDataTrackedAppend(t *testing.T) {
 		{"Float", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Float, n, c, 0) }, float32(1), []float32{1, 0}, 4, 8},
 		{"Double", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Double, n, c, 0) }, float64(1), []float64{1, 0}, 8, 16},
 		{"Timestamptz", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Timestamptz, n, c, 0) }, int64(1), []int64{1, 0}, 8, 16},
-		{"JSON", func(n bool, c int) FieldData { return NewJSONFieldData(n, c, true) }, []byte("{}"), [][]byte{[]byte("{}"), nil}, 18, 34},
-		{"Geometry", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c, true) }, []byte{1, 2, 3}, [][]byte{{1, 2, 3}, nil}, 19, 35},
-		{"GeometryString", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c, true) }, "中", []string{"中", ""}, 19, 35},
+		{"JSON", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_JSON,
+				Nullable: n,
+			}, c, true)
+		}, []byte("{}"), [][]byte{[]byte("{}"), nil}, 18, 34},
+		{"Geometry", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_Geometry,
+				Nullable: n,
+			}, c, true)
+		}, []byte{1, 2, 3}, [][]byte{{1, 2, 3}, nil}, 19, 35},
+		{"GeometryString", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_Geometry,
+				Nullable: n,
+			}, c, true)
+		}, "中", []string{"中", ""}, 19, 35},
 	}
 	for _, tc := range cases {
 		for _, nullable := range []bool{false, true} {
@@ -1221,7 +1242,12 @@ func TestArrayFieldDataTrackedAppend(t *testing.T) {
 				}
 
 				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
-					field := NewArrayFieldData(tt.element, nullable, elementNullable, capacity, true)
+					field := newFieldDataForTest[*ArrayFieldData](&schemapb.FieldSchema{
+						DataType:        schemapb.DataType_Array,
+						ElementType:     tt.element,
+						Nullable:        nullable,
+						ElementNullable: elementNullable,
+					}, capacity, true)
 					require.Equal(t, capacity, cap(field.Data))
 					require.Equal(t, tt.element, field.GetElementType())
 					require.Equal(t, elementNullable, field.GetElementNullable())
@@ -1256,7 +1282,13 @@ func TestVectorArrayFieldDataTrackedAppend(t *testing.T) {
 				}
 
 				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
-					field := NewVectorArrayFieldData(tt.element, 8, nullable, elementNullable, capacity, true)
+					field := newFieldDataForTest[*VectorArrayFieldData](&schemapb.FieldSchema{
+						DataType:        schemapb.DataType_ArrayOfVector,
+						ElementType:     tt.element,
+						Nullable:        nullable,
+						ElementNullable: elementNullable,
+						TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(8)}},
+					}, capacity, true)
 					require.Equal(t, capacity, cap(field.Data))
 					require.Equal(t, tt.element, field.ElementType)
 					require.EqualValues(t, 8, field.Dim)
@@ -1366,8 +1398,13 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 		schemapb.DataType_BFloat16Vector: func(n bool, c int) FieldData {
 			return newFixedFieldDataForTest(schemapb.DataType_BFloat16Vector, n, c, 8)
 		},
-		schemapb.DataType_Int8Vector:        func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int8Vector, n, c, 8) },
-		schemapb.DataType_SparseFloatVector: func(n bool, c int) FieldData { return NewSparseFloatVectorFieldData(n, c, true) },
+		schemapb.DataType_Int8Vector: func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int8Vector, n, c, 8) },
+		schemapb.DataType_SparseFloatVector: func(n bool, c int) FieldData {
+			return newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: n,
+			}, c, true)
+		},
 	}
 	for _, tc := range fieldMemoryCases() {
 		newField, ok := constructors[tc.dataType]
@@ -1445,7 +1482,10 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 }
 
 func TestSparseFloatVectorFieldDataTrackedEncoding(t *testing.T) {
-	field := NewSparseFloatVectorFieldData(false, 64, true)
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 64, true)
 	for _, step := range []struct {
 		index uint32
 		want  int
@@ -1472,9 +1512,61 @@ func TestSparseFloatVectorFieldDataTrackedEncoding(t *testing.T) {
 	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 }
 
+func TestSparseFloatVectorFieldDataTrackedWireBoundaries(t *testing.T) {
+	for _, dim := range []int64{0, 1, 127, 128, 16383, 16384, 1 << 21, 1 << 32, 1<<63 - 1} {
+		for _, length := range []int{0, 120, 128, 16376, 16384} {
+			t.Run(fmt.Sprintf("dim=%d/length=%d", dim, length), func(t *testing.T) {
+				field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+					DataType: schemapb.DataType_SparseFloatVector,
+					Nullable: false,
+				}, 0, true)
+				source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: [][]byte{nil, make([]byte, length)}, Dim: dim,
+				}}
+				for i := 0; i < 2; i++ {
+					require.NoError(t, field.AppendDataRows(source))
+					checkedMemorySize(t, field)
+				}
+				// Dim-only appends can grow its varint without adding rows.
+				require.NoError(t, field.AppendDataRows(&SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{Dim: 1<<63 - 1},
+				}))
+				checkedMemorySize(t, field)
+			})
+		}
+	}
+}
+
+func TestSparseFloatVectorFieldDataTrackingAllocations(t *testing.T) {
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 0, true)
+	field.Contents = make([][]byte, 0, 1)
+	source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{
+		Contents: [][]byte{make([]byte, 128)}, Dim: 128,
+	}}
+	var err error
+	allocs := testing.AllocsPerRun(100, func() {
+		field.Contents = field.Contents[:0]
+		field.Dim = 0
+		field.memorySize = 9
+		err = field.AppendDataRows(source)
+	})
+	require.NoError(t, err)
+	require.Zero(t, allocs, "tracking must not allocate temporary protobuf messages")
+	require.Equal(t, 143, checkedMemorySize(t, field))
+}
+
 func TestSparseFloatVectorFieldDataTrackedAppendAllRows(t *testing.T) {
-	field := NewSparseFloatVectorFieldData(false, 8, true)
-	source := NewSparseFloatVectorFieldData(true, 8, true)
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 8, true)
+	source := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: true,
+	}, 8, true)
 	require.NoError(t, source.AppendRow(nil))
 	require.NoError(t, source.AppendRow(typeutil.CreateSparseFloatRow([]uint32{127}, []float32{1})))
 	for i := 1; i <= 2; i++ {
@@ -1497,18 +1589,41 @@ func TestTrackedAppendValidDataRowsInvalidType(t *testing.T) {
 		newFixedFieldDataForTest(schemapb.DataType_Float, true, 0, 0),
 		newFixedFieldDataForTest(schemapb.DataType_Double, true, 0, 0),
 		newFixedFieldDataForTest(schemapb.DataType_Timestamptz, true, 0, 0),
-		NewJSONFieldData(true, 0, true),
-		NewGeometryFieldData(true, 0, true),
+		newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+			Nullable: true,
+		}, 0, true),
+		newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_Geometry,
+			Nullable: true,
+		}, 0, true),
 
-		NewStringFieldData(schemapb.DataType_VarChar, true, 0, true),
-		NewArrayFieldData(schemapb.DataType_Int64, true, true, 0, true),
-		NewVectorArrayFieldData(schemapb.DataType_FloatVector, 8, true, true, 0, true),
+		newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+			Nullable: true,
+		}, 0, true),
+		newFieldDataForTest[*ArrayFieldData](&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_Array,
+			ElementType:     schemapb.DataType_Int64,
+			Nullable:        true,
+			ElementNullable: true,
+		}, 0, true),
+		newFieldDataForTest[*VectorArrayFieldData](&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			Nullable:        true,
+			ElementNullable: true,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(8)}},
+		}, 0, true),
 		newFixedFieldDataForTest(schemapb.DataType_BinaryVector, true, 0, 8),
 		newFixedFieldDataForTest(schemapb.DataType_FloatVector, true, 0, 8),
 		newFixedFieldDataForTest(schemapb.DataType_Float16Vector, true, 0, 8),
 		newFixedFieldDataForTest(schemapb.DataType_BFloat16Vector, true, 0, 8),
 		newFixedFieldDataForTest(schemapb.DataType_Int8Vector, true, 0, 8),
-		NewSparseFloatVectorFieldData(true, 0, true),
+		newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}, 0, true),
 	}
 	for _, field := range fields {
 		t.Run(field.GetDataType().String(), func(t *testing.T) {
@@ -1576,7 +1691,7 @@ func TestNewFieldDataMissingDimension(t *testing.T) {
 		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
 	} {
 		t.Run(dataType.String(), func(t *testing.T) {
-			field, err := NewFieldData(dataType, &schemapb.FieldSchema{DataType: dataType}, 0, true)
+			field, err := NewFieldDataWithMemoryTracking(dataType, &schemapb.FieldSchema{DataType: dataType}, 0)
 			require.Error(t, err)
 			require.Nil(t, field)
 		})
@@ -1602,13 +1717,22 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 			return newFixedFieldDataForTest(schemapb.DataType_Int64, nullable, capacity, 0)
 		}, int64(42)},
 		{"String1024", func(nullable bool, capacity int, enabled bool) FieldData {
-			return NewStringFieldData(schemapb.DataType_VarChar, nullable, capacity, enabled)
+			return newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_VarChar,
+				Nullable: nullable,
+			}, capacity, enabled)
 		}, text},
 		{"JSON1024", func(nullable bool, capacity int, enabled bool) FieldData {
-			return NewJSONFieldData(nullable, capacity, enabled)
+			return newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_JSON,
+				Nullable: nullable,
+			}, capacity, enabled)
 		}, []byte(`{"value":"` + text + `"}`)},
 		{"Sparse64", func(nullable bool, capacity int, enabled bool) FieldData {
-			return NewSparseFloatVectorFieldData(nullable, capacity, enabled)
+			return newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: nullable,
+			}, capacity, enabled)
 		}, sparse},
 	}
 	for _, tc := range cases {
@@ -1704,8 +1828,8 @@ func scannedMemorySize(data interface{ GetMemorySize() int }) int {
 func TestFieldDataMemoryTrackingMode(t *testing.T) {
 	for _, tc := range fieldMemoryCases() {
 		for _, nullable := range []bool{false, true} {
-			for _, mode := range [][]bool{nil, {false}, {true}} {
-				t.Run(fmt.Sprintf("%s/nullable=%t/mode=%v", tc.dataType, nullable, mode), func(t *testing.T) {
+			for _, tracked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/tracked=%t", tc.dataType, nullable, tracked), func(t *testing.T) {
 					element := schemapb.DataType_Int64
 					if tc.dataType == schemapb.DataType_ArrayOfVector {
 						element = schemapb.DataType_FloatVector
@@ -1714,7 +1838,11 @@ func TestFieldDataMemoryTrackingMode(t *testing.T) {
 						DataType: tc.dataType, Nullable: nullable, ElementType: element,
 						TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
 					}
-					field, err := NewFieldData(tc.dataType, schema, 0, mode...)
+					constructor := NewFieldData
+					if tracked {
+						constructor = NewFieldDataWithMemoryTracking
+					}
+					field, err := constructor(tc.dataType, schema, 0)
 					require.NoError(t, err)
 					check := func() {
 						require.Equal(t, scannedMemorySize(field), field.GetMemorySize())
@@ -1779,6 +1907,23 @@ func TestInsertMemorySizeAllFields(t *testing.T) {
 	}
 }
 
+func TestNewInsertDataWithMemoryTrackingIncludesFunctionOutputs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "input", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "output", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+	}}
+	untracked, err := NewInsertData(schema)
+	require.NoError(t, err)
+	require.NotContains(t, untracked.Data, FieldID(101))
+
+	tracked, err := NewInsertDataWithMemoryTracking(schema)
+	require.NoError(t, err)
+	require.Contains(t, tracked.Data, FieldID(101))
+	require.NoError(t, tracked.Append(map[FieldID]interface{}{100: "input", 101: "output"}))
+	require.Equal(t, "output", tracked.Data[101].GetRow(0))
+	require.Equal(t, 45, checkedMemorySize(t, tracked))
+}
+
 func TestInsertDataTrackedFieldSizes(t *testing.T) {
 	cases := fieldMemoryCases()
 	cases = append(cases, fieldMemoryCase{schemapb.DataType_Text, "中", []string{"中"}, 1, 19, 0, 0})
@@ -1803,9 +1948,9 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 				var data *InsertData
 				var err error
 				if capacity == 0 {
-					data, err = NewInsertData(schema, true)
+					data, err = NewInsertDataWithMemoryTracking(schema)
 				} else {
-					data, err = NewInsertDataWithCap(schema, capacity, false, true)
+					data, err = newInsertDataWithCap(schema, capacity, true, true)
 				}
 				require.NoError(t, err)
 				require.Len(t, data.Data, len(cases))
@@ -1852,7 +1997,10 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 }
 
 func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
-	data := &InsertData{Data: map[FieldID]FieldData{100: NewStringFieldData(schemapb.DataType_VarChar, true, 0, true)}}
+	data := &InsertData{Data: map[FieldID]FieldData{100: newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+	}, 0, true)}}
 	require.NoError(t, data.Data[100].AppendRow("中"))
 	require.Equal(t, 21, checkedMemorySize(t, data))
 	require.Equal(t, data.GetMemorySize(), checkedMemorySize(t, data))
@@ -1861,7 +2009,10 @@ func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
 	require.Equal(t, 38, checkedMemorySize(t, data))
 	require.ErrorIs(t, data.Data[100].AppendRow(42), merr.ErrParameterInvalid)
 	require.Equal(t, 38, checkedMemorySize(t, data))
-	data.Data[100] = NewJSONFieldData(false, 0, true)
+	data.Data[100] = newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, true)
 	require.NoError(t, data.Data[100].AppendRow([]byte("{}")))
 	require.Equal(t, 19, checkedMemorySize(t, data))
 	data.Data[101] = newFixedFieldDataForTest(schemapb.DataType_Int64, false, 0, 0)
@@ -1874,9 +2025,15 @@ func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
 }
 
 func TestInsertDataMemoryTrackingMixedFields(t *testing.T) {
-	tracked := NewStringFieldData(schemapb.DataType_VarChar, false, 0, true)
+	tracked := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
+		Nullable: false,
+	}, 0, true)
 	require.NoError(t, tracked.AppendRow("tracked"))
-	untracked := NewJSONFieldData(false, 0)
+	untracked := newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, false)
 	require.NoError(t, untracked.AppendRow([]byte("{}")))
 	data := &InsertData{Data: map[FieldID]FieldData{100: tracked, 101: untracked, 102: newFixedFieldDataForTest(schemapb.DataType_Int64, false, 0, 0)}}
 	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
@@ -1885,8 +2042,27 @@ func TestInsertDataMemoryTrackingMixedFields(t *testing.T) {
 	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
 	delete(data.Data, 101)
 	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
-	data.Data[100] = NewJSONFieldData(false, 0)
+	data.Data[100] = newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, false)
 	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+}
+
+// newFieldDataForTest exercises the common public constructors while preserving
+// the concrete type needed by field-specific assertions.
+func newFieldDataForTest[T FieldData](schema *schemapb.FieldSchema, capacity int, trackMemory bool) T {
+	var field FieldData
+	var err error
+	if trackMemory {
+		field, err = NewFieldDataWithMemoryTracking(schema.GetDataType(), schema, capacity)
+	} else {
+		field, err = NewFieldData(schema.GetDataType(), schema, capacity)
+	}
+	if err != nil {
+		panic(err)
+	}
+	return field.(T)
 }
 
 // newFixedFieldDataForTest uses the existing generic constructor for fixed-width fixtures.
