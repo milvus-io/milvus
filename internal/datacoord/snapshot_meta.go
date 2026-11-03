@@ -536,6 +536,12 @@ func (sm *snapshotMeta) Close() {
 // Returns:
 //   - error: Error if any phase fails
 func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *snapshotstorage.SnapshotData) error {
+	// Replicated creation retries reuse their ID and object paths. Serialize
+	// publication with Pending GC so an old scan cannot delete the new result.
+	lock := sm.getPinLock(snapshot.SnapshotInfo.GetId())
+	lock.Lock()
+	defer lock.Unlock()
+
 	// Step 1: Extract segment IDs and build IDs for reference tracking
 	// Also populate snapshotstorage.SnapshotData fields so they are persisted to S3 metadata.json.
 	// Without this, after restart the RefIndex loaded from S3 would have nil segmentIDs,
@@ -1633,6 +1639,49 @@ func (sm *snapshotMeta) PinSnapshot(ctx context.Context, collectionID int64, nam
 		mlog.Int("pinCount", len(updated.GetPinIds())),
 		mlog.Int("activePins", active))
 	return pinID, active, nil
+}
+
+// ensureRestorePin installs the primary's pin identity on a receiving replica.
+// Replays keep one permanent pin until the durable restore job releases it.
+func (sm *snapshotMeta) ensureRestorePin(ctx context.Context, collectionID int64, name string, pinID int64) (int, error) {
+	sm.pinMu.RLock()
+	snapshot, err := sm.getSnapshotByName(ctx, collectionID, name)
+	sm.pinMu.RUnlock()
+	if err != nil {
+		return 0, err
+	}
+	lock := sm.getPinLock(snapshot.GetId())
+	lock.Lock()
+	defer lock.Unlock()
+
+	sm.pinMu.RLock()
+	current, ok := sm.snapshotID2Info.Get(snapshot.GetId())
+	sm.pinMu.RUnlock()
+	if !ok || current.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
+		return 0, merr.WrapErrSnapshotNotFound(name, "snapshot removed before restore pin")
+	}
+	found := false
+	for _, id := range current.GetPinIds() {
+		if id == pinID {
+			found = true
+			break
+		}
+	}
+	if found && current.GetPinExpireAtMs()[pinID] == 0 {
+		return countActivePins(current), nil
+	}
+	updated := cloneSnapshotInfo(current)
+	if !found {
+		updated.PinIds = append(updated.PinIds, pinID)
+	}
+	delete(updated.PinExpireAtMs, pinID)
+	if err := sm.catalog.SaveSnapshot(ctx, updated); err != nil {
+		return 0, err
+	}
+	sm.pinMu.Lock()
+	sm.swapSnapshotInfoLocked(current, updated)
+	sm.pinMu.Unlock()
+	return countActivePins(updated), nil
 }
 
 // HasActivePins reports whether the named snapshot currently has any

@@ -2845,40 +2845,15 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 			)
 
 			gc.ackSignal(signal)
-			// Compute paths from collection_id + snapshot_id
-			manifestDir, metadataPath := snapshotstorage.GetSnapshotPaths(
-				gc.option.cli.RootPath(),
-				snapshot.GetCollectionId(),
-				snapshot.GetId(),
-			)
-
-			snapshotLog.Info(ctx, "cleaning up pending snapshot",
-				mlog.String("manifestDir", manifestDir),
-				mlog.String("metadataPath", metadataPath))
-
-			// Delete manifest directory using RemoveWithPrefix (no list needed)
-			// This removes all segment manifest files: manifests/{snapshot_id}/*.avro
-			if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove pending snapshot manifest directory", mlog.Err(err))
-				// Keep catalog record for retry in next GC cycle.
+			cleaned, err := gc.recyclePendingSnapshot(ctx, snapshot)
+			if err != nil {
+				snapshotLog.Warn(ctx, "failed to clean pending snapshot, retry next cycle", mlog.Err(err))
 				continue
 			}
-
-			// Delete metadata file
-			if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
-				snapshotLog.Warn(ctx, "failed to remove pending snapshot metadata file", mlog.Err(err))
-				// Keep catalog record for retry in next GC cycle.
-				continue
+			if cleaned {
+				snapshotLog.Info(ctx, "successfully cleaned up pending snapshot")
+				cleanedCount++
 			}
-
-			// Delete etcd record
-			if err := snapshotMeta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
-				snapshotLog.Warn(ctx, "failed to drop pending snapshot from catalog", mlog.Err(err))
-				continue
-			}
-
-			snapshotLog.Info(ctx, "successfully cleaned up pending snapshot")
-			cleanedCount++
 		}
 
 		log.Info(ctx, "pending snapshots cleanup completed",
@@ -3009,4 +2984,28 @@ func (gc *garbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 	}
 
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
+}
+
+// A creation retry may have published the same ID since the Pending scan.
+// Hold its publication lock through object and catalog deletion; a later retry
+// then writes a complete new bundle after cleanup rather than racing deletion.
+func (gc *garbageCollector) recyclePendingSnapshot(ctx context.Context, snapshot *datapb.SnapshotInfo) (bool, error) {
+	meta := gc.meta.GetSnapshotMeta()
+	lock := meta.getPinLock(snapshot.GetId())
+	lock.Lock()
+	defer lock.Unlock()
+	if current, ok := meta.snapshotID2Info.Get(snapshot.GetId()); ok && current.GetState() != datapb.SnapshotState_SnapshotStatePending {
+		return false, nil
+	}
+	manifestDir, metadataPath := snapshotstorage.GetSnapshotPaths(gc.option.cli.RootPath(), snapshot.GetCollectionId(), snapshot.GetId())
+	if err := gc.option.cli.RemoveWithPrefix(ctx, manifestDir); err != nil {
+		return false, merr.Wrap(err, "failed to remove pending snapshot manifest directory")
+	}
+	if err := gc.option.cli.Remove(ctx, metadataPath); err != nil {
+		return false, merr.Wrap(err, "failed to remove pending snapshot metadata file")
+	}
+	if err := meta.CleanupPendingSnapshot(ctx, snapshot); err != nil {
+		return false, err
+	}
+	return true, nil
 }

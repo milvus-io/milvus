@@ -106,7 +106,7 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 
 	// Mock snapshotMeta methods using mockey
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found") // Name doesn't exist
+		return nil, merr.WrapErrSnapshotNotFound(name) // Name doesn't exist
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -161,7 +161,7 @@ func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {
 	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -233,7 +233,7 @@ func TestSnapshotManager_CreateSnapshot_AllocatorError(t *testing.T) {
 
 	// Mock snapshotMeta.GetSnapshot to return not found
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -271,7 +271,7 @@ func TestSnapshotManager_CreateSnapshot_GenSnapshotError(t *testing.T) {
 
 	// Mock snapshotMeta.GetSnapshot to return not found
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -311,7 +311,7 @@ func TestSnapshotManager_CreateSnapshot_SaveError(t *testing.T) {
 
 	// Mock snapshotMeta methods
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -353,7 +353,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnGenSnapshotError(
 	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(nil, expectedErr).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -391,7 +391,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnSaveError(t *test
 	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -444,7 +444,7 @@ func TestSnapshotManager_CreateSnapshot_PendingHeldEvenWithoutLongTermProtection
 	mockHandler.EXPECT().GenSnapshot(mock.Anything, int64(100), mock.Anything).Return(snapshotData, nil).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 
@@ -487,7 +487,7 @@ func TestSnapshotManager_CreateSnapshot_ClearsSnapshotPendingOnAllocError(t *tes
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(0), expectedErr).Once()
 
 	mockGetSnapshot := mockey.Mock((*snapshotMeta).GetSnapshot).To(func(sm *snapshotMeta, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
-		return nil, errors.New("not found")
+		return nil, merr.WrapErrSnapshotNotFound(name)
 	}).Build()
 	defer mockGetSnapshot.UnPatch()
 

@@ -3940,11 +3940,15 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	defer patchStart.UnPatch()
 	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 	defer patchClose.UnPatch()
+	allocated := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(9001), nil).Build()
+	defer allocated.UnPatch()
 	called := false
 	patchBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
 		func(_ *embeddedBroadcastAPI, _ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
 			called = true
 			require.Equal(t, message.MessageTypeCreateSnapshot, msg.MessageType())
+			require.False(t, msg.IsUnreplicable())
+			require.EqualValues(t, 9001, message.MustAsBroadcastCreateSnapshotMessageV2(msg).Header().GetSnapshotId())
 			require.True(t, msg.BroadcastHeader().AckSyncUp)
 			// Broadcaster adds CChannel after receiving the caller's data channels.
 			require.ElementsMatch(t, []string{"p1_100v0", "p2_100v1"}, msg.BroadcastHeader().VChannels)
@@ -3953,7 +3957,7 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	defer patchBroadcast.UnPatch()
 	server := &Server{
 		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-		handler:         &embeddedHandler{}, broker: &embeddedBroker{},
+		handler:         &embeddedHandler{}, broker: &embeddedBroker{}, allocator: &restoreAllocatorTarget{},
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
@@ -8150,7 +8154,7 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 }
 
 func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
-	for _, scenario := range []string{"collection_error", "collection_missing", "lock_error", "duplicate_after_lock", "broadcast_error"} {
+	for _, scenario := range []string{"collection_error", "collection_missing", "lock_error", "duplicate_after_lock", "allocation_error", "broadcast_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			calls := 0
 			lookup := mockey.Mock((*snapshotManager).GetSnapshot).To(func(_ *snapshotManager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
@@ -8184,7 +8188,14 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 			defer exists.UnPatch()
 			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
 			defer publish.UnPatch()
-			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &embeddedBroker{}}
+			allocate := mockey.Mock((*restoreAllocatorTarget).AllocID).To(func(_ *restoreAllocatorTarget, _ context.Context) (int64, error) {
+				if scenario == "allocation_error" {
+					return 0, merr.ErrServiceNotReady
+				}
+				return 9001, nil
+			}).Build()
+			defer allocate.UnPatch()
+			server := &Server{allocator: &restoreAllocatorTarget{}, snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &embeddedBroker{}}
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: "daily"})
 			require.NoError(t, err)

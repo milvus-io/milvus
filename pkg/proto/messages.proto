@@ -673,6 +673,7 @@ message CreateSnapshotMessageHeader {
     string name         = 2;
     string description  = 3;
     int64 compaction_protection_seconds = 4; // duration in seconds to protect referenced segments from compaction
+    int64 snapshot_id = 5; // Allocated by the primary before broadcast; zero retains legacy local allocation.
 }
 
 // CreateSnapshotMessageBody is the body of create snapshot message.

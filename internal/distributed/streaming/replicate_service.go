@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -179,6 +180,10 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		if err := s.overwriteCreateCollectionMessage(sourceCluster, msg); err != nil {
 			return nil, err
 		}
+	case message.MessageTypeRestoreSnapshot:
+		if err := s.overwriteRestoreSnapshotMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
 	case message.MessageTypeAlterReplicateConfig:
 		if err := s.overwriteAlterReplicateConfigMessage(cfg, msg); err != nil {
 			return nil, err
@@ -213,6 +218,29 @@ func (s replicateService) getTargetVChannel(sourceCluster *replicateutil.MilvusC
 func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
 	body := createCollectionMsg.MustBody()
+	if err := s.overwriteCollectionChannels(sourceCluster, body); err != nil {
+		return err
+	}
+	createCollectionMsg.OverwriteBody(body)
+	return nil
+}
+
+func (s replicateService) overwriteRestoreSnapshotMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	restore := message.MustAsMutableRestoreSnapshotMessageV2(msg)
+	body := restore.MustBody()
+	if body.GetCollection() == nil {
+		return nil // Legacy restore into an already-created collection.
+	}
+	if err := s.overwriteCollectionChannels(sourceCluster, body.GetCollection()); err != nil {
+		return err
+	}
+	restore.OverwriteBody(body)
+	return nil
+}
+
+// Replication preserves collection/partition/index identities and localizes
+// only the physical and virtual channel placement of the creation recipe.
+func (s replicateService) overwriteCollectionChannels(sourceCluster *replicateutil.MilvusCluster, body *msgpb.CreateCollectionRequest) error {
 	for idx, sourcePChannel := range body.PhysicalChannelNames {
 		targetPChannel, err := sourceCluster.GetTargetChannel(sourcePChannel, s.clusterID)
 		if err != nil {
@@ -221,7 +249,6 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 		body.PhysicalChannelNames[idx] = targetPChannel
 		body.VirtualChannelNames[idx] = strings.Replace(body.VirtualChannelNames[idx], sourcePChannel, targetPChannel, 1)
 	}
-	createCollectionMsg.OverwriteBody(body)
 	return nil
 }
 

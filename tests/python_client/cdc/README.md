@@ -267,18 +267,25 @@ collection and row checks use `MilvusClient`.
 | File | Contracts checked |
 | --- | --- |
 | `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
-| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; local restore data with continued DML replication |
+| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; replicated snapshot lifecycle and identity; primary-only snapshot/manifest admission; restored data/DDL IDs, deletes, partitions, continued DML and chained restore |
 | `test_api_control.py` | RestoreRBAC, AlterRole, restored credentials and effective permissions; phrase slop; local heartbeat/telemetry/client commands |
-| `test_api_storage.py` | Local file-resource registration/removal; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
+| `test_api_storage.py` | Local file-resource registration/removal; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and replicated external restore data/identity |
 | `test_import_2pc.py` | Manual import commit/abort, rejected auto-commit without visible rows, and subsequent successful imports |
 | `test_resource_group.py` | Actual create/update/drop/transfer calls, with local/replicated-state assertions |
 
-RestoreSnapshot, RestoreExternalSnapshot and RefreshExternalCollection currently
-emit unreplicable task messages. Their boundary cases assert successful primary
-data changes, no corresponding secondary job or restored/refreshed rows after a
-control-channel barrier, and continued ordinary DML replication. Collection and
-index DDL still replicate independently. These are executable boundary tests,
-not expected failures of full-data replication tests.
+CreateSnapshot and new RestoreSnapshot/RestoreExternalSnapshot creation recipes
+replicate. Tests compare SnapshotID from the published metadata object key,
+Restore JobID, CollectionID, Partition IDs and Index IDs on both clusters, together
+with complete restored rows and continued DML. Physical segment and compaction
+layouts remain local. DropSnapshot also replicates, including same-name reuse;
+API pin/unpin leases remain local. Snapshot export jobs and external refresh
+tasks remain local. The external-refresh boundary checks still require no
+secondary refresh job or refreshed rows after a control-channel barrier.
+
+Upgrade both coordinators and the receiving replication path before using the
+new snapshot contract. Historical WAL records marked `_ur` remain skipped;
+these tests create their snapshots after topology setup rather than assuming
+old local snapshots were copied by an upgrade.
 
 Run from `tests/python_client` with the repository virtual environment active:
 
@@ -315,7 +322,7 @@ CChannel progress barrier. This barrier does not prove progress on every data
 channel; data cases additionally wait for exact row contents.
 
 Supported replication cases require complete business data on the secondary.
-Local restore and refresh cases instead verify the documented nonreplication
-boundary and continued CDC progress. Collection/format checks do not establish
+Local refresh cases verify the documented nonreplication boundary and continued
+CDC progress. Collection/format checks do not establish
 an E2E pass, and adding these files does not by itself verify a recurring
 Jenkins selection.

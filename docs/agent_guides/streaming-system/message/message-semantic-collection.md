@@ -17,7 +17,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
-| RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| RestoreSnapshot | Broadcast: target VChannels + CChannel (AckSyncUp); legacy CChannel-only | Yes for target creation | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
@@ -40,8 +40,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition seals and flushes all earlier growing segments of the collection on each VChannel, but logically drops only the requested partition.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
-- **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
-- **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
+- **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. The primary allocates SnapshotID before broadcast; replicas reuse it while generating their own local storage snapshot. Flushes earlier L1/L0 data and uses each receiving business channel's message position as the snapshot cut. A callback waits for an earlier asynchronous Restore to make the collection available.
+- **RestoreSnapshot**: New messages carry the primary's collection, partition, index and Job IDs. Replicas remap the embedded creation channels and install the source pin locally before starting their own copy Job. Collections become available after local restore publication. Empty legacy bodies restore into an already-created target.
+- **DropSnapshot** / **DropSnapshotsByCollection**: CChannel-only snapshot deletion. A replicated DropSnapshot retries while an earlier local restore still holds the source pin.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
 - **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. New jobs carry `commit_by_coordinator=true` and do not require a StreamingNode Flush or per-channel commit RPC. Legacy messages keep the per-channel RPC before BroadcastAckModule Ack and the counter-based checker completion.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
@@ -59,7 +60,7 @@ but have no ACK callbacks and do not maintain metadata during replay.
 
 ## Replication Compatibility
 
-Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, RefreshExternalCollection, and ManualFlush. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
+Current producers explicitly mark BatchUpdateManifest, RefreshExternalCollection and ManualFlush with `Unreplicable` (`_ur`). New CreateSnapshot, DropSnapshot and creation-bearing RestoreSnapshot messages replicate through the ordinary DDL path. Their historical WAL records already carrying `_ur` remain skipped; enabling this protocol does not retroactively copy old local snapshots. A zero SnapshotID retains legacy callback allocation. Both clusters' coordinators and the receiving replication path must support the new identity and restore-creation contract before using it. Segment/log/compaction-plan identities remain local, as with ordinary independently materialized replicated data.
 
 ## Data Lifecycle Ordering Invariants
 

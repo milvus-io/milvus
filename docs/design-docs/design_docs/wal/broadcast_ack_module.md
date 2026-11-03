@@ -142,6 +142,16 @@ is not the snapshot cut. Snapshot generation receives these positions explicitly
 it neither calls Flush RPC nor waits for cp_updater to publish them. Existing
 compaction protection and snapshot publication remain in the snapshot manager.
 
+New CreateSnapshot messages carry a primary-allocated SnapshotID; callback replay
+reuses a committed matching identity. Replicas build snapshots from their own
+acknowledged business-channel cuts. The callback waits for the collection to
+be available, including completion of an earlier asynchronous Restore. Restore
+creation carries the primary's collection/partition/index/Job IDs, with channel
+placement remapped on receipt. Each receiver owns its local source pin and copy
+Job. Replicated DropSnapshot may retry until that Job releases its pin; the
+checker releases it without acquiring the callback's resource keys. Old messages
+carrying `_ur` retain their local-only behavior.
+
 ## Truncate API Completion
 
 TruncateCollection broadcasts with `AckSyncUp` to all collection VChannels and

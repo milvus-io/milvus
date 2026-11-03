@@ -1,4 +1,4 @@
-"""Explicit unsupported-RPC and non-replicating snapshot contracts."""
+"""Explicit unsupported-RPC boundaries and snapshot replication contracts."""
 
 import grpc
 import pytest
@@ -7,7 +7,7 @@ from google.protobuf.message_factory import GetMessageClass
 from pymilvus import MilvusException
 from pymilvus.grpc_gen import milvus_pb2
 
-from .contract_helpers import assert_index_sync, rows_equal, rpc
+from .contract_helpers import assert_index_sync, assert_restore_identity, rpc, snapshot_identity
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -67,19 +67,22 @@ class TestCDCUnsupportedAPI:
 
 
 class TestCDCSnapshotBoundary:
-    def test_snapshot_create_pin_unpin_drop_stays_local(self, cdc_contract):
+    def test_snapshot_create_and_drop_replicate_with_stable_identity(self, cdc_contract):
         c = cdc_contract
         name = c.collection()
         c.upstream.insert(name, c.data())
         c.upstream.flush(name)
         c.assert_rows(name, c.data())
-        snapshot = c.name("snapshot_local")
+        snapshot = c.name("snapshot_replicated")
         c.request.addfinalizer(lambda: c.upstream.drop_snapshot(snapshot, name))
-        c.upstream.create_snapshot(snapshot, name, description="CDC local snapshot", timeout=c.timeout)
+        c.upstream.create_snapshot(snapshot, name, description="CDC replicated snapshot", timeout=c.timeout)
         assert snapshot in c.upstream.list_snapshots(name)
-        assert c.upstream.describe_snapshot(snapshot, name).description == "CDC local snapshot"
-        c.control_barrier()
-        assert snapshot not in c.downstream.list_snapshots(name)
+        assert c.upstream.describe_snapshot(snapshot, name).description == "CDC replicated snapshot"
+        first_identity = snapshot_identity(c.upstream, snapshot, name)
+        c.wait(
+            lambda: self.assert_snapshot_identity(c, snapshot, name, first_identity),
+            "replicated snapshot identity",
+        )
         pin = c.upstream.pin_snapshot_data(snapshot, name, ttl_seconds=600)
         try:
             with pytest.raises(MilvusException, match="(?i)pin"):
@@ -91,16 +94,28 @@ class TestCDCSnapshotBoundary:
         c.control_barrier()
         assert snapshot not in c.upstream.list_snapshots(name)
         assert snapshot not in c.downstream.list_snapshots(name)
+        # A replicated drop permits the same name to be reused on both clusters.
+        c.upstream.create_snapshot(snapshot, name, timeout=c.timeout)
+        next_identity = snapshot_identity(c.upstream, snapshot, name)
+        assert next_identity != first_identity
+        c.wait(lambda: self.assert_snapshot_identity(c, snapshot, name, next_identity), "recreated snapshot identity")
         c.upstream.insert(name, c.data(10))
         c.assert_rows(name, c.data() + c.data(10))
 
-    def test_restore_snapshot_data_stays_local_and_cdc_continues(self, cdc_contract):
-        """Restore data stays on the primary; metadata and subsequent DML still replicate."""
+    @staticmethod
+    def assert_snapshot_identity(contract, snapshot, collection, expected):
+        assert snapshot_identity(contract.downstream, snapshot, collection) == expected
+
+    def test_restore_snapshot_replicates_data_ids_and_continued_dml(self, cdc_contract):
+        """Both clusters restore historical rows before accepting subsequent DML."""
         c = cdc_contract
         name = c.collection()
+        c.upstream.create_partition(name, "extra")
         c.upstream.insert(name, c.data())
-        c.upstream.flush(name)
-        c.assert_rows(name, c.data())
+        c.upstream.insert(name, c.data(10), partition_name="extra")
+        c.upstream.delete(name, ids=[1])
+        expected = [row for row in c.data() + c.data(10) if row["id"] != 1]
+        c.assert_rows(name, expected)
         snapshot = c.name("snapshot_restore")
         c.request.addfinalizer(lambda: c.upstream.drop_snapshot(snapshot, name))
         c.upstream.create_snapshot(snapshot, name, timeout=c.timeout)
@@ -109,25 +124,40 @@ class TestCDCSnapshotBoundary:
         job = c.upstream.restore_snapshot(snapshot, name, target, timeout=c.timeout)
 
         def completed():
-            state = c.upstream.get_restore_snapshot_state(job)
-            assert state.state == "RestoreSnapshotCompleted", state
+            for client in (c.upstream, c.downstream):
+                state = client.get_restore_snapshot_state(job)
+                assert state.state == "RestoreSnapshotCompleted", state
+                assert state.job_id == job
 
-        c.wait(completed, "source restore completion")
+        c.wait(completed, "both restore jobs complete under the same ID")
         assert any(info.job_id == job for info in c.upstream.list_restore_snapshot_jobs(collection_name=target))
         c.sync_schema(target)
+        assert_restore_identity(c.upstream, c.downstream, target)
         assert_index_sync(c.upstream, c.downstream, target, "vector", c.timeout)
         c.upstream.load_collection(target)
-        c.control_barrier()
-        c.wait(lambda: rows_equal(c.upstream, target, c.data()), "primary restored rows")
-        c.wait(lambda: rows_equal(c.downstream, target, []), "secondary restored collection remains empty")
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
+        c.assert_rows(target, expected)
+        assert any(info.job_id == job for info in c.downstream.list_restore_snapshot_jobs(collection_name=target))
 
-        # Observe subsequent DML on the same collection before checking absence again.
         new_rows = c.data(100)
         c.upstream.insert(target, new_rows)
-        c.wait(lambda: rows_equal(c.downstream, target, new_rows), "DML after local snapshot restore")
-        rows_equal(c.upstream, target, c.data() + new_rows)
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
+        c.assert_rows(target, expected + new_rows)
+
+        # Snapshot and restore a restored collection, including post-restore DML.
+        chained_snapshot, chained_target = c.name("chained_snapshot"), c.name("chained_restore")
+        c.request.addfinalizer(lambda: c.upstream.drop_snapshot(chained_snapshot, target))
+        c.upstream.create_snapshot(chained_snapshot, target, timeout=c.timeout)
+        c.request.addfinalizer(lambda: c.upstream.drop_collection(chained_target))
+        chained_job = c.upstream.restore_snapshot(chained_snapshot, target, chained_target, timeout=c.timeout)
+
+        def chained_completed():
+            for client in (c.upstream, c.downstream):
+                state = client.get_restore_snapshot_state(chained_job)
+                assert state.state == "RestoreSnapshotCompleted", state
+
+        c.wait(chained_completed, "chained restore completion")
+        assert_restore_identity(c.upstream, c.downstream, chained_target)
+        c.upstream.load_collection(chained_target)
+        c.assert_rows(chained_target, expected + new_rows)
 
     def test_manifest_secondary_rejected_without_data_changes(self, cdc_contract):
         c = cdc_contract

@@ -441,6 +441,19 @@ func (sm *snapshotManager) CreateSnapshot(
 	compactionProtectionSeconds int64,
 	positions []*msgpb.MsgPosition,
 ) (int64, error) {
+	return sm.createSnapshot(ctx, collectionID, name, description, compactionProtectionSeconds, positions, 0)
+}
+
+// createSnapshot applies a durable snapshot recipe. A supplied ID belongs to
+// the originating broadcast; only legacy local messages allocate in the callback.
+func (sm *snapshotManager) createSnapshot(
+	ctx context.Context,
+	collectionID int64,
+	name, description string,
+	compactionProtectionSeconds int64,
+	positions []*msgpb.MsgPosition,
+	snapshotID int64,
+) (int64, error) {
 	// Lock to prevent TOCTOU race on snapshot name uniqueness check
 	sm.createSnapshotMu.Lock()
 	defer sm.createSnapshotMu.Unlock()
@@ -450,8 +463,28 @@ func (sm *snapshotManager) CreateSnapshot(
 		mlog.Int64("compactionProtectionSeconds", compactionProtectionSeconds))
 
 	// Validate snapshot name uniqueness within collection (protected by createSnapshotMu)
-	if _, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
+	if existing, err := sm.snapshotMeta.GetSnapshot(ctx, collectionID, name); err == nil {
+		if snapshotID != 0 {
+			if existing.GetId() == snapshotID {
+				return snapshotID, nil
+			}
+			return 0, merr.WrapErrDataIntegrityMsg("snapshot %s in collection %d has ID %d, expected %d",
+				name, collectionID, existing.GetId(), snapshotID)
+		}
 		return 0, merr.WrapErrParameterInvalidMsg("snapshot name %s already exists", name)
+	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
+		return 0, err
+	}
+	if snapshotID != 0 {
+		// The primary can finish a Restore before its replica. Its next snapshot
+		// must include the replica's restored historical data as well as WAL data.
+		available, err := sm.broker.HasCollection(ctx, collectionID)
+		if err != nil {
+			return 0, err
+		}
+		if !available {
+			return 0, merr.WrapErrServiceNotReadyMsg("snapshot collection %d is not available yet", collectionID)
+		}
 	}
 
 	// Block compaction commit for this collection during snapshot creation.
@@ -464,10 +497,13 @@ func (sm *snapshotManager) CreateSnapshot(
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
 
 	// Allocate snapshot ID
-	snapshotID, err := sm.allocator.AllocID(ctx)
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to allocate snapshot ID", mlog.Err(err))
-		return 0, err
+	if snapshotID == 0 {
+		var err error
+		snapshotID, err = sm.allocator.AllocID(ctx)
+		if err != nil {
+			mlog.Error(ctx, "failed to allocate snapshot ID", mlog.Err(err))
+			return 0, err
+		}
 	}
 
 	// Generate snapshot data
@@ -1352,6 +1388,15 @@ func (sm *snapshotManager) restoreData(
 		}
 		mlog.Info(ctx, "job already exists, skip creation (idempotent)")
 		return jobID, nil
+	}
+	if !external && len(publication) != 0 && publication[0].replicated && pinID != 0 {
+		// API admission pins on the primary. Replicated callbacks must install
+		// that same durable pin locally before any asynchronous copy can start.
+		active, err := sm.snapshotMeta.ensureRestorePin(ctx, sourceCollectionID, snapshotName, pinID)
+		if err != nil {
+			return handleSourceError("failed to pin restore snapshot", err)
+		}
+		setSnapshotActivePinsGauge(sourceCollectionID, snapshotName, active)
 	}
 
 	var snapshotData *snapshotstorage.SnapshotData

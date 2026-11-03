@@ -1,11 +1,14 @@
 """Precise state oracles shared by CDC interface contract tests."""
 
+import re
 import time
 from contextlib import contextmanager
+from urllib.parse import urlsplit
 
 import grpc
 from pymilvus import DataType, MilvusException
 from pymilvus.client.utils import check_status
+from pymilvus.grpc_gen import milvus_pb2
 
 from .base import TestCDCSyncBase
 
@@ -60,6 +63,31 @@ def rpc(client, method, request, timeout=30):
     status = getattr(response, "status", getattr(response, "alter_status", response))
     check_status(status)
     return response
+
+
+def snapshot_identity(client, snapshot, collection):
+    """Read the physical collection/snapshot IDs from the published metadata key."""
+    info = client.describe_snapshot(snapshot, collection, timeout=10)
+    match = re.search(r"/snapshots/(\d+)/metadata/(\d+)\.json$", urlsplit(info.s3_location).path)
+    assert match, info.s3_location
+    return tuple(map(int, match.groups()))
+
+
+def assert_restore_identity(upstream, downstream, collection):
+    """Compare physical DDL IDs, independently of schemas and local segment layout."""
+    def identity(client):
+        description = client.describe_collection(collection, timeout=10)
+        partitions = rpc(client, "ShowPartitions", milvus_pb2.ShowPartitionsRequest(collection_name=collection))
+        indexes = rpc(client, "DescribeIndex", milvus_pb2.DescribeIndexRequest(collection_name=collection))
+        return (
+            description["collection_id"],
+            dict(zip(partitions.partition_names, partitions.partitionIDs)),
+            {index.index_name: index.indexID for index in indexes.index_descriptions},
+        )
+
+    source, target = identity(upstream), identity(downstream)
+    assert source == target, (source, target)
+    return source
 
 
 class CDCContract:

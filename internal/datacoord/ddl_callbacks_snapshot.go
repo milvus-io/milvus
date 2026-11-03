@@ -30,7 +30,8 @@ import (
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
-// ID allocation happens inside SnapshotManager.CreateSnapshot.
+// New messages carry the primary's snapshot ID. Old local messages retain
+// allocation in SnapshotManager.CreateSnapshot.
 func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultCreateSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
@@ -39,7 +40,6 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	)
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
-	// Create snapshot - ID is allocated inside CreateSnapshot
 	positions := make([]*msgpb.MsgPosition, 0, len(result.Results))
 	for channel, fence := range result.Results {
 		if funcutil.IsControlChannel(channel) {
@@ -53,7 +53,14 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 		})
 	}
 	sort.Slice(positions, func(i, j int) bool { return positions[i].GetChannelName() < positions[j].GetChannelName() })
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
+	var snapshotID int64
+	var err error
+	if header.GetSnapshotId() != 0 {
+		snapshotID, err = s.snapshotManager.(*snapshotManager).createSnapshot(ctx, header.CollectionId,
+			header.Name, header.Description, header.CompactionProtectionSeconds, positions, header.GetSnapshotId())
+	} else {
+		snapshotID, err = s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
+	}
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
@@ -69,8 +76,10 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 // exclusive resource key lock and does a pin check under that lock before broadcasting.
 // PinSnapshotData also takes the same key (shared mode), so no concurrent Pin can add
 // pins while this callback runs. Therefore snapshotManager.DropSnapshot is guaranteed
-// never to return ErrSnapshotPinned on this path — the only remaining failure modes are
-// transient (etcd/network), which are correctly retried by the ack scheduler loop.
+// never to return ErrSnapshotPinned on the originating cluster. On a replica,
+// an earlier Restore may still be copying and holding its local source pin.
+// Its asynchronous checker releases the pin independently of these resource
+// keys, after which the ack scheduler can retry this drop successfully.
 func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(

@@ -9,7 +9,7 @@ from pymilvus import DataType, MilvusException
 from pymilvus.client.types import LoadState
 from pymilvus.grpc_gen import milvus_pb2
 
-from .contract_helpers import assert_index_sync, rows_equal, rpc
+from .contract_helpers import assert_index_sync, assert_restore_identity, rows_equal, rpc, snapshot_identity
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -179,7 +179,7 @@ class TestCDCStorageAPI:
         c.assert_rows(canary, c.data())
         assert [state(client) for client in (c.upstream, c.downstream)] == before
 
-    def test_snapshot_export_and_external_restore_data_stay_local(self, cdc_contract, storage):
+    def test_snapshot_export_and_external_restore_replicate_data(self, cdc_contract, storage):
         c = cdc_contract
         configs, _, prefix = storage
         name = c.collection()
@@ -211,7 +211,7 @@ class TestCDCStorageAPI:
         c.wait(complete, "snapshot export")
         assert completed[0].snapshot_metadata_uri
         c.control_barrier()
-        assert snapshot not in c.downstream.list_snapshots(name)
+        assert snapshot_identity(c.upstream, snapshot, name) == snapshot_identity(c.downstream, snapshot, name)
         restored = c.name("external_restore")
         c.request.addfinalizer(lambda: c.upstream.drop_collection(restored))
         response = rpc(
@@ -225,23 +225,23 @@ class TestCDCStorageAPI:
         )
 
         def restored_complete():
-            info = c.upstream.get_restore_snapshot_state(response.job_id)
-            assert info.state == "RestoreSnapshotCompleted", info
+            for client in (c.upstream, c.downstream):
+                info = client.get_restore_snapshot_state(response.job_id)
+                assert info.state == "RestoreSnapshotCompleted", info
+                assert info.job_id == response.job_id
 
         c.wait(restored_complete, "external snapshot restore")
         c.sync_schema(restored)
+        assert_restore_identity(c.upstream, c.downstream, restored)
         assert_index_sync(c.upstream, c.downstream, restored, "vector", c.timeout)
         c.upstream.load_collection(restored)
         c.control_barrier()
-        c.wait(lambda: rows_equal(c.upstream, restored, c.data()), "primary external restore rows")
-        c.wait(lambda: rows_equal(c.downstream, restored, []), "secondary externally restored collection remains empty")
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
-        assert any(
-            info.job_id == response.job_id
-            for info in c.upstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
-        )
+        c.assert_rows(restored, c.data())
+        for client in (c.upstream, c.downstream):
+            assert any(
+                info.job_id == response.job_id
+                for info in client.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
+            )
         new_rows = c.data(100)
         c.upstream.insert(restored, new_rows)
-        c.wait(lambda: rows_equal(c.downstream, restored, new_rows), "DML after local external restore")
-        rows_equal(c.upstream, restored, c.data() + new_rows)
-        assert not c.downstream.list_restore_snapshot_jobs(collection_name=restored, timeout=10)
+        c.assert_rows(restored, c.data() + new_rows)

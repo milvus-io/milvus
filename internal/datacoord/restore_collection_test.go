@@ -242,7 +242,7 @@ func TestRestoreBroadcastResourceOwnership(t *testing.T) {
 				api := &captureBroadcastAPI{}
 				mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(api, tc.startErr).Build()
 				sent := mockey.Mock((*captureBroadcastAPI).Broadcast).To(func(_ *captureBroadcastAPI, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-					require.True(t, msg.IsUnreplicable())
+					require.False(t, msg.IsUnreplicable())
 					recipe := message.MustAsBroadcastRestoreSnapshotMessageV2(msg)
 					require.EqualValues(t, 10, recipe.Header().GetCollectionId())
 					if tc.external {

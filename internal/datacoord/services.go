@@ -2595,9 +2595,15 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 
 	// Business-channel Acks prove L1/L0 persistence through each snapshot fence.
 	// Broadcast CreateSnapshot message via DDL framework
-	// Snapshot ID is allocated in the callback
+	// Replicas replay the same snapshot identity; allocation cannot happen in
+	// the independently executed acknowledgement callbacks.
+	snapshotID, err := s.allocator.AllocID(ctx)
+	if err != nil {
+		return merr.Status(err), nil
+	}
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
 		WithHeader(&message.CreateSnapshotMessageHeader{
+			SnapshotId:                  snapshotID,
 			CollectionId:                req.GetCollectionId(),
 			Name:                        req.GetName(),
 			Description:                 req.GetDescription(),
@@ -2605,7 +2611,6 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
 		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
-		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
@@ -2759,7 +2764,6 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 			CollectionId: req.GetCollectionId(),
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
-		WithUnreplicable().
 		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
