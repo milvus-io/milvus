@@ -340,8 +340,7 @@ func (s *sealedBm25Stats) fetchFieldsLocked(fieldIDs []int64) (map[int64]*storag
 type growingBm25Stats struct {
 	bm25Stats
 
-	activate       bool
-	droppedVersion int64
+	activate bool
 }
 
 func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
@@ -544,6 +543,9 @@ type idfOracle struct {
 	sync.RWMutex
 	current *statsTable
 	growing map[int64]*growingBm25Stats
+
+	// Record removal intent without waiting for the oracle lock held by stats merges.
+	growingDropVersions typeutil.ConcurrentMap[int64, int64]
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
@@ -1074,14 +1076,29 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
 }
 
 func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64) {
-	o.Lock()
-	defer o.Unlock()
+	if targetVersion == 0 {
+		return
+	}
 
 	for _, segmentID := range segmentIDs {
-		if stats, ok := o.growing[segmentID]; ok && stats.droppedVersion == 0 {
-			stats.droppedVersion = targetVersion
-		}
+		o.growingDropVersions.GetOrInsert(segmentID, targetVersion)
 	}
+}
+
+// Caller holds the oracle write lock so pending removals use the latest growing stats.
+func (o *idfOracle) removeDroppedGrowings(targetVersion int64) {
+	o.growingDropVersions.Range(func(segmentID, droppedVersion int64) bool {
+		if droppedVersion <= targetVersion {
+			if stats, ok := o.growing[segmentID]; ok {
+				if stats.activate {
+					o.current.MinusExclusive(stats.bm25Stats)
+				}
+				delete(o.growing, segmentID)
+			}
+			o.growingDropVersions.Remove(segmentID)
+		}
+		return true
+	})
 }
 
 // memSize estimates total in-memory size of current + all growing stats.
@@ -1275,6 +1292,13 @@ type statsCandidate struct {
 func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 	snapshot, snapshotTs := o.next.GetSnapshot()
 	if snapshot.targetVersion <= o.targetVersion.Load() {
+		// Repeated target publications can mark segments whose stats were already removed.
+		if o.growingDropVersions.Len() != 0 {
+			o.Lock()
+			o.removeDroppedGrowings(o.targetVersion.Load())
+			o.Unlock()
+			o.syncResource()
+		}
 		return false, nil
 	}
 
@@ -1408,15 +1432,7 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		return false, merr.Wrap(settleErr, "settle sealed bm25 stats failed")
 	}
 
-	for segmentID, stats := range o.growing {
-		// drop growing segment bm25 stats
-		if stats.droppedVersion != 0 && stats.droppedVersion <= snapshot.targetVersion {
-			if stats.activate {
-				o.current.MinusExclusive(stats.bm25Stats)
-			}
-			delete(o.growing, segmentID)
-		}
-	}
+	o.removeDroppedGrowings(snapshot.targetVersion)
 
 	for _, c := range candidates {
 		if c.apply {
