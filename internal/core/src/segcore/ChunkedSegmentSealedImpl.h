@@ -855,7 +855,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (num_chunk == 0) {
             return;
         }
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         if (op == proto::plan::OpType::Equal) {
             // find first occurrence
@@ -947,7 +950,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (num_chunk == 0) {
             return;
         }
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         // Find the lower bound position (first value >= lower_val or > lower_val)
         auto [lower_chunk_id, lower_in_chunk_offset, lower_exact_match] =
@@ -1013,7 +1019,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_sorted_pk_doc_offset(
         const PK& pk,
         const std::shared_ptr<ChunkedColumnInterface>& pk_column) const {
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
         auto [chunk_id, in_chunk_offset, exact_match] =
             this->pk_lower_bound<PK>(pk, pk_column.get(), all_chunk_pins, 0);
         if (!exact_match) {
@@ -1036,7 +1045,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         std::sort(sorted_pks.begin(), sorted_pks.end());
 
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         size_t pk_idx = 0;
         int last_chunk_id = 0;

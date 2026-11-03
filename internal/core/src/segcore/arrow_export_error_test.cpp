@@ -84,10 +84,15 @@ class FaultingSegment final : public SegmentGrowingImpl {
     std::function<void()> fault = [] {};
 
     std::unique_ptr<DataArray>
-    bulk_subscript(OpContext*,
+    bulk_subscript(OpContext* ctx,
                    FieldId field_id,
                    const int64_t*,
                    int64_t count) const override {
+        EXPECT_NE(ctx, nullptr);
+        if (ctx != nullptr) {
+            EXPECT_EQ(ctx->runtime_load_priority,
+                      proto::common::LoadPriority::HIGH);
+        }
         fault();
         auto data = std::make_unique<DataArray>();
         data->set_field_id(field_id.get());

@@ -5984,10 +5984,13 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                 segcore::CheckCancellation(
                     op_ctx, get_segment_id(), "FillPrimaryKeys");
                 milvus::OpContext local_ctx;
+                local_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 if (op_ctx != nullptr) {
                     local_ctx.cancellation_token = op_ctx->cancellation_token;
                     local_ctx.runtime_load_priority =
-                        op_ctx->runtime_load_priority;
+                        op_ctx->runtime_load_priority.value_or(
+                            milvus::proto::common::LoadPriority::HIGH);
                 }
                 // Intentionally bypass bulk_subscript's scalar-index raw-data
                 // routing here: the sealed VARCHAR PK fast path reads the
@@ -9033,9 +9036,12 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     // sharing op_ctx across segments would double-count bytes. See
     // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     for (auto field_id : plan->target_entries_) {
         // Skip fields already filled by take

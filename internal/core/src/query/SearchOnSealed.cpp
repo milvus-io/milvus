@@ -295,7 +295,8 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_info,
                                          index_info,
                                          search_bitview,
-                                         data_type);
+                                         data_type,
+                                         op_context);
         cached_iter.NextBatch(search_info, result);
         FinalizeVectorSearchOffsets(result,
                                     search_info.struct_element_offsets_.get());
