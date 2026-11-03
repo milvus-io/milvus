@@ -1752,8 +1752,8 @@ TEST(JsonStatsExecPathTest, PathIndexWinsOverJsonStats) {
     f.Install("/a", "DOUBLE");
     EXPECT_EQ(f.Path(unary), exec::ExprExecPath::ScalarIndex);
     EXPECT_EQ(f.Path(term), exec::ExprExecPath::ScalarIndex);
-    EXPECT_EQ(f.Eval(unary), expected);
-    EXPECT_EQ(f.Eval(term), expected);
+    EXPECT_TRUE(f.Eval(unary) == expected);
+    EXPECT_TRUE(f.Eval(term) == expected);
     proto::plan::GenericValue text;
     text.set_string_val("3");
     EXPECT_EQ(f.Path(f.Unary("a", proto::plan::Equal, text)),
@@ -1768,7 +1768,7 @@ TEST(JsonStatsExecPathTest, FlatIndexWinsOverJsonStats) {
     const auto expected = f.Eval(unary);
     f.Install("", "JSON");
     EXPECT_EQ(f.Path(unary), exec::ExprExecPath::ScalarIndex);
-    EXPECT_EQ(f.Eval(unary), expected);
+    EXPECT_TRUE(f.Eval(unary) == expected);
 }
 
 TEST(JsonStatsExecPathTest,
@@ -1798,8 +1798,8 @@ TEST(JsonStatsExecPathTest,
         EXPECT_EQ(bool(negative[i]), i == 1 || i == 5) << i;
     }
     JsonStatsExecFixture raw(rows, 1304, false);
-    EXPECT_EQ(raw.Eval(contains), positive);
-    EXPECT_EQ(raw.Eval(negation), negative);
+    EXPECT_TRUE(raw.Eval(contains) == positive);
+    EXPECT_TRUE(raw.Eval(negation) == negative);
     raw.Install("/tags", "ARRAY_DOUBLE");
     EXPECT_EQ(raw.Path(contains), exec::ExprExecPath::ScalarIndex);
 }
