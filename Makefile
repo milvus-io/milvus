@@ -284,7 +284,7 @@ build-failpoint-fixture:
 	@bash $(PWD)/scripts/build_failpoint_fixture.sh "$(FAILPOINT_FIXTURE_PATH)"
 
 integration-test-failpoint: getdeps build-failpoint-fixture
-	@env MILVUS_FAILPOINT_WORK_DIR="$(FAILPOINT_FIXTURE_PATH)" bash $(PWD)/scripts/run_intergration_test.sh --package ./idempotency "$(INSTALL_PATH)/gotestsum --"
+	@env MILVUS_FAILPOINT_WORK_DIR="$(FAILPOINT_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./idempotency "$(INSTALL_PATH)/gotestsum --"
 
 build-cmek-fixtures:
 	@echo "Building CMEK fixture plugins ..."
