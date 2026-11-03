@@ -31,6 +31,7 @@
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
 
