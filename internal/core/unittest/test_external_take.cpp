@@ -1982,6 +1982,164 @@ TEST(InternalTakeTest, TryTakeForRetrieve_ProjectsDynamicField) {
     EXPECT_EQ(dynamic_data.scalars().json_data().data(1), R"({"foo":1})");
 }
 
+// A VECTOR_ARRAY column taken from a manifest-backed sealed segment must carry
+// the collection-level element type and dim, which the Go reduce and the SDK
+// read to decode the rows.
+TEST(InternalTakeTest, TryTakeForRetrieve_VectorArraySetsElementTypeAndDim) {
+    constexpr int64_t kRows = 3;
+    constexpr int kWidth = kVecDim * sizeof(float);
+    const FieldId pk_id(100);
+    const FieldId dense_id(101);
+    const FieldId element_nullable_id(102);
+
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->AddField(FieldMeta(
+        FieldName("pk"), pk_id, DataType::INT64, false, std::nullopt));
+    schema->AddField(FieldMeta(FieldName("dense_vecs"),
+                               dense_id,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               false,
+                               false));
+    schema->AddField(FieldMeta(FieldName("element_nullable_vecs"),
+                               element_nullable_id,
+                               DataType::VECTOR_ARRAY,
+                               DataType::VECTOR_FLOAT,
+                               kVecDim,
+                               knowhere::metric::L2,
+                               false,
+                               true));
+    schema->set_primary_field_id(pk_id);
+
+    auto vector_of = [](int64_t row, int64_t element) {
+        std::vector<float> v(kVecDim);
+        for (int64_t k = 0; k < kVecDim; ++k) {
+            v[k] = static_cast<float>(row * 100 + element * 10 + k);
+        }
+        return v;
+    };
+
+    // Row r of dense_vecs holds r + 1 vectors. Every row of
+    // element_nullable_vecs holds three elements, the middle one null.
+    arrow::Int64Builder pk_builder;
+    auto dense_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::FixedSizeBinaryBuilder>(
+            arrow::fixed_size_binary(kWidth)));
+    auto* dense_values = static_cast<arrow::FixedSizeBinaryBuilder*>(
+        dense_builder->value_builder());
+    auto nullable_builder = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), std::make_shared<arrow::BinaryBuilder>());
+    auto* nullable_values =
+        static_cast<arrow::BinaryBuilder*>(nullable_builder->value_builder());
+    for (int64_t row = 0; row < kRows; ++row) {
+        ASSERT_TRUE(pk_builder.Append(row).ok());
+        ASSERT_TRUE(dense_builder->Append().ok());
+        for (int64_t j = 0; j <= row; ++j) {
+            auto v = vector_of(row, j);
+            ASSERT_TRUE(
+                dense_values->Append(reinterpret_cast<const uint8_t*>(v.data()))
+                    .ok());
+        }
+        ASSERT_TRUE(nullable_builder->Append().ok());
+        for (int64_t j = 0; j < 3; ++j) {
+            if (j == 1) {
+                ASSERT_TRUE(nullable_values->AppendNull().ok());
+                continue;
+            }
+            auto v = vector_of(row, j);
+            ASSERT_TRUE(
+                nullable_values
+                    ->Append(reinterpret_cast<const uint8_t*>(v.data()), kWidth)
+                    .ok());
+        }
+    }
+    auto table = arrow::Table::Make(
+        arrow::schema({
+            arrow::field(std::to_string(pk_id.get()), arrow::int64()),
+            arrow::field(std::to_string(dense_id.get()),
+                         arrow::list(arrow::fixed_size_binary(kWidth))),
+            arrow::field(std::to_string(element_nullable_id.get()),
+                         arrow::list(arrow::binary())),
+        }),
+        {pk_builder.Finish().ValueOrDie(),
+         dense_builder->Finish().ValueOrDie(),
+         nullable_builder->Finish().ValueOrDie()});
+
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {pk_id, dense_id, element_nullable_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {2, 0, 2};
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, true));
+    ASSERT_EQ(results->fields_data_size(), 3);
+
+    auto assert_row = [&](const proto::schema::VectorField& row,
+                          int64_t source_row,
+                          const std::vector<int64_t>& elements) {
+        EXPECT_EQ(row.dim(), kVecDim);
+        ASSERT_EQ(row.float_vector().data_size(), elements.size() * kVecDim);
+        for (size_t j = 0; j < elements.size(); ++j) {
+            auto expected = vector_of(source_row, elements[j]);
+            for (int64_t k = 0; k < kVecDim; ++k) {
+                EXPECT_FLOAT_EQ(row.float_vector().data(j * kVecDim + k),
+                                expected[k]);
+            }
+        }
+    };
+
+    const auto& dense = results->fields_data(1);
+    ASSERT_EQ(dense.field_id(), dense_id.get());
+    ASSERT_EQ(dense.type(), proto::schema::DataType::ArrayOfVector);
+    EXPECT_EQ(dense.vectors().dim(), kVecDim);
+    const auto& dense_array = dense.vectors().vector_array();
+    EXPECT_EQ(dense_array.element_type(), proto::schema::DataType::FloatVector);
+    EXPECT_EQ(dense_array.dim(), kVecDim);
+    ASSERT_EQ(dense_array.data_size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(i);
+        std::vector<int64_t> elements;
+        for (int64_t j = 0; j <= offsets[i]; ++j) {
+            elements.push_back(j);
+        }
+        assert_row(dense_array.data(i), offsets[i], elements);
+        EXPECT_EQ(dense_array.data(i).valid_data_size(), 0);
+    }
+
+    const auto& nullable = results->fields_data(2);
+    ASSERT_EQ(nullable.field_id(), element_nullable_id.get());
+    EXPECT_EQ(nullable.vectors().dim(), kVecDim);
+    const auto& nullable_array = nullable.vectors().vector_array();
+    EXPECT_EQ(nullable_array.element_type(),
+              proto::schema::DataType::FloatVector);
+    EXPECT_EQ(nullable_array.dim(), kVecDim);
+    ASSERT_EQ(nullable_array.data_size(), offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(i);
+        const auto& row = nullable_array.data(i);
+        assert_row(row, offsets[i], {0, 2});
+        ASSERT_EQ(row.valid_data_size(), 3);
+        EXPECT_TRUE(row.valid_data(0));
+        EXPECT_FALSE(row.valid_data(1));
+        EXPECT_TRUE(row.valid_data(2));
+    }
+}
+
 TEST(InternalTakeTest, TryTakeForSearch_ResolvesTextOutputField) {
     auto info = BuildInternalSchemaWithTextAndDynamicFields();
     auto table = BuildInternalTakeArrowTableWithTextAndDynamicFields(info);
