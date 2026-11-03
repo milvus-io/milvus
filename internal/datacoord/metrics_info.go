@@ -248,8 +248,10 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 			ID:          paramtable.GetNodeID(),
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
-			SegmentMaxSize:             Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
-			ResolvedScalarIndexVersion: s.indexEngineVersionManager.ResolveScalarIndexVersion(),
+			SegmentMaxSize:                  Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
+			ForceMergeDataNodeMemoryFactor:  Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(),
+			ForceMergeQueryNodeMemoryFactor: Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(),
+			ResolvedScalarIndexVersion:      s.indexEngineVersionManager.ResolveScalarIndexVersion(),
 		},
 		QuotaMetrics:      s.getQuotaMetrics(),
 		CollectionMetrics: s.getCollectionMetrics(ctx),
