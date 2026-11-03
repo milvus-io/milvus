@@ -23,6 +23,7 @@
 
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/scalar/marisa/MarisaIndexReader.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 
 namespace milvus::index::test {
@@ -47,6 +48,9 @@ MakeStorage() {
     storage->csr_index = storage->csr_index_owner->data();
     storage->csr_offsets = storage->csr_offsets_owner->data();
     storage->csr_num_keys = 1;
+    storage->json_exists =
+        JsonProjectedIndexSpec("/a", JsonCastType::FromString("VARCHAR"), 2)
+            .MakeExists({1});
     return storage;
 }
 
@@ -205,6 +209,47 @@ TEST_F(MarisaIndexCacheTest, MetadataStaysColdAndOperationsUseRequestContext) {
     EXPECT_EQ(nulls->IsNull().count(), 1);
     EXPECT_EQ(observer->loads, 2);
     EXPECT_EQ(observer->last_context, &second_ctx);
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
+TEST_F(MarisaIndexCacheTest, JsonExistenceAndPredicatesReloadTheSameStorage) {
+    auto child =
+        std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, std::nullopt);
+    auto index = JsonPathIndex::FromStorage(
+        child,
+        JsonProjectedIndexSpec(
+            "/a", JsonCastType::FromString("VARCHAR"), std::nullopt));
+    OpContext first_ctx;
+    auto reader = index->CreateReader(&first_ctx);
+    const auto* json = dynamic_cast<const IJsonIndexReader*>(reader.get());
+    ASSERT_NE(json, nullptr);
+    auto resolved = json->Resolve("/a", JsonCastType::FromString("VARCHAR"));
+    ASSERT_TRUE(resolved);
+    EXPECT_EQ(observer->loads, 0);
+    auto exists = json->Exists("/a");
+    EXPECT_TRUE(exists[0]);
+    EXPECT_FALSE(exists[1]);
+    EXPECT_EQ(observer->loads, 1);
+    EXPECT_EQ(observer->last_context, &first_ctx);
+    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            resolved.get());
+    ASSERT_NE(predicate, nullptr);
+    const std::string_view key = "apple";
+    EXPECT_EQ(predicate->In(1, &key).count(), 1);
+    EXPECT_EQ(observer->loads, 2);
+    EXPECT_TRUE(slot->ManualEvict(0));
+    OpContext next_ctx;
+    auto next = index->CreateReader(&next_ctx);
+    index.reset();
+    child.reset();
+    reader.reset();
+    json = dynamic_cast<const IJsonIndexReader*>(next.get());
+    ASSERT_NE(json, nullptr);
+    EXPECT_EQ(json->Exists("/a").count(), 1);
+    EXPECT_EQ(observer->loads, 3);
+    EXPECT_EQ(observer->last_context, &next_ctx);
     EXPECT_TRUE(slot->ManualEvict(0));
 }
 

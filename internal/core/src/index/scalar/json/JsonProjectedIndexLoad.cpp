@@ -585,17 +585,43 @@ FinishJsonProjectedOpenAsync(bool use_async,
     }
     AssertInfo(plan.cast_type.has_value(),
                "complete typed JSON load lacks a cast type");
+    const auto rows = inner->Metadata().count.value();
+    JsonProjectedIndexSpec spec(plan.json_path, *plan.cast_type, rows);
+    auto exists =
+        co_await LoadJsonExists(use_async, std::move(plan), source, rows);
+    co_return std::make_shared<JsonPathIndex>(
+        std::move(inner), std::move(spec), std::move(exists));
+}
+
+std::optional<JsonProjectedIndexSpec>
+JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count) {
+    const auto projected = ParseProjectedParams({}, params);
+    if (!projected ||
+        ReadAnnotation(params) != JsonProjectionCompleteness::Complete) {
+        return std::nullopt;
+    }
+    return JsonProjectedIndexSpec(
+        projected->json_path, projected->cast_type, row_count);
+}
+
+folly::coro::Task<std::shared_ptr<const TargetBitmap>>
+LoadJsonExists(bool use_async,
+               JsonProjectedOpenPlan plan,
+               storage::FileSource& source,
+               int64_t row_count) {
+    if (plan.completeness != JsonProjectionCompleteness::Complete) {
+        co_return nullptr;
+    }
+    AssertInfo(plan.cast_type.has_value(),
+               "complete typed JSON load lacks a cast type");
     std::vector<size_t> offsets;
     if (plan.has_non_exist_entry) {
-        offsets = (co_await ReadNonExistOffsets(
-            use_async, plan, source, inner->Metadata().count.value()));
+        offsets =
+            co_await ReadNonExistOffsets(use_async, plan, source, row_count);
     }
-    const auto row_count = inner->Metadata().count.value();
-    co_return std::make_shared<JsonPathIndex>(
-        std::move(inner),
-        JsonProjectedIndexSpec(
-            std::move(plan.json_path), *plan.cast_type, row_count),
-        offsets);
+    co_return JsonProjectedIndexSpec(
+        std::move(plan.json_path), *plan.cast_type, row_count)
+        .MakeExists(offsets);
 }
 
 Config
@@ -678,17 +704,13 @@ PreparePackedJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-IndexPtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                              IndexPtr inner) {
-    AssertInfo(inner != nullptr,
-               "typed JSON requires an initialized inner reader");
+std::shared_ptr<const TargetBitmap>
+FinishPackedJsonExists(JsonProjectedOpenPlan plan, int64_t rows) {
     if (plan.completeness != JsonProjectionCompleteness::Complete) {
-        return inner;
+        return nullptr;
     }
     AssertInfo(plan.cast_type.has_value(),
                "typed JSON projection lacks cast type");
-    const auto rows = inner->Metadata().count.value();
     AssertInfo(rows >= 0, "typed JSON inner reader reported negative count");
     std::vector<size_t> staged_offsets;
     if (plan.packed_non_exist_file) {
@@ -718,11 +740,25 @@ FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
         ThrowInfo(DataFormatBroken,
                   "typed JSON non-exist offsets exceed row count");
     }
+    return JsonProjectedIndexSpec(
+               std::move(plan.json_path), *plan.cast_type, rows)
+        .MakeExists(offsets);
+}
+
+IndexPtr
+FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan, IndexPtr inner) {
+    AssertInfo(inner != nullptr,
+               "typed JSON requires an initialized inner reader");
+    if (plan.completeness != JsonProjectionCompleteness::Complete) {
+        return inner;
+    }
+    AssertInfo(plan.cast_type.has_value(),
+               "complete typed JSON load lacks a cast type");
+    const auto rows = inner->Metadata().count.value();
+    JsonProjectedIndexSpec spec(plan.json_path, *plan.cast_type, rows);
+    auto exists = FinishPackedJsonExists(std::move(plan), rows);
     return std::make_shared<JsonPathIndex>(
-        std::move(inner),
-        JsonProjectedIndexSpec(
-            std::move(plan.json_path), *plan.cast_type, rows),
-        offsets);
+        std::move(inner), std::move(spec), std::move(exists));
 }
 
 }  // namespace milvus::index

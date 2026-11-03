@@ -23,6 +23,7 @@
 #include <string_view>
 
 #include "common/JsonCastType.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
 #include "index/IndexLoadPlan.h"
@@ -98,6 +99,21 @@ PreparePackedJsonProjectedOpen(std::string_view family,
 IndexPtr
 FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan,
                               IndexPtr inner);
+
+/** @brief Derive optional routing metadata without loading storage. */
+std::optional<JsonProjectedIndexSpec>
+JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count);
+
+/** @brief Validate loaded sidecar data before publishing its owning storage cell. */
+std::shared_ptr<const TargetBitmap>
+FinishPackedJsonExists(JsonProjectedOpenPlan plan, int64_t row_count);
+
+/** @brief Load and validate the legacy sidecar as part of its storage transaction. */
+folly::coro::Task<std::shared_ptr<const TargetBitmap>>
+LoadJsonExists(bool use_async,
+               JsonProjectedOpenPlan plan,
+               storage::FileSource& source,
+               int64_t row_count);
 
 /**
  * @brief Whether a JSON path projects multiple values per parent row.

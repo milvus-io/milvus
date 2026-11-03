@@ -35,6 +35,7 @@
 #include "index/Utils.h"
 #include "index/scalar/json/JsonFlatIndexReader.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
+#include "index/scalar/json/JsonProjectedIndexArtifact.h"
 #include "index/scalar/bitmap/BitmapIndexReader.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "tantivy-wrapper.h"
@@ -168,6 +169,173 @@ CheckCachedJsonFlat() {
             }
         }
     }
+}
+
+void
+CheckCachedMarisaProjection(bool corrupt = false) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarchar");
+    ScalarTestData<std::string_view> data({"apple", "pear", "", ""});
+    data.validity.reset(2);
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = std::make_unique<JsonProjectedIndexArtifact>(
+        backend.Build(input.View(), {.row_count = 4}),
+        "/a",
+        JsonCastType::FromString("VARCHAR"),
+        4,
+        std::vector<size_t>{3},
+        true);
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "json-marisa-cache-XXXXXX",
+                        "JSON Marisa cache test");
+                    auto persisted = packed ? SerializeV3(*artifact)
+                                            : SerializeV1V2(*artifact);
+                    if (corrupt) {
+                        const size_t bad_offset = 4;
+                        auto& bytes = persisted.entries.at(
+                            std::string(INDEX_NON_EXIST_OFFSET_FILE_NAME));
+                        std::memcpy(
+                            bytes.data(), &bad_offset, sizeof(bad_offset));
+                    }
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 4});
+                    options.params["field_type"] = DataType::JSON;
+                    options.params[INDEX_TYPE] = HYBRID_INDEX_TYPE;
+                    options.params[JSON_PATH] = "/a";
+                    options.params[JSON_CAST_TYPE] = "VARCHAR";
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    if (auto* legacy =
+                            std::get_if<LegacyIndexSource>(&source)) {
+                        options.params = AnnotateJsonProjectionCompleteness(
+                            std::move(options.params), *legacy->source);
+                    } else {
+                        const auto& packed_source =
+                            std::get<PackedIndexSource>(source);
+                        options.params = AnnotateJsonProjectionCompleteness(
+                            std::move(options.params),
+                            packed_source.Directory(),
+                            packed_source.Metadata());
+                    }
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    if (corrupt) {
+                        cache.meta.cache_warmup_policy =
+                            CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+                        ExpectSegcoreError(ErrorCode::UnexpectedError, [&] {
+                            (void)LoaderRegistry::Instance()
+                                .Lookup(backend.Family())
+                                .Load({std::move(source), options, cache});
+                        });
+                        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                        continue;
+                    }
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().count.has_value(),
+                              known_count || packed);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (known_count || packed)
+                        EXPECT_EQ(reader->Count(), 4);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* json =
+                        dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    EXPECT_TRUE(json->Resolve(
+                        "/a", JsonCastType::FromString("VARCHAR")));
+                    EXPECT_FALSE(json->Resolve(
+                        "/wrong", JsonCastType::FromString("VARCHAR")));
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)json->Exists("/a"); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 4);
+                    json = dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    ExpectBitmap(json->Exists("/a"), Hits(4, {0, 1, 2}));
+                    auto path = json->Resolve(
+                        "/a", JsonCastType::FromString("VARCHAR"));
+                    const auto* predicate = dynamic_cast<
+                        const IScalarPredicateReader<std::string_view>*>(
+                        path.get());
+                    ASSERT_NE(predicate, nullptr);
+                    const std::string_view value = "apple";
+                    ExpectBitmap(predicate->In(1, &value), Hits(4, {0}));
+                    ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {1}));
+                }
+            }
+        }
+    }
+}
+
+TEST(JsonPathIndexCacheTest, MarisaStorageLoadsExistenceWithRequestContext) {
+    CheckCachedMarisaProjection();
+}
+
+TEST(JsonPathIndexCacheTest,
+     MarisaWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedMarisaProjection(true);
 }
 
 TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {

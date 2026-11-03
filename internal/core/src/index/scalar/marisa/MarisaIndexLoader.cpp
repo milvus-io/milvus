@@ -543,9 +543,6 @@ MarisaIndexLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached Marisa construction consumed this loader");
     if (cache) {
-        AssertInfo(
-            !DeriveCaps(options_.params).json_paths,
-            "JSON projection cache migration is separate from Marisa storage");
         std::optional<int64_t> count;
         if (const auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
             const auto bytes =
@@ -582,8 +579,13 @@ MarisaIndexLoader::Load(milvus::OpContext* context,
                         SingleCellIndexStorageTranslator<MarisaIndexStorage>>(
                         *cache, use_async, std::move(load)),
                     context);
-        co_return std::make_shared<MarisaIndex>(
-            std::move(slot), value_type, count);
+        auto index =
+            std::make_shared<MarisaIndex>(std::move(slot), value_type, count);
+        if (auto spec = JsonProjectedSpec(options_.params, count)) {
+            co_return JsonPathIndex::FromStorage(std::move(index),
+                                                 std::move(*spec));
+        }
+        co_return index;
     }
     if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
         co_return co_await RunPackedIndexLoad(
@@ -608,6 +610,8 @@ MarisaIndexLoader::LoadStorage(OpenedIndexSource& source,
            const storage::LoadOptions& opts,
            bool use_async)
             -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kMarisa, source, opts);
             auto storage = co_await LoadState(use_async, source, opts);
             const auto rows =
                 GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
@@ -618,6 +622,11 @@ MarisaIndexLoader::LoadStorage(OpenedIndexSource& source,
                     storage->str_ids_size,
                     *rows);
             }
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        source,
+                                        storage->str_ids_size);
             co_return storage;
         },
         context);
@@ -869,6 +878,8 @@ MarisaIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
         AddObservedBytes(result->file_backed_bytes, csr_bytes);
     }
     result->Validate();
+    result->json_exists = FinishPackedJsonExists(std::move(state->projection),
+                                                 result->str_ids_size);
     co_return result;
 }
 
@@ -877,12 +888,12 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
                                 const storage::LoadOptions& opts,
                                 bool use_async) {
     auto storage = co_await FinishPackedStorage(plan, opts, use_async);
-    const auto& state =
-        std::any_cast<const std::shared_ptr<PackedMarisaState>&>(
-            plan.load_context);
-    co_return FinishPackedJsonProjectedOpen(
-        std::move(state->projection),
-        std::make_shared<MarisaIndex>(std::move(storage)));
+    auto index = std::make_shared<MarisaIndex>(std::move(storage));
+    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
+        co_return JsonPathIndex::FromStorage(std::move(index),
+                                             std::move(*spec));
+    }
+    co_return index;
 }
 
 namespace {

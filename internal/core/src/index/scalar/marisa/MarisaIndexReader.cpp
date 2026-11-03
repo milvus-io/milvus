@@ -288,6 +288,10 @@ MarisaIndexReader::ValueType() const {
 cachinglayer::ResourceUsage
 MarisaIndexStorage::CellByteSize() const {
     size_t bytes = sizeof(MarisaIndexStorage);
+    if (json_exists) {
+        AddUsageBytes(bytes, sizeof(TargetBitmap));
+        AddUsageBytes(bytes, json_exists->size_in_bytes());
+    }
     if (!mmap_owner) {
         AddUsageBytes(bytes, trie->total_size());
     }

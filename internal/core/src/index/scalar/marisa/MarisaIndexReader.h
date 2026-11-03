@@ -96,6 +96,7 @@ struct MarisaIndexStorage final {
     std::shared_ptr<const std::vector<uint32_t>> csr_index_owner;
     std::shared_ptr<const std::vector<uint32_t>> csr_offsets_owner;
     std::shared_ptr<const marisa::Trie> trie;
+    std::shared_ptr<const TargetBitmap> json_exists;
     // row -> trie key id. Heap-owned or a view over mapped bytes.
     const int64_t* str_ids{nullptr};
     size_t str_ids_size{0};
@@ -134,6 +135,7 @@ class MarisaIndex final : public IIndex,
 
  private:
     friend class MarisaIndexReader;
+    friend class JsonPathIndex;
     struct CachedStorage {
         std::shared_ptr<cachinglayer::CacheSlot<MarisaIndexStorage>> slot;
         DataType value_type;

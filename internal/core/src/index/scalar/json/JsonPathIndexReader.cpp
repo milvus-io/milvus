@@ -168,16 +168,17 @@ IsJsonSortCast(JsonCastType cast_type) {
 
 JsonProjectedIndexSpec::JsonProjectedIndexSpec(std::string json_path,
                                                JsonCastType cast_type,
-                                               int64_t row_count)
+                                               std::optional<int64_t> row_count)
     : json_path_(std::move(json_path)),
       cast_type_(cast_type),
       row_count_(row_count) {
     ValidateJsonPointer(json_path_);
     ValidateCastType(cast_type_);
-    AssertInfo(row_count_ >= 0,
+    AssertInfo(!row_count_ || *row_count_ >= 0,
                "typed JSON projection row count must be non-negative");
-    AssertInfo(static_cast<uint64_t>(row_count_) <=
-                   static_cast<uint64_t>(std::numeric_limits<size_t>::max()),
+    AssertInfo(!row_count_ || static_cast<uint64_t>(*row_count_) <=
+                                  static_cast<uint64_t>(
+                                      std::numeric_limits<size_t>::max()),
                "typed JSON projection row count exceeds size_t domain");
 }
 
@@ -193,7 +194,8 @@ JsonProjectedIndexSpec::CastType() const {
 
 int64_t
 JsonProjectedIndexSpec::RowCount() const {
-    return row_count_;
+    AssertInfo(row_count_.has_value(), "JSON row count is not loaded");
+    return *row_count_;
 }
 
 bool
@@ -210,7 +212,7 @@ JsonProjectedIndexSpec::ValidateInner(const IndexMetadata& inner) const {
                "typed JSON projection inner count {} disagrees with row count "
                "{}",
                inner.count.value_or(-1),
-               row_count_);
+               row_count_.value_or(-1));
     AssertInfo(ValueTypeMatchesCast(inner.value_type, cast_type_),
                "typed JSON projection inner value type {} disagrees with cast "
                "{}",
@@ -230,14 +232,14 @@ JsonProjectedIndexSpec::ValidateInner(const IndexMetadata& inner) const {
 void
 JsonProjectedIndexSpec::ValidateNonExistOffsets(
     const std::vector<size_t>& offsets) const {
-    const auto count = static_cast<size_t>(row_count_);
+    const auto count = static_cast<size_t>(RowCount());
     size_t previous = 0;
     bool first = true;
     for (const auto offset : offsets) {
         AssertInfo(offset < count,
                    "typed JSON non-exist offset {} exceeds row count {}",
                    offset,
-                   row_count_);
+                   row_count_.value_or(-1));
         AssertInfo(first || offset > previous,
                    "typed JSON non-exist offsets must be strictly increasing");
         previous = offset;
@@ -245,22 +247,61 @@ JsonProjectedIndexSpec::ValidateNonExistOffsets(
     }
 }
 
-JsonPathIndex::JsonPathIndex(
-    IndexPtr inner,
-    JsonProjectedIndexSpec spec,
-    const std::vector<size_t>& non_exist_offsets)
-    : inner_(std::move(inner)), spec_(std::move(spec)) {
+JsonPathIndex::JsonPathIndex(IndexPtr inner,
+                             JsonProjectedIndexSpec spec,
+                             const std::vector<size_t>& non_exist_offsets)
+    : JsonPathIndex(
+          std::move(inner), spec, spec.MakeExists(non_exist_offsets)) {
+}
+
+JsonPathIndex::JsonPathIndex(IndexPtr inner,
+                             JsonProjectedIndexSpec spec,
+                             std::shared_ptr<const TargetBitmap> exists)
+    : inner_(std::move(inner)),
+      spec_(std::move(spec)),
+      exists_(std::move(exists)) {
     AssertInfo(inner_ != nullptr,
-               "typed JSON projection reader requires an inner reader");
+               "typed JSON projection requires an inner index");
     spec_.ValidateInner(inner_->Metadata());
-    spec_.ValidateNonExistOffsets(non_exist_offsets);
-    exists_ = TargetBitmap(static_cast<size_t>(spec_.RowCount()), true);
-    for (const auto offset : non_exist_offsets) {
-        exists_.reset(offset);
-    }
+    const auto& bitmap = std::get<std::shared_ptr<const TargetBitmap>>(exists_);
+    AssertInfo(bitmap && bitmap->size() == spec_.RowCount(),
+               "typed JSON existence bitmap count mismatch");
     size_t own_heap = sizeof(JsonPathIndex);
-    AddSize(own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
-    AddSize(own_heap, exists_.size_in_bytes(), "typed JSON projection");
+    AddSize(
+        own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
+    AddSize(own_heap, sizeof(TargetBitmap), "typed JSON projection");
+    AddSize(
+        own_heap,
+        std::get<std::shared_ptr<const TargetBitmap>>(exists_)->size_in_bytes(),
+        "typed JSON projection");
+    heap_bytes_ = ToUsageBytes(own_heap, "typed JSON projection");
+}
+
+std::shared_ptr<const TargetBitmap>
+JsonProjectedIndexSpec::MakeExists(const std::vector<size_t>& offsets) const {
+    ValidateNonExistOffsets(offsets);
+    auto exists =
+        std::make_shared<TargetBitmap>(static_cast<size_t>(RowCount()), true);
+    for (const auto offset : offsets) {
+        exists->reset(offset);
+    }
+    return exists;
+}
+
+JsonPathIndex::JsonPathIndex(IndexPtr inner,
+                             JsonProjectedIndexSpec spec,
+                             PinExists pin_exists)
+    : inner_(std::move(inner)),
+      spec_(std::move(spec)),
+      exists_(std::move(pin_exists)) {
+    AssertInfo(inner_ != nullptr,
+               "typed JSON projection requires an inner index");
+    AssertInfo(static_cast<bool>(std::get<PinExists>(exists_)),
+               "typed JSON projection requires an existence accessor");
+    spec_.ValidateInner(inner_->Metadata());
+    size_t own_heap = sizeof(JsonPathIndex);
+    AddSize(
+        own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
     heap_bytes_ = ToUsageBytes(own_heap, "typed JSON projection");
 }
 
@@ -283,7 +324,9 @@ JsonPathIndex::CancelWarmup() const {
 
 JsonPathIndexReader::JsonPathIndexReader(
     std::shared_ptr<const JsonPathIndex> index, milvus::OpContext* op_ctx)
-    : index_(std::move(index)), inner_(index_->inner_->CreateReader(op_ctx)) {
+    : index_(std::move(index)),
+      inner_(index_->inner_->CreateReader(op_ctx)),
+      op_ctx_(op_ctx) {
 }
 
 JsonPathIndexReader::~JsonPathIndexReader() = default;
@@ -300,7 +343,7 @@ JsonPathIndexReader::CoordDomain() const {
 
 int64_t
 JsonPathIndexReader::Count() const {
-    return index_->spec_.RowCount();
+    return inner_->Count();
 }
 
 DataType
@@ -338,7 +381,12 @@ TargetBitmap
 JsonPathIndexReader::Exists(std::string_view path) const {
     AssertInfo(path == index_->spec_.JsonPath(),
                "typed JSON Exists called for an unregistered path");
-    return index_->exists_.clone();
+    const auto* resident =
+        std::get_if<std::shared_ptr<const TargetBitmap>>(&index_->exists_);
+    const auto exists =
+        resident ? *resident
+                 : std::get<JsonPathIndex::PinExists>(index_->exists_)(op_ctx_);
+    return exists->clone();
 }
 
 std::vector<JsonCastType>

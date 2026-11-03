@@ -18,6 +18,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
+#include <variant>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -45,7 +48,7 @@ class JsonProjectedIndexSpec final {
  public:
     JsonProjectedIndexSpec(std::string json_path,
                            JsonCastType cast_type,
-                           int64_t row_count);
+                           std::optional<int64_t> row_count);
 
     const std::string&
     JsonPath() const;
@@ -62,13 +65,17 @@ class JsonProjectedIndexSpec final {
     void
     ValidateInner(const IndexMetadata& inner) const;
 
+    /** @brief Validate offsets and construct the existence bitmap. */
+    std::shared_ptr<const TargetBitmap>
+    MakeExists(const std::vector<size_t>& offsets) const;
+
     void
     ValidateNonExistOffsets(const std::vector<size_t>& offsets) const;
 
  private:
     std::string json_path_;
     JsonCastType cast_type_;
-    int64_t row_count_{0};
+    std::optional<int64_t> row_count_;
 };
 
 /** @brief Owns a typed child index and immutable JSON path/existence metadata. */
@@ -78,6 +85,33 @@ class JsonPathIndex final : public IIndex,
     JsonPathIndex(IndexPtr inner,
                   JsonProjectedIndexSpec spec,
                   const std::vector<size_t>& non_exist_offsets);
+
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  std::shared_ptr<const TargetBitmap> exists);
+
+    /** @brief Route JSON queries while the child storage owns the existence bitmap.
+     * The callback pins the same storage cell as ordinary child operations.
+     */
+    using PinExists =
+        std::function<std::shared_ptr<const TargetBitmap>(OpContext*)>;
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  PinExists pin_exists);
+
+    template <typename Index>
+    static IndexPtr
+    FromStorage(std::shared_ptr<Index> inner, JsonProjectedIndexSpec spec) {
+        PinExists pin = [inner](OpContext* ctx) {
+            auto storage = inner->PinStorage(ctx);
+            AssertInfo(storage->json_exists != nullptr,
+                       "complete JSON storage lacks existence bitmap");
+            return std::shared_ptr<const TargetBitmap>(
+                storage, storage->json_exists.get());
+        };
+        return std::make_shared<JsonPathIndex>(
+            std::move(inner), std::move(spec), std::move(pin));
+    }
 
     IndexMetadata
     Metadata() const override;
@@ -92,7 +126,7 @@ class JsonPathIndex final : public IIndex,
     friend class JsonPathIndexReader;
     IndexPtr inner_;
     JsonProjectedIndexSpec spec_;
-    TargetBitmap exists_;
+    std::variant<std::shared_ptr<const TargetBitmap>, PinExists> exists_;
     int64_t heap_bytes_{0};
 };
 
@@ -142,6 +176,7 @@ class JsonPathIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const JsonPathIndex> index_;
     IIndexReaderBasePtr inner_;
+    OpContext* const op_ctx_;
 };
 
 }  // namespace milvus::index
