@@ -339,21 +339,26 @@ TEST(ConjunctExprTest, InheritedMaskRestoredAfterException) {
             rows[i] = Truth::False;
         }
     }
-    auto first = std::make_shared<MaskAwareExpr>(rows, size);
-    auto failing = std::make_shared<MaskAwareExpr>(rows, size);
-    failing->throw_on_eval_ = true;
-    PhyConjunctFilterExpr conjunct(
-        std::vector<ExprPtr>{first, failing}, true, nullptr);
-    QueryContext query_context("conjunct_test", nullptr, size, 0);
-    ExecContext exec_context(&query_context);
-    EvalCtx eval_context(&exec_context);
-    eval_context.set_bitmap_input(parent.clone());
+    for (const bool fail_first : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "fail_first=" << fail_first);
+        auto first = std::make_shared<MaskAwareExpr>(rows, size);
+        auto second = std::make_shared<MaskAwareExpr>(rows, size);
+        first->throw_on_eval_ = fail_first;
+        second->throw_on_eval_ = !fail_first;
+        PhyConjunctFilterExpr conjunct(
+            std::vector<ExprPtr>{first, second}, true, nullptr);
+        QueryContext query_context("conjunct_test", nullptr, size, 0);
+        ExecContext exec_context(&query_context);
+        EvalCtx eval_context(&exec_context);
+        eval_context.set_bitmap_input(parent.clone());
 
-    VectorPtr result;
-    EXPECT_THROW(conjunct.Eval(eval_context, result), std::runtime_error);
+        VectorPtr result;
+        EXPECT_THROW(conjunct.Eval(eval_context, result), std::runtime_error);
 
-    EXPECT_EQ(failing->eval_count_, 1);
-    ExpectMask(eval_context, parent);
+        EXPECT_EQ(first->eval_count_, 1);
+        EXPECT_EQ(second->eval_count_, fail_first ? 0 : 1);
+        ExpectMask(eval_context, parent);
+    }
 }
 
 TEST(ConjunctExprTest, NestedMaskSkipsKeepCursorsAlignedThroughTail) {
