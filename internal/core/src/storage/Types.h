@@ -22,6 +22,7 @@
 #include <unordered_map>
 
 #include "common/EasyAssert.h"
+#include "common/MmapAdvice.h"
 #include "common/Types.h"
 #include "fmt/core.h"
 #include "pb/index_coord.pb.h"
@@ -174,6 +175,13 @@ struct MmapConfig {
     bool mmap_writeback{false};
     bool json_stats_enable_mmap;
     std::string json_stats_mmap_path;
+    MmapAdvice vector_field_mmap_advice{MmapAdvice::None};
+
+    [[nodiscard]] MmapAdvice
+    GetVectorFieldMmapAdvice() const {
+        return vector_field_mmap_advice;
+    }
+
     bool
     GetEnableGrowingMmap() const {
         return growing_enable_mmap;
@@ -236,7 +244,9 @@ struct MmapConfig {
            << vector_field_enable_mmap << ", mmap_writeback=" << std::boolalpha
            << mmap_writeback << ", json_stats_enable_mmap=" << std::boolalpha
            << json_stats_enable_mmap
-           << ", json_stats_mmap_path=" << json_stats_mmap_path << "]";
+           << ", json_stats_mmap_path=" << json_stats_mmap_path
+           << ", vector_field_mmap_advice="
+           << MmapAdviceName(vector_field_mmap_advice) << "]";
         return ss.str();
     }
 };

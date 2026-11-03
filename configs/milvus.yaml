@@ -753,6 +753,7 @@ queryNode:
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
     vectorField: true # Enable mmap for loading vector data
+    vectorFieldAdvice: none # madvise policy for sealed vector field data mmap: none, normal, random, sequential, willneed (case-insensitive). Takes effect after restarting QueryNode. Does not change populate or cache warmup.
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index

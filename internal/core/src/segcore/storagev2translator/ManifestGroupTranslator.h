@@ -32,6 +32,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/ChunkTarget.h"
+#include "common/MmapAdvice.h"
 #include "common/FieldMeta.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
@@ -116,7 +117,8 @@ class ManifestGroupTranslator
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
             MmapChunkWritebackMode::Disabled,
-        bool enable_async_load = false);
+        bool enable_async_load = false,
+        MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -256,6 +258,7 @@ class ManifestGroupTranslator
     bool has_array_field_{false};
     std::string mmap_dir_path_;
     MmapChunkWritebackMode writeback_mode_;
+    MmapAdvice vector_field_mmap_advice_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
     bool enable_async_load_{false};

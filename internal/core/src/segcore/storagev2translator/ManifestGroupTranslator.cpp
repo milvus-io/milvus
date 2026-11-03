@@ -99,7 +99,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     const MmapChunkWritebackMode writeback_mode,
-    const bool enable_async_load)
+    const bool enable_async_load,
+    MmapAdvice vector_field_mmap_advice)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -153,6 +154,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                               DataType::ARRAY;
                                    })),
       writeback_mode_(writeback_mode),
+      vector_field_mmap_advice_(vector_field_mmap_advice),
       load_priority_(load_priority),
       enable_async_load_(enable_async_load),
       async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
@@ -896,7 +898,8 @@ ManifestGroupTranslator::load_group_chunk(
                                     mmap_populate_,
                                     filepath.string(),
                                     load_priority_,
-                                    writeback_mode_);
+                                    writeback_mode_,
+                                    vector_field_mmap_advice_);
     }
 
     return std::make_unique<milvus::GroupChunk>(std::move(chunks));

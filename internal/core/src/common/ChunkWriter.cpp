@@ -862,7 +862,8 @@ create_chunk_buffer(const FieldMeta& field_meta,
                     bool mmap_populate,
                     const std::string& file_path,
                     proto::common::LoadPriority load_priority,
-                    MmapChunkWritebackMode writeback_mode) {
+                    MmapChunkWritebackMode writeback_mode,
+                    MmapAdvice vector_field_mmap_advice) {
     auto cw = create_chunk_writer(field_meta);
     auto [size, row_nums] = cw->calculate_size(array_vec);
     size_t aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
@@ -887,6 +888,9 @@ create_chunk_buffer(const FieldMeta& field_meta,
     auto data = target->release();
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
     if (!file_path.empty()) {
+        if (IsVectorDataType(field_meta.get_data_type())) {
+            ApplyMmapAdvice(data, aligned_size, vector_field_mmap_advice);
+        }
         chunk_mmap_guard =
             std::make_shared<ChunkMmapGuard>(data, size, file_path);
         mmap_target->TransferOwnership();
@@ -918,13 +922,15 @@ create_chunk(const FieldMeta& field_meta,
              bool mmap_populate,
              const std::string& file_path,
              proto::common::LoadPriority load_priority,
-             MmapChunkWritebackMode writeback_mode) {
+             MmapChunkWritebackMode writeback_mode,
+             MmapAdvice vector_field_mmap_advice) {
     auto buffer = create_chunk_buffer(field_meta,
                                       array_vec,
                                       mmap_populate,
                                       file_path,
                                       load_priority,
-                                      writeback_mode);
+                                      writeback_mode,
+                                      vector_field_mmap_advice);
     return make_chunk_from_buffer(field_meta, buffer, 0);
 }
 
@@ -935,7 +941,17 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                    bool mmap_populate,
                    const std::string& file_path,
                    proto::common::LoadPriority load_priority,
-                   MmapChunkWritebackMode writeback_mode) {
+                   MmapChunkWritebackMode writeback_mode,
+                   MmapAdvice vector_field_mmap_advice) {
+    // madvise operates on OS pages. Keep scalar sub-chunks on separate pages
+    // even on hosts whose page size exceeds the usual 4 KiB chunk alignment.
+    size_t alignment = ChunkTarget::ALIGNED_SIZE;
+    if (!file_path.empty() && vector_field_mmap_advice != MmapAdvice::None) {
+        const auto page_size = sysconf(_SC_PAGESIZE);
+        if (page_size > 0) {
+            alignment = std::max(alignment, static_cast<size_t>(page_size));
+        }
+    }
     std::vector<std::shared_ptr<ChunkWriterBase>> cws;
     cws.reserve(field_ids.size());
     size_t total_aligned_size = 0, final_row_nums = 0;
@@ -951,8 +967,7 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
         auto [size, row_nums] = cws[i]->calculate_size(array_vec[i]);
         // Allocate and place each sub-chunk at an aligned boundary,
         // but keep the raw (unaligned) size for chunk construction.
-        auto aligned_size = (size + ChunkTarget::ALIGNED_SIZE - 1) &
-                            ~(ChunkTarget::ALIGNED_SIZE - 1);
+        auto aligned_size = (size + alignment - 1) & ~(alignment - 1);
         // store raw size for make_chunk()
         chunk_sizes.push_back(size);
         chunk_offsets.push_back(total_aligned_size);
@@ -996,15 +1011,17 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
                       field_ids[i].get(),
                       chunk_sizes[i]);
         }
-        auto aligned_size = (written + ChunkTarget::ALIGNED_SIZE - 1) &
-                            ~(ChunkTarget::ALIGNED_SIZE - 1);
+        auto aligned_size = (written + alignment - 1) & ~(alignment - 1);
         auto padding_size = aligned_size - written;
         if (padding_size > 0) {
             // Use a stack buffer to avoid heap allocation for padding zeros.
-            // ChunkTarget::ALIGNED_SIZE is typically small (e.g. 64/512),
-            // so padding_size is always < ALIGNED_SIZE.
+            // A system page may be larger than ALIGNED_SIZE.
             char padding[ChunkTarget::ALIGNED_SIZE] = {};
-            target->write(padding, padding_size);
+            while (padding_size > 0) {
+                const auto bytes = std::min(padding_size, sizeof(padding));
+                target->write(padding, bytes);
+                padding_size -= bytes;
+            }
         }
         // Release each one-shot writer's scratch buffers before the combined
         // file-backed mapping is populated in target->release().
@@ -1016,6 +1033,13 @@ create_group_chunk(const std::vector<FieldId>& field_ids,
     // For mmap mode, create a shared mmap region manager
     std::shared_ptr<ChunkMmapGuard> chunk_mmap_guard = nullptr;
     if (!file_path.empty()) {
+        for (size_t i = 0; i < field_ids.size(); ++i) {
+            if (IsVectorDataType(field_metas[i].get_data_type())) {
+                ApplyMmapAdvice(data + chunk_offsets[i],
+                                chunk_sizes[i],
+                                vector_field_mmap_advice);
+            }
+        }
         chunk_mmap_guard = std::make_shared<ChunkMmapGuard>(
             data, total_aligned_size, file_path);
         mmap_target->TransferOwnership();

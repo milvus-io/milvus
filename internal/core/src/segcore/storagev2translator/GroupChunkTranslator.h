@@ -23,6 +23,7 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/ChunkTarget.h"
+#include "common/MmapAdvice.h"
 #include "milvus-storage/common/metadata.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
@@ -54,7 +55,8 @@ class GroupChunkTranslator
         // up 1:1 with cells (see the .cpp for why). On by default, even when
         // statistics are absent. Disable to allow target-size packing.
         bool force_one_row_group_per_cell = true,
-        SkipMetricsByField skip_metrics_by_field = {});
+        SkipMetricsByField skip_metrics_by_field = {},
+        MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
 
     ~GroupChunkTranslator() override;
 
@@ -122,6 +124,7 @@ class GroupChunkTranslator
     bool mmap_populate_;
     bool has_array_field_{false};
     MmapChunkWritebackMode writeback_mode_;
+    MmapAdvice vector_field_mmap_advice_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };

@@ -4471,6 +4471,7 @@ type queryNodeConfig struct {
 	// Deprecated: Since 2.4.7, use `MmapVectorField`/`MmapVectorIndex`/`MmapScalarField`/`MmapScalarIndex` instead
 	MmapEnabled                         ParamItem `refreshable:"false"`
 	MmapVectorField                     ParamItem `refreshable:"false"`
+	MmapVectorFieldAdvice               ParamItem `refreshable:"false"`
 	MmapVectorIndex                     ParamItem `refreshable:"false"`
 	MmapScalarField                     ParamItem `refreshable:"false"`
 	MmapScalarIndex                     ParamItem `refreshable:"false"`
@@ -5398,6 +5399,15 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.MmapVectorField.Init(base.mgr)
+
+	p.MmapVectorFieldAdvice = ParamItem{
+		Key:          "queryNode.mmap.vectorFieldAdvice",
+		Version:      "3.0.6",
+		DefaultValue: "none",
+		Doc:          "madvise policy for sealed vector field data mmap: none, normal, random, sequential, willneed (case-insensitive). Takes effect after restarting QueryNode. Does not change populate or cache warmup.",
+		Export:       true,
+	}
+	p.MmapVectorFieldAdvice.Init(base.mgr)
 
 	p.MmapVectorIndex = ParamItem{
 		Key:          "queryNode.mmap.vectorIndex",

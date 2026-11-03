@@ -77,7 +77,8 @@ ChunkTranslator::ChunkTranslator(
     bool mmap_populate,
     milvus::proto::common::LoadPriority load_priority,
     const std::string& warmup_policy,
-    MmapChunkWritebackMode writeback_mode)
+    MmapChunkWritebackMode writeback_mode,
+    MmapAdvice vector_field_mmap_advice)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -101,6 +102,7 @@ ChunkTranslator::ChunkTranslator(
             /* support_eviction */ true,
             field_data_info.shard),
       writeback_mode_(writeback_mode),
+      vector_field_mmap_advice_(vector_field_mmap_advice),
       load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
@@ -216,7 +218,8 @@ ChunkTranslator::get_cells(
                                  mmap_populate_,
                                  filepath.string(),
                                  load_priority_,
-                                 writeback_mode_);
+                                 writeback_mode_,
+                                 vector_field_mmap_advice_);
         }
         cells.emplace_back(cid, std::move(chunk));
     }

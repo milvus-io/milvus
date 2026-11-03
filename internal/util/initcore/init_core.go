@@ -337,9 +337,11 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 	cGrowingMMapDir := C.CString(growingMMapDir)
 	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
 	cJSONStatsMmapPath := C.CString(params.QueryNodeCfg.MmapDirPath.GetValue())
+	cVectorFieldMmapAdvice := C.CString(params.QueryNodeCfg.MmapVectorFieldAdvice.GetValue())
 	defer C.free(unsafe.Pointer(cGrowingMMapDir))
 	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
 	defer C.free(unsafe.Pointer(cJSONStatsMmapPath))
+	defer C.free(unsafe.Pointer(cVectorFieldMmapAdvice))
 	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
 	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
 	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsFloat() * 1024 * 1024
@@ -357,6 +359,7 @@ func InitMmapManager(params *paramtable.ComponentParam, nodeID int64) error {
 		mmap_writeback:           C.bool(params.QueryNodeCfg.MmapWriteback.GetAsBool()),
 		json_stats_enable_mmap:   C.bool(params.QueryNodeCfg.MmapJSONStats.GetAsBool()),
 		json_stats_mmap_path:     cJSONStatsMmapPath,
+		vector_field_mmap_advice: cVectorFieldMmapAdvice,
 	}
 	status := C.InitMmapManager(mmapConfig)
 	return HandleCStatus(&status, "InitMmapManager failed")

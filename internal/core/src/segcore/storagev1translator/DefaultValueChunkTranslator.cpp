@@ -44,7 +44,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     bool mmap_populate,
     const std::string& warmup_policy,
     MmapChunkWritebackMode writeback_mode,
-    std::shared_ptr<const IStructElementOffsets> struct_offsets)
+    std::shared_ptr<const IStructElementOffsets> struct_offsets,
+    MmapAdvice vector_field_mmap_advice)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
@@ -52,6 +53,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       use_mmap_(use_mmap),
       mmap_populate_(mmap_populate),
       writeback_mode_(writeback_mode),
+      vector_field_mmap_advice_(vector_field_mmap_advice),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       field_meta_(field_meta),
       struct_offsets_(std::move(struct_offsets)),
@@ -379,7 +381,8 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
                                            mmap_populate_,
                                            filepath.string(),
                                            proto::common::LoadPriority::HIGH,
-                                           writeback_mode_);
+                                           writeback_mode_,
+                                           vector_field_mmap_advice_);
     }
 }
 

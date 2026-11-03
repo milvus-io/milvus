@@ -143,7 +143,18 @@ SetArrowFileSystemChunkManagerEnabled(bool enable) {
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config) {
     try {
+        const auto advice = milvus::ParseMmapAdvice(
+            c_mmap_config.vector_field_mmap_advice == nullptr
+                ? "none"
+                : c_mmap_config.vector_field_mmap_advice);
+        if (!advice.has_value()) {
+            return milvus::FailureCStatus(
+                milvus::ConfigInvalid,
+                "Invalid queryNode.mmap.vectorFieldAdvice: expected none, "
+                "normal, random, sequential or willneed");
+        }
         milvus::storage::MmapConfig mmap_config;
+        mmap_config.vector_field_mmap_advice = *advice;
         mmap_config.cache_read_ahead_policy =
             std::string(c_mmap_config.cache_read_ahead_policy);
         mmap_config.mmap_path = std::string(c_mmap_config.mmap_path);

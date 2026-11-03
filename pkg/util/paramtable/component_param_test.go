@@ -549,6 +549,19 @@ func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
 
+	t.Run("query node vector field mmap advice", func(t *testing.T) {
+		item := &params.QueryNodeCfg.MmapVectorFieldAdvice
+		t.Cleanup(func() { params.Reset(item.Key) })
+		assert.Equal(t, "queryNode.mmap.vectorFieldAdvice", item.Key)
+		assert.Equal(t, "3.0.6", item.Version)
+		assert.True(t, item.Export)
+		assert.Equal(t, "none", item.GetValue())
+		for _, advice := range []string{"none", "normal", "random", "sequential", "willneed", "RANDOM"} {
+			require.NoError(t, params.Save(item.Key, advice))
+			assert.Equal(t, advice, item.GetValue())
+		}
+	})
+
 	t.Run("query node zero copy config key", func(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
 	})
