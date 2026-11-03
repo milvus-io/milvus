@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Utils.h"
 #include "common/Types.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/VectorTypeUtils.h"
