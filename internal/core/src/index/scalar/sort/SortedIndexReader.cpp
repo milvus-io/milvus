@@ -868,9 +868,17 @@ SortedIndexReader<T>::ValueType() const {
 template <typename T>
 cachinglayer::ResourceUsage
 SortedIndexStorage<T>::CellByteSize() const {
-    return {ToInt64(state.valid_bitset->size_in_bytes() +
-                    state.idx_to_offsets_heap_bytes) +
-                values.MemoryUsage(),
+    auto memory = ToInt64(state.valid_bitset->size_in_bytes() +
+                          state.idx_to_offsets_heap_bytes) +
+                  values.MemoryUsage();
+    if (json_exists) {
+        const auto bytes =
+            ToInt64(sizeof(TargetBitmap) + json_exists->size_in_bytes());
+        AssertInfo(memory <= std::numeric_limits<int64_t>::max() - bytes,
+                   "sorted reader resource size exceeds int64 capacity");
+        memory += bytes;
+    }
+    return {memory,
             ToInt64(state.idx_to_offsets_file_bytes) + values.FileUsage()};
 }
 

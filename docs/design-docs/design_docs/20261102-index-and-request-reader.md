@@ -206,7 +206,7 @@ The existing heap/mmap decoding and candidate semantics are unchanged.
 
 RTree 同样把整份 Boost 树和 validity 数据作为一个缓存 cell，由请求 Reader 在查询时 pin。Count 使用加载参数中已有的权威行数，不读取索引文件。向调用方返回 validity 时，使用共享句柄保留对应 cell 的 pin，直到调用方释放句柄；普通 Candidates 和空值查询只在本次调用期间持有 pin。Growing 的分片和 validity 共享方式保持不变。
 
-Sorted 的数值和字符串索引均直接缓存各自的 `SortedIndexStorage<T>`，包括排序数据、validity 和反向坐标表。请求 Reader 的查询及 Gather 回调在同一次 storage pin 内完成；返回的 Lookup 值仍然拥有自己的数据。已解析的计数和能力保留在 Index 上，CreateReader 与元数据访问不加载 cell。JSON projection 暂留原加载路径，后续随 sidecar 一起迁移。
+Sorted 的数值和字符串索引均直接缓存各自的 `SortedIndexStorage<T>`，包括排序数据、validity 和反向坐标表。请求 Reader 的查询及 Gather 回调在同一次 storage pin 内完成；返回的 Lookup 值仍然拥有自己的数据。已解析的计数和能力保留在 Index 上，CreateReader 与元数据访问不加载 cell。完整 JSON projection 的缺失值 bitmap 随同一 Storage cell 加载和淘汰。
 
 Bitmap 保持 Roaring 与 Bitset 两种具体 posting 表示，分别使用 `BitmapPostingStorage<T, Posting>` 作为缓存 cell。In、NotIn、Range、字符串匹配及 Gather 在一次 pin 内完成；内部辅助函数接收本次已固定的 Storage，避免重复 pin。加载器继续按已解析的基数选择表示，冻结 Roaring 的临时映射清理和取消检查保持在加载事务内。
 
@@ -218,4 +218,4 @@ Text 的文件加载入口直接创建 `TextIndex`，由它持有 `TextIndexStor
 
 JSON flat 直接缓存 `JsonFlatIndexStorage`。根路径和已知行数保留在 Index 上，创建根 Reader 与 CastTypesOf 不加载 Storage。Resolve 是访问索引的一次操作，返回的路径 Reader 持有具体 Storage 的 pin，覆盖后续多次谓词查询；释放路径 Reader 后该 cell 可以被淘汰。Exists 与字段 null 查询只在本次操作期间持有 pin。
 
-JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings 或 trie 在同一个 cell 内完成加载、校验和淘汰。JsonPathIndex 只保存路径路由与子 Index，通过子 Index 的 pin 获取 bitmap；不为 sidecar 创建第二个共享 FileSource 的 slot。已迁移的 Marisa、Ngram 和 Inverted 支持这个模式，其他家族按批次接入。旧索引缺少行数时，路径与类型判断仍不做 I/O，Count 和 Exists 使用请求上下文加载实际 Storage。
+JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings 或 trie 在同一个 cell 内完成加载、校验和淘汰。JsonPathIndex 只保存路径路由与子 Index，通过子 Index 的 pin 获取 bitmap；不为 sidecar 创建第二个共享 FileSource 的 slot。已迁移的 Marisa、Ngram、Inverted 和 Sorted 支持这个模式，其他家族按批次接入。旧索引缺少行数时，路径与类型判断仍不做 I/O，Count 和 Exists 使用请求上下文加载实际 Storage。

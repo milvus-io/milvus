@@ -272,6 +272,7 @@ struct SortedIndexStorage {
 
     sorted_reader_detail::SortedReaderState state;
     sorted_reader_detail::SortedStorageView<T> values;
+    std::shared_ptr<const TargetBitmap> json_exists;
 };
 
 template <typename T>
@@ -299,6 +300,7 @@ class SortedIndex final : public IIndex,
 
  private:
     friend class SortedIndexReader<T>;
+    friend class JsonPathIndex;
     std::shared_ptr<const SortedIndexStorage<T>>
     PinStorage(milvus::OpContext* op_ctx) const;
 

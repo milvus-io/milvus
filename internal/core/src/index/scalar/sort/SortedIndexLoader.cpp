@@ -858,7 +858,8 @@ template <typename T>
 IndexPtr
 SortedIndexLoader::CreateCached(const IndexCacheConfig& cache,
                                 milvus::OpContext* context) {
-    const auto caps = DeriveCaps(options_.params);
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
     const IndexMetadata metadata{
         caps,
         state_->meta.nested ? Domain::Element : Domain::Row,
@@ -884,7 +885,11 @@ SortedIndexLoader::CreateCached(const IndexCacheConfig& cache,
                     SingleCellIndexStorageTranslator<SortedIndexStorage<T>>>(
                     cache, use_async, std::move(load)),
                 context);
-    return std::make_shared<SortedIndex<T>>(std::move(slot), metadata);
+    auto index = std::make_shared<SortedIndex<T>>(std::move(slot), metadata);
+    if (auto spec = JsonProjectedSpec(options_.params, metadata.count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
+    }
+    return index;
 }
 
 template <typename T>
@@ -911,21 +916,30 @@ SortedIndexLoader::LoadStorage(OpenedIndexSource& source,
                     const storage::LoadOptions& opts,
                     bool use_async)
             -> folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kSort, files, opts);
+            std::unique_ptr<SortedIndexStorage<T>> storage;
             if constexpr (std::is_same_v<T, std::string_view>) {
-                co_return std::make_unique<SortedIndexStorage<T>>(
+                storage = std::make_unique<SortedIndexStorage<T>>(
                     co_await LoadStringState(use_async,
                                              files,
                                              opts,
                                              prepared.meta,
                                              prepared.params));
             } else {
-                co_return std::make_unique<SortedIndexStorage<T>>(
+                storage = std::make_unique<SortedIndexStorage<T>>(
                     co_await LoadNumericState<T>(use_async,
                                                  files,
                                                  opts,
                                                  prepared.meta,
                                                  prepared.params));
             }
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        files,
+                                        storage->state.total_num_rows);
+            co_return storage;
         },
         context);
 }
@@ -936,9 +950,6 @@ SortedIndexLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached sorted construction consumed this loader");
     if (cache) {
-        AssertInfo(
-            !DeriveCaps(options_.params).json_paths,
-            "JSON projection cache migration is separate from sorted storage");
         if (IsStringDataType(state_->params.value_type)) {
             co_return CreateCached<std::string_view>(*cache, context);
         }
@@ -1193,8 +1204,11 @@ SortedIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                 static_cast<uint8_t>((1u << (state->meta.count % 8)) - 1u);
         }
     }
-    co_return FinishPackedSortedState<T>(
+    auto storage = FinishPackedSortedState<T>(
         *state, std::move(data_mapping), std::move(offsets_mapping));
+    storage->json_exists = FinishPackedJsonExists(
+        std::move(state->projection), storage->state.total_num_rows);
+    co_return storage;
 }
 
 template <typename T>
@@ -1202,8 +1216,13 @@ folly::coro::Task<IndexPtr>
 SortedIndexLoader::FinishPackedIndex(IndexLoadPlan& plan,
                                      const storage::LoadOptions& opts,
                                      bool use_async) {
-    co_return std::make_shared<SortedIndex<T>>(
+    auto index = std::make_shared<SortedIndex<T>>(
         co_await FinishPackedStorage<T>(plan, opts, use_async));
+    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
+        co_return JsonPathIndex::FromStorage(std::move(index),
+                                             std::move(*spec));
+    }
+    co_return index;
 }
 
 folly::coro::Task<IndexPtr>
@@ -1222,8 +1241,7 @@ SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
                 return FinishPackedIndex<T>(plan, opts, use_async);
             });
     }
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            std::move(inner));
+    co_return inner;
 }
 
 namespace {

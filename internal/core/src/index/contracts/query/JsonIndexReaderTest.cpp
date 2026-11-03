@@ -243,6 +243,8 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                             ? HYBRID_INDEX_TYPE
                         : backend.Family() == families::kNgram
                             ? NGRAM_INDEX_TYPE
+                        : backend.Family() == families::kSort
+                            ? ASCENDING_SORT
                             : INVERTED_INDEX_TYPE;
                     options.params[JSON_PATH] = "/a";
                     options.params[JSON_CAST_TYPE] = "VARCHAR";
@@ -290,15 +292,15 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                     auto index = LoaderRegistry::Instance()
                                      .Lookup(backend.Family())
                                      .Load({std::move(source), options, cache});
-                    EXPECT_EQ(index->Metadata().count.has_value(),
-                              known_count || (packed && backend.Family() ==
-                                                            families::kMarisa));
+                    const bool count_known =
+                        known_count || backend.Family() == families::kSort ||
+                        (packed && backend.Family() == families::kMarisa);
+                    EXPECT_EQ(index->Metadata().count.has_value(), count_known);
                     folly::CancellationSource cancellation;
                     cancellation.requestCancellation();
                     OpContext cancelled(cancellation.getToken());
                     auto reader = index->CreateReader(&cancelled);
-                    if (known_count ||
-                        (packed && backend.Family() == families::kMarisa))
+                    if (count_known)
                         EXPECT_EQ(reader->Count(), 4);
                     else
                         ExpectSegcoreError(ErrorCode::FollyCancel,
@@ -371,10 +373,9 @@ TEST(JsonPathIndexCacheTest,
     CheckCachedStringProjection("InvertedVarchar", true);
 }
 
-TEST(JsonPathIndexCacheTest,
-     InvertedArrayUsesParentRowsForExistenceAndPredicates) {
-    const auto& backend = ScalarReaderBackends().Get<ArrayView>(
-        "JsonProjectedInvertedArrayVarchar");
+void
+CheckCachedArrayProjection(const char* backend_name) {
+    const auto& backend = ScalarReaderBackends().Get<ArrayView>(backend_name);
     auto data = ScalarDataSets()
                     .Get<ArrayView>("JsonProjectedArrayVarchar")
                     .make_data();
@@ -434,7 +435,8 @@ TEST(JsonPathIndexCacheTest,
             auto index = LoaderRegistry::Instance()
                              .Lookup(backend.Family())
                              .Load({std::move(source), options, cache});
-            EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+            EXPECT_EQ(index->Metadata().count.has_value(),
+                      known_count || backend.Family() == families::kSort);
             EXPECT_FALSE(index->Metadata().caps.nested);
             OpContext ctx;
             auto reader = index->CreateReader(&ctx);
@@ -455,6 +457,23 @@ TEST(JsonPathIndexCacheTest,
             ExpectBitmap(predicate->NotIn(1, &key), Hits(7, {1, 2}));
         }
     }
+}
+
+TEST(JsonPathIndexCacheTest,
+     InvertedArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedInvertedArrayVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     SortedArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedSortedArrayVarchar");
+}
+
+TEST(JsonPathIndexCacheTest, SortedStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("SortedVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     SortedWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("SortedVarchar", true);
 }
 
 TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
