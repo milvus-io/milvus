@@ -257,8 +257,8 @@ func TestSearchTask_RequeryKeepsSearchTimestamp(t *testing.T) {
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
 	})
 
-	// With a fresh requery timestamp, Strong only moves the collection TTL
-	// cutoff; Bounded also moves the guarantee and the entity TTL cutoff.
+	// A fresh requery timestamp would move the collection and entity TTL
+	// cutoffs under every level, and the guarantee under Bounded.
 	for _, tc := range []struct {
 		name          string
 		level         commonpb.ConsistencyLevel
@@ -298,7 +298,7 @@ func TestSearchTask_RequeryKeepsSearchTimestamp(t *testing.T) {
 			require.Equal(t, searchTS, requeryTask.BeginTs())
 			require.Equal(t, tsoutil.ComposeTSByTime(tc.guaranteeTime), requeryTask.GetGuaranteeTimestamp())
 			require.Equal(t, tsoutil.ComposeTSByTime(searchTime.Add(-collectionTTL)), requeryTask.GetCollectionTtlTimestamps())
-			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), requeryTask.GetEntityTtlPhysicalTime())
+			require.Equal(t, uint64(searchTime.UnixMicro()), requeryTask.GetEntityTtlPhysicalTime())
 		})
 	}
 }

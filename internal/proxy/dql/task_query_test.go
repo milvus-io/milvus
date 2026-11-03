@@ -246,8 +246,98 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 			// Strong Query uses its own timestamp plus the metadata fence, leaving
 			// MVCC selection to QueryNode. TTL clocks follow normal preprocessing.
 			require.Zero(t, task.GetMvccTimestamp())
-			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+			require.Equal(t, uint64(schedulerTime.UnixMicro()), task.GetEntityTtlPhysicalTime())
 			require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+		})
+	}
+}
+
+// Entity TTL compares the TTL field with the current time. The guarantee
+// timestamp is not the current time under Bounded, Session, Customized or
+// Eventually: Eventually falls back to the collection's UpdateTimestamp, which
+// only moves on DDL, and Session carries the client's last write.
+func TestQueryTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(200)
+	)
+	schedulerTime := time.Unix(1_700_000_000, 0)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
+	updateTS := tsoutil.ComposeTSByTime(schedulerTime.Add(-time.Hour))
+	newerUpdateTS := tsoutil.ComposeTSByTime(schedulerTime.Add(time.Second))
+	lastWriteTS := tsoutil.ComposeTSByTime(schedulerTime.Add(-30 * time.Minute))
+	gracefulTime := paramtable.Get().CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	})
+	collectionInfo := &collectionInfo{
+		CollID:          collectionID,
+		Schema:          schema,
+		UpdateTimestamp: updateTS,
+	}
+	metaCache := newTestCache()
+	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, collectionInfo, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
+	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]UniqueID{
+		paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(): partitionID,
+	}, nil)
+
+	for _, tc := range []struct {
+		name               string
+		useDefault         bool
+		defaultLevel       commonpb.ConsistencyLevel
+		updateTS           uint64
+		level              commonpb.ConsistencyLevel
+		requestGuaranteeTS uint64
+		guaranteeTS        uint64
+	}{
+		{name: "strong", level: commonpb.ConsistencyLevel_Strong, guaranteeTS: schedulerTS},
+		{name: "bounded", level: commonpb.ConsistencyLevel_Bounded, guaranteeTS: tsoutil.AddPhysicalDurationOnTs(schedulerTS, -gracefulTime)},
+		{name: "session", level: commonpb.ConsistencyLevel_Session, requestGuaranteeTS: lastWriteTS, guaranteeTS: lastWriteTS},
+		{name: "customized", level: commonpb.ConsistencyLevel_Customized, requestGuaranteeTS: lastWriteTS, guaranteeTS: lastWriteTS},
+		{name: "eventually", level: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
+		{name: "default eventually", useDefault: true, defaultLevel: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
+		{name: "strong, collection updated after the task", level: commonpb.ConsistencyLevel_Strong, updateTS: newerUpdateTS, guaranteeTS: newerUpdateTS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionInfo.ConsistencyLevel = tc.defaultLevel
+			collectionInfo.UpdateTimestamp = updateTS
+			if tc.updateTS != 0 {
+				collectionInfo.UpdateTimestamp = tc.updateTS
+			}
+			ctx := context.Background()
+			task := &QueryTask{
+				baseTask:  baseTask{MetaCache: metaCache},
+				Condition: NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					Base: &commonpb.MsgBase{},
+				},
+				ctx: ctx,
+				request: &milvuspb.QueryRequest{
+					Base:                  &commonpb.MsgBase{},
+					DbName:                "default",
+					CollectionName:        "test_collection",
+					Expr:                  "id in [1]",
+					OutputFields:          []string{"id"},
+					ConsistencyLevel:      tc.level,
+					UseDefaultConsistency: tc.useDefault,
+					GuaranteeTimestamp:    tc.requestGuaranteeTS,
+				},
+			}
+			require.NoError(t, task.OnEnqueue())
+			task.SetTs(schedulerTS)
+
+			require.NoError(t, task.PreExecute(ctx))
+			require.Equal(t, tc.guaranteeTS, task.GetGuaranteeTimestamp())
+			require.Equal(t, uint64(schedulerTime.UnixMicro()), task.GetEntityTtlPhysicalTime())
 		})
 	}
 }
