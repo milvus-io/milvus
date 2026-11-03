@@ -214,7 +214,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = it.insertMsg.GetDbName()
 	}
-	collectionName = colInfo.Schema.GetName()
+	collectionName = colInfo.Name
 	it.insertMsg.DbName = canonicalDBName
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID
@@ -231,7 +231,10 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema := colInfo.Schema
+	schema, err := colInfo.GetWriteSchema(ctx)
+	if err != nil {
+		return err
+	}
 	it.schema = schema.CollectionSchema
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {

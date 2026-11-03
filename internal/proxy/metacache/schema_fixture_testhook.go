@@ -31,9 +31,11 @@ type fixtureSchemaKey struct {
 var fixtureSchemas sync.Map
 
 var (
-	fixtureMu     sync.Mutex
-	fixtureOwners = make(map[testing.TB]bool)
-	fixturePatch  *mockey.Mocker
+	fixtureMu           sync.Mutex
+	fixtureOwners       = make(map[testing.TB]bool)
+	fixturePatch        *mockey.Mocker
+	fixtureRefreshPatch *mockey.Mocker
+	fixtureWritePatch   *mockey.Mocker
 )
 
 func prepareFixtureSchemas(t testing.TB) {
@@ -42,11 +44,14 @@ func prepareFixtureSchemas(t testing.TB) {
 	defer fixtureMu.Unlock()
 	if fixtureOwners[t] {
 		fixturePatch.Patch() // PatchConvey may have ended the previous scope.
+		fixtureRefreshPatch.Patch()
+		fixtureWritePatch.Patch()
 		return
 	}
 	if len(fixtureOwners) == 0 {
 		fixtureSchemas.Clear()
-		fixturePatch = mockey.Mock(resolveSchema).To(func(ctx context.Context, info *CollectionInfo, write bool) (*SchemaInfo, error) {
+		fixtureRefreshPatch = mockey.Mock(refreshSchema).Return(nil).Build()
+		resolver := func(info *CollectionInfo, ctx context.Context) (*SchemaInfo, error) {
 			schema, ok := fixtureSchemas.Load(info)
 			if !ok {
 				schema, ok = fixtureSchemas.Load(fixtureSchemaKey{info.CollID, info.ReadSchemaVersion})
@@ -54,10 +59,14 @@ func prepareFixtureSchemas(t testing.TB) {
 			if !ok || schema == nil {
 				return nil, merr.WrapErrServiceInternalMsg("test schema not seeded for collection %d", info.CollID)
 			}
-			return withCollectionMetadata(schema.(*SchemaInfo), info), nil
-		}).Build()
+			return schema.(*SchemaInfo), nil
+		}
+		fixturePatch = mockey.Mock((*CollectionInfo).GetReadSchema).To(resolver).Build()
+		fixtureWritePatch = mockey.Mock((*CollectionInfo).GetWriteSchema).To(resolver).Build()
 	}
 	fixturePatch.Patch()
+	fixtureRefreshPatch.Patch()
+	fixtureWritePatch.Patch()
 	fixtureOwners[t] = true
 	t.Cleanup(func() {
 		fixtureMu.Lock()
@@ -65,6 +74,8 @@ func prepareFixtureSchemas(t testing.TB) {
 		delete(fixtureOwners, t)
 		if len(fixtureOwners) == 0 {
 			fixturePatch.UnPatch()
+			fixtureRefreshPatch.UnPatch()
+			fixtureWritePatch.UnPatch()
 			fixtureSchemas.Clear()
 		}
 	})
@@ -107,4 +118,35 @@ func (m *MetaCache) SeedSchemaForTest(t testing.TB, id int64, schema *schemapb.C
 	}
 	fixtureSchemas.Store(fixtureSchemaKey{id, schema.GetVersion()}, body)
 	return nil
+}
+
+// CollectionInfoForTest binds a fixture schema through the same accessor boundary
+// used by production, without adding schema storage to CollectionInfo.
+func CollectionInfoForTest(t testing.TB, info *CollectionInfo, schema *SchemaInfo) *CollectionInfo {
+	t.Helper()
+	prepareFixtureSchemas(t)
+	if schema != nil {
+		info.ReadSchemaVersion = schema.Version
+		if info.Name == "" {
+			info.Name = schema.Name
+		}
+		if info.DBName == "" {
+			info.DBName = schema.DbName
+		}
+		if info.Properties == nil {
+			info.Properties = schema.Properties
+		}
+		info.IsPartitionKeyCollection = schema.IsPartitionKeyCollection()
+	}
+	fixtureSchemas.Store(info, schema)
+	return info
+}
+
+func ReadSchemaForTest(t testing.TB, info *CollectionInfo) *SchemaInfo {
+	t.Helper()
+	schema, err := info.GetReadSchema(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
 }

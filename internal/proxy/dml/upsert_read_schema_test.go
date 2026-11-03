@@ -52,7 +52,7 @@ func TestUpsertReadSchemaDuringPublication(t *testing.T) {
 			task.schema = mustNewSchemaInfo(write)
 			task.req.PartialUpdate = test.partial
 			published := mustNewSchemaInfo(base)
-			lookup := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&metacache.CollectionInfo{CollID: task.collectionID, Schema: published}, nil).Build()
+			lookup := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &metacache.CollectionInfo{CollID: task.collectionID}, published), nil).Build()
 			defer lookup.UnPatch()
 			read, err := task.upsertReadSchema(context.Background(), []string{"id"})
 			if test.blocked {
@@ -89,7 +89,7 @@ func TestUpsertReadSchemaResolution(t *testing.T) {
 			}})
 			read := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
 			read.Version = tc.version
-			info := &metacache.CollectionInfo{CollID: task.collectionID, Schema: mustNewSchemaInfo(read)}
+			info := metacache.CollectionInfoForTest(t, &metacache.CollectionInfo{CollID: task.collectionID}, mustNewSchemaInfo(read))
 			if tc.wrongID {
 				info.CollID++
 			}
@@ -101,7 +101,7 @@ func TestUpsertReadSchemaResolution(t *testing.T) {
 				require.Nil(t, got)
 			} else {
 				require.NoError(t, err)
-				require.Same(t, info.Schema, got)
+				require.Same(t, metacache.ReadSchemaForTest(t, info), got)
 			}
 		})
 	}

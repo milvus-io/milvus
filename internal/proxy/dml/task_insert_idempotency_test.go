@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -242,12 +243,12 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, propert
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
-		CollID:     100,
-		DBName:     "db",
-		Schema:     schema,
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: 100,
+		DBName: "db",
+
 		Properties: properties,
-	}, nil)
+	}, schema), nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	return cache
 }

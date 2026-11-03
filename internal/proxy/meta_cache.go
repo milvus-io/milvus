@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -47,10 +46,6 @@ type (
 
 func NewMetaCache(mixCoord types.MixCoordClient) (*MetaCache, error) {
 	return metacache.NewMetaCache(mixCoord)
-}
-
-func newSchemaInfo(schema *schemapb.CollectionSchema) (*schemaInfo, error) {
-	return metacache.NewSchemaInfo(schema)
 }
 
 func normalizeDBName(database string) string {

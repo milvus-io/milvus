@@ -2008,7 +2008,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
-	it.collectionName = colInfo.Schema.GetName()
+	it.collectionName = colInfo.Name
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()
@@ -2025,7 +2025,10 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema := colInfo.Schema
+	schema, err := colInfo.GetWriteSchema(ctx)
+	if err != nil {
+		return err
+	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {

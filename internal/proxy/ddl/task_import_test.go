@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -113,9 +114,9 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			cache := &MetaCache{}
 			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 			defer idPatch.UnPatch()
-			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-				CollID: 100, DBName: "default", Schema: schema,
-			}, nil).Build()
+			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+				CollID: 100, DBName: "default",
+			}, schema), nil).Build()
 			defer schemaPatch.UnPatch()
 			partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).To(
 				func(_ *MetaCache, _ context.Context, _, _, name string) (int64, error) {
@@ -618,10 +619,9 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair, 
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(100), nil).Maybe()
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
-		Return(&collectionInfo{
+		Return(metacache.CollectionInfoForTest(t, &collectionInfo{
 			CollID: int64(100),
-			Schema: &schemaInfo{CollectionSchema: collectionSchema},
-		}, nil).Maybe()
+		}, &schemaInfo{CollectionSchema: collectionSchema}), nil).Maybe()
 
 	// Only reached by the ordinary-import case, which runs past the gate into
 	// partition resolution.

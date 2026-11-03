@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -74,11 +75,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		CollID:    collectionID,
-		Schema:    mustNewSchemaInfo(schema),
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+
 		ShardsNum: common.DefaultShardsNum,
-	}, nil)
+	}, mustNewSchemaInfo(schema)), nil)
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
@@ -112,13 +113,13 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesReque
 	// keep the caller-provided id. Neither GetCollectionName nor GetCollectionID
 	// is mocked, so any redundant identifier round-trip would fail the test.
 	mockCache := &MockCache{}
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
-		CollID:    collectionID,
-		DBName:    dbName,
-		DBID:      dbID,
-		Schema:    mustNewSchemaInfo(schema),
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+		DBName: dbName,
+		DBID:   dbID,
+
 		ShardsNum: common.DefaultShardsNum,
-	}, nil)
+	}, mustNewSchemaInfo(schema)), nil)
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	request := &milvuspb.DescribeCollectionRequest{
 		CollectionID: collectionID,
@@ -170,11 +171,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_FilterNamespaceField(t *t
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		CollID:    collectionID,
-		Schema:    mustNewSchemaInfo(schema),
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+
 		ShardsNum: common.DefaultShardsNum,
-	}, nil)
+	}, mustNewSchemaInfo(schema)), nil)
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		DbName:         dbName,
@@ -211,14 +212,14 @@ func TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName(t
 	}
 
 	mockCache := &MockCache{}
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
 		CollID: collectionID,
 		// resolved by the coordinator and carried in the cache entry
-		DBID:      7,
-		DBName:    "db1",
-		Schema:    mustNewSchemaInfo(schema),
+		DBID:   7,
+		DBName: "db1",
+
 		ShardsNum: common.DefaultShardsNum,
-	}, nil)
+	}, mustNewSchemaInfo(schema)), nil)
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	// the monitoring http path passes only the collection id, both db name and
 	// collection name are empty
@@ -286,11 +287,11 @@ func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequ
 
 	mockCache := &MockCache{}
 	mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil)
-	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(&collectionInfo{
-		CollID:    collectionID,
-		Schema:    mustNewSchemaInfo(schema),
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+
 		ShardsNum: common.DefaultShardsNum,
-	}, nil)
+	}, mustNewSchemaInfo(schema)), nil)
 	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
 	request := &milvuspb.DescribeCollectionRequest{DbName: dbName, CollectionName: collectionName}
 	resp, err := provider.DescribeCollection(ctx, request)
@@ -508,11 +509,11 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 	cacheSchema := proto.Clone(raw.GetSchema()).(*schemapb.CollectionSchema)
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, database, collectionName).Return(collectionID, nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, database, collectionName, collectionID).Return(&collectionInfo{
-		CollID:              collectionID,
-		DBID:                raw.GetDbId(),
-		DBName:              database,
-		Schema:              mustNewSchemaInfo(cacheSchema),
+	cache.EXPECT().GetCollectionInfo(mock.Anything, database, collectionName, collectionID).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+		DBID:   raw.GetDbId(),
+		DBName: database,
+
 		CreatedTimestamp:    raw.GetCreatedTimestamp(),
 		CreatedUtcTimestamp: raw.GetCreatedUtcTimestamp(),
 		ConsistencyLevel:    raw.GetConsistencyLevel(),
@@ -523,7 +524,7 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 		ShardsNum:           raw.GetShardsNum(),
 		Aliases:             raw.GetAliases(),
 		Properties:          raw.GetProperties(),
-	}, nil)
+	}, mustNewSchemaInfo(cacheSchema)), nil)
 	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}).DescribeCollection(ctx,
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)

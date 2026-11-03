@@ -5,10 +5,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestExactSchemaVersionAfterRecovery(t *testing.T) {
@@ -89,4 +93,62 @@ func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, second.Schema.Description, read.Schema.Description)
 	require.True(t, proto.Equal(second.Schema, read.Schema), "exact lookup must return the canonical schema payload")
+}
+
+func TestAlterCollectionMetadataSnapshotRecovery(t *testing.T) {
+	meta := restoreSchemaTestMeta()
+	meta.CollectionInfo.Schemas[1].Schema.Name = "old"
+	view := NewVChannelViewFromMeta(meta)
+	raw := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{CollectionName: "renamed"}}).MustBuildMutable()
+	msg := message.MustAsImmutableAlterCollectionMessageV2(raw.WithTimeTick(40).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(2)))
+	require.True(t, view.ObserveAlterCollectionMessageV2(msg))
+	require.False(t, view.ObserveAlterCollectionMessageV2(msg), "duplicate replay is idempotent")
+	snapshot, savesSchemas := view.ConsumeDirtyAndGetSnapshot()
+	require.True(t, savesSchemas)
+	require.Len(t, snapshot.CollectionInfo.Schemas, 3)
+	require.Equal(t, "old", snapshot.CollectionInfo.Schemas[1].Schema.Name)
+	require.EqualValues(t, 40, snapshot.CollectionInfo.Schemas[2].CheckpointTimeTick)
+	recovered := NewVChannelViewFromMeta(snapshot)
+	latest, err := recovered.GetSchemaVersion(1, 1)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", latest.Schema.Name)
+	_, historical := recovered.GetSchema(25)
+	require.Equal(t, "old", historical.Name)
+	state, ok := recovered.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Equal(t, "renamed", state.Schema.Name)
+	require.EqualValues(t, 1, state.Schema.Version)
+}
+
+func TestExactSchemaVersionUsesCurrentMetadata(t *testing.T) {
+	meta := restoreSchemaTestMeta()
+	old := meta.CollectionInfo.Schemas[0].Schema
+	old.Name = "before"
+	old.Properties = common.NewKeyValuePairs(map[string]string{
+		common.CollectionTTLConfigKey: "30", common.MaxFieldIDKey: "100", common.TimezoneKey: "UTC",
+	})
+	latest := meta.CollectionInfo.Schemas[1].Schema
+	latest.Name, latest.DbName, latest.Description = "renamed", "newdb", "new description"
+	latest.ExternalSource, latest.ExternalSpec = "s3://new", "{}"
+	latest.Properties = common.NewKeyValuePairs(map[string]string{
+		common.CollectionTTLConfigKey: "60", common.CollectionTTLFieldKey: "expires", common.MaxFieldIDKey: "101",
+		common.TimezoneKey: "Asia/Shanghai", common.CollectionOnTruncatingKey: "true",
+	})
+	before := proto.Clone(meta)
+	view := NewVChannelViewFromMeta(meta)
+	selected, err := view.GetSchemaVersion(1, 0)
+	require.NoError(t, err)
+	require.Zero(t, selected.Schema.Version)
+	require.Equal(t, "renamed", selected.Schema.Name)
+	require.Equal(t, "newdb", selected.Schema.DbName)
+	require.Equal(t, "new description", selected.Schema.Description)
+	require.Equal(t, "s3://new", selected.Schema.ExternalSource)
+	require.Equal(t, "{}", selected.Schema.ExternalSpec)
+	require.Equal(t, old.Fields, selected.Schema.Fields)
+	require.Equal(t, map[string]string{
+		common.CollectionTTLConfigKey: "30", common.MaxFieldIDKey: "100", common.TimezoneKey: "Asia/Shanghai",
+	}, common.KeyValuePairs(selected.Schema.Properties).ToMap())
+	require.True(t, proto.Equal(before, meta), "response projection must not alter stored allocation-time history")
 }

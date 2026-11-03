@@ -95,8 +95,11 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	if err := validateRecoveredViewMeta(
 		vchannelMetas,
 		segmentMetas,
-		r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2,
+		r.checkpoint.Magic >= utility.RecoveryMagicRecoveryStorageV2,
 	); err != nil {
+		return err
+	}
+	if err := r.alignCollectionSchemaMetadata(ctx, vchannelMetas); err != nil {
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
@@ -133,7 +136,7 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 	if r.checkpoint == nil {
 		return false, merr.WrapErrDataIntegrityMsg("missing recovery checkpoint")
 	}
-	if r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 {
+	if r.checkpoint.Magic == utility.RecoveryMagicRecoveryStorageV2 || r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned {
 		return false, nil
 	}
 	if r.checkpoint.Magic != utility.RecoveryMagicStreamingInitialized {

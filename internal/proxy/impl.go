@@ -3143,6 +3143,7 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 }
 
 type searchByPKPreflight struct {
+	schema         *schemaInfo
 	collectionInfo *collectionInfo
 }
 
@@ -3221,8 +3222,12 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 				"collection id %d is not consistent with resolved collection %d", requestedID, collectionInfo.CollID)
 		}
 	}
+	schema, err := collectionInfo.GetReadSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &searchByPKPreflight{
-		collectionInfo: collectionInfo,
+		collectionInfo: collectionInfo, schema: schema,
 	}, nil
 }
 
@@ -3251,7 +3256,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if collectionInfo.DBName != "" {
 		request.DbName = collectionInfo.DBName
 	}
-	request.CollectionName = collectionInfo.Schema.GetName()
+	request.CollectionName = collectionInfo.Name
 
 	// Check for duplicate IDs (fail fast before query)
 	inputIDsCount := typeutil.GetSizeOfIDs(ids)
@@ -3266,7 +3271,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	// Get anns_field from search params, or infer from schema if only one vector field exists
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, request.SearchParams)
 	if err != nil || annsFieldName == "" {
-		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
+		vecFields := typeutil.GetVectorFieldSchemas(preflight.schema.CollectionSchema)
 		if len(vecFields) == 0 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
@@ -3278,7 +3283,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		annsFieldName = vecFields[0].Name
 	}
 
-	annField := typeutil.GetFieldByName(collectionInfo.Schema.CollectionSchema, annsFieldName)
+	annField := typeutil.GetFieldByName(preflight.schema.CollectionSchema, annsFieldName)
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
@@ -3290,7 +3295,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	}
 
 	// Check if this is a BM25 function-based search
-	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), collectionInfo.Schema.Functions)
+	bm25Function, isBM25Search := getBM25FunctionOfAnnsField(annField.GetFieldID(), preflight.schema.Functions)
 
 	// For BM25 search, we need to fetch text field; for vector search, we need vector field
 	var fieldToFetch string
@@ -3309,7 +3314,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	}
 
 	// Get primary key field
-	pkField, err := collectionInfo.Schema.GetPkField()
+	pkField, err := preflight.schema.GetPkField()
 	if err != nil {
 		return nil, err
 	}
@@ -3420,7 +3425,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		pkOffset[pkItr(i)] = i
 	}
 	orderedFieldsData, err := PickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
-		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
+		preflight.schema.CollectionSchema, collectionInfo.CollID)
 	if err != nil {
 		return nil, err
 	}
@@ -4620,7 +4625,12 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if typeutil.IsExternalCollection(collInfo.Schema.CollectionSchema) {
+		schema, err := collInfo.GetReadSchema(ctx)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if typeutil.IsExternalCollection(schema.CollectionSchema) {
 			var collIdentifier string
 			if req.GetCollectionName() != "" {
 				collIdentifier = fmt.Sprintf("name=%s", req.GetCollectionName())
@@ -6631,7 +6641,11 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		if err != nil {
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
-		fieldID, exists := info.Schema.MapFieldID(req.GetFieldName())
+		schema, err := info.GetReadSchema(ctx)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
+		}
+		fieldID, exists := schema.MapFieldID(req.GetFieldName())
 		if !exists {
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(req.GetFieldName())))}, nil
 		}
@@ -7470,7 +7484,11 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	}
 
 	// Validate it's an external collection
-	if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
+	schema, err := collectionInfo.GetReadSchema(ctx)
+	if err != nil {
+		return &milvuspb.RefreshExternalCollectionResponse{Status: merr.Status(err)}, nil
+	}
+	if !typeutil.IsExternalCollection(schema.CollectionSchema) {
 		mlog.Warn(context.TODO(), "collection is not an external collection")
 		return &milvuspb.RefreshExternalCollectionResponse{
 			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),
@@ -7485,8 +7503,8 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// checked to defensively reassert the atomic-tuple invariant in case
 	// any legacy collection holds a half-initialized pair.
 	if !srcSet {
-		persistedSrc := collectionInfo.Schema.GetExternalSource()
-		persistedSpec := collectionInfo.Schema.GetExternalSpec()
+		persistedSrc := schema.GetExternalSource()
+		persistedSpec := schema.GetExternalSpec()
 		if persistedSrc == "" || persistedSpec == "" {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg(
@@ -7603,7 +7621,11 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 			}, nil
 		}
 
-		if !typeutil.IsExternalCollection(collectionInfo.Schema.CollectionSchema) {
+		schema, err := collectionInfo.GetReadSchema(ctx)
+		if err != nil {
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{Status: merr.Status(err)}, nil
+		}
+		if !typeutil.IsExternalCollection(schema.CollectionSchema) {
 			mlog.Warn(context.TODO(), "collection is not an external collection")
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
 				Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection %s is not an external collection", req.GetCollectionName())),

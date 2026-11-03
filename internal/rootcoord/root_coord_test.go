@@ -204,6 +204,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		if msg.MessageType() == message.MessageTypeAlterCollection {
+			require.True(t, msg.BroadcastHeader().AckSyncUp, "schema updates must reach SN history before cache invalidation")
+		}
 		// Stamp the header the way the real broadcaster does, control channel included.
 		msg = msg.OverwriteBroadcastHeader(1)
 		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())

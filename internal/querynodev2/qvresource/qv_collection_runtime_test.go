@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -141,7 +142,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *test
 // Patch points use mockey so requests are checked at the streaming boundary.
 type queryViewSchemaClient struct{ streaming.SchemaClient }
 
-func (*queryViewSchemaClient) GetSchemaVersion(context.Context, streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
+func (*queryViewSchemaClient) GetSchemaVersion(context.Context, streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
 	panic("mock with mockey")
 }
 
@@ -149,9 +150,9 @@ func mockQueryViewSchemaClient(t *testing.T) *queryViewSchemaClient {
 	t.Helper()
 	client := &queryViewSchemaClient{}
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
-		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
-			return &streaming.SchemaSnapshot{
-				Schema: &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
+		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
+			return &schemautil.SchemaInfo{
+				FullSchema: &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
@@ -239,9 +240,9 @@ func TestQueryViewCollectionRuntimeIsolatesReadGenerations(t *testing.T) {
 func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 	paramtable.Init()
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
-		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
-			return &streaming.SchemaSnapshot{
-				Schema: &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
+		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
+			return &schemautil.SchemaInfo{
+				FullSchema: &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	defer patch.UnPatch()

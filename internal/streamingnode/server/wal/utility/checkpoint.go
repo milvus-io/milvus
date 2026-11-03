@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
-	RecoveryMagicRecoveryStorageV2    int64 = 2 // recovery metadata uses one published global checkpoint.
+	RecoveryMagicStreamingInitialized  int64 = 1 // the vchannel info is set into the catalog.
+	RecoveryMagicRecoveryStorageV2     int64 = 2 // recovery metadata uses one published global checkpoint.
+	RecoveryMagicSchemaMetadataAligned int64 = 3 // collection schema metadata was aligned with the coordinator.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.

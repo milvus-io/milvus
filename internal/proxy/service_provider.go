@@ -208,7 +208,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 			resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
-		collectionName = c.Schema.GetName()
+		collectionName = c.Name
 	}
 
 	// validate collection name, ref describeCollectionTask.PreExecute
@@ -245,10 +245,15 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	}
 
 	if resp.CollectionName == "" {
-		resp.CollectionName = c.Schema.Name
+		resp.CollectionName = c.Name
 	}
 
-	resp.Schema, err = ProjectDescribeCollectionSchema(c.Schema.CollectionSchema, true)
+	schema, err := c.GetReadSchema(metadataCtx)
+	if err != nil {
+		resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
+		return resp, nil
+	}
+	resp.Schema, err = ProjectDescribeCollectionSchema(schema.CollectionSchema, true)
 	if err != nil {
 		log.Error(ctx, "failed to project collection schema", mlog.Err(err))
 		return nil, err

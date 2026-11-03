@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 )
 
@@ -10,4 +11,8 @@ import (
 // boundary with mockey to supply an independent write selector.
 func (m *MockCache) GetCollectionWriteInfo(ctx context.Context, database, name string, id int64) (*metacache.CollectionInfo, error) {
 	return m.GetCollectionInfo(ctx, database, name, id)
+}
+
+func newSchemaInfo(schema *schemapb.CollectionSchema) (*schemaInfo, error) {
+	return metacache.NewSchemaInfo(schema)
 }

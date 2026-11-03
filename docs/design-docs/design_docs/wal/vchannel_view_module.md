@@ -86,6 +86,12 @@ Rules include:
 - DropCollection/DropPartition first close their target in memory; stable tombstones become dirty only after their asynchronous dependencies complete;
 - TruncateCollection records the new lifecycle boundary and routes data work;
 - schema-changing AlterCollection appends schema history before segment routing;
+- metadata-only AlterCollection also appends an owned schema snapshot at the
+  message TimeTick, retaining SchemaVersion and earlier snapshots. This includes
+  name/database, description, properties and external source/spec masks; it does
+  not trigger schema-change flushing. Exact-version lookup selects the latest
+  retained metadata for that version, while allocation-time lookup retains its
+  existing WAL boundary semantics;
 - AlterWAL state belongs to the PChannel control fields embedded in the global
   WALCheckpoint, not a VChannel snapshot.
 
@@ -280,3 +286,10 @@ This bridge is marked `TODO: Remove after enabling queryview.`
 This change does not yet adjust WAL truncation. Backends that physically remove
 history independently of this conservative query position still need the
 separate truncation/retention integration before relying on older query seeks.
+
+Exact-version SchemaClient RPCs project the latest collection Name/DbName,
+Description, external tuple and non-versioned properties onto an owned response.
+Fields, functions, flags, SchemaVersion, TTL and field-ID watermark come from the
+selected version. This does not rewrite retained snapshots or allocation-time
+schema lookup. It lets Proxy cache the compiled SchemaInfo directly instead of
+rebuilding a metadata envelope on every access.

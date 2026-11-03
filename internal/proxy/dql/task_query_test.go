@@ -69,7 +69,7 @@ func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
 				t.Cleanup(func() { m.UnPatch() })
 			}
 			patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 300}, nil)
+			patch((*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{UpdateTimestamp: 300}, schema), nil)
 			patch((*metacache.MetaCache).GetCollectionSchema, schema, nil)
 			patch(IsPartitionKeyMode, false, nil)
 			patch(GetPartitionIDs, []int64{1}, nil)
@@ -192,11 +192,10 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 			DataType:     schemapb.DataType_Int64,
 		}},
 	})
-	collectionInfo := &collectionInfo{
-		CollID:        collectionID,
-		Schema:        schema,
-		CollectionTTL: uint64(collectionTTL),
-	}
+	collectionInfo := metacache.CollectionInfoForTest(t, &collectionInfo{
+		CollID: collectionID,
+	}, schema)
+
 	metaCache := newTestCache()
 	collectionIDMocker := mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 	defer collectionIDMocker.UnPatch()
@@ -296,10 +295,9 @@ func TestQueryTask_all(t *testing.T) {
 
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{
 		CollID: collectionID,
-		Schema: schemaInfo,
-	}, nil)
+	}, schemaInfo), nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": 1}, nil)
 
 	t.Run("test query task parameters", func(t *testing.T) {

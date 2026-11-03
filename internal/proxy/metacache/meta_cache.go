@@ -50,7 +50,7 @@ type Cache interface {
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
-	// GetCollectionInfo returns collection metadata and the published read schema.
+	// GetCollectionInfo returns routing metadata and the published read version.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*CollectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
@@ -107,18 +107,14 @@ type Cache interface {
 	Close()
 }
 
-// CollectionInfo is the compatible request view. Cache entries leave Schema nil;
-// getters attach a SchemaClient snapshot to a copy, never to the stored entry.
+// CollectionInfo holds collection metadata and its published schema version.
+// Schema bodies and derived indices are owned exclusively by SchemaClient.
 type CollectionInfo struct {
-	Schema                   *SchemaInfo
 	CollID                   typeutil.UniqueID
 	DBID                     typeutil.UniqueID
 	DBName                   string
 	Name                     string
 	ReadSchemaVersion        int32
-	Description              string
-	ExternalSource           string
-	ExternalSpec             string
 	IsPartitionKeyCollection bool
 	CreatedTimestamp         uint64
 	CreatedUtcTimestamp      uint64
@@ -126,7 +122,6 @@ type CollectionInfo struct {
 	PartitionKeyIsolation    bool
 	QueryMode                string
 	UpdateTimestamp          uint64
-	CollectionTTL            uint64
 	NumPartitions            int64
 	VChannels                []string
 	PChannels                []string
@@ -355,6 +350,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
+	info := newCollectionInfo(collection, isolation, queryMode)
+	// Complete the refresh before publishing metadata. Invalidation drains this
+	// fill through fillMu, so the next miss cannot reuse a pre-invalidation flight.
+	if err := refreshSchema(ctx, info); err != nil {
+		return nil, err
+	}
 
 	bucketDB := collection.GetDbName()
 	if bucketDB == "" {
@@ -365,13 +366,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			// the response uncached instead of inventing a compat mechanism for
 			// an upgrade-window-only entry class -- repeat lookups just
 			// re-describe until the rootcoords are upgraded.
-			return newCollectionInfo(collection, isolation, queryMode), nil
+			return info, nil
 		}
 		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
-	info := newCollectionInfo(collection, isolation, queryMode)
 	if info.DBName == "" {
 		info.DBName = bucketDB // authoritative for by-name fills
 	}
@@ -447,9 +447,6 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, isolatio
 		DBName:                   collection.GetDbName(),
 		Name:                     collection.GetSchema().GetName(),
 		ReadSchemaVersion:        collection.GetSchema().GetVersion(),
-		Description:              collection.GetSchema().GetDescription(),
-		ExternalSource:           collection.GetSchema().GetExternalSource(),
-		ExternalSpec:             collection.GetSchema().GetExternalSpec(),
 		IsPartitionKeyCollection: hasPartitionKey(collection.GetSchema()),
 		CreatedTimestamp:         collection.CreatedTimestamp,
 		CreatedUtcTimestamp:      collection.CreatedUtcTimestamp,
@@ -457,7 +454,6 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, isolatio
 		PartitionKeyIsolation:    isolation,
 		QueryMode:                queryMode,
 		UpdateTimestamp:          collection.UpdateTimestamp,
-		CollectionTTL:            GetCollectionTTL(collection.GetProperties()),
 		VChannels:                collection.VirtualChannelNames,
 		PChannels:                collection.PhysicalChannelNames,
 		NumPartitions:            collection.NumPartitions,
@@ -642,7 +638,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectio
 	if err != nil {
 		return nil, err
 	}
-	return info.Schema, nil
+	return info.GetReadSchema(ctx)
 }
 
 // setAliasLocked sets an alias hint (alias -> real name). Caller must hold m.mu

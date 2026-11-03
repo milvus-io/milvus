@@ -523,9 +523,9 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
-	schemaChange := messageutil.IsSchemaChange(msg.Header())
-	if schemaChange {
-		schema := msg.MustBody().Updates.Schema
+	schemas := info.meta.CollectionInfo.Schemas
+	current := schemas[len(schemas)-1].GetSchema()
+	if schema := messageutil.ApplyCollectionSchemaUpdates(current, msg.Header(), msg.MustBody()); schema != nil {
 		if info.hasSchemaVersionLocked(msg.TimeTick(), schema) {
 			return false
 		}

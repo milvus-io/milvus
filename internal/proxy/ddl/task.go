@@ -2239,7 +2239,7 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if collInfo == nil || collInfo.Schema == nil || collInfo.Schema.GetName() == "" {
+		if collInfo == nil || collInfo.Name == "" {
 			return merr.WrapErrServiceInternalMsg("failed to resolve collection metadata for alter collection target %d", collectionID)
 		}
 		t.CollectionID = collectionID
@@ -2270,7 +2270,10 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	if err := resolveCollectionInfo(); err != nil {
 		return err
 	}
-	collSchema := collInfo.Schema
+	collSchema, err := collInfo.GetReadSchema(ctx)
+	if err != nil {
+		return err
+	}
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)

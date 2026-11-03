@@ -175,3 +175,37 @@ def test_proxy_schema_add_field_after_warm_write(schema_access_client):
     )
     assert result[0]["value"] == 20
     assert result[0]["added"] == 9
+
+
+@pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.parametrize("first_access", ["read", "write"])
+def test_proxy_schema_same_version_metadata_refresh(schema_access_client, first_access):
+    client, stub, name = schema_access_client
+    create_collection(client, name)
+    client.insert(name, [row(1, 10), row(2, 20)], timeout=60)
+    assert ids(client, name) == [1, 2]
+    collection_id, version = snapshot(stub, name)
+
+    # Run with a long SchemaClient TTL: success must come from invalidation,
+    # not idle expiry. Metadata updates deliberately retain the same version.
+    for description, timezone in [("first description", "Asia/Shanghai"), ("second description", "UTC")]:
+        client.alter_collection_properties(
+            name, {"collection.description": description, "timezone": timezone}, timeout=60
+        )
+        if first_access == "write":
+            client.upsert(name, row(2, 22), timeout=60)
+        response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60)
+        assert response.status.code == 0, response.status
+        assert (response.collectionID, response.schema.version) == (collection_id, version)
+        assert response.schema.description == description
+        assert {kv.key: kv.value for kv in response.schema.properties}["timezone"] == timezone
+        assert ids(client, name) == [1, 2]
+        if first_access == "read":
+            client.upsert(name, row(2, 22), timeout=60)
+
+    client.drop_collection_properties(name, ["timezone"], timeout=60)
+    response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60)
+    assert response.status.code == 0, response.status
+    assert (response.collectionID, response.schema.version) == (collection_id, version)
+    assert "timezone" not in {kv.key: kv.value for kv in response.schema.properties}
+    assert response.schema.description == "second description"

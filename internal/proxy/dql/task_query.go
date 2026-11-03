@@ -823,12 +823,16 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
 
-	schema := colInfo.Schema
+	schema := t.boundReadSchema
 	if t.boundReadSchema != nil {
 		if t.boundCollectionID != t.CollectionID {
 			return merr.WrapErrServiceUnavailableMsg("collection identity changed during internal query")
 		}
-		schema = t.boundReadSchema
+	} else {
+		schema, err = colInfo.GetReadSchema(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	t.schema = schema
 	t.SchemaVersion = schema.GetVersion()

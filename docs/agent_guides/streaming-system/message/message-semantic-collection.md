@@ -8,7 +8,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 |---------|----------|-------------------|-------------|
 | CreateCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
-| AlterCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
+| AlterCollection | Broadcast: VChannels + CChannel (AckSyncUp) | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | TruncateCollection | Broadcast: VChannels + CChannel (AckSyncUp) | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | CreatePartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropPartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
@@ -36,7 +36,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 - **CreateCollection**: Creates a new collection with its partitions and VChannels.
 - **DropCollection**: Drops a collection and all its data, indexes, and load config. Implicitly flushes all growing segments.
-- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
+- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. Producers use AckSyncUp so recovery schema updates complete before the coordinator callback invalidates Proxy metadata caches; checkpoint publication is independent. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition seals and flushes all earlier growing segments of the collection on each VChannel, but logically drops only the requested partition.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.

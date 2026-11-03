@@ -1125,7 +1125,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		c, err := cache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
-		assert.Equal(t, c.Schema.Name, "bar")
+		assert.Equal(t, c.Name, "bar")
 	})
 
 	t.Run("update with name", func(t *testing.T) {
@@ -1152,7 +1152,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		c, err := cache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
-		assert.Equal(t, c.Schema.Name, "bar")
+		assert.Equal(t, c.Name, "bar")
 	})
 }
 
@@ -1399,7 +1399,7 @@ func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
 	// first id-only lookup primes the by-id index (one describe, recorded as a miss)
 	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, "foo", info.Schema.GetName())
+	assert.Equal(t, "foo", info.Name)
 
 	// a second id-only lookup must be served from the by-id index as a HIT, with
 	// no additional describe and no cache-miss metric

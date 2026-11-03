@@ -114,18 +114,21 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
+	if colInfo == nil {
 		return merr.WrapErrImportSysFailed("collection schema is unavailable")
 	}
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = req.GetDbName()
 	}
-	canonicalCollectionName := colInfo.Schema.GetName()
+	canonicalCollectionName := colInfo.Name
 	req.DbName = canonicalDBName
 	req.CollectionName = canonicalCollectionName
 
-	schema := colInfo.Schema
+	schema, err := colInfo.GetReadSchema(ctx)
+	if err != nil {
+		return err
+	}
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportSysFailed("collection schema has no fields")
 	}

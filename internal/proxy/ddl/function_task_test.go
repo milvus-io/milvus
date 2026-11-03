@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -222,15 +223,13 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 		}
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
-		coll := &collectionInfo{
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Functions: []*schemapb.FunctionSchema{
-						{Name: req.FunctionName, Type: schemapb.FunctionType_BM25},
-					},
+		coll := metacache.CollectionInfoForTest(f.T(), &collectionInfo{}, &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Functions: []*schemapb.FunctionSchema{
+					{Name: req.FunctionName, Type: schemapb.FunctionType_BM25},
 				},
 			},
-		}
+		})
 
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
 		task.MetaCache = cache
@@ -290,19 +289,18 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
-		coll := &collectionInfo{
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
-						{Name: "vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
-					},
-					Functions: []*schemapb.FunctionSchema{
-						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding},
-					},
+		coll := metacache.CollectionInfoForTest(f.T(), &collectionInfo{}, &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text_col"},
+					{Name: "vec", DataType: schemapb.DataType_FloatVector, IsFunctionOutput: true},
+				},
+				Functions: []*schemapb.FunctionSchema{
+					{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding},
 				},
 			},
-		}
+		})
+
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
@@ -334,17 +332,19 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
-		coll := &collectionInfo{
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Functions: []*schemapb.FunctionSchema{
-						// identity matches the request; a valid alter changes only params
-						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
-						{Name: "f2", Type: schemapb.FunctionType_TextEmbedding},
-					},
+		coll := metacache.CollectionInfoForTest(f.T(), &collectionInfo{
+
+			// identity matches the request; a valid alter changes only params
+
+		}, &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Functions: []*schemapb.FunctionSchema{
+					{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
+					{Name: "f2", Type: schemapb.FunctionType_TextEmbedding},
 				},
 			},
-		}
+		})
+
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()
@@ -372,15 +372,14 @@ func (f *FunctionTaskSuite) TestAlterCollectionFunctionTaskPreExecute() {
 			Condition:                      NewTaskCondition(ctx),
 			AlterCollectionFunctionRequest: req,
 		}
-		coll := &collectionInfo{
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Functions: []*schemapb.FunctionSchema{
-						{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
-					},
+		coll := metacache.CollectionInfoForTest(f.T(), &collectionInfo{}, &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Functions: []*schemapb.FunctionSchema{
+					{Name: "test_function", Type: schemapb.FunctionType_TextEmbedding, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"vec"}},
 				},
 			},
-		}
+		})
+
 		cache := NewMockCache(f.T())
 		cache.EXPECT().GetCollectionID(ctx, req.DbName, req.CollectionName).Return(int64(1), nil).Maybe()
 		cache.EXPECT().GetCollectionInfo(ctx, req.DbName, req.CollectionName, int64(1)).Return(coll, nil).Maybe()

@@ -209,7 +209,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: udpates,
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -334,7 +334,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -393,7 +393,7 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err

@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -50,4 +51,26 @@ func TestWriteSchemaAdmissionAndRecovery(t *testing.T) {
 	delete(m.collections, 1)
 	_, err = m.GetWriteSchema(1, "p_1v0")
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
+func TestAlterCollectionMetadataUpdatesWriteSchemaWithoutFencing(t *testing.T) {
+	m := &shardManagerImpl{collections: newCollectionInfosFromWritePathRecovery(map[string]moduleapi.VChannelWritePathRecoveryState{
+		"p_1v0": {CollectionID: 1, Schema: &schemapb.CollectionSchema{Version: 2, Name: "old"}, SchemaTimeTick: 10},
+	})}
+	previous := m.collections[1].Schema
+	msg := message.NewAlterCollectionMessageBuilderV2().WithVChannel("p_1v0").
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{CollectionName: "renamed"}}).MustBuildMutable()
+	msg.WithTimeTick(20)
+	// No partition managers are installed: a metadata update must never enter
+	// the flush/fence path or alter the encoding version.
+	flushed, err := m.AlterCollection(message.MustAsMutableAlterCollectionMessageV2(msg))
+	require.NoError(t, err)
+	require.Empty(t, flushed)
+	got, err := m.GetWriteSchema(1, "p_1v0")
+	require.NoError(t, err)
+	require.Equal(t, "renamed", got.Schema.Name)
+	require.EqualValues(t, 2, got.Schema.Version)
+	require.EqualValues(t, 20, got.CheckpointTimeTick)
+	require.Equal(t, "old", previous.Schema.Name)
 }

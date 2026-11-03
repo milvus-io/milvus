@@ -5,9 +5,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 )
 
-// GetSchemaVersion returns an owned snapshot of an exact historical schema.
+// GetSchemaVersion returns an owned exact-version schema with current
+// non-versioned collection metadata.
 // In particular, zero identifies version zero, never the latest schema.
 func (m *VChannelRecoveryModule) GetSchemaVersion(collectionID int64, version int32) (*streamingpb.CollectionSchemaOfVChannel, error) {
 	m.mu.Lock()
@@ -26,7 +28,14 @@ func (info *VChannelView) GetSchemaVersion(collectionID int64, version int32) (*
 	}
 	schemas := info.meta.GetCollectionInfo().GetSchemas()
 	if entry := info.canonicalReadSchemaLocked(version); entry != nil {
-		return proto.Clone(entry).(*streamingpb.CollectionSchemaOfVChannel), nil
+		snapshot := proto.Clone(entry).(*streamingpb.CollectionSchemaOfVChannel)
+		// Exact versions bind encoding and TTL. Non-versioned metadata follows
+		// the latest collection state; allocation-time history stays untouched.
+		latest := schemas[len(schemas)-1]
+		if entry != latest {
+			messageutil.CopyCollectionSchemaMetadata(snapshot.Schema, latest.Schema)
+		}
+		return snapshot, nil
 	}
 	if len(schemas) == 0 || schemas[len(schemas)-1].GetSchema().GetVersion() < version {
 		return nil, status.NewInner("schema version %d has not been observed on vchannel %s", version, info.meta.GetVchannel())
@@ -36,8 +45,8 @@ func (info *VChannelView) GetSchemaVersion(collectionID int64, version int32) (*
 
 // canonicalReadSchemaLocked is the compatibility mapping for pre-versioned
 // semantic updates (for example legacy TTL changes). The last retained normal
-// payload of that version is the upgrade's read identity. All new semantic
-// updates advance SchemaVersion, so this mapping stays immutable afterwards.
+// payload of that version supplies the most recently observed metadata. New
+// encoding/TTL updates advance SchemaVersion; metadata-only ALTERs retain it.
 // Segment encoding additionally uses its allocation boundary, not this alias.
 func (info *VChannelView) canonicalReadSchemaLocked(version int32) *streamingpb.CollectionSchemaOfVChannel {
 	history := info.meta.GetCollectionInfo().GetSchemas()
