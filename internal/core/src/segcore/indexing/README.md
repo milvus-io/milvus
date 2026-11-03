@@ -1,5 +1,9 @@
 # Segment index architecture
 
+This document covers segment registration, publication, and query selection. For the Index/Reader
+contracts, context lifetime, and storage accounting, see
+[Index contracts](../../index/contracts/README.md#index-and-request-reader-boundary).
+
 Queries select an index capability, create a request reader, and execute through that reader.
 Sealed and growing indexes use different ownership and publication mechanisms:
 

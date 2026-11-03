@@ -2,9 +2,9 @@
 
 This directory splits vector index objects by query, build, artifact, and load. See
 [`contracts/README.md`](../contracts/README.md) for the shared contracts and
-[`growing/README.md`](../growing/README.md) for incremental writes. Splitting the responsibilities
-does not by itself require changing knowhere algorithms or persisted formats; this does not mean
-that implementations not yet wired in have completed behavior or performance verification.
+[growing publication protocol](../contracts/README.md#growing-publication-protocol) for incremental writes. Splitting the responsibilities
+does not by itself require changing knowhere algorithms or persisted formats. Backend-specific
+operation support and verification limits are listed below.
 
 ## Files and responsibilities
 
@@ -13,11 +13,12 @@ that implementations not yet wired in have completed behavior or performance ver
 | `KnowhereEngine` | Holds the native engine, the complete backing owner, and the actual type, metric, dim, and physical/embedding-list state |
 | `VectorIndexValidDataUtils` | Encodes and decodes the nullable row validity bitmap and publishes it into the knowhere IdMap (#50524; the mapping itself is owned by knowhere) |
 | `contracts/query/IVectorReader.h` | Unified vector query interface covering search, value retrieval, metadata, nullable, refine, and embedding-list operations |
-| `VectorIndexReader` | Non-template unified reader; at runtime it distinguishes only the memory/disk search shell and the DiskANN beamwidth, and dispatches on the physical type only at the retrieval leaf |
+| `VectorIndex` | Owns a resident `KnowhereEngine` or a typed engine cache slot and creates request readers |
+| `VectorIndexReader` | Non-template request reader; at runtime it distinguishes only the memory/disk search shell and the DiskANN beamwidth, and dispatches on the physical type only at the retrieval leaf |
 | `VectorMemBuilder` | `IArtifactBuilder<VectorBuildInput<T>>`; accepts the complete input in one call, and the caller owns the tensor and side inputs |
-| `VectorDiskBuilder` | `IArtifactBuilder<PreparedVectorBuildFiles<T>>`; knowhere reads the prepared complete files |
-| `VectorMemArtifact` | Named logical BinarySet entries; supports consuming the built engine/validity to produce a reader directly |
-| `VectorDiskArtifact` | Serializes large files by path only; queries must open the persisted artifact through `VectorDiskLoader` |
+| `VectorDiskBuilder` | `IArtifactBuilder<PreparedVectorBuildFiles<T>>`; consumes prepared files and an optional borrowed resident tensor |
+| `VectorMemArtifact` | Named logical BinarySet entries; supports consuming the built engine/validity to produce an Index directly |
+| `VectorDiskArtifact` | Serializes engine output as named buffers or staged files; queries open the persisted artifact through `VectorDiskLoader` |
 | `VectorMemLoader` | Two open modes: materialize and mmap |
 | `VectorDiskLoader` | Disk index loading and integration with streaming backends |
 | `VectorLoadUtils` / `VectorParamUtils` | Shared integer syntax parsing; does not merge the separate mem/disk policies for missing values, aliases, and types |
@@ -28,8 +29,16 @@ that implementations not yet wired in have completed behavior or performance ver
 
 ## Query and lifecycle
 
-`VectorIndexReader` inherits both `IIndexReaderBase` and the query-only mixin `IVectorReader`, and
-holds the engine/validity by value.
+`VectorIndex` owns either a resident engine or a `CacheSlot<KnowhereEngine>`, expressed as a
+variant. `CreateReader(op_ctx)` creates a `VectorIndexReader` that retains this Index and borrows
+the request context without pinning the engine. The reader inherits `IIndexReaderBase` and the
+query-only mixin `IVectorReader`. Search, retrieval, and iterator creation acquire the engine using
+the bound context; returned iterators retain the exact engine pin.
+
+A native lazy-loading backend is resident at this boundary and manages its own cache. No outer
+whole-engine cache is added around it. Sparse vectors and VECTOR_ARRAY use the same Index/Reader
+ownership model. Segment-level lazy Index creation is described in
+[Segment index architecture](../../segcore/indexing/README.md#sealed-loading-and-publication).
 Inside `KnowhereEngine`, the backing owner is declared before the native handle, so the native node
 is destroyed before the final owner of the mmap files or the FileManager generation.
 Search receives only the parameters, metric, topk, and trace from `VectorSearchParams`; visibility
@@ -78,15 +87,15 @@ not enough to conclude that the lifetime is safe.
   the source/sink. The packed V3 vector format is not implemented at present.
 - An mmap load streams the ordered engine entries and concatenates them into a local file.
   Embedding-list sidecars stay separate files, and validity/empty-list metadata is parsed separately.
-  The FileSource is borrowed only while opening; the reader must retain its backing files.
+  The FileSource is borrowed only while opening; the engine must retain its backing files.
 - Large DiskANN files are streamed by path; only a V1/V2 DiskFiles index source can create a
   disk-engine handle. The loader first probes capabilities with a LocalFiles handle, and a
   stream-load backend then switches to a RemoteStreams handle restricted to the engine inventory;
-  the reader retains the finally selected handle together with its FileManager and local generation.
+  the engine retains the finally selected handle together with its FileManager and local generation.
 - `IArtifactBuilder` returns the finished Artifact from `Build(input)`; the Artifact is responsible
   for serialization, and the build service orchestrates the upload and `FileSink::Finish()`. Only
   `VectorMemArtifact` provides a one-shot consuming conversion, in which the engine and validity are
-  moved into an independent reader; `VectorDiskArtifact` does not provide this capability and must
+  moved into an independent Index; `VectorDiskArtifact` does not provide this capability and must
   first be serialized and then opened by `VectorDiskLoader`.
   Local staging is cleaned up by its actual owner, which must not delete files still in use by a
   reader.
@@ -114,8 +123,3 @@ not enough to conclude that the lifetime is safe.
   publication record fixes the reader Count, mapping, and CoveredRowEnd; it shares the live engine
   with later Adds, so it guarantees only the logical prefix described above and does not guarantee
   that approximate ANN traversal results are a physically stable snapshot.
-
-The old VectorIndex/VectorMemIndex/VectorDiskIndex files referenced in migration TODOs are in the
-historical commit `e255009e01` and can be viewed with
-`git show e255009e01:internal/core/src/index/<file>`; the local notes above do not depend on the
-migration design document.

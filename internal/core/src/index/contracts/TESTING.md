@@ -54,7 +54,9 @@ only checking that a call returned.
 | `BuilderRegistry`, `LoaderRegistry`, `LoaderEntry` | Typed lookup, unknown and duplicate keys, metadata only caps, independent create/load, parameter forwarding, and factory errors |
 | `IArtifactBuilder`, scalar/vector input | Complete borrowed input, multiple and empty batches, null validity, one shot artifact ownership, serialization after caller input dies, and invalid input rejection |
 | `IIndexConvertible` | Optional consuming conversion, no implicit I/O, shell destruction, failure propagation, and reader dependency lifetime |
-| `IIndexReaderBase`, `ReaderCaps` | Count in declared coordinate domain, type, capability/mixin agreement, resource values, and metadata derived caps matching the opened reader |
+| `IIndex` | Metadata without I/O, independent request contexts, retained index version, cold reader creation, and warmup cancellation without invalidating readers |
+| `IIndexReaderBase`, `ReaderCaps` | Count in declared coordinate domain, type, capability/mixin agreement, and metadata derived caps matching the request reader |
+| Concrete Storage/Engine cells | Heap/mmap resource accounting, retained backing owners, and cache estimates when actual usage is unavailable |
 | `IScalarPredicateReader` | IN, NOT IN, all comparison and interval bounds, duplicates, empty keys, null exclusion, bit count, nested element offsets |
 | `INullReader` | Exact complementary masks, all valid/all null, packed boundaries, empty batches, independent returned bitmap, and own coordinate domain |
 | `IScalarValueReader` | Owned `Lookup`, null, repeated and unordered `Gather`, callback ordering/validity, and borrowed view copied inside callback |
