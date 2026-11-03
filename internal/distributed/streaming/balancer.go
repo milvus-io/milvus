@@ -3,11 +3,9 @@ package streaming
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -23,10 +21,6 @@ type balancerImpl struct {
 func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingNodeInfo, error) {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -44,9 +38,6 @@ func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingN
 // GetWALDistribution returns the wal distribution of the streaming node.
 func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error) {
 	if _, err := b.checkIfStreamingServiceReady(ctx); err != nil {
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	sbalancer := snmanager.StaticStreamingNodeManager.GetBalancer()
@@ -75,10 +66,6 @@ func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*ty
 func (b balancerImpl) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -114,10 +101,6 @@ func (b balancerImpl) IsRebalanceSuspended(ctx context.Context) (bool, error) {
 func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil
-		}
 		return err
 	}
 
@@ -136,10 +119,6 @@ func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
 func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil
-		}
 		return err
 	}
 
@@ -158,10 +137,6 @@ func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
 func (b balancerImpl) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil
-		}
 		return err
 	}
 
@@ -178,10 +153,6 @@ func (b balancerImpl) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error 
 func (b balancerImpl) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
 	_, err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
-		// for 2.5.x compatibility, return empty result when streaming service is not ready.
-		if !streamingutil.IsStreamingServiceEnabled() && errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-			return nil
-		}
 		return err
 	}
 

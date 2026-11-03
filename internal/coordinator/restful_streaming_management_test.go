@@ -13,7 +13,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -22,8 +21,6 @@ import (
 )
 
 func TestStreamingBalanceConfigPersistence(t *testing.T) {
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer enabled.UnPatch()
 	paramtable.Init()
 	client, err := clientv3.New(clientv3.Config{Endpoints: paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second})
 	require.NoError(t, err)
@@ -97,8 +94,6 @@ func TestStreamingBalanceConfigPersistence(t *testing.T) {
 }
 
 func TestStreamingNodeManagement(t *testing.T) {
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer enabled.UnPatch()
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	defer streaming.SetWALForTest(previous)

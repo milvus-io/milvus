@@ -11,15 +11,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestWALTransferChannel(t *testing.T) {
 	ctx := t.Context()
-	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
-	defer enabled.UnPatch()
 	server := &Server{ctx: ctx}
 	b := &mock_balancer.MockBalancer{}
 	get := mockey.Mock(walbalance.GetWithContext).Return(b, nil).Build()

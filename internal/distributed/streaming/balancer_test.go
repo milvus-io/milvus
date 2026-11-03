@@ -11,17 +11,14 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestBalancer(t *testing.T) {
-	mockey.PatchConvey("WAL distribution distinguishes empty sessions and preserves legacy readiness", t, func() {
+	mockey.PatchConvey("WAL distribution distinguishes empty sessions and propagates readiness failures", t, func() {
 		var readyErr, nodesErr, assignmentErr, updateErr error
-		enabled := true
-		mockey.Mock(streamingutil.IsStreamingServiceEnabled).To(func() bool { return enabled }).Build()
 		mockey.Mock(balancerImpl.checkIfStreamingServiceReady).To(func(balancerImpl, context.Context) (bool, error) { return readyErr == nil, readyErr }).Build()
 		native := &mock_balancer.MockBalancer{}
 		mockey.Mock((*snmanager.StreamingNodeManager).GetBalancer).Return(native).Build()
@@ -97,17 +94,8 @@ func TestBalancer(t *testing.T) {
 		require.ErrorIs(t, err, readyErr)
 		require.ErrorIs(t, b.FreezeNodeIDs(ctx, []int64{1}), readyErr)
 		require.ErrorIs(t, b.DefreezeNodeIDs(ctx, []int64{1}), readyErr)
-		enabled = false
-		_, err = b.ListStreamingNode(ctx)
-		require.NoError(t, err)
-		_, err = b.GetWALDistribution(ctx, 1)
-		require.NoError(t, err)
-		_, err = b.GetFrozenNodeIDs(ctx)
-		require.NoError(t, err)
-		require.NoError(t, b.FreezeNodeIDs(ctx, []int64{1}))
-		require.NoError(t, b.DefreezeNodeIDs(ctx, []int64{1}))
-		require.NoError(t, b.SuspendRebalance(ctx))
-		require.NoError(t, b.ResumeRebalance(ctx))
+		require.ErrorIs(t, b.SuspendRebalance(ctx), readyErr)
+		require.ErrorIs(t, b.ResumeRebalance(ctx), readyErr)
 		_, err = b.IsRebalanceSuspended(ctx)
 		require.ErrorIs(t, err, readyErr)
 	})
