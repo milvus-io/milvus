@@ -1205,7 +1205,8 @@ TEST(ScalarIndexV3ResourceTest,
         }
         EXPECT_GT(estimate.shared_overhead.memory_bytes, 0);
         EXPECT_EQ(estimate.private_overhead.memory_bytes, 0);
-        const auto& overhead = translator.CacheMetadata().loading_overhead_config;
+        const auto& overhead =
+            translator.CacheMetadata().loading_overhead_config;
         ASSERT_TRUE(overhead.has_value());
         ASSERT_TRUE(overhead->memory.has_value());
         EXPECT_EQ(overhead->memory->group, group);
@@ -1272,8 +1273,9 @@ TEST(ScalarIndexV3ResourceTest,
             fixture.context,
             Config(load_info.index_params));
         EXPECT_EQ(translator.Family(), families::kBitmap);
-        EXPECT_EQ(translator.CacheMetadata().loading_overhead_config.has_value(),
-                  use_async);
+        EXPECT_EQ(
+            translator.CacheMetadata().loading_overhead_config.has_value(),
+            use_async);
         const auto [loaded, private_overhead, shared_overhead] =
             translator.EstimatedResources();
         EXPECT_GT(loaded.memory_bytes, 0);

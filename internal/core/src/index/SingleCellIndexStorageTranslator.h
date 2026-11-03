@@ -50,9 +50,15 @@ class SingleCellIndexStorageTranslator final
     cell_id_of(cachinglayer::uid_t) const override {
         return 0;
     }
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
-        return {config_.loaded_usage, config_.loading_overhead};
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        if (cids.empty()) {
+            return {};
+        }
+        return {config_.loaded_usage,
+                config_.loading_overhead,
+                config_.shared_loading_overhead};
     }
     const std::string&
     key() const override {

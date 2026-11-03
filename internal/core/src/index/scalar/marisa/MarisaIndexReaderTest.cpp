@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "storage/EntryStreamUtils.h"
 
+#include "index/SingleCellIndexStorageTranslator.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/scalar/marisa/MarisaIndexReader.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
@@ -52,6 +53,37 @@ MakeStorage() {
         JsonProjectedIndexSpec("/a", JsonCastType::FromString("VARCHAR"), 2)
             .MakeExists({1});
     return storage;
+}
+
+TEST(SingleCellIndexStorageTranslatorTest, BatchEstimatePreservesSharedBudget) {
+    const IndexCacheConfig config{
+        "batch-estimate",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {100, 200},
+        {30, 40},
+        0,
+        0,
+        {50, 60}};
+    SingleCellIndexStorageTranslator<MarisaIndexStorage> translator(
+        config,
+        false,
+        [](OpContext*)
+            -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+            ADD_FAILURE() << "resource estimation must not load storage";
+            co_return nullptr;
+        });
+    const auto usage = translator.estimated_loading_usage({0});
+    EXPECT_EQ(usage.resident, config.loaded_usage);
+    EXPECT_EQ(usage.private_overhead, config.loading_overhead);
+    EXPECT_EQ(usage.shared_overhead, config.shared_loading_overhead);
+    const auto empty = translator.estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 }
 
 TEST(MarisaIndexOwnershipTest, ReadersRetainStorageAndOwnedValues) {
@@ -88,8 +120,12 @@ class MarisaStorageTranslator final
     cell_id_of(cachinglayer::uid_t uid) const override {
         return uid;
     }
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        if (cids.empty()) {
+            return {};
+        }
         return {{1024 * 1024, 0}, {0, 0}};
     }
     const std::string&
