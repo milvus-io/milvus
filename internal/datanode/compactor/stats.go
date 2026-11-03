@@ -62,10 +62,15 @@ func buildCompactionOutputStats(insertLogs, deltalogs []*datapb.FieldBinlog, sta
 // gets a null_counts entry: the field is physically present in the segment,
 // and the presence contract in storage.BuildStatsFromFieldBinlogs requires an
 // entry for every such field, zero included.
+//
+// validElementCounts carries the valid element counts of the VectorArray
+// output fields; an output without an entry (not a VectorArray, or not
+// countable) gets none.
 func buildMaterializationStatsDelta(
 	columnGroups []storagecommon.ColumnGroup,
 	memorySizes map[int64]int,
 	nullCounts map[int64]int64,
+	validElementCounts map[int64]int64,
 	statsBlobSize int64,
 ) *datapb.Statistics {
 	s := &datapb.Statistics{
@@ -76,6 +81,12 @@ func buildMaterializationStatsDelta(
 		s.InsertBinlogSize += int64(memorySizes[group.GroupID])
 		s.InsertBinlogCount++
 		s.NullCounts[group.GroupID] = nullCounts[group.GroupID]
+		if n, ok := validElementCounts[group.GroupID]; ok {
+			if s.ValidElementCounts == nil {
+				s.ValidElementCounts = make(map[int64]int64)
+			}
+			s.ValidElementCounts[group.GroupID] = n
+		}
 	}
 	return s
 }

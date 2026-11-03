@@ -204,17 +204,6 @@ ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
             field_meta.get_array_type_schema());
     });
 
-    if (!is_mmap() && array_data.size() == element_count) {
-        std::vector<ArrayValue> data_raw;
-        data_raw.reserve(element_count);
-        for (ssize_t i = 0; i < element_count; ++i) {
-            data_raw.emplace_back(
-                ArrayValue(array_data.Get(static_cast<int>(i)), array_type_));
-        }
-        return Base::set_data_raw(
-            element_offset, data_raw.data(), element_count);
-    }
-
     const auto& validity = GetFieldDataRowValidData(*data);
     const bool has_validity = validity.size() == element_count;
     ssize_t valid_count = 0;
@@ -244,23 +233,13 @@ ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
         }
     }
 
-    if (!is_mmap()) {
-        std::vector<ArrayValue> data_raw;
-        data_raw.reserve(element_count);
-        for (ssize_t i = 0; i < element_count; ++i) {
-            data_raw.emplace_back(ArrayValue(*rows[i], array_type_));
-        }
-        return Base::set_data_raw(
-            element_offset, data_raw.data(), element_count);
-    }
-
-    set_mmap_proto_rows(
+    set_proto_rows(
         element_offset,
         std::span<const ScalarFieldProto* const>(rows.data(), rows.size()));
 }
 
 void
-ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
+ConcurrentVector<ArrayValue>::set_proto_rows(
     ssize_t element_offset, std::span<const ScalarFieldProto* const> rows) {
     if (rows.empty()) {
         return;
@@ -280,11 +259,11 @@ ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
     }
     chunks_ptr_->emplace_to_at_least(chunk_num, allocation_chunk_size);
 
-    using MmapArrayChunkVector =
+    using ArrayChunkVector =
         ThreadSafeChunkVector<ArrayValue,
                               VariableLengthChunk<ArrayValue>,
                               true>;
-    auto* mmap_chunks = static_cast<MmapArrayChunkVector*>(chunks_ptr_.get());
+    auto* chunks = static_cast<ArrayChunkVector*>(chunks_ptr_.get());
 
     ssize_t current_offset = element_offset;
     size_t source_offset = 0;
@@ -296,11 +275,11 @@ ConcurrentVector<ArrayValue>::set_mmap_proto_rows(
         const auto remaining_rows =
             static_cast<ssize_t>(rows.size() - source_offset);
         const auto copy_count = std::min(remaining_in_chunk, remaining_rows);
-        mmap_chunks->copy_array_rows_to_chunk(
+        chunks->copy_array_rows_to_chunk(
             chunk_id,
             static_cast<size_t>(chunk_offset),
             rows.subspan(source_offset, static_cast<size_t>(copy_count)),
-            *array_type_);
+            array_type_);
         current_offset += copy_count;
         source_offset += static_cast<size_t>(copy_count);
     }

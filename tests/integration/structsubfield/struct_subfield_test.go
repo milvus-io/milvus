@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -129,6 +130,16 @@ func (s *StructSubFieldSuite) TestAddedVectorAndNestedArrayWithMmap() {
 			s.Require().NoError(s.insert(ctx, name, 3, true, baseChildren()...))
 			s.assertBackfilled(ctx, name, 3, tc.child, 2, true)
 			s.flush(ctx, name)
+			if tc.field.GetDataType() == schemapb.DataType_ArrayOfVector {
+				// An element-nullable vector array needs an index before it is loaded again.
+				field := structName + "[" + tc.child + "]"
+				status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+					CollectionName: name, FieldName: field, IndexName: "idx_" + tc.child,
+					ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+				})
+				s.Require().NoError(merr.CheckRPCCall(status, err))
+				s.WaitForIndexBuilt(ctx, name, field)
+			}
 			s.release(ctx, name)
 			s.load(ctx, name)
 			s.assertBackfilled(ctx, name, 1, tc.child, 0, false)

@@ -1483,6 +1483,12 @@ PrepareSealedIndexLoadConfig(const LoadIndexInfo& load_index_info) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "metric type is empty for vector index");
         }
+        // Element nullability decides the domain of a VECTOR_ARRAY index's
+        // persisted validity; index_params do not carry it.
+        if (field_type == DataType::VECTOR_ARRAY) {
+            config[milvus::index::ELEMENT_NULLABLE] =
+                load_index_info.schema.element_nullable();
+        }
     }
 
     if (index_type == milvus::index::NGRAM_INDEX_TYPE) {
