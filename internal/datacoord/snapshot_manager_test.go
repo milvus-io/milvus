@@ -1235,6 +1235,62 @@ func TestSnapshotManager_BuildChannelMapping_Success(t *testing.T) {
 	assert.Equal(t, originalChannels, snapshotData.Collection.GetVirtualChannelNames())
 }
 
+func TestSnapshotManager_BuildChannelMapping_PreservesRoutingOrder(t *testing.T) {
+	// Different channel loads can assign the two collections different physical
+	// channel orders. The metadata arrays still define their routing indexes.
+	for _, targetChannels := range [][]string{
+		{"dml_0_200v0", "dml_1_200v1"},
+		{"replica_2_200v0", "replica_10_200v1"},
+	} {
+		t.Run(targetChannels[0], func(t *testing.T) {
+			source := []string{"dml_1_100v0", "dml_0_100v1"}
+			data := &snapshotstorage.SnapshotData{
+				Collection: &datapb.CollectionDescription{VirtualChannelNames: source},
+				Segments:   []*datapb.SegmentDescription{{SegmentId: 1, ChannelName: source[0]}},
+			}
+			sm := &snapshotManager{getChannelsByCollectionID: func(context.Context, int64) ([]RWChannel, error) {
+				return []RWChannel{&channelMeta{Name: targetChannels[1]}, &channelMeta{Name: targetChannels[0]}}, nil
+			}}
+			mapping, err := sm.buildChannelMapping(t.Context(), data, 200)
+			require.NoError(t, err)
+			for shard := range source {
+				require.Equal(t, targetChannels[shard], mapping[source[shard]])
+			}
+			require.Equal(t, []string{"dml_1_100v0", "dml_0_100v1"}, data.Collection.GetVirtualChannelNames())
+		})
+	}
+}
+
+func TestSnapshotManager_BuildChannelMapping_InvalidShardIndexes(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		source, target []string
+	}{
+		{"invalid source", []string{"invalid"}, []string{"p_200v0"}},
+		{"invalid target", []string{"p_100v0"}, []string{"invalid"}},
+		{"duplicate target", []string{"p_100v0", "q_100v1"}, []string{"p_200v0", "q_200v0"}},
+		{"duplicate source", []string{"p_100v0", "q_100v0"}, []string{"p_200v0", "q_200v1"}},
+		{"different indexes", []string{"p_100v0"}, []string{"p_200v1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := &snapshotManager{getChannelsByCollectionID: func(context.Context, int64) ([]RWChannel, error) {
+				channels := make([]RWChannel, len(tc.target))
+				for i, name := range tc.target {
+					channels[i] = &channelMeta{Name: name}
+				}
+				return channels, nil
+			}}
+			data := &snapshotstorage.SnapshotData{
+				Collection: &datapb.CollectionDescription{VirtualChannelNames: tc.source},
+				Segments:   []*datapb.SegmentDescription{{SegmentId: 1}},
+			}
+			mapping, err := sm.buildChannelMapping(t.Context(), data, 200)
+			require.Error(t, err)
+			require.Nil(t, mapping)
+		})
+	}
+}
+
 func TestSnapshotManager_BuildChannelMapping_EmptySegments(t *testing.T) {
 	ctx := context.Background()
 
@@ -5471,19 +5527,19 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 				SnapshotInfo: &datapb.SnapshotInfo{Name: "snapshot-1", CollectionId: 100},
 				Collection: &datapb.CollectionDescription{
 					Partitions:          map[string]int64{"source-partition": 10},
-					VirtualChannelNames: []string{"declared-channel"},
+					VirtualChannelNames: []string{"source_100v0"},
 				},
 				Segments: []*datapb.SegmentDescription{{
 					SegmentId:   1,
 					PartitionId: 10,
-					ChannelName: "missing-channel",
+					ChannelName: "source_100v1",
 				}},
 			},
 			targetPartitions: &milvuspb.ShowPartitionsResponse{
 				PartitionNames: []string{"source-partition"},
 				PartitionIDs:   []int64{20},
 			},
-			targetChannels: []RWChannel{&channelMeta{Name: "target-channel"}},
+			targetChannels: []RWChannel{&channelMeta{Name: "target_200v0"}},
 			reason:         "restore job creation failed",
 		},
 	}

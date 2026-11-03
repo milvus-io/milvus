@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1649,18 +1648,31 @@ func (sm *snapshotManager) buildChannelMapping(
 			len(snapshotChannels), len(targetChannels))
 	}
 
-	// Build mapping (sorted)
-	sort.Strings(snapshotChannels)
-
-	targetChannelNames := make([]string, len(targetChannels))
-	for i, ch := range targetChannels {
-		targetChannelNames[i] = ch.GetName()
+	// Copied rows retain their source routing shard. Physical channel names and
+	// slice iteration order must not change the shard index on the target.
+	targetByShard := make(map[int]string, len(targetChannels))
+	for _, channel := range targetChannels {
+		_, _, shard, err := funcutil.ParseVChannel(channel.GetName())
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to parse restore target vchannel")
+		}
+		if _, exists := targetByShard[shard]; exists {
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate restore target shard index %d", shard)
+		}
+		targetByShard[shard] = channel.GetName()
 	}
-	sort.Strings(targetChannelNames)
-
-	mapping := make(map[string]string)
-	for i, targetChannel := range targetChannelNames {
-		mapping[snapshotChannels[i]] = targetChannel
+	mapping := make(map[string]string, len(snapshotChannels))
+	for _, sourceChannel := range snapshotChannels {
+		_, _, shard, err := funcutil.ParseVChannel(sourceChannel)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to parse snapshot source vchannel")
+		}
+		targetChannel, exists := targetByShard[shard]
+		if !exists {
+			return nil, merr.WrapErrDataIntegrityMsg("snapshot shard index %d has no matching restore target", shard)
+		}
+		mapping[sourceChannel] = targetChannel
+		delete(targetByShard, shard)
 	}
 
 	return mapping, nil
