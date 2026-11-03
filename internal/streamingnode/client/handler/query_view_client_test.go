@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -41,7 +42,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 			return planResp, nil
 		},
 	}
-	client := newTestHandlerClient(queryPlanService, nil)
+	client := newTestHandlerClient(queryPlanService, nil, nil)
 
 	resp, err := client.QueryViewClient().GetQueryPlan(context.Background(), shardID, planReq)
 
@@ -68,7 +69,7 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 			return searchResp, nil
 		},
 	}
-	client := newTestHandlerClient(nil, viewQueryService)
+	client := newTestHandlerClient(nil, viewQueryService, nil)
 
 	resp, err := client.QueryViewClient().SearchOnView(context.Background(), types.PChannelInfo{Name: "p0"}, searchReq)
 
@@ -76,14 +77,14 @@ func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
 	require.Same(t, searchResp, resp)
 }
 
-func TestHandlerClientConvertsViewQueryRPCError(t *testing.T) {
+func TestHandlerClientPreservesViewQueryRPCError(t *testing.T) {
 	viewErr := viewerror.NewViewNotFound("missing view")
 	viewQueryService := &fakeViewQueryServiceClient{
 		searchOnView: func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-			return nil, viewerror.NewGRPCStatusFromViewError(viewErr).Err()
+			return nil, viewerror.ConvertViewError(viewpb.ViewQueryService_SearchOnView_FullMethodName, viewerror.NewGRPCStatusFromViewError(viewErr).Err())
 		},
 	}
-	client := newTestHandlerClient(nil, viewQueryService)
+	client := newTestHandlerClient(nil, viewQueryService, nil)
 
 	_, err := client.QueryViewClient().SearchOnView(context.Background(), types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
 
@@ -91,7 +92,25 @@ func TestHandlerClientConvertsViewQueryRPCError(t *testing.T) {
 	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
 }
 
-func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQueryService viewpb.ViewQueryServiceClient) *handlerClientImpl {
+func TestHandlerClientViewSyncRoutesByPChannelAssignment(t *testing.T) {
+	mockey.PatchConvey("view sync uses its current pchannel assignment", t, func() {
+		service := &syncViewRPC{}
+		mockey.Mock((*syncViewRPC).SyncQueryView).To(func(_ *syncViewRPC, ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+			serverID, ok := contextutil.GetPickServerID(ctx)
+			require.True(t, ok)
+			require.Equal(t, int64(101), serverID)
+			pchannel, err := decodeOutgoingQueryViewPChannel(ctx)
+			require.NoError(t, err)
+			require.Equal(t, types.PChannelInfo{Name: "p0", Term: 1, AccessMode: types.AccessModeRW}, pchannel)
+			return &syncViewStream{}, nil
+		}).Build()
+		client := newTestHandlerClient(nil, nil, service)
+		_, err := client.QueryViewSyncClient().SyncQueryView(t.Context(), "p0")
+		require.NoError(t, err)
+	})
+}
+
+func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQueryService viewpb.ViewQueryServiceClient, viewSyncService viewpb.ViewSyncServiceClient) *handlerClientImpl {
 	client := &handlerClientImpl{
 		lifetime: typeutil.NewLifetime(),
 		watcher: fakeAssignmentWatcher{
@@ -105,6 +124,10 @@ func newTestHandlerClient(queryPlanService viewpb.QueryPlanServiceClient, viewQu
 		owner:            client,
 		queryPlanService: fakeLazyService[viewpb.QueryPlanServiceClient]{service: queryPlanService},
 		viewQueryService: fakeLazyService[viewpb.ViewQueryServiceClient]{service: viewQueryService},
+	}
+	client.queryViewSyncClient = &queryViewSyncClient{
+		owner:           client,
+		viewSyncService: fakeLazyService[viewpb.ViewSyncServiceClient]{service: viewSyncService},
 	}
 	return client
 }
@@ -151,7 +174,7 @@ func (c *fakeQueryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, req *
 }
 
 type fakeViewQueryServiceClient struct {
-	viewpb.ViewQueryServiceClient // Retain the baseline, unused Requery RPC contract.
+	viewpb.ViewQueryServiceClient // Retain the unused Requery RPC contract.
 	searchOnView                  func(context.Context, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	queryOnView                   func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }

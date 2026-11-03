@@ -3,6 +3,7 @@ package streamingquery
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
@@ -66,7 +68,31 @@ func TestStreamingQueryRPC(t *testing.T) {
 	vc := desc.GetVirtualChannelNames()[0]
 	etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{os.Getenv("SN_QUERY_TEST_ETCD")}, DialTimeout: 5 * time.Second})
 	require.NoError(t, err)
-	defer etcd.Close()
+	t.Cleanup(func() { _ = etcd.Close() })
+	// Master reads immutable loading requirements, while the ordinary Proxy
+	// fixture still uses legacy loading. Explicitly seed only this test's View
+	// dependency when exercising the extracted RPCs without the QV publisher.
+	if os.Getenv("SN_QUERY_TEST_BOOTSTRAP_LOAD_INFO") == "1" && !recovering {
+		partitions, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: name})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(partitions.GetStatus()))
+		config := &viewpb.CollectionLoadConfig{CollectionID: desc.GetCollectionID(), Version: 1, PartitionIds: partitions.GetPartitionIDs()}
+		for _, field := range desc.GetSchema().GetFields() {
+			config.RequiredFields = append(config.RequiredFields, &viewpb.LoadFieldConfig{FieldId: field.GetFieldID()})
+		}
+		value, err := proto.Marshal(config)
+		require.NoError(t, err)
+		key := fmt.Sprintf("%s/meta/%s/%d/1", namespace, queryview.VersionedLoadInfoPrefix, desc.GetCollectionID())
+		created, err := etcd.Txn(ctx).If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).Then(clientv3.OpPut(key, string(value))).Commit()
+		require.NoError(t, err)
+		require.True(t, created.Succeeded, "test must never replace existing load requirements")
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := etcd.Txn(cleanupCtx).If(clientv3.Compare(clientv3.Value(key), "=", string(value))).Then(clientv3.OpDelete(key)).Commit()
+			require.NoError(t, err)
+		})
+	}
 	var assignment *streamingpb.PChannelMeta
 	var sn *grpc.ClientConn
 	var rpcctx context.Context
@@ -157,9 +183,19 @@ func TestStreamingQueryRPC(t *testing.T) {
 	retrieveBytes, err := proto.Marshal(retrievePlan)
 	require.NoError(t, err)
 	plans := viewpb.NewQueryPlanServiceClient(sn)
+	getQueryPlan := func(ctx context.Context, request *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		response, err := plans.GetQueryPlan(ctx, request)
+		if err == nil {
+			// The production query client restores payloads explicitly marked as
+			// reused before sending the plan to a worker. Direct RPC fixtures must
+			// honor that same contract.
+			err = qviews.RestoreQueryPlanPayloads(response, request)
+		}
+		return response, err
+	}
 	queries := viewpb.NewViewQueryServiceClient(sn)
 	getPlan := func() *viewpb.QueryPlan {
-		response, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: &viewpb.ShardID{ReplicaId: 40451, Vchannel: vc}, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
+		response, err := getQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: &viewpb.ShardID{ReplicaId: 40451, Vchannel: vc}, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
 		require.NoError(t, err)
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())
 		return response.GetPlan()
@@ -225,7 +261,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 	vectorField, err := schema.GetFieldFromName("vector")
 	require.NoError(t, err)
 	searchReq := &internalpb.SearchRequest{CollectionID: desc.GetCollectionID(), FieldId: vectorField.GetFieldID(), SerializedExprPlan: searchBytes, PlaceholderGroup: placeholder, Nq: 1, Topk: 3, MetricType: metric}
-	optimized, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
+	optimized, err := getQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 	require.NoError(t, err)
 	searchPlanRPC := optimized.GetPlan()
 	if bm25 {
@@ -299,7 +335,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 		verifyConcurrentSNViews(t, ctx, rpcctx, proxy, sn, etcd, namespace, name, view, getPlan(), searchPlanRPC.GetLegacySearchRequest())
 	}
 	if bm25 && os.Getenv("SN_QUERY_TEST_MULTIVERSION") == "1" {
-		response, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
+		response, err := getQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 		require.NoError(t, err)
 		require.True(t, proto.Equal(view.Meta.Version, response.GetPlan().GetVersion()))
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())

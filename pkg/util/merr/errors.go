@@ -278,6 +278,10 @@ var (
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
 	ErrQueryPlan           = newMilvusError("query plan failed", 2201, false, WithErrorType(InputError))
 
+	// ErrQueryViewNotReady asks the query owner to replan after its view was
+	// retired or became unavailable. It does not imply collection release.
+	ErrQueryViewNotReady = newMilvusError("query view not ready", 2202, true)
+
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
 	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2301, false)

@@ -43,11 +43,11 @@ func TestClientSearchOnViewRoutesByQueryNodeID(t *testing.T) {
 	require.Same(t, searchResp, resp)
 }
 
-func TestClientConvertsViewQueryRPCError(t *testing.T) {
+func TestClientPreservesViewQueryRPCError(t *testing.T) {
 	viewErr := viewerror.NewViewInvalidated("stale view")
 	service := &fakeViewQueryServiceClient{
 		queryOnView: func(context.Context, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
-			return nil, viewerror.NewGRPCStatusFromViewError(viewErr).Err()
+			return nil, viewerror.ConvertViewError(viewpb.ViewQueryService_QueryOnView_FullMethodName, viewerror.NewGRPCStatusFromViewError(viewErr).Err())
 		},
 	}
 	client := &clientImpl{
@@ -62,6 +62,7 @@ func TestClientConvertsViewQueryRPCError(t *testing.T) {
 
 	require.Error(t, err)
 	require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+	require.Nil(t, viewerror.RPCContextFromDetails(status.Convert(err).Details()))
 }
 
 type fakeLazyService[T any] struct {
@@ -118,5 +119,28 @@ func TestMissingSessionCarriesPreDispatchResolverRevision(t *testing.T) {
 	case <-unavailable.Changed:
 	default:
 		t.Fatal("resolver update lost")
+	}
+}
+
+// Local admission failures must not be attributed to the selected remote node.
+func TestClientAdmissionFailureHasNoRPCContext(t *testing.T) {
+	for _, stopped := range []bool{false, true} {
+		owner := &clientImpl{lifetime: typeutil.NewLifetime()}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if stopped {
+			owner.lifetime.SetState(typeutil.LifetimeStateStopped)
+		} else {
+			cancel()
+		}
+		client := &queryViewClient{owner: owner}
+		_, err := client.SearchOnView(ctx, 11, &viewpb.SearchOnViewRequest{})
+		require.Error(t, err)
+		require.Nil(t, viewerror.RPCContextFromDetails(status.Convert(err).Details()))
+		if stopped {
+			require.True(t, viewerror.AsViewError(err).IsOnShutdown())
+		} else {
+			require.Same(t, context.Canceled, err)
+		}
 	}
 }

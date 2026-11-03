@@ -64,12 +64,12 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	}).Build()
 	defer manager.UnPatch()
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, service.NewHandlerService(&schemaRPCManager{}))
 	go server.Serve(listener)
 	defer server.Stop()
 	conn, err := grpc.NewClient("passthrough:///schema-wal", grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()),
+		grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
