@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -28,13 +29,15 @@
 
 namespace milvus::index {
 
+class KnowhereEngine;
+
 /**
- * @brief Loads in-memory Knowhere readers from legacy artifacts.
+ * @brief Loads in-memory Knowhere engines from legacy artifacts.
  *
  * Materialized loads populate a BinarySet; mmap loads stream ordered engine
  * entries to a local file. Embedding-list sidecars and validity remain
- * separate. Owns the opened source and fixed load options; each Load creates a
- * new reader.
+ * separate. Resident loads reuse the source sequentially; cached construction
+ * transfers it with fixed load options to the engine slot.
  */
 class VectorMemLoader final : public IndexLoader {
  public:
@@ -59,7 +62,7 @@ class VectorMemLoader final : public IndexLoader {
          const IndexCacheConfig* cache = nullptr) override;
 
  private:
-    LegacyIndexSource source_;
+    std::optional<LegacyIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -72,6 +75,11 @@ class VectorMemLoader final : public IndexLoader {
      * sidecars.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
+    static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+    LoadEngine(storage::FileSource& source,
+               const storage::LoadOptions& opts,
+               bool use_async);
+
     static folly::coro::Task<IndexPtr>
     LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,

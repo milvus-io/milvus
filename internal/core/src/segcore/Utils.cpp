@@ -1692,7 +1692,8 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         translator->Family() == index::families::kSort ||
         translator->Family() == index::families::kFmIndex ||
         translator->Family() == index::families::kRTree ||
-        translator->Family() == index::families::kBitmap) {
+        translator->Family() == index::families::kBitmap ||
+        translator->Family() == index::families::kVectorMem) {
         load_index_info->index = translator->CreateIndex(op_ctx);
     } else {
         load_index_info->index = milvus::cachinglayer::Manager::GetInstance()

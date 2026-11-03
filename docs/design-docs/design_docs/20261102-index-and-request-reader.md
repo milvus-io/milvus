@@ -221,3 +221,5 @@ JSON flat 直接缓存 `JsonFlatIndexStorage`。根路径和已知行数保留�
 JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings 或 trie 在同一个 cell 内完成加载、校验和淘汰。JsonPathIndex 只保存路径路由与子 Index，通过子 Index 的 pin 获取 bitmap；不为 sidecar 创建第二个共享 FileSource 的 slot。Marisa、Ngram、Inverted、Sorted 和 Bitmap 均支持这个模式。Bitmap 的 bitset 与 Roaring 使用相同的存在性 bitmap 生命周期，HYBRID 选择的 JSON ARRAY 仍按父行查询。旧索引缺少行数时，路径与类型判断仍不做 I/O，Count 和 Exists 使用请求上下文加载实际 Storage。
 
 普通 ARRAY 的 nested Bitmap、Sorted、Inverted 沿用对应类型的 Storage cache，Count 和结果 bitmap 使用元素坐标。测试以 3 个父行、6 个元素检查 legacy/packed、同步/异步、heap/mmap 路径，确认 LoadInfo 的父行数不替换元素计数；JSON ARRAY 则保留父行坐标。
+
+内存向量由 VectorIndex 保存常驻 engine 或 CacheSlot<KnowhereEngine>，两种状态使用 variant 表达。Reader 的单次查询、取向量或有效性检查持有对应 engine pin，返回的迭代器继续持有该 pin，直到迭代器释放。类型、metric 和索引名称来自固定配置，不触发加载；未知 Count 从实际 engine 读取，不能用 VECTOR_ARRAY 的父行数代替。原有加载器的数量、维度、validity 校验仍在缓存发布前执行，稀疏向量使用同一加载路径。

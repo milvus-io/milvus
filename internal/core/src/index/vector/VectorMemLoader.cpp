@@ -18,6 +18,8 @@
 #include "storage/LocalFileIOPool.h"
 #include "index/vector/VectorMemLoader.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 #include "index/vector/VectorLoadUtils.h"
 
 #include <cstdint>
@@ -479,7 +481,7 @@ VectorMemLoader::Create(OpenedIndexSource source,
     }
     auto loader = std::unique_ptr<VectorMemLoader>(new VectorMemLoader(
         std::get<LegacyIndexSource>(std::move(source)), std::move(options)));
-    (void)PlanEntries(*loader->source_.source,
+    (void)PlanEntries(*loader->source_->source,
                       ParseRuntimeParams(loader->options_.params));
     co_return loader;
 }
@@ -487,9 +489,30 @@ VectorMemLoader::Create(OpenedIndexSource source,
 folly::coro::Task<IndexPtr>
 VectorMemLoader::Load(milvus::OpContext* context,
                       const IndexCacheConfig* cache) {
-    AssertInfo(cache == nullptr,
-               "cached loading is not yet migrated for this family");
-    return RunLegacyLoad(source_, options_, &LoadLegacy, context);
+    AssertInfo(source_.has_value(),
+               "cached vector construction consumed this loader");
+    if (!cache) {
+        co_return co_await RunLegacyLoad(
+            *source_, options_, &LoadLegacy, context);
+    }
+    const auto params = ParseRuntimeParams(options_.params);
+    const bool use_async = source_->use_async;
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunLegacyLoad<std::unique_ptr<KnowhereEngine>>(
+            source, options, &LoadEngine, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                *cache, use_async, std::move(load)),
+            context);
+    co_return std::make_shared<VectorIndex>(std::move(slot),
+                                            params.physical_type,
+                                            params.index_type,
+                                            params.metric_type);
 }
 
 ReaderCaps
@@ -502,6 +525,14 @@ VectorMemLoader::DeriveCaps(const Config& index_meta) {
 
 folly::coro::Task<IndexPtr>
 VectorMemLoader::LoadLegacy(storage::FileSource& source,
+                            const storage::LoadOptions& opts,
+                            bool use_async) {
+    auto engine = co_await LoadEngine(source, opts, use_async);
+    co_return std::make_shared<VectorIndex>(std::move(*engine));
+}
+
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+VectorMemLoader::LoadEngine(storage::FileSource& source,
                             const storage::LoadOptions& opts,
                             bool use_async) {
     const auto params = ParseRuntimeParams(opts.params);
@@ -517,7 +548,7 @@ VectorMemLoader::LoadLegacy(storage::FileSource& source,
     }
     OpenedMemState state(params);
     co_await PopulateState(use_async, state, source, opts, params, plan);
-    co_return std::make_shared<VectorIndex>(std::move(state.engine));
+    co_return std::make_unique<KnowhereEngine>(std::move(state.engine));
 }
 
 }  // namespace milvus::index

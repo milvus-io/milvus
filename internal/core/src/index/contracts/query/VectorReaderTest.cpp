@@ -35,6 +35,8 @@
 #include "index/contracts/query/IVectorReader.h"
 #include "index/test_utils/TestArtifactIO.h"
 #include "index/vector/VectorIndexReader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/CacheSlot.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/artifact/LoadOptions.h"
@@ -106,7 +108,84 @@ OpenFloatVectors(bool all_null) {
     return LoadFloatVectors(input, false);
 }
 
-TEST(VectorIndexOwnershipTest, IteratorRetainsIndexAfterReadersAreReleased) {
+TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    IndexCacheConfig config{
+        "vector-engine-lifetime-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    int loads = 0;
+    auto load =
+        [&](OpContext*) -> folly::coro::Task<std::unique_ptr<KnowhereEngine>> {
+        ++loads;
+        auto engine = std::make_unique<KnowhereEngine>(
+            DataType::VECTOR_FLOAT,
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_HNSW,
+            knowhere::metric::L2,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
+        engine->SetDim(kDim);
+        const std::array<float, 6> rows{0, 0, 1, 1, 2, 2};
+        const knowhere::Json params{
+            {"metric_type", "L2"}, {"M", 16}, {"efConstruction", 64}};
+        EXPECT_EQ(
+            engine->native_index.Build(
+                knowhere::GenDataSet(3, kDim, rows.data()), params, false),
+            knowhere::Status::success);
+        co_return engine;
+    };
+    auto slot = std::make_shared<cachinglayer::CacheSlot<KnowhereEngine>>(
+        std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+            config, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    auto index = std::make_shared<VectorIndex>(slot,
+                                               DataType::VECTOR_FLOAT,
+                                               knowhere::IndexEnum::INDEX_HNSW,
+                                               knowhere::metric::L2);
+    OpContext ctx;
+    auto reader = index->CreateReader(&ctx);
+    EXPECT_EQ(loads, 0);
+    EXPECT_EQ(reader->Count(), 3);
+    EXPECT_EQ(loads, 1);
+    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto* vector = dynamic_cast<const IVectorReader*>(reader.get());
+    ASSERT_NE(vector, nullptr);
+    const std::array<float, 2> query{0, 0};
+    auto iterators = vector->Iterators(GenDataset(1, kDim, query.data()),
+                                       {{"metric_type", "L2"}, {"ef", 64}},
+                                       BitsetView{},
+                                       nullptr);
+    ASSERT_TRUE(iterators.has_value()) << iterators.what();
+    ASSERT_EQ(iterators.value().size(), 1);
+    EXPECT_EQ(loads, 2);
+    index.reset();
+    reader.reset();
+    EXPECT_FALSE(slot->ManualEvict(0));
+    const auto has_next = iterators.value().front()->HasNext();
+    ASSERT_TRUE(has_next.has_value());
+    ASSERT_TRUE(has_next.value());
+    auto hit = iterators.value().front()->Next();
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit.value().first, 0);
+    iterators.value().clear();
+    EXPECT_TRUE(slot->ManualEvict(0));
+}
+
+TEST(VectorIndexOwnershipTest, IteratorRetainsEngineAfterReadersAreReleased) {
     KnowhereEngine engine(
         DataType::VECTOR_FLOAT,
         DataType::NONE,
@@ -121,8 +200,10 @@ TEST(VectorIndexOwnershipTest, IteratorRetainsIndexAfterReadersAreReleased) {
     ASSERT_EQ(engine.native_index.Build(
                   knowhere::GenDataSet(3, kDim, rows.data()), config, false),
               knowhere::Status::success);
-    auto index = std::make_shared<VectorIndex>(std::move(engine));
-    std::weak_ptr<const VectorIndex> lifetime = index;
+    auto owned_engine =
+        std::make_shared<const KnowhereEngine>(std::move(engine));
+    std::weak_ptr<const KnowhereEngine> lifetime = owned_engine;
+    auto index = std::make_shared<VectorIndex>(std::move(owned_engine));
     auto first = index->CreateReader(nullptr);
     auto second = index->CreateReader(nullptr);
     EXPECT_NE(first.get(), second.get());

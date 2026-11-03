@@ -4270,8 +4270,10 @@ ChunkedSegmentSealedImpl::FilterVectorValidOffsetsFromIndex(
     // offsets stay in logical row space and only null rows are dropped.
     result.valid_data = std::make_unique<bool[]>(count);
     result.valid_offsets.reserve(count);
+    TargetBitmap valid(count, true);
+    reader.ApplyValidDataByOffsets(seg_offsets, count, valid.view());
     for (int64_t i = 0; i < count; ++i) {
-        result.valid_data[i] = reader.IsRowValid(seg_offsets[i]);
+        result.valid_data[i] = valid[i];
         if (result.valid_data[i]) {
             result.valid_offsets.push_back(seg_offsets[i]);
         }

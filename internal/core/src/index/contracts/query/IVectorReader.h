@@ -63,12 +63,8 @@ class IVectorReader {
            milvus::OpContext* op_ctx,
            SearchResult& result) const = 0;
 
-    // Returned iterators do not carry a reader pin. Consumers may retain them in
-    // SearchResult::vector_iterators_, and knowhere iterators borrow the index's
-    // IdMap to map their result ids back to logical rows. The consumer must keep
-    // all borrowed state alive for iterator use. TODO: audit and wire that
-    // lifetime anchor across deferred consumption; this return type alone does
-    // not establish it.
+    // Iterators retain their exact engine pin, including the IdMap and file
+    // owner. Query buffers, bitsets and operation context remain caller-owned.
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,

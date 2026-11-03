@@ -28,6 +28,7 @@
 #include "common/FastMem.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
+#include "cachinglayer/CacheSlot.h"
 #include "index/Meta.h"
 #include "index/vector/RangeSearchParams.h"
 #include "index/vector/VectorDiskAnnUtils.h"
@@ -122,61 +123,92 @@ EngineHasValidity(const KnowhereEngine& engine) {
     return result.value();
 }
 
+bool
+EngineIsRowValid(const KnowhereEngine& engine, int64_t logical_offset) {
+    const auto result = engine.native_index.IsRowValid(logical_offset);
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
+                  "failed to read row validity: {}",
+                  result.what());
+    }
+    return result.value();
+}
+
 }  // namespace
 
 VectorIndex::VectorIndex(KnowhereEngine engine)
-    : engine_(std::move(engine)),
-      physical_count_(IsAllNullNullable(engine_.native_index) ||
-                              engine_.IsEmptyEmbListIndex()
-                          ? 0
-                          : engine_.native_index.Count()) {
+    : VectorIndex(std::make_shared<const KnowhereEngine>(std::move(engine))) {
+}
+
+VectorIndex::VectorIndex(std::shared_ptr<const KnowhereEngine> engine)
+    : engine_(std::move(engine)) {
+    const auto& owned =
+        std::get<std::shared_ptr<const KnowhereEngine>>(engine_);
+    AssertInfo(owned != nullptr, "vector index requires an engine");
+    physical_count_ =
+        IsAllNullNullable(owned->native_index) || owned->IsEmptyEmbListIndex()
+            ? 0
+            : owned->native_index.Count();
+}
+
+VectorIndex::VectorIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot,
+    DataType physical_type,
+    IndexType index_type,
+    MetricType metric)
+    : engine_(CachedEngine{std::move(slot),
+                           physical_type,
+                           std::move(index_type),
+                           std::move(metric)}) {
+    AssertInfo(std::get<CachedEngine>(engine_).slot != nullptr,
+               "vector index requires a cache slot");
 }
 
 VectorIndex::VectorIndex(uint32_t disk_ann_beamwidth, KnowhereEngine engine)
-    : engine_(std::move(engine)),
-      backend_(Backend::Disk),
-      disk_ann_beamwidth_(disk_ann_beamwidth),
-      physical_count_(IsAllNullNullable(engine_.native_index) ||
-                              engine_.IsEmptyEmbListIndex()
-                          ? 0
-                          : engine_.native_index.Count()) {
-    ValidateDiskAnnBeamwidth(engine_, disk_ann_beamwidth_);
+    : VectorIndex(std::move(engine)) {
+    backend_ = Backend::Disk;
+    disk_ann_beamwidth_ = disk_ann_beamwidth;
+    ValidateDiskAnnBeamwidth(
+        *std::get<std::shared_ptr<const KnowhereEngine>>(engine_),
+        disk_ann_beamwidth_);
 }
 
 VectorIndex::VectorIndex(KnowhereEngine engine,
                          int64_t logical_count,
                          int64_t physical_count,
                          knowhere::Json search_defaults)
-    : engine_(std::move(engine)),
+    : engine_(std::make_shared<const KnowhereEngine>(std::move(engine))),
       backend_(Backend::Memory),
       physical_count_(physical_count),
       logical_count_(logical_count),
       growing_search_defaults_(std::move(search_defaults)) {
-    AssertInfo(physical_count_ >= 0,
+    const auto& owned =
+        *std::get<std::shared_ptr<const KnowhereEngine>>(engine_);
+    AssertInfo(physical_count >= 0,
                "growing vector reader physical count {} is negative",
-               physical_count_);
-    AssertInfo(logical_count_ >= physical_count_,
+               physical_count);
+    AssertInfo(logical_count_ >= physical_count,
                "growing vector reader logical count {} is below its physical "
                "count {}",
                logical_count_,
-               physical_count_);
-    if (physical_count_ > 0) {
-        const auto engine_count = engine_.native_index.Count();
-        AssertInfo(physical_count_ <= engine_count,
+               physical_count);
+    if (physical_count > 0) {
+        const auto engine_count = owned.native_index.Count();
+        AssertInfo(physical_count <= engine_count,
                    "growing vector reader physical count {} exceeds engine "
                    "count {}",
-                   physical_count_,
+                   physical_count,
                    engine_count);
     }
     // The shared IdMap keeps growing behind this generation, so only the
     // frozen prefix may be compared against it.
-    const auto logical_count_result = engine_.native_index.LogicalCount();
+    const auto logical_count_result = owned.native_index.LogicalCount();
     if (!logical_count_result.has_value()) {
         ThrowInfo(KnowhereStatusToErrorCode(logical_count_result.error()),
                   "failed to read growing logical count: {}",
                   logical_count_result.what());
     }
-    AssertInfo(!EngineHasValidity(engine_) ||
+    AssertInfo(!EngineHasValidity(owned) ||
                    static_cast<int64_t>(logical_count_result.value()) >=
                        logical_count_,
                "growing vector reader logical count {} exceeds the published "
@@ -187,7 +219,38 @@ VectorIndex::VectorIndex(KnowhereEngine engine,
 
 IndexMetadata
 VectorIndex::Metadata() const {
-    return {ReaderCaps{}, Domain::Row, engine_.PhysicalType(), physical_count_};
+    const auto* cached = std::get_if<CachedEngine>(&engine_);
+    const auto type =
+        cached ? cached->physical_type
+               : std::get<std::shared_ptr<const KnowhereEngine>>(engine_)
+                     ->PhysicalType();
+    return {ReaderCaps{}, Domain::Row, type, physical_count_};
+}
+
+std::shared_ptr<const KnowhereEngine>
+VectorIndex::PinEngine(milvus::OpContext* op_ctx) const {
+    if (const auto* resident =
+            std::get_if<std::shared_ptr<const KnowhereEngine>>(&engine_))
+        return *resident;
+    const auto& cached = std::get<CachedEngine>(engine_);
+    std::shared_ptr<const KnowhereEngine> engine;
+    if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+        engine = {cached.slot, resident};
+    } else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        engine = {std::move(pin), cell};
+    }
+    AssertInfo(engine && engine->PhysicalType() == cached.physical_type,
+               "cached vector engine disagrees with metadata");
+    return engine;
+}
+
+void
+VectorIndex::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedEngine>(&engine_))
+        cached->slot->CancelWarmup();
 }
 
 IIndexReaderBasePtr
@@ -226,7 +289,9 @@ VectorIndexReader::VectorIndexReader(std::shared_ptr<const VectorIndex> index,
 
 cachinglayer::ResourceUsage
 VectorIndexReader::CellByteSize() const {
-    return index_->engine_.CellByteSize();
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return engine.CellByteSize();
 }
 
 ReaderCaps
@@ -245,12 +310,16 @@ VectorIndexReader::CoordDomain() const {
 
 int64_t
 VectorIndexReader::Count() const {
-    return IsEmptyEngine() ? 0 : index_->physical_count_;
+    if (index_->physical_count_)
+        return *index_->physical_count_;
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return IsEmptyEngine(engine) ? 0 : engine.native_index.Count();
 }
 
 DataType
 VectorIndexReader::ValueType() const {
-    return index_->engine_.PhysicalType();
+    return index_->Metadata().value_type;
 }
 
 int64_t
@@ -265,23 +334,26 @@ VectorIndexReader::Search(const DatasetPtr& dataset,
                           const BitsetView& bitset,
                           milvus::OpContext* op_ctx,
                           SearchResult& result) const {
+    op_ctx = op_ctx ? op_ctx : op_ctx_;
+    const auto engine_pin = index_->PinEngine(op_ctx);
+    const auto& engine = *engine_pin;
     if (!IsGrowingGeneration()) {
         if (index_->backend_ == Backend::Disk) {
-            SearchDisk(dataset, params, bitset, op_ctx, result);
+            SearchDisk(engine, dataset, params, bitset, op_ctx, result);
         } else {
-            SearchMemory(dataset, params, bitset, op_ctx, result);
+            SearchMemory(engine, dataset, params, bitset, op_ctx, result);
         }
         return;
     }
     if (index_->physical_count_ == 0) {
-        FillEmptySearchResult(dataset, params, result);
+        FillEmptySearchResult(engine, dataset, params, result);
         return;
     }
 
     TargetBitmap prefix_storage;
     const auto bounded = BoundSearchBitset(bitset, prefix_storage);
-    const auto effective = EffectiveSearchParams(params);
-    SearchMemory(dataset, effective, bounded, op_ctx, result);
+    const auto effective = EffectiveSearchParams(engine, params);
+    SearchMemory(engine, dataset, effective, bounded, op_ctx, result);
 }
 
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
@@ -289,20 +361,23 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
                              const knowhere::Json& json,
                              const BitsetView& bitset,
                              milvus::OpContext* op_ctx) const {
+    op_ctx = op_ctx ? op_ctx : op_ctx_;
+    const auto engine_pin = index_->PinEngine(op_ctx);
+    const auto& engine = *engine_pin;
     const auto shape = detail::ValidateQueryDataset(
-        dataset, index_->engine_.PhysicalType(), index_->engine_.Dim());
-    if (IsEmptyEngine()) {
+        dataset, engine.PhysicalType(), engine.Dim());
+    if (IsEmptyEngine(engine)) {
         return detail::MakeEmptyVectorIterators(shape.logical_nq_size);
     }
     const auto bounded = BoundIteratorBitset(bitset);
-    auto result = index_->engine_.native_index.AnnIterator(
-        dataset, json, bounded, false, op_ctx);
+    auto result =
+        engine.native_index.AnnIterator(dataset, json, bounded, false, op_ctx);
     if (!result.has_value()) {
         return result;
     }
     // Native iterator destruction may still use the engine and its file owner.
     struct IteratorOwner {
-        std::shared_ptr<const VectorIndex> index;
+        std::shared_ptr<const KnowhereEngine> engine;
         knowhere::IndexNode::IteratorPtr iterator;
     };
     for (auto& iterator : result.value()) {
@@ -311,7 +386,7 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
         }
         auto* raw = iterator.get();
         auto owner = std::make_shared<IteratorOwner>(
-            IteratorOwner{index_, std::move(iterator)});
+            IteratorOwner{engine_pin, std::move(iterator)});
         iterator = knowhere::IndexNode::IteratorPtr(std::move(owner), raw);
     }
     return result;
@@ -319,18 +394,23 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
 
 bool
 VectorIndexReader::RefineEnabled() const {
-    return !IsEmptyEngine() &&
-           index_->engine_.native_index.IsIndexRefineEnabled();
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return !IsEmptyEngine(engine) && engine.native_index.IsIndexRefineEnabled();
 }
 
 bool
 VectorIndexReader::HasRawData() const {
-    return IsEmptyEngine() ||
-           index_->engine_.native_index.HasRawData(index_->engine_.Metric());
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return IsEmptyEngine(engine) ||
+           engine.native_index.HasRawData(engine.Metric());
 }
 
 std::vector<uint8_t>
 VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     auto reject_sparse = [&]() -> std::vector<uint8_t> {
         ThrowInfo(Unsupported,
                   index_->backend_ == Backend::Disk
@@ -339,60 +419,61 @@ VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
                       : "dense vector retrieval is not supported for a sparse "
                         "index");
     };
-    if (index_->engine_.PhysicalType() == DataType::VECTOR_SPARSE_U32_F32) {
+    if (engine.PhysicalType() == DataType::VECTOR_SPARSE_U32_F32) {
         return reject_sparse();
     }
-    ValidateGenerationIds(dataset, "get vector");
+    ValidateGenerationIds(engine, dataset, "get vector");
     const auto request = detail::ValidateIdRequest(dataset, "get vector");
     if (request.rows_size == 0) {
         return {};
     }
-    if (IsAllNullNullable(index_->engine_.native_index)) {
+    if (IsAllNullNullable(engine.native_index)) {
         ThrowInfo(UnexpectedError,
                   "failed to get vector, this nullable vector index contains "
                   "no valid vectors");
     }
     return DispatchPhysicalVectorDataType(
-        index_->engine_.PhysicalType(),
+        engine.PhysicalType(),
         [&]<typename T>() -> std::vector<uint8_t> {
             if constexpr (std::is_same_v<T, sparse_u32_f32>) {
                 return reject_sparse();
             } else {
-                return detail::RetrieveDenseVectors<T>(index_->engine_,
-                                                       dataset);
+                return detail::RetrieveDenseVectors<T>(engine, dataset);
             }
         },
         [&]() -> std::vector<uint8_t> {
             ThrowInfo(DataTypeInvalid,
                       "invalid physical vector data type {}",
-                      index_->engine_.PhysicalType());
+                      engine.PhysicalType());
         });
 }
 
 std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     if (index_->backend_ == Backend::Disk) {
         ThrowInfo(Unsupported,
                   "sparse vector retrieval is not supported for disk indexes");
     }
-    if (index_->engine_.PhysicalType() != DataType::VECTOR_SPARSE_U32_F32) {
+    if (engine.PhysicalType() != DataType::VECTOR_SPARSE_U32_F32) {
         ThrowInfo(Unsupported,
                   "sparse vector retrieval is not supported for a dense "
                   "index");
     }
 
-    ValidateGenerationIds(dataset, "get sparse vector");
+    ValidateGenerationIds(engine, dataset, "get sparse vector");
     const auto request =
         detail::ValidateIdRequest(dataset, "get sparse vector");
     if (request.rows_size == 0) {
         return nullptr;
     }
-    if (IsAllNullNullable(index_->engine_.native_index)) {
+    if (IsAllNullNullable(engine.native_index)) {
         ThrowInfo(UnexpectedError,
                   "failed to get vector, this nullable vector index contains "
                   "no valid vectors");
     }
-    auto retrieved = index_->engine_.native_index.GetVectorByIds(dataset);
+    auto retrieved = engine.native_index.GetVectorByIds(dataset);
     if (!retrieved.has_value()) {
         detail::ThrowRetrievalError("get sparse vector", retrieved);
     }
@@ -428,17 +509,31 @@ VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
 
 MetricType
 VectorIndexReader::Metric() const {
-    return index_->engine_.Metric();
+    if (const auto* cached =
+            std::get_if<VectorIndex::CachedEngine>(&index_->engine_)) {
+        return cached->metric;
+    }
+    const auto& engine =
+        *std::get<std::shared_ptr<const KnowhereEngine>>(index_->engine_);
+    return engine.Metric();
 }
 
 IndexType
 VectorIndexReader::KnowhereIndexType() const {
-    return index_->engine_.KnowhereIndexType();
+    if (const auto* cached =
+            std::get_if<VectorIndex::CachedEngine>(&index_->engine_)) {
+        return cached->index_type;
+    }
+    const auto& engine =
+        *std::get<std::shared_ptr<const KnowhereEngine>>(index_->engine_);
+    return engine.KnowhereIndexType();
 }
 
 int64_t
 VectorIndexReader::Dim() const {
-    return index_->engine_.Dim();
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return engine.Dim();
 }
 
 knowhere::Json
@@ -446,22 +541,28 @@ VectorIndexReader::PrepareSearchParams(const VectorSearchParams& params) const {
     if (!IsGrowingGeneration()) {
         return PrepareVectorSearchParams(params);
     }
-    return PrepareVectorSearchParams(EffectiveSearchParams(params));
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    return PrepareVectorSearchParams(
+        EffectiveSearchParams(*engine_pin, params));
 }
 
 bool
 VectorIndexReader::HasValidData() const {
-    return EngineHasValidity(index_->engine_);
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
+    return EngineHasValidity(engine);
 }
 
 int64_t
 VectorIndexReader::ValidCount() const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     // A growing generation reports the vector count it froze, not the live
     // count of the shared engine.
     if (IsGrowingGeneration()) {
-        return index_->physical_count_;
+        return index_->physical_count_.value();
     }
-    const auto result = index_->engine_.native_index.ValidCount();
+    const auto result = engine.native_index.ValidCount();
     if (!result.has_value()) {
         ThrowInfo(KnowhereStatusToErrorCode(result.error()),
                   "failed to read valid count: {}",
@@ -472,29 +573,27 @@ VectorIndexReader::ValidCount() const {
 
 bool
 VectorIndexReader::IsRowValid(int64_t logical_offset) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     if (IsGrowingGeneration() &&
         (logical_offset < 0 || logical_offset >= index_->logical_count_)) {
         return false;
     }
-    const auto result = index_->engine_.native_index.IsRowValid(logical_offset);
-    if (!result.has_value()) {
-        ThrowInfo(KnowhereStatusToErrorCode(result.error()),
-                  "failed to read row validity: {}",
-                  result.what());
-    }
-    return result.value();
+    return EngineIsRowValid(engine, logical_offset);
 }
 
 void
 VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset,
                                          int64_t count,
                                          TargetBitmapView valid_result) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity range result size mismatch");
-    const auto status = index_->engine_.native_index.IntersectValidity(
-        logical_offset,
-        static_cast<size_t>(count),
-        ValidityTarget(valid_result));
+    const auto status =
+        engine.native_index.IntersectValidity(logical_offset,
+                                              static_cast<size_t>(count),
+                                              ValidityTarget(valid_result));
     if (status != knowhere::Status::success) {
         ThrowInfo(KnowhereStatusToErrorCode(status),
                   "failed to apply validity range: {}",
@@ -516,9 +615,11 @@ VectorIndexReader::ApplyValidDataByOffsets(
     const int64_t* offsets,
     int64_t count,
     TargetBitmapView valid_result) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity offset result size mismatch");
-    const auto status = index_->engine_.native_index.IntersectValidityAt(
+    const auto status = engine.native_index.IntersectValidityAt(
         offsets, static_cast<size_t>(count), ValidityTarget(valid_result));
     if (status != knowhere::Status::success) {
         ThrowInfo(KnowhereStatusToErrorCode(status),
@@ -541,17 +642,22 @@ VectorIndexReader::CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                                  size_t labels_len,
                                  bool is_cosine,
                                  milvus::OpContext* op_ctx) const {
-    ValidateGenerationIds(labels, labels_len, "calculate distance");
-    return index_->engine_.native_index.CalcDistByIDs(
+    op_ctx = op_ctx ? op_ctx : op_ctx_;
+    const auto engine_pin = index_->PinEngine(op_ctx);
+    const auto& engine = *engine_pin;
+    ValidateGenerationIds(engine, labels, labels_len, "calculate distance");
+    return engine.native_index.CalcDistByIDs(
         query_dataset, bitset, labels, labels_len, is_cosine, op_ctx);
 }
 
 std::pair<std::vector<uint8_t>, std::vector<size_t>>
 VectorIndexReader::GetEmbListByIds(const DatasetPtr& dataset,
                                    const std::string& metric_type) const {
+    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine = *engine_pin;
     using Result = std::pair<std::vector<uint8_t>, std::vector<size_t>>;
     return DispatchPhysicalVectorDataType(
-        index_->engine_.PhysicalType(),
+        engine.PhysicalType(),
         [&]<typename T>() -> Result {
             if constexpr (std::is_same_v<T, sparse_u32_f32>) {
                 ThrowInfo(Unsupported,
@@ -559,13 +665,13 @@ VectorIndexReader::GetEmbListByIds(const DatasetPtr& dataset,
                           "elements");
             } else {
                 return detail::RetrieveEmbeddingLists<T>(
-                    index_->engine_, dataset, metric_type);
+                    engine, dataset, metric_type);
             }
         },
         [&]() -> Result {
             ThrowInfo(DataTypeInvalid,
                       "invalid physical vector data type {}",
-                      index_->engine_.PhysicalType());
+                      engine.PhysicalType());
         });
 }
 
@@ -576,16 +682,16 @@ VectorIndexReader::IsGrowingGeneration() const {
 
 VectorSearchParams
 VectorIndexReader::EffectiveSearchParams(
-    const VectorSearchParams& params) const {
+    const KnowhereEngine& engine, const VectorSearchParams& params) const {
     auto effective = params;
-    effective.metric_type_ = index_->engine_.Metric();
+    effective.metric_type_ = engine.Metric();
     effective.search_params_ = *index_->growing_search_defaults_;
     for (const auto* key : kGrowingQueryOverrides) {
         if (params.search_params_.contains(key)) {
             effective.search_params_[key] = params.search_params_.at(key);
         }
     }
-    if (index_->engine_.Metric() == knowhere::metric::BM25) {
+    if (engine.Metric() == knowhere::metric::BM25) {
         effective.search_params_[knowhere::meta::BM25_AVGDL] =
             params.search_params_.at(knowhere::meta::BM25_AVGDL);
     }
@@ -593,11 +699,12 @@ VectorIndexReader::EffectiveSearchParams(
 }
 
 void
-VectorIndexReader::FillEmptySearchResult(const DatasetPtr& dataset,
+VectorIndexReader::FillEmptySearchResult(const KnowhereEngine& engine,
+                                         const DatasetPtr& dataset,
                                          const VectorSearchParams& params,
                                          SearchResult& result) const {
     const auto shape = detail::ValidateQueryDataset(
-        dataset, index_->engine_.PhysicalType(), index_->engine_.Dim());
+        dataset, engine.PhysicalType(), engine.Dim());
     const auto result_count = detail::CheckedResultCount(shape, params.topk_);
     result.seg_offsets_.assign(result_count, INVALID_SEG_OFFSET);
     result.distances_.assign(result_count, 0.0F);
@@ -606,18 +713,19 @@ VectorIndexReader::FillEmptySearchResult(const DatasetPtr& dataset,
 }
 
 void
-VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
+VectorIndexReader::SearchMemory(const KnowhereEngine& engine,
+                                const DatasetPtr& dataset,
                                 const VectorSearchParams& params,
                                 const BitsetView& bitset,
                                 milvus::OpContext* op_ctx,
                                 SearchResult& result) const {
     const auto shape = detail::ValidateQueryDataset(
-        dataset, index_->engine_.PhysicalType(), index_->engine_.Dim());
+        dataset, engine.PhysicalType(), engine.Dim());
     const auto topk = params.topk_;
     const auto result_count = detail::CheckedResultCount(shape, topk);
     auto search_conf = PrepareVectorSearchParams(params);
 
-    if (IsEmptyEngine()) {
+    if (IsEmptyEngine(engine)) {
         result.seg_offsets_.assign(result_count, INVALID_SEG_OFFSET);
         result.distances_.assign(result_count, 0.0F);
         result.total_nq_ = shape.logical_nq;
@@ -627,9 +735,9 @@ VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
 
     auto final = [&] {
         if (CheckAndUpdateKnowhereRangeSearchParam(
-                params, topk, index_->engine_.Metric(), search_conf)) {
+                params, topk, engine.Metric(), search_conf)) {
             milvus::tracer::AddEvent("start_knowhere_index_range_search");
-            auto search = index_->engine_.native_index.RangeSearch(
+            auto search = engine.native_index.RangeSearch(
                 dataset, search_conf, bitset, op_ctx);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!search.has_value()) {
@@ -640,18 +748,15 @@ VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
                           knowhere::Status2String(status),
                           search.what());
             }
-            auto regenerated =
-                milvus::ReGenRangeSearchResult(search.value(),
-                                               topk,
-                                               shape.logical_nq,
-                                               index_->engine_.Metric());
+            auto regenerated = milvus::ReGenRangeSearchResult(
+                search.value(), topk, shape.logical_nq, engine.Metric());
             milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
             return regenerated;
         }
 
         milvus::tracer::AddEvent("start_knowhere_index_search");
-        auto search = index_->engine_.native_index.Search(
-            dataset, search_conf, bitset, op_ctx);
+        auto search =
+            engine.native_index.Search(dataset, search_conf, bitset, op_ctx);
         milvus::tracer::AddEvent("finish_knowhere_index_search");
         if (!search.has_value()) {
             const auto status = search.error();
@@ -669,24 +774,25 @@ VectorIndexReader::SearchMemory(const DatasetPtr& dataset,
 }
 
 void
-VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
+VectorIndexReader::SearchDisk(const KnowhereEngine& engine,
+                              const DatasetPtr& dataset,
                               const VectorSearchParams& params,
                               const BitsetView& bitset,
                               milvus::OpContext* op_ctx,
                               SearchResult& result) const {
     const auto shape = detail::ValidateQueryDataset(
-        dataset, index_->engine_.PhysicalType(), index_->engine_.Dim());
-    if (params.metric_type_ != index_->engine_.Metric()) {
+        dataset, engine.PhysicalType(), engine.Dim());
+    if (params.metric_type_ != engine.Metric()) {
         ThrowInfo(MetricTypeInvalid,
                   "vector query metric {} disagrees with index metric {}",
                   params.metric_type_,
-                  index_->engine_.Metric());
+                  engine.Metric());
     }
     const auto topk = params.topk_;
     const auto result_count = detail::CheckedResultCount(shape, topk);
     auto search_config = PrepareVectorSearchParams(params);
 
-    if (IsEmptyEngine()) {
+    if (IsEmptyEngine(engine)) {
         result.seg_offsets_.assign(result_count, INVALID_SEG_OFFSET);
         result.distances_.assign(result_count, 0.0F);
         result.total_nq_ = shape.logical_nq;
@@ -694,9 +800,8 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
         return;
     }
 
-    if (index_->engine_.KnowhereIndexType() ==
-        knowhere::IndexEnum::INDEX_DISKANN) {
-        ValidateDiskAnnBeamwidth(index_->engine_, index_->disk_ann_beamwidth_);
+    if (engine.KnowhereIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+        ValidateDiskAnnBeamwidth(engine, index_->disk_ann_beamwidth_);
         if (params.search_params_.contains(DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
                 params.search_params_.at(DISK_ANN_QUERY_LIST);
@@ -708,20 +813,18 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
 
     auto final = [&] {
         if (CheckAndUpdateKnowhereRangeSearchParam(
-                params, topk, index_->engine_.Metric(), search_config)) {
-            auto search = index_->engine_.native_index.RangeSearch(
+                params, topk, engine.Metric(), search_config)) {
+            auto search = engine.native_index.RangeSearch(
                 dataset, search_config, bitset, op_ctx);
             if (!search.has_value()) {
                 ThrowSearchError("range search", search);
             }
-            return milvus::ReGenRangeSearchResult(search.value(),
-                                                  topk,
-                                                  shape.logical_nq,
-                                                  index_->engine_.Metric());
+            return milvus::ReGenRangeSearchResult(
+                search.value(), topk, shape.logical_nq, engine.Metric());
         }
 
-        auto search = index_->engine_.native_index.Search(
-            dataset, search_config, bitset, op_ctx);
+        auto search =
+            engine.native_index.Search(dataset, search_config, bitset, op_ctx);
         if (!search.has_value()) {
             ThrowSearchError("search", search, &search_config);
         }
@@ -794,17 +897,19 @@ VectorIndexReader::BoundIteratorBitset(const BitsetView& bitset) const {
 }
 
 void
-VectorIndexReader::ValidateGenerationIds(const DatasetPtr& dataset,
+VectorIndexReader::ValidateGenerationIds(const KnowhereEngine& engine,
+                                         const DatasetPtr& dataset,
                                          const char* operation) const {
     if (!IsGrowingGeneration()) {
         return;
     }
     const auto request = detail::ValidateIdRequest(dataset, operation);
-    ValidateGenerationIds(request.ids, request.rows_size, operation);
+    ValidateGenerationIds(engine, request.ids, request.rows_size, operation);
 }
 
 void
-VectorIndexReader::ValidateGenerationIds(const int64_t* ids,
+VectorIndexReader::ValidateGenerationIds(const KnowhereEngine& engine,
+                                         const int64_t* ids,
                                          size_t count,
                                          const char* operation) const {
     if (!IsGrowingGeneration()) {
@@ -820,7 +925,7 @@ VectorIndexReader::ValidateGenerationIds(const int64_t* ids,
                    operation,
                    ids[i],
                    index_->logical_count_);
-        AssertInfo(IsRowValid(ids[i]),
+        AssertInfo(EngineIsRowValid(engine, ids[i]),
                    "{} id {} is a null row of this nullable vector index",
                    operation,
                    ids[i]);
@@ -828,12 +933,12 @@ VectorIndexReader::ValidateGenerationIds(const int64_t* ids,
 }
 
 bool
-VectorIndexReader::IsEmptyEngine() const {
+VectorIndexReader::IsEmptyEngine(const KnowhereEngine& engine) const {
     if (IsGrowingGeneration()) {
         return index_->physical_count_ == 0;
     }
-    return IsAllNullNullable(index_->engine_.native_index) ||
-           index_->engine_.IsEmptyEmbListIndex();
+    return IsAllNullNullable(engine.native_index) ||
+           engine.IsEmptyEmbListIndex();
 }
 
 }  // namespace milvus::index
