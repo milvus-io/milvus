@@ -693,3 +693,31 @@ func TestGrowingHandoffLaterTargetCountsOnce(t *testing.T) {
 	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 10*time.Second, 10*time.Millisecond)
 	assertCurrentField(t, o, 102, sumStats(base.stats[102], sealedStats))
 }
+
+func TestGrowingHandoffLargeStats(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	syncHandoffTarget(d, 1)
+
+	row := make(map[uint32]float32, 1<<17)
+	for token := uint32(0); token < 1<<17; token++ {
+		row[token] = 1
+	}
+	stats := storage.NewBM25Stats()
+	stats.Append(row)
+	o.RegisterGrowing(1, bm25Stats{102: stats})
+	o.UpdateGrowing(1, bm25Stats{102: stats})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	sealedStats := sumStats(stats, stats)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{102: sealedStats})
+	seg.load(t, o, 102)
+	d.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+
+	syncHandoffTarget(d, 2, 1)
+	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 10*time.Second, time.Millisecond)
+	assertCurrentField(t, o, 102, sealedStats)
+	tf := typeutil.CreateAndSortSparseFloatRow(row)
+	idf, _, err := o.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: 1 << 17})
+	require.NoError(t, err)
+	assert.Equal(t, sealedStats.BuildIDF(tf), idf[0])
+}

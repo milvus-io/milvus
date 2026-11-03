@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -31,6 +32,9 @@ const (
 
 	// below this many tokens a merge locks the shard per token instead of splitting the stats first
 	concurrentBM25StatsSplitThreshold = 1024
+
+	// Keep insert batches on the direct path; splitting and goroutines pay off on bulk stats.
+	concurrentBM25StatsParallelThreshold = 64 * 1024
 )
 
 // ConcurrentBM25Stats holds the same data as BM25Stats with the token table split into shards,
@@ -110,6 +114,10 @@ func (c *ConcurrentBM25Stats) MinusUnlocked(stats *BM25Stats) {
 }
 
 func (c *ConcurrentBM25Stats) applyUnlocked(rows map[uint32]int32, sign int32) {
+	if len(rows) >= concurrentBM25StatsParallelThreshold && runtime.GOMAXPROCS(0) > 1 {
+		c.applySharded(rows, sign, false)
+		return
+	}
 	for token, count := range rows {
 		addTokenCount(c.shards[shardOf(token)].rowsWithToken, token, sign*count)
 	}
@@ -136,6 +144,10 @@ func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
 		return
 	}
 
+	c.applySharded(rows, sign, true)
+}
+
+func (c *ConcurrentBM25Stats) applySharded(rows map[uint32]int32, sign int32, lockShards bool) {
 	// the split buffers are reused across merges: a recovering delegator merges thousands of
 	// segments with hundreds of thousands of tokens each, and fresh buffers per merge pile up as garbage
 	bufp := splitBufferPool.Get().(*[][]tokenCount)
@@ -153,15 +165,47 @@ func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
 	}()
 
 	start := c.nextShard.Add(1)
-	for i := uint32(0); i < concurrentBM25StatsShards; i++ {
-		s := (start + i) % concurrentBM25StatsShards
+	applyShard := func(i int) {
+		s := (start + uint32(i)) % concurrentBM25StatsShards
 		shard := &c.shards[s]
-		shard.Lock()
+		if lockShards {
+			shard.Lock()
+		}
 		for _, tc := range split[s] {
 			addTokenCount(shard.rowsWithToken, tc.token, sign*tc.count)
 		}
-		shard.Unlock()
+		if lockShards {
+			shard.Unlock()
+		}
 	}
+	if len(rows) >= concurrentBM25StatsParallelThreshold {
+		parallelBM25StatsShards(applyShard)
+	} else {
+		for i := range c.shards {
+			applyShard(i)
+		}
+	}
+}
+
+func parallelBM25StatsShards(apply func(int)) {
+	workers := min(runtime.GOMAXPROCS(0), concurrentBM25StatsShards)
+	if workers == 1 {
+		for i := 0; i < concurrentBM25StatsShards; i++ {
+			apply(i)
+		}
+		return
+	}
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer wg.Done()
+			for i := worker; i < concurrentBM25StatsShards; i += workers {
+				apply(i)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // MergeFrom adds other into c, merging the shards in parallel. Safe for concurrent use,
@@ -170,23 +214,17 @@ func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
 	// the row count goes first, see the type comment
 	c.numRow.Add(other.numRow.Load())
 	c.numToken.Add(other.numToken.Load())
-	var wg sync.WaitGroup
-	for i := range c.shards {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			src := &other.shards[i]
-			dst := &c.shards[i]
-			src.RLock()
-			dst.Lock()
-			for token, count := range src.rowsWithToken {
-				addTokenCount(dst.rowsWithToken, token, count)
-			}
-			dst.Unlock()
-			src.RUnlock()
-		}(i)
-	}
-	wg.Wait()
+	parallelBM25StatsShards(func(i int) {
+		src := &other.shards[i]
+		dst := &c.shards[i]
+		src.RLock()
+		dst.Lock()
+		for token, count := range src.rowsWithToken {
+			addTokenCount(dst.rowsWithToken, token, count)
+		}
+		dst.Unlock()
+		src.RUnlock()
+	})
 }
 
 func (c *ConcurrentBM25Stats) NumRow() int64 {

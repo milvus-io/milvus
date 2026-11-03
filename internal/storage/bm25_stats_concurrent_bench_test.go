@@ -131,3 +131,57 @@ func BenchmarkUpdateGrowing(b *testing.B) {
 		b.Run(fmt.Sprintf("rows=%d/concurrent-unlocked", rows), func(b *testing.B) { run(b, concurrent.MergeUnlocked) })
 	}
 }
+
+func BenchmarkBM25StatsBulkApply(b *testing.B) {
+	data := loadBenchTables()
+	base := data.plain.Clone()
+	for token := range base.rowsWithToken {
+		base.rowsWithToken[token] = 1 << 28
+	}
+	base.numRow, base.numToken = 1<<40, 1<<60
+	for _, tokens := range []int{50, 5000, 65536, 1_000_000} {
+		delta := NewBM25Stats()
+		for i := 0; len(delta.rowsWithToken) < tokens; i++ {
+			delta.rowsWithToken[data.tokens[i]] = 1
+		}
+		delta.numRow, delta.numToken = 1, int64(tokens)
+		for _, operation := range []string{"Merge", "Minus", "MergeUnlocked", "MinusUnlocked", "MergeFrom", "MergeConcurrent"} {
+			b.Run(fmt.Sprintf("tokens=%d/%s", tokens, operation), func(b *testing.B) {
+				c := NewConcurrentBM25Stats()
+				c.MergeUnlocked(base)
+				var apply func(*BM25Stats)
+				switch operation {
+				case "Merge", "MergeConcurrent":
+					apply = c.Merge
+				case "Minus":
+					apply = c.Minus
+				case "MergeUnlocked":
+					apply = c.MergeUnlocked
+				case "MinusUnlocked":
+					apply = c.MinusUnlocked
+				case "MergeFrom":
+					other := NewConcurrentBM25Stats()
+					other.MergeUnlocked(delta)
+					apply = func(*BM25Stats) { c.MergeFrom(other) }
+				}
+				apply(delta)
+				var oracle sync.Mutex
+				b.ReportAllocs()
+				b.ResetTimer()
+				if operation == "MergeConcurrent" {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							apply(delta)
+						}
+					})
+					return
+				}
+				for i := 0; i < b.N; i++ {
+					oracle.Lock()
+					apply(delta)
+					oracle.Unlock()
+				}
+			})
+		}
+	}
+}
