@@ -142,23 +142,56 @@ func (w *Window) Complete(pending *PendingEntry, result CommitResult, msg messag
 		return false, 0
 	}
 
-	entry := &idempotencyview.Record{
-		SourceMessageID:        result.MessageID,
-		SourceTimeTick:         result.CommitTimeTick,
-		LastConfirmedMessageID: result.LastConfirmedMessageID,
-		IdempotencyKey:         string(pending.Key),
-		InsertResult:           result.IdempotentResult,
-	}
 	delete(w.inflight, pending.Key)
-	now := w.manager.config.Now()
-	w.manager.addLocked(w, entry, now)
-	evicted := w.manager.evictLocked(now)
+	entry, evicted := w.storeLocked(pending.Key, result)
 	observeWindowEntries(vchannelOf(msg), len(w.entries))
 	observeWindowInflight(vchannelOf(msg), len(w.inflight))
 
 	pending.result = PendingResult{Entry: entry, OwnerResolved: true}
 	close(pending.done)
 	return true, evicted
+}
+
+// Record remembers a write that this window never arbitrated: a replicated
+// write, which the replicate interceptor appends unconditionally. There is no
+// inflight phase and no waiter to resolve. An entry already held for the key is
+// replaced: the source cluster evicted the key and a client legally reused it,
+// so the newer write is the one a retry must see. Returns the number of
+// entries evicted by the byte cap.
+func (w *Window) Record(key IdempotencyKey, result CommitResult, msg message.MutableMessage) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	_, evicted := w.storeLocked(key, result)
+	observeWindowEntries(vchannelOf(msg), len(w.entries))
+	return evicted
+}
+
+// Forget drops the entry held for key, if any. It is used when a write for key
+// landed but its result cannot be recorded: an entry still held for the key
+// would then describe an older write, and would answer a retry with that
+// write's primary keys. Without the entry the retry appends again. inflight is
+// untouched: a replicated write never owns an inflight slot.
+func (w *Window) Forget(key IdempotencyKey) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if old := w.entries[key]; old != nil {
+		w.manager.removeLocked(old)
+	}
+}
+
+func (w *Window) storeLocked(key IdempotencyKey, result CommitResult) (*idempotencyview.Record, int) {
+	entry := &idempotencyview.Record{
+		SourceMessageID:        result.MessageID,
+		SourceTimeTick:         result.CommitTimeTick,
+		LastConfirmedMessageID: result.LastConfirmedMessageID,
+		IdempotencyKey:         string(key),
+		InsertResult:           result.IdempotentResult,
+	}
+	now := w.manager.config.Now()
+	w.manager.addLocked(w, entry, now)
+	return entry, w.manager.evictLocked(now)
 }
 
 func (w *Window) Fail(pending *PendingEntry, err error, msg message.MutableMessage) bool {
