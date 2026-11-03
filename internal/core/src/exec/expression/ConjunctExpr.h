@@ -118,49 +118,6 @@ class PhyConjunctFilterExpr : public Expr {
         inputs_ = std::move(inputs);
     }
 
-    // Set the bitmap input for the next expression in the conjunction.
-    // The bitmap indicates which rows still need to be evaluated.
-    //
-    // For AND: A row needs evaluation if it's currently TRUE or NULL
-    //   - TRUE rows: need to check if they remain TRUE after AND
-    //   - NULL rows: need to check if result becomes FALSE (NULL AND FALSE = FALSE)
-    //   - FALSE rows: already determined, no need to evaluate
-    //   => bitmap = data | ~valid (TRUE or NULL)
-    //
-    // For OR: A row needs evaluation if it's currently FALSE or NULL
-    //   - FALSE rows: need to check if they become TRUE after OR
-    //   - NULL rows: need to check if result becomes TRUE (NULL OR TRUE = TRUE)
-    //   - TRUE rows: already determined, no need to evaluate
-    //   => bitmap = ~data | ~valid (FALSE or NULL)
-    void
-    SetNextExprBitmapInput(const ColumnVectorPtr& vec, EvalCtx& context) {
-        const size_t size = vec->size();
-        TargetBitmapView data(vec->GetRawData(), size);
-        TargetBitmapView valid(vec->GetValidRawData(), size);
-
-        if (is_and_) {
-            // bitmap = data | ~valid
-            // Using De Morgan's law: data | ~valid = ~(~data & valid) = ~(valid & ~data)
-            // Use inplace_sub which computes: this = this & ~other
-            TargetBitmap next_input_bitmap(valid);      // copy valid
-            next_input_bitmap.inplace_sub(data, size);  // valid & ~data
-            next_input_bitmap.flip();  // ~(valid & ~data) = data | ~valid
-            context.set_bitmap_input(std::move(next_input_bitmap));
-        } else {
-            // bitmap = ~data | ~valid
-            // Using De Morgan's law: ~data | ~valid = ~(data & valid)
-            TargetBitmap next_input_bitmap(data);        // copy data
-            next_input_bitmap.inplace_and(valid, size);  // data & valid
-            next_input_bitmap.flip();  // ~(data & valid) = ~data | ~valid
-            context.set_bitmap_input(std::move(next_input_bitmap));
-        }
-    }
-
-    void
-    ClearBitmapInput(EvalCtx& context) {
-        context.clear_bitmap_input();
-    }
-
     bool
     IsAnd() {
         return is_and_;
@@ -172,16 +129,12 @@ class PhyConjunctFilterExpr : public Expr {
     }
 
  private:
-    int64_t
-    UpdateResult(ColumnVectorPtr& input_result,
-                 EvalCtx& ctx,
-                 ColumnVectorPtr& result);
+    // Rows that still need following expressions under ordinary 3VL.
+    TargetBitmap
+    BuildActiveBitmap(const ColumnVectorPtr& vec);
 
     static DataType
     ResolveType(const std::vector<DataType>& inputs);
-
-    bool
-    CanSkipFollowingExprs(ColumnVectorPtr& vec);
 
     void
     SkipFollowingExprs(int start);

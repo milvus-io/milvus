@@ -36,6 +36,8 @@
 #include "common/Tracer.h"
 #include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "exec/expression/GISFunctionFilterExpr.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
@@ -2457,3 +2459,329 @@ TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
     raw.reset();
     CleanupIndexFiles(stats->GetIndexFiles(), "GIS dwithin equivalence test");
 }
+
+namespace {
+using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
+
+class GeometryReadCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript(OpContext* op_ctx,
+                   FieldId field_id,
+                   const int64_t* offsets,
+                   int64_t count) const override {
+        if (get_schema()[field_id].get_data_type() == DataType::GEOMETRY) {
+            geometry_reads.insert(
+                geometry_reads.end(), offsets, offsets + count);
+        }
+        return ChunkedSegmentSealedImpl::bulk_subscript(
+            op_ctx, field_id, offsets, count);
+    }
+
+    mutable std::vector<int64_t> geometry_reads;
+};
+
+// Restore the thread's previous GEOS error callback after observing parsing.
+class GeometryParseErrorCounter {
+ public:
+    GeometryParseErrorCounter()
+        : ctx_(GetThreadLocalGEOSContext()),
+          previous_(GEOSContext_setErrorHandler_r(ctx_, Count)),
+          start_(errors_) {
+    }
+
+    ~GeometryParseErrorCounter() {
+        GEOSContext_setErrorHandler_r(ctx_, previous_);
+    }
+
+    size_t
+    count() const {
+        return errors_ - start_;
+    }
+
+ private:
+    static void
+    Count(const char*, ...) {
+        ++errors_;
+    }
+
+    inline static thread_local size_t errors_ = 0;
+    GEOSContextHandle_t ctx_;
+    GEOSMessageHandler previous_;
+    size_t start_;
+};
+
+struct MaskedGISSegment {
+    SchemaPtr schema;
+    std::unique_ptr<GeometryReadCountingSegment> sealed;
+    FieldId pk_id;
+    FieldId geo_id;
+    int64_t segment_id;
+};
+
+MaskedGISSegment
+MakeGeometrySegment(const std::vector<std::string>& wkbs,
+                    const std::vector<uint8_t>& validity) {
+    static std::atomic<int64_t> next_segment{5501800};
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("id", DataType::INT64);
+    const auto geo = schema->AddDebugField("geo", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(pk);
+    const auto segment_id = next_segment.fetch_add(1);
+    auto sealed = std::make_unique<GeometryReadCountingSegment>(
+        schema, empty_index_meta, SegcoreConfig::default_config(), segment_id);
+    const auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager();
+    std::vector<int64_t> ids(wkbs.size());
+    std::iota(ids.begin(), ids.end(), 0);
+    const std::vector<int64_t> timestamps(wkbs.size(), 0);
+    for (const auto field_id : {RowFieldID, pk, TimestampFieldID}) {
+        auto data =
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+        const auto& values = field_id == TimestampFieldID ? timestamps : ids;
+        data->FillFieldData(values.data(), values.size());
+        sealed->LoadFieldData(PrepareSingleFieldInsertBinlog(
+            1, 1, segment_id, field_id.get(), {data}, cm));
+    }
+    auto geometry =
+        storage::CreateFieldData(DataType::GEOMETRY, DataType::NONE, true);
+    geometry->FillFieldData(wkbs.data(), validity.data(), wkbs.size(), 0);
+    sealed->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        1, 1, segment_id, geo.get(), {geometry}, cm));
+    return {schema, std::move(sealed), pk, geo, segment_id};
+}
+
+class GISBitmapCountingRTree : public index::RTreeIndex<std::string> {
+ public:
+    GISBitmapCountingRTree(const storage::FileManagerContext& context,
+                           int& queries)
+        : index::RTreeIndex<std::string>(context), queries_(queries) {
+    }
+
+    const TargetBitmap
+    Query(const DatasetPtr& dataset) override {
+        ++queries_;
+        return index::RTreeIndex<std::string>::Query(dataset);
+    }
+
+ private:
+    int& queries_;
+};
+
+void
+InstallMaskedGeometryIndex(MaskedGISSegment& segment,
+                           const std::vector<std::string>& wkbs,
+                           const std::vector<uint8_t>& validity,
+                           const storage::FileManagerContext& context,
+                           int& queries) {
+    auto rtree = std::make_unique<GISBitmapCountingRTree>(context, queries);
+    rtree->InitForBuildIndex(true);
+    for (size_t row = 0; row < wkbs.size(); ++row) {
+        rtree->AddGeometry(
+            wkbs[row], row, (validity[row / 8] & (1u << (row % 8))) != 0);
+    }
+    LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = segment.segment_id;
+    info.field_id = segment.geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.schema.set_nullable(true);
+    info.index_params["index_type"] = index::RTREE_INDEX_TYPE;
+    info.cache_index = CreateTestCacheIndex(
+        "gis_bitmap_" + std::to_string(segment.segment_id), std::move(rtree));
+    segment.sealed->LoadIndex(info);
+}
+
+TEST_F(RTreeIndexTest, BitmapInputLimitsIndexedDWithinRefinement) {
+    constexpr int N = 15;
+    const std::vector<uint8_t> validity{0xBD, 0x7F};  // NULL rows 1 and 6
+    auto wkbs = std::vector<std::string>(N, CreateWkbFromWkt("POINT(0 0)"));
+    wkbs[4] = CreateWkbFromWkt("POINT(0.01 0)");
+    // Inside the coarse box, but outside the exact 2000-metre circle.
+    wkbs[14] = CreateWkbFromWkt("POINT(0.015 0.015)");
+
+    for (const bool cache_enabled : {false, true}) {
+        SCOPED_TRACE(cache_enabled);
+        GeometryCacheFlagGuard cache_guard(cache_enabled);
+        auto segment = MakeGeometrySegment(wkbs, validity);
+        int coarse_queries = 0;
+        field_meta_.field_schema.set_nullable(true);
+        storage::FileManagerContext index_context(
+            field_meta_, index_meta_, chunk_manager_, fs_);
+        InstallMaskedGeometryIndex(
+            segment, wkbs, validity, index_context, coarse_queries);
+        auto* sealed = segment.sealed.get();
+        ASSERT_EQ(sealed->GetGeometryCache(segment.geo_id) != nullptr,
+                  cache_enabled);
+
+        auto typed = std::make_shared<expr::GISFunctionFilterExpr>(
+            expr::ColumnInfo(segment.geo_id, DataType::GEOMETRY, {}, true),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            "POINT(0 0)",
+            2000.0);
+        exec::PhyGISFunctionFilterExpr physical(
+            {}, typed, "masked-dwithin", nullptr, sealed, N, 4, 0);
+        ASSERT_TRUE(physical.CanUseIndex());
+        exec::QueryContext query("masked-dwithin", sealed, N, MAX_TIMESTAMP);
+        exec::ExecContext execution(&query);
+        exec::EvalCtx context(&execution);
+
+        auto evaluate = [&](std::vector<bool> mask,
+                            int start,
+                            const std::vector<bool>& expected) {
+            TargetBitmap input(mask.size());
+            for (size_t row = 0; row < mask.size(); ++row) {
+                input[row] = mask[row];
+            }
+            context.set_bitmap_input(std::move(input));
+            VectorPtr result;
+            physical.Eval(context, result);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), expected.size());
+            TargetBitmapView bits(column->GetRawData(), column->size());
+            TargetBitmapView valid(column->GetValidRawData(), column->size());
+            for (size_t row = 0; row < expected.size(); ++row) {
+                EXPECT_EQ(bits[row], expected[row]) << "row " << start + row;
+                EXPECT_EQ(valid[row], start + row != 1 && start + row != 6)
+                    << "row " << start + row;
+            }
+        };
+
+        // No exact work is needed yet, including for later batches.
+        evaluate({false, false, false, false}, 0, {false, false, false, false});
+        EXPECT_TRUE(sealed->geometry_reads.empty());
+        evaluate({true, false, true, false}, 4, {true, false, false, false});
+        if (!cache_enabled) {
+            EXPECT_EQ(sealed->geometry_reads, (std::vector<int64_t>{4}));
+        }
+        // A parent that short-circuits an entire batch still advances GIS.
+        physical.MoveCursor();
+        evaluate({true, false, true}, 12, {true, false, false});
+        if (!cache_enabled) {
+            EXPECT_EQ(sealed->geometry_reads,
+                      (std::vector<int64_t>{4, 12, 14}));
+        }
+        EXPECT_EQ(coarse_queries, 1);
+
+        // NOT must still reject NULL, including the selected NULL row 6.
+        auto negated = std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, typed);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           negated);
+        const auto result = ExecuteQueryExpr(plan, sealed, N, MAX_TIMESTAMP);
+        for (int row = 0; row < N; ++row) {
+            EXPECT_EQ(result[row], row == 14) << "row " << row;
+        }
+    }
+}
+
+TEST_F(RTreeIndexTest, BitmapInputSkipsRawGeometryParsing) {
+    constexpr int N = 11;
+    const std::vector<uint8_t> validity{0xBF, 0x07};  // NULL row 6
+    auto wkbs = std::vector<std::string>(N, CreateWkbFromWkt("POINT(0 0)"));
+    wkbs[1] = "invalid wkb";
+    wkbs[9] = "invalid wkb";
+    const std::vector<std::vector<bool>> masks{{true, false, true, false},
+                                               {false, true, true, true},
+                                               {true, false, true}};
+
+    for (const bool cache_enabled : {false, true}) {
+        GeometryCacheFlagGuard cache_guard(cache_enabled);
+        for (const bool growing : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "cache=" << cache_enabled
+                                              << ", growing=" << growing);
+            auto segment = MakeGeometrySegment(wkbs, validity);
+            const auto schema = segment.schema;
+            ScopedSegcoreConfigRestore config_restore;
+            auto config = SegcoreConfig::default_config();
+            config.set_chunk_rows(3);  // Eval batches cross data chunks.
+            config.set_enable_interim_segment_index(false);
+            std::unique_ptr<SegmentGrowing> growing_segment;
+            SegmentInternalInterface* source = segment.sealed.get();
+            if (growing) {
+                growing_segment =
+                    CreateGrowingSegment(schema, empty_index_meta, 0, config);
+                auto data = DataGen(schema, N);
+                for (auto& field : *data.raw_->mutable_fields_data()) {
+                    if (field.field_id() == segment.geo_id.get()) {
+                        auto* geometry =
+                            field.mutable_scalars()->mutable_geometry_data();
+                        geometry->clear_data();
+                        field.clear_valid_data();
+                        for (int row = 0; row < N; ++row) {
+                            geometry->add_data(wkbs[row]);
+                            field.add_valid_data(row != 6);
+                        }
+                    }
+                }
+                growing_segment->PreInsert(N);
+                growing_segment->Insert(0,
+                                        N,
+                                        data.row_ids_.data(),
+                                        data.timestamps_.data(),
+                                        data.raw_);
+                source = growing_segment.get();
+            }
+            ASSERT_EQ(source->GetGeometryCache(segment.geo_id) != nullptr,
+                      cache_enabled);
+
+            for (const auto op :
+                 {proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+                  proto::plan::GISFunctionFilterExpr_GISOp_Intersects}) {
+                SCOPED_TRACE(static_cast<int>(op));
+                auto typed = std::make_shared<expr::GISFunctionFilterExpr>(
+                    expr::ColumnInfo(
+                        segment.geo_id, DataType::GEOMETRY, {}, true),
+                    op,
+                    "POINT(0 0)",
+                    2000.0);
+                exec::PhyGISFunctionFilterExpr physical(
+                    {}, typed, "masked-raw-gis", nullptr, source, N, 4, 0);
+                ASSERT_FALSE(physical.CanUseIndex());
+                exec::QueryContext query(
+                    "masked-raw-gis", source, N, MAX_TIMESTAMP);
+                exec::ExecContext execution(&query);
+                exec::EvalCtx context(&execution);
+                GeometryParseErrorCounter parse_errors;
+                int start = 0;
+                for (const auto& mask : masks) {
+                    TargetBitmap input(mask.size());
+                    for (size_t row = 0; row < mask.size(); ++row) {
+                        input[row] = mask[row];
+                    }
+                    context.set_bitmap_input(std::move(input));
+                    VectorPtr result;
+                    physical.Eval(context, result);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector>(result);
+                    ASSERT_NE(column, nullptr);
+                    ASSERT_EQ(column->size(), mask.size());
+                    TargetBitmapView bits(column->GetRawData(), column->size());
+                    TargetBitmapView valid(column->GetValidRawData(),
+                                           column->size());
+                    for (size_t row = 0; row < mask.size(); ++row) {
+                        EXPECT_EQ(bits[row], mask[row] && start + row != 6)
+                            << "row " << start + row;
+                        EXPECT_EQ(valid[row], start + row != 6)
+                            << "row " << start + row;
+                    }
+                    start += mask.size();
+                }
+                EXPECT_EQ(parse_errors.count(), 0u)
+                    << "masked corrupt WKB must not reach the GEOS parser";
+            }
+        }
+    }
+}
+
+}  // namespace
