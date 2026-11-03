@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -36,13 +37,14 @@ import (
 
 // CopySegmentTask manages the copying of multiple segment pairs from source to target.
 type CopySegmentTask struct {
-	ctx            context.Context                     // Context for cancellation and timeout
-	cancel         context.CancelFunc                  // Cancel function for aborting task execution
-	jobID          int64                               // Parent job ID for tracking related tasks
-	taskID         int64                               // Unique task ID assigned by DataCoord
-	collectionID   int64                               // Target collection ID
-	partitionIDs   []int64                             // Target partition IDs (deduplicated from targets)
-	state          datapb.ImportTaskStateV2            // Current task state (Pending/InProgress/Completed/Failed)
+	ctx            context.Context          // Context for cancellation and timeout
+	cancel         context.CancelFunc       // Cancel function for aborting task execution
+	jobID          int64                    // Parent job ID for tracking related tasks
+	taskID         int64                    // Unique task ID assigned by DataCoord
+	collectionID   int64                    // Target collection ID
+	partitionIDs   []int64                  // Target partition IDs (deduplicated from targets)
+	state          datapb.ImportTaskStateV2 // Current task state (Pending/InProgress/Completed/Failed)
+	failureStatus  *commonpb.Status
 	reason         string                              // Failure reason if state is Failed
 	slots          int64                               // Resource slots allocated for this task
 	segmentResults map[int64]*datapb.CopySegmentResult // Results for each target segment
@@ -169,6 +171,17 @@ func (t *CopySegmentTask) GetReason() string {
 	return t.reason
 }
 
+func (t *CopySegmentTask) GetFailureStatus() *commonpb.Status {
+	return t.failureStatus
+}
+
+// UpdateCopyFailure keeps the typed execution error in the manager-owned snapshot.
+func UpdateCopyFailure(err error) UpdateAction {
+	return func(task Task) {
+		task.(*CopySegmentTask).failureStatus = merr.Status(err)
+	}
+}
+
 func (t *CopySegmentTask) GetSchema() *schemapb.CollectionSchema {
 	return nil // CopySegmentTask doesn't need schema (copies files directly)
 }
@@ -207,6 +220,7 @@ func (t *CopySegmentTask) Clone() Task {
 		partitionIDs:   t.partitionIDs,
 		state:          t.state,
 		reason:         t.reason,
+		failureStatus:  typeutil.Clone(t.failureStatus),
 		slots:          t.slots,
 		segmentResults: results,
 		req:            t.req,
@@ -271,13 +285,13 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 	// Step 2: Validate input
 	if len(sources) == 0 {
 		reason := "no source segments to copy"
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason), UpdateCopyFailure(merr.WrapErrDataIntegrityMsg(reason)))
 		return nil
 	}
 	if len(sources) != len(targets) {
 		reason := fmt.Sprintf("source segments count (%d) does not match target segments count (%d)",
 			len(sources), len(targets))
-		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason), UpdateCopyFailure(merr.WrapErrDataIntegrityMsg(reason)))
 		return nil
 	}
 
@@ -314,6 +328,7 @@ func (t *CopySegmentTask) Execute() []*conc.Future[any] {
 		t.manager.Update(t.GetTaskID(),
 			UpdateState(datapb.ImportTaskStateV2_Failed),
 			UpdateReason(firstErr.Error()),
+			UpdateCopyFailure(firstErr),
 		)
 		return nil, firstErr
 	})
@@ -377,7 +392,7 @@ func (t *CopySegmentTask) copySingleSegment(source *datapb.CopySegmentSource, ta
 		reason := "no insert/delete binlogs for segment"
 		mlog.Error(t.ctx,
 			reason, logFields...)
-		return nil, merr.WrapErrParameterInvalidMsg(reason)
+		return nil, merr.WrapErrDataIntegrityMsg(reason)
 	}
 
 	// Step 2: Copy all segment files (binlogs + indexes) together

@@ -1554,7 +1554,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntry
 
 	err := SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.Require().Error(err)
-	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
 	s.Contains(err.Error(), "2001", "the error must name the segment")
 	s.Contains(err.Error(), "5001", "the error must name the foreign index ID")
 

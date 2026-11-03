@@ -711,17 +711,20 @@ func (sm *snapshotManager) RestoreSnapshot(
 	// cascade / GC) observes and rejects against — pin checks already live in
 	// snapshotMeta.DropSnapshot, so no separate ref-count mechanism is needed.
 	//
-	// TTL acts as an orphan-pin safety net: if the job fails to persist, datacoord
-	// crashes between Pin and broadcast, or UnpinSnapshot fails at terminal state,
-	// the pin self-expires so DropSnapshot is not blocked indefinitely. The default
-	// is 24h (dataCoord.snapshot.restorePinTTLSeconds), well above the worst-case
-	// restore wall time since restore is a segment-level S3 object copy (no data
-	// rewrite) — even multi-TB restores complete in minutes.
+	// A durable creation DDL must retain its source throughout forward retry,
+	// including across coordinator restarts, so its pin does not expire. The
+	// legacy path retains the configured orphan-pin TTL. A crash before durable
+	// submission or an unrecoverable pin-release failure requires manual unpin.
 	//
 	// PinSnapshot also does its own GetSnapshot under pinMu, which closes the
 	// TOCTOU against any DropSnapshot that committed between the proxy-level
 	// check and now — replacing the previous re-validation step.
 	pinTTLSeconds := Params.DataCoordCfg.SnapshotRestorePinTTLSeconds.GetAsInt64()
+	if sm.collectionRestorer != nil {
+		// Durable DDL retries have no execution deadline. Only the terminal job
+		// releases this pin; a crash before submission may require manual unpin.
+		pinTTLSeconds = 0
+	}
 	pinID, activePins, err := sm.snapshotMeta.PinSnapshot(ctx, sourceCollectionID, snapshotName, pinTTLSeconds)
 	if err != nil {
 		phase0Lock.Close()
@@ -1322,8 +1325,11 @@ func (sm *snapshotManager) restoreData(
 		mlog.Int64("jobID", jobID),
 		mlog.Bool("external", external),
 		mlog.Bool("externalSpecSet", externalSpec != ""))
-	handleExternalError := func(operation string, err error) (int64, error) {
-		return sm.handleExternalRestoreSourceError(
+	handleSourceError := func(operation string, err error) (int64, error) {
+		if !external && len(publication) == 0 {
+			return 0, merr.Wrap(err, operation)
+		}
+		return sm.handleRestoreSourceError(
 			ctx,
 			sourceCollectionID,
 			snapshotName,
@@ -1331,7 +1337,7 @@ func (sm *snapshotManager) restoreData(
 			collectionID,
 			jobID,
 			operation,
-			err,
+			err, external, pinID, publication...,
 		)
 	}
 
@@ -1339,7 +1345,12 @@ func (sm *snapshotManager) restoreData(
 	// Check if job already exists (WAL replay scenario)
 	existingJob := sm.copySegmentMeta.GetJob(ctx, jobID)
 	if existingJob != nil {
-		mlog.Info(context.TODO(), "job already exists, skip creation (idempotent)")
+		if existingJob.GetState() == datapb.CopySegmentJobState_CopySegmentJobFailed && existingJob.GetPinId() > 0 {
+			if err := sm.UnpinSnapshotData(ctx, existingJob.GetPinId()); err != nil {
+				return 0, err
+			}
+		}
+		mlog.Info(ctx, "job already exists, skip creation (idempotent)")
 		return jobID, nil
 	}
 
@@ -1354,7 +1365,7 @@ func (sm *snapshotManager) restoreData(
 			externalSpec,
 		)
 		if resolveErr != nil {
-			return handleExternalError("failed to resolve external snapshot storage", resolveErr)
+			return handleSourceError("failed to resolve external snapshot storage", resolveErr)
 		}
 		snapshotData, err = sm.snapshotMeta.ReadAndValidateExternalSnapshotDataWithChunkManager(
 			ctx,
@@ -1368,22 +1379,19 @@ func (sm *snapshotManager) restoreData(
 	}
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data", mlog.Err(err))
-		if external {
-			return handleExternalError("failed to read external snapshot data", err)
-		}
-		return 0, merr.Wrap(err, "failed to read snapshot data")
+		return handleSourceError("failed to read snapshot data", err)
 	}
 	actualSnapshotFingerprint := ""
 	if external {
 		actualSnapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
 		if err != nil {
-			return handleExternalError("failed to fingerprint external snapshot", err)
+			return handleSourceError("failed to fingerprint external snapshot", err)
 		}
 		if expectedSnapshotFingerprint != "" && actualSnapshotFingerprint != expectedSnapshotFingerprint {
 			fingerprintErr := merr.WrapErrDataIntegrityMsg(
 				"external snapshot changed after preflight validation",
 			)
-			return handleExternalError("snapshot fingerprint mismatch", fingerprintErr)
+			return handleSourceError("snapshot fingerprint mismatch", fingerprintErr)
 		}
 	}
 
@@ -1391,10 +1399,7 @@ func (sm *snapshotManager) restoreData(
 	partitionMapping, err := sm.buildPartitionMapping(ctx, snapshotData, collectionID)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to build partition mapping", mlog.Err(err))
-		if external {
-			return handleExternalError("partition mapping failed", err)
-		}
-		return 0, merr.Wrap(err, "partition mapping failed")
+		return handleSourceError("partition mapping failed", err)
 	}
 	mlog.Info(context.TODO(), "partition mapping built", mlog.Any("partitionMapping", partitionMapping))
 
@@ -1402,10 +1407,7 @@ func (sm *snapshotManager) restoreData(
 	channelMapping, err := sm.buildChannelMapping(ctx, snapshotData, collectionID)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to build channel mapping", mlog.Err(err))
-		if external {
-			return handleExternalError("channel mapping failed", err)
-		}
-		return 0, merr.Wrap(err, "channel mapping failed")
+		return handleSourceError("channel mapping failed", err)
 	}
 
 	// ========== Phase 4: Create copy segment job ==========
@@ -1425,10 +1427,7 @@ func (sm *snapshotManager) restoreData(
 		publication...,
 	); err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
-		if external {
-			return handleExternalError("restore job creation failed", err)
-		}
-		return 0, merr.Wrap(err, "restore job creation failed")
+		return handleSourceError("restore job creation failed", err)
 	}
 
 	mlog.Info(context.TODO(), "restore data completed successfully",
@@ -1438,7 +1437,7 @@ func (sm *snapshotManager) restoreData(
 	return jobID, nil
 }
 
-func (sm *snapshotManager) handleExternalRestoreSourceError(
+func (sm *snapshotManager) handleRestoreSourceError(
 	ctx context.Context,
 	sourceCollectionID int64,
 	snapshotName string,
@@ -1447,34 +1446,46 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 	jobID int64,
 	operation string,
 	err error,
+	external bool,
+	pinID int64,
+	publication ...*restorePublication,
 ) (int64, error) {
 	wrappedErr := merr.Wrap(err, operation)
 	if !isPermanentSnapshotError(err) {
 		return 0, wrappedErr
 	}
 
+	createsCollection := len(publication) > 0 && publication[0].createsCollection
 	now := uint64(time.Now().UnixNano())
 	failedJob := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       collectionID,
-			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
+			State:              datapb.CopySegmentJobState_CopySegmentJobFailed,
+			Reason:             wrappedErr.Error(),
 			StartTs:            now,
 			CompleteTs:         now,
 			SnapshotName:       snapshotName,
 			SourceCollectionId: sourceCollectionID,
-			External:           true,
+			External:           external,
 			SnapshotS3Location: snapshotS3Location,
+			PinId:              pinID, CreatesCollection: createsCollection,
 		},
 		tr: timerecord.NewTimeRecorder("copy segment job"),
 	}
 	UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed)(failedJob)
-	UpdateCopyJobReason(wrappedErr.Error())(failedJob)
 	if addErr := sm.copySegmentMeta.AddJob(ctx, failedJob); addErr != nil {
-		return 0, merr.Wrap(addErr, "failed to persist failed external restore job")
+		return 0, merr.Wrap(addErr, "failed to persist failed restore job")
+	}
+	if pinID > 0 {
+		// A replay resumes this idempotent release if persistence succeeded but
+		// the pin update failed. Never expose a transient empty Pending job.
+		if err := sm.UnpinSnapshotData(ctx, pinID); err != nil {
+			return 0, err
+		}
 	}
 
-	mlog.Warn(ctx, "external snapshot restore failed permanently; restore job marked failed",
+	mlog.Warn(ctx, "snapshot restore failed permanently; restore job marked failed",
 		mlog.FieldJobID(jobID),
 		mlog.Int64("collectionID", collectionID),
 		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(snapshotS3Location)),
@@ -1483,9 +1494,10 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 }
 
 func isPermanentSnapshotError(err error) bool {
-	return errors.Is(err, merr.ErrDataIntegrity) ||
-		merr.GetErrorType(err) == merr.InputError ||
-		merr.IsNonRetryableErr(err)
+	// Use confirmed source/recipe errors, not the RPC Retriable flag. The I/O
+	// denylist covers missing objects, access/credential and invalid I/O requests.
+	return errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, merr.ErrSnapshotNotFound) ||
+		merr.GetErrorType(err) == merr.InputError || merr.IsNonRetryableErr(err)
 }
 
 // ============================================================================

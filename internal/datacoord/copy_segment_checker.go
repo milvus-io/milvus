@@ -50,7 +50,7 @@ import (
 // STATE TRANSITIONS:
 // 1. Pending → Executing: Create tasks by grouping segment ID mappings
 // 2. Executing → Completed: All tasks completed, update segments to Flushed
-// 3. Executing → Failed: Any task failed or job timeout
+// 3. Executing → Failed: Permanent task failure, or legacy job timeout
 // 4. Completed/Failed → GC: Remove job and tasks after retention period
 //
 // TASK CREATION:
@@ -343,6 +343,13 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 
 	if job.(*copySegmentJob).GetCreatesCollection() && len(job.GetIdMappings()) > 0 {
 		if err := c.registerRestoreSegments(job); err != nil {
+			if isPermanentSnapshotError(err) {
+				if saveErr := c.copyMeta.UpdateJobStateAndReleaseRef(c.ctx, job.GetJobId(),
+					UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed), UpdateCopyJobReason(err.Error())); saveErr != nil {
+					log.Warn(c.ctx, "failed to persist permanent restore registration failure", mlog.Err(saveErr))
+				}
+				return
+			}
 			log.Warn(c.ctx, "retrying restored segment registration", mlog.Err(err))
 			return
 		}
@@ -754,12 +761,8 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 // Job Timeout and Garbage Collection
 // ============================================================================
 
-// tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
-//
-// Only applies to non-terminal jobs (Pending/Executing).
-// Timeout prevents jobs from running indefinitely due to stuck tasks.
-//
-// Timeout is set when job is created based on configuration.
+// tryTimeoutJob expires legacy restore jobs in Pending/Executing states.
+// New collection-creating Restore DDL uses forward retry without a deadline.
 func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 	job = c.copyMeta.GetJob(c.ctx, job.GetJobId())
 	if job == nil {
@@ -775,8 +778,10 @@ func (c *copySegmentChecker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
-	if job.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(job, c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())) {
-		return // Only idempotent metadata publication remains.
+	if job.(*copySegmentJob).GetCreatesCollection() {
+		// A durable Restore DDL uses forward retry, including its copy phase.
+		// Elapsed time alone does not establish an unrecoverable failure.
+		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if job.GetTimeoutTs() == 0 || time.Now().Before(timeoutTime) {
@@ -820,6 +825,20 @@ func (c *copySegmentChecker) checkGC(job CopySegmentJob) {
 	if job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted &&
 		job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
 		return
+	}
+	if isForwardRetryRestore(job) && job.GetPinId() > 0 {
+		// New Restore pins do not expire. Finish a terminal transition's unpin
+		// after a transient catalog failure or a coordinator crash, before GC
+		// can discard the durable owner. Unpin is idempotent and does no I/O
+		// after the pin has already been removed.
+		collection, name, active, err := c.meta.snapshotMeta.UnpinSnapshot(c.ctx, job.GetPinId())
+		if err != nil {
+			mlog.Warn(c.ctx, "retrying terminal restore snapshot unpin", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+			return
+		}
+		if name != "" {
+			setSnapshotActivePinsGauge(collection, name, active)
+		}
 	}
 	if job.(*copySegmentJob).GetCreatesCollection() {
 		for _, mapping := range job.GetIdMappings() {

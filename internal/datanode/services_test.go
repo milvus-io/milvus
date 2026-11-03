@@ -1977,3 +1977,25 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
 }
+
+// Execution status stays inside the copy payload; a successful QueryTask RPC
+// must preserve its type instead of turning it into a transport error.
+func (s *DataNodeServicesSuite) TestQueryCopySegmentFailureStatus() {
+	task := importv2.NewCopySegmentTask(s.ctx, &datapb.CopySegmentRequest{TaskID: 984}, s.node.importTaskMgr, nil, nil, nil, nil, "", "")
+	s.node.importTaskMgr.Add(task)
+	s.node.importTaskMgr.Update(task.GetTaskID(), importv2.UpdateState(datapb.ImportTaskStateV2_Failed),
+		importv2.UpdateReason("source unavailable"), importv2.UpdateCopyFailure(merr.ErrServiceUnavailable))
+	direct, err := s.node.QueryCopySegment(s.ctx, &datapb.QueryCopySegmentRequest{TaskID: task.GetTaskID()})
+	s.NoError(merr.CheckRPCCall(direct.GetStatus(), err))
+	s.ErrorIs(merr.Error(direct.GetFailureStatus()), merr.ErrServiceUnavailable)
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(task.GetTaskID())
+	properties.AppendType(taskcommon.CopySegment)
+	generic, err := s.node.QueryTask(s.ctx, &workerpb.QueryTaskRequest{Properties: properties})
+	s.NoError(merr.CheckRPCCall(generic.GetStatus(), err))
+	decoded := &datapb.QueryCopySegmentResponse{}
+	s.NoError(proto.Unmarshal(generic.GetPayload(), decoded))
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, decoded.GetState())
+	s.ErrorIs(merr.Error(decoded.GetFailureStatus()), merr.ErrServiceUnavailable)
+}

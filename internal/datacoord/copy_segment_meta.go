@@ -333,7 +333,8 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// Note: no ref-count rebuild is needed on restart. Restore protection is provided
 	// by pins persisted on SnapshotInfo (see createRestoreJob / RestoreSnapshot phase 0),
 	// which survive restart automatically via snapshotMeta reload. Terminal jobs have
-	// already released their pin; active jobs still hold theirs.
+	// normally released their pin; terminal cleanup resumes an interrupted release.
+	// Active collection-creating restores retain non-expiring pins.
 	//
 	// Upgrade caveat: CopySegmentJob rows persisted by pre-pin-refactor datacoord carry
 	// PinId=0 (proto default). The terminal-transition guard at UpdateJobStateAndReleaseRef
@@ -344,7 +345,8 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// Rollback caveat: if post-pin-refactor data is read by a pre-refactor binary, the
 	// old code ignores CopySegmentJob.PinId and uses its in-memory ref counter. Pins
 	// persisted on SnapshotInfo remain but are never unpinned → orphan pins. The pin
-	// TTL (dataCoord.snapshot.restorePinTTLSeconds) caps the blast radius.
+	// TTL caps legacy orphan pins; new durable Restore pins need terminal cleanup
+	// or manual unpin.
 
 	return copySegmentMeta, nil
 }
@@ -572,11 +574,14 @@ func (m *copySegmentMeta) updateJobStateAndReleaseRef(ctx context.Context, jobID
 
 	unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, pinID)
 	if unpinErr != nil {
-		// Unpin failure is non-fatal for the state transition (already persisted).
-		// Pins carry a TTL (dataCoord.snapshot.restorePinTTLSeconds) so an orphan
-		// left here will self-heal; we still log loudly so operators can detect
-		// a broken unpin path early instead of waiting for TTL expiry.
-		mlog.Warn(ctx, "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
+		// The state transition is already durable. Terminal Restore cleanup
+		// retries permanent-pin release before removing the job; legacy pins
+		// retain their configured TTL fallback.
+		reason := "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL"
+		if isForwardRetryRestore(updatedJob) {
+			reason = "failed to unpin source snapshot on job terminal transition, restore cleanup will retry"
+		}
+		mlog.Warn(ctx, reason,
 			mlog.FieldJobID(jobID),
 			mlog.Int64("pinID", pinID),
 			mlog.Int64("sourceCollectionID", sourceCollectionID),

@@ -1328,6 +1328,8 @@ message QueryCopySegmentResponse {
   string reason = 4;
   repeated CopySegmentResult segment_results = 5;  // Complete segment and index metadata
   int64 slots = 6;
+  // Execution error, separate from the Query RPC status. Absent on older workers.
+  common.Status failure_status = 7;
 }
 
 message DropCopySegmentRequest {

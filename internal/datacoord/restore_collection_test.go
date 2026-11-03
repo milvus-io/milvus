@@ -251,7 +251,7 @@ func TestRestoreBroadcastResourceOwnership(t *testing.T) {
 					return nil, tc.broadcastErr
 				}).Build()
 				manager := &snapshotManager{collectionRestorer: &rootcoord.Core{}, allocator: &restoreAllocatorTarget{}}
-				id, err := manager.broadcastRestoreCollection(t.Context(), &snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}}}, "snapshot", 1, "target", "default", 5, tc.external, "location", "")
+				id, err := manager.broadcastRestoreCollection(t.Context(), &snapshotstorage.SnapshotData{Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}}}, "snapshot", 1, "target", "default", 5, tc.external, "s3://bucket/root/snapshots/1/metadata/1.json", "")
 				if tc.accepted {
 					require.NoError(t, err)
 					require.EqualValues(t, 77, id)

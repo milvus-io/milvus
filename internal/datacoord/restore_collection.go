@@ -29,10 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -61,6 +63,14 @@ type restorePublication struct {
 }
 
 func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snapshot *snapshotstorage.SnapshotData, name string, sourceID int64, target, db string, pinID int64, external bool, location, spec string) (int64, error) {
+	if err := validateRestoreSnapshotRecipe(snapshot); err != nil {
+		return 0, err
+	}
+	if external {
+		if _, err := deriveSnapshotSourceRootURI(location, snapshot.Layout); err != nil {
+			return 0, err
+		}
+	}
 	b, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(db), message.NewExclusiveCollectionNameResourceKey(db, target))
 	if err != nil {
@@ -147,6 +157,44 @@ func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snaps
 	// the caller stopped waiting. Its callback creates the asynchronous job.
 	owned = false
 	return jobID, nil
+}
+
+// Check the already loaded recipe before reserving IDs or broadcasting DDL.
+// This uses only snapshot metadata; file copying and manifest I/O stay async.
+func validateRestoreSnapshotRecipe(snapshot *snapshotstorage.SnapshotData) error {
+	partitions := make(map[int64]struct{}, len(snapshot.Collection.GetPartitions()))
+	for _, id := range snapshot.Collection.GetPartitions() {
+		if _, exists := partitions[id]; exists {
+			return merr.WrapErrDataIntegrityMsg("snapshot has duplicate partition ID %d", id)
+		}
+		partitions[id] = struct{}{}
+	}
+	if len(snapshot.Segments) == 0 {
+		return nil
+	}
+	channels := make(map[string]struct{}, len(snapshot.Collection.GetVirtualChannelNames()))
+	for _, channel := range snapshot.Collection.GetVirtualChannelNames() {
+		if _, exists := channels[channel]; exists || channel == "" {
+			return merr.WrapErrDataIntegrityMsg("snapshot has invalid or duplicate channel %q", channel)
+		}
+		channels[channel] = struct{}{}
+	}
+	if snapshot.Collection.GetNumShards() > 0 && int64(len(channels)) != snapshot.Collection.GetNumShards() {
+		return merr.WrapErrDataIntegrityMsg("snapshot shard count %d does not match its %d channels", snapshot.Collection.GetNumShards(), len(channels))
+	}
+	for _, segment := range snapshot.Segments {
+		if _, exists := partitions[segment.GetPartitionId()]; !exists && segment.GetSegmentLevel() != datapb.SegmentLevel_L0 {
+			return merr.WrapErrDataIntegrityMsg("snapshot segment %d has unknown partition %d", segment.GetSegmentId(), segment.GetPartitionId())
+		}
+		if _, exists := channels[segment.GetChannelName()]; !exists {
+			return merr.WrapErrDataIntegrityMsg("snapshot segment %d has unknown channel %q", segment.GetSegmentId(), segment.GetChannelName())
+		}
+		hasManifest := segment.GetStorageVersion() >= storage.StorageV3 && segment.GetManifestPath() != ""
+		if len(segment.GetBinlogs()) == 0 && len(segment.GetDeltalogs()) == 0 && !hasManifest {
+			return merr.WrapErrDataIntegrityMsg("snapshot segment %d has no insert/delete data", segment.GetSegmentId())
+		}
+	}
+	return nil
 }
 
 func (sm *snapshotManager) applyRestoreCollection(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
