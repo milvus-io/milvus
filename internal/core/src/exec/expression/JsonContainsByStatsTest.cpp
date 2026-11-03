@@ -1955,3 +1955,81 @@ TEST(JsonStatsExecPathTest, ContainsDoesNotLoadDeclinedIndex) {
     }
     EXPECT_EQ(loads.load(), 0);
 }
+
+TEST(JsonStatsExecPathTest, NumericTermsDoNotLoadImpreciseIndex) {
+    std::atomic<int> loads{0};
+    JsonStatsExecFixture f({R"({"a":1})",
+                            R"({"a":9007199254740992})",
+                            R"({"a":9007199254740993})",
+                            R"({"a":-9007199254740992})",
+                            R"({"a":-9007199254740993})",
+                            R"({"a":null})",
+                            R"({})"},
+                           1313);
+    segcore::LoadIndexInfo info;
+    info.field_id = f.field.get();
+    info.field_type = DataType::JSON;
+    info.index_params = {{JSON_PATH, "/a"}, {JSON_CAST_TYPE, "DOUBLE"}};
+    info.cache_index =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<index::IndexBase>(
+            std::make_unique<FailingJsonIndexTranslator>(loads));
+    f.segment->LoadIndex(info);
+    ASSERT_EQ(loads.load(), 0);
+    for (bool floating : {false, true}) {
+        for (int sign : {1, -1}) {
+            SCOPED_TRACE(fmt::format("floating={}, sign={}", floating, sign));
+            proto::plan::GenericValue one;
+            proto::plan::GenericValue large;
+            if (floating) {
+                one.set_float_val(1.0);
+                large.set_float_val(sign * 0x1p53);
+            } else {
+                one.set_int64_val(1);
+                large.set_int64_val(sign * ((int64_t{1} << 53) + 1));
+            }
+            // The first literal is safe: selection must examine the entire list.
+            auto term = std::make_shared<expr::TermFilterExpr>(
+                expr::ColumnInfo(f.field, DataType::JSON, {"a"}),
+                std::vector<proto::plan::GenericValue>{one, large},
+                false);
+            ASSERT_NO_THROW(
+                EXPECT_EQ(f.Path(term), exec::ExprExecPath::JsonStats));
+            const auto positive = f.Eval(term);
+            const auto negative =
+                f.Eval(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, term));
+            ASSERT_EQ(positive.size(), 7);
+            ASSERT_EQ(negative.size(), 7);
+            const size_t match = (sign > 0 ? 1 : 3) + (floating ? 0 : 1);
+            for (size_t i = 0; i < positive.size(); ++i) {
+                EXPECT_EQ(bool(positive[i]), i == 0 || i == match) << i;
+                EXPECT_EQ(bool(negative[i]), i < 5 && i != 0 && i != match)
+                    << i;
+            }
+        }
+    }
+    EXPECT_EQ(loads.load(), 0);
+}
+
+TEST(JsonStatsExecPathTest, FloatingTermsDoNotUseFlatIndex) {
+    JsonStatsExecFixture f({R"({"a":9007199254740992})",
+                            R"({"a":9007199254740993})",
+                            R"({"a":-9007199254740992})",
+                            R"({"a":-9007199254740993})"},
+                           1314);
+    f.Install("", "JSON");
+    for (int sign : {1, -1}) {
+        proto::plan::GenericValue value;
+        value.set_float_val(sign * 0x1p53);
+        auto term = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(f.field, DataType::JSON, {"a"}),
+            std::vector<proto::plan::GenericValue>{value},
+            false);
+        ASSERT_EQ(f.Path(term), exec::ExprExecPath::JsonStats);
+        const auto result = f.Eval(term);
+        ASSERT_EQ(result.size(), 4);
+        for (size_t i = 0; i < result.size(); ++i) {
+            EXPECT_EQ(bool(result[i]), i == (sign > 0 ? 0 : 2)) << i;
+        }
+    }
+}
