@@ -143,13 +143,16 @@ func (c *schemaClient) GetCurrentWriteSchema(ctx context.Context, req GetCurrent
 		if err != nil {
 			return nil, err
 		}
+		body, err := c.cacheSchema(schemaIdentity{id, response.Version}, response, key.generation)
+		if err != nil {
+			return nil, err
+		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if c.ctx.Err() != nil {
 			return nil, ErrWALAccesserClosed
 		}
-		body, err := c.cacheSchemaLocked(schemaIdentity{id, response.Version}, response, key.generation)
-		if epoch, ok := c.epochs.load(id); err == nil && ok && epoch == key.generation {
+		if epoch, ok := c.epochs.load(id); ok && epoch == key.generation {
 			c.writeVersions.store(id, response.Version)
 		}
 		return body, err
@@ -201,12 +204,7 @@ func (c *schemaClient) GetSchemaVersion(ctx context.Context, req GetSchemaVersio
 		if response.Version != req.Version {
 			return nil, merr.WrapErrServiceInternalMsg("streaming returned a mismatched schema version")
 		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.ctx.Err() != nil {
-			return nil, ErrWALAccesserClosed
-		}
-		return c.cacheSchemaLocked(identity, response, key.generation)
+		return c.cacheSchema(identity, response, key.generation)
 	})
 }
 
@@ -231,19 +229,36 @@ type cachedSchema struct {
 	info  *schemautil.SchemaInfo
 }
 
-func (c *schemaClient) cacheSchemaLocked(key schemaIdentity, response *schemapb.CollectionSchema, epoch uint64) (*schemautil.SchemaInfo, error) {
-	current, ok := c.epochs.load(key.collectionID)
-	publish := ok && current == epoch
-	if publish {
+// cacheSchema builds field indices outside the client lock. Publication rechecks
+// the epoch and cache because another read, write or refresh can finish meanwhile.
+func (c *schemaClient) cacheSchema(key schemaIdentity, response *schemapb.CollectionSchema, epoch uint64) (*schemautil.SchemaInfo, error) {
+	c.mu.Lock()
+	if c.ctx.Err() != nil {
+		c.mu.Unlock()
+		return nil, ErrWALAccesserClosed
+	}
+	if current, ok := c.epochs.load(key.collectionID); ok && current == epoch {
 		if cached, ok := c.bodies.load(key); ok && cached.epoch == epoch {
+			c.mu.Unlock()
 			return cached.info, nil
 		}
 	}
+	c.mu.Unlock()
+
 	info, err := schemautil.NewSchemaInfo(response)
 	if err != nil {
 		return nil, err
 	}
-	if publish {
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ctx.Err() != nil {
+		return nil, ErrWALAccesserClosed
+	}
+	if current, ok := c.epochs.load(key.collectionID); ok && current == epoch {
+		if cached, ok := c.bodies.load(key); ok && cached.epoch == epoch {
+			return cached.info, nil
+		}
 		c.bodies.store(key, cachedSchema{epoch, info})
 	}
 	return info, nil

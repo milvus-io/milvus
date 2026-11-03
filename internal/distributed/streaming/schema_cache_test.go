@@ -244,9 +244,9 @@ func TestSchemaClientCloseFencesPendingFill(t *testing.T) {
 func seedTestSchema(t *testing.T, c *schemaClient, id int64, raw *schemapb.CollectionSchema) *schemautil.SchemaInfo {
 	t.Helper()
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	epoch := c.schemaEpochLocked(id, false)
-	info, err := c.cacheSchemaLocked(schemaIdentity{id, raw.Version}, raw, epoch)
+	c.mu.Unlock()
+	info, err := c.cacheSchema(schemaIdentity{id, raw.Version}, raw, epoch)
 	require.NoError(t, err)
 	return info
 }
