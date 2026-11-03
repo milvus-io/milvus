@@ -1256,4 +1256,106 @@ TEST(ScalarIndexV3ErrorCodeTest, MmapFailureKeepsItsCodeAndCleansTargets) {
     }
     EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
 }
+
+TEST(IndexArrayCacheTest, ElementCountsIgnoreParentRowMetadata) {
+    for (const auto* name :
+         {"BitmapInt64Nested", "SortedInt64Nested", "InvertedInt64Nested"}) {
+        const auto& backend = ScalarReaderBackends().Get<int64_t>(name);
+        ScalarTestData<int64_t> data({1, 2, 2, 3, 4, 5});
+        data.domain = Domain::Element;
+        data.validity_present = false;
+        const ScalarTestInput<int64_t> input(data);
+        auto artifact = backend.Build(input.View(), {.row_count = 6});
+        for (const bool packed : {false, true}) {
+            for (const bool mmap : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << name << packed << mmap << async);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "array-cache-XXXXXX",
+                        "array cache test");
+                    const auto persisted = packed ? SerializeV3(*artifact)
+                                                  : SerializeV1V2(*artifact);
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed)
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        auto stream =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async)
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            stream,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    stream, stream->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 6});
+                    options.params[INDEX_NUM_ROWS_KEY] = 3;
+                    options.enable_mmap = mmap;
+                    options.mmap_dir_path = staging->Path();
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().domain, Domain::Element);
+                    EXPECT_TRUE(index->Metadata().caps.nested);
+                    const bool count_known =
+                        backend.Family() != families::kInverted;
+                    EXPECT_EQ(index->Metadata().count.has_value(), count_known);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (count_known)
+                        EXPECT_EQ(reader->Count(), 6);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    OpContext ctx;
+                    reader = index->CreateReader(&ctx);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 6);
+                    const auto* predicate =
+                        dynamic_cast<const IScalarPredicateReader<int64_t>*>(
+                            reader.get());
+                    ASSERT_NE(predicate, nullptr);
+                    const int64_t key = 2;
+                    ExpectBitmap(predicate->In(1, &key), Hits(6, {1, 2}));
+                    ExpectBitmap(predicate->NotIn(1, &key),
+                                 Hits(6, {0, 3, 4, 5}));
+                }
+            }
+        }
+    }
+}
+
 }  // namespace milvus::index::test
