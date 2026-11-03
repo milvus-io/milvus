@@ -1342,6 +1342,42 @@ TEST_F(JsonFlatIndexExprTest, TestComparisonUnknowns) {
     EXPECT_TRUE(final[13]);
 }
 
+// Tantivy does not store array element positions, so a flat index cannot
+// answer a path with an array index segment. The fixture's flat index is
+// mounted on the whole field (nested path ""), and such paths must still fall
+// back to raw data.
+TEST_F(JsonFlatIndexExprTest, ArrayIndexPathOnRootFlatIndexFallsBackToRawData) {
+    struct Case {
+        std::vector<std::string> path;
+        proto::plan::GenericValue value;
+        int64_t row;
+    };
+    proto::plan::GenericValue first_letter;
+    first_letter.set_string_val("a");
+    proto::plan::GenericValue one;
+    one.set_int64_val(1);
+    // json["a"][0] == "a" matches {"a": ["a", "b"]}; json[0] == 1 matches the
+    // root array [1, 2, 3].
+    for (const auto& c :
+         {Case{{"a", "0"}, first_letter, 6}, Case{{"0"}, one, 12}}) {
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid_, DataType::JSON, c.path),
+            proto::plan::OpType::Equal,
+            c.value,
+            std::vector<proto::plan::GenericValue>());
+        // Only the RawData path executes batch by batch.
+        EXPECT_FALSE(
+            CanExprExecuteAllAtOnce(expr, segment_.get(), json_data_.size()))
+            << expr->ToString();
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = query::ExecuteQueryExpr(
+            plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+        EXPECT_EQ(final.count(), 1) << expr->ToString();
+        EXPECT_TRUE(final[c.row]) << expr->ToString();
+    }
+}
+
 TEST_F(JsonFlatIndexExprTest, JSONArrayEqualityFallsBackToRawData) {
     proto::plan::GenericValue value;
     auto* array = value.mutable_array_val();

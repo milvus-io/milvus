@@ -474,11 +474,11 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                                               pinned_index)};
 }
 
-std::string
+std::optional<std::string>
 ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
     FieldId field_id, std::string_view query_path) const {
     auto runtime = CaptureRuntimeResourceState();
-    std::string best_path;
+    std::optional<std::string> best_path;
     int path_len_diff = std::numeric_limits<int>::max();
     for (const auto& index : runtime->json_indices) {
         if (index.field_id != field_id ||
