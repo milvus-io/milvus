@@ -120,3 +120,9 @@ CreateCollection(p0)@tt=1                    (creates collection with default pa
   → ManualFlush@tt=18                        (exclusive, seals remaining segments)
 → DropCollection@tt=20                       (exclusive, flushes all segments, collection terminated)
 ```
+
+During replicated Restore, a latest by-ID Describe from another Milvus component
+returns a retriable NotReady while the collection is Restoring. This prevents a
+following Load callback from treating the collection as dropped and acknowledging
+the load without applying it. User describes still hide the collection, and
+DescribeCollectionInternal continues to expose the recipe for recovery.

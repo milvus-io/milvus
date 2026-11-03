@@ -1276,7 +1276,23 @@ func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	if in.GetCollectionName() != "" {
 		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts, false)
 	}
-	return c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
+	coll, err := c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
+	if !allowUnavailable && isMaxTs(ts) && errors.Is(err, merr.ErrCollectionNotFound) && contextutil.IsIntraClusterRequest(ctx) {
+		// A replicated Load can arrive before the local Restore finishes. It
+		// must retry rather than acknowledge the collection as already dropped.
+		pending, lookupErr := c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, true)
+		if lookupErr != nil && !errors.Is(lookupErr, merr.ErrCollectionNotFound) {
+			return nil, lookupErr
+		}
+		if lookupErr == nil && pending.State == pb.CollectionState_CollectionRestoring {
+			return nil, merr.WrapErrServiceNotReadyMsg("collection %d is being restored", in.GetCollectionID())
+		}
+		if lookupErr == nil && pending.Available() {
+			// Publication may have completed between the two metadata reads.
+			return filterUnavailablePartition(pending), nil
+		}
+	}
+	return coll, err
 }
 
 func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName string) *milvuspb.DescribeCollectionResponse {

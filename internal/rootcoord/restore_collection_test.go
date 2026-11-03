@@ -23,6 +23,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -62,6 +63,62 @@ func TestRestoreCollectionVisibilityAfterDurableCompletion(t *testing.T) {
 	require.Equal(t, etcdpb.CollectionState_CollectionRestoring, collection.State, "published metadata is immutable")
 	_, err = mt.GetCollectionByID(t.Context(), "default", 10, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
+}
+
+func TestRestoreInternalDescribeRetriesUntilAvailable(t *testing.T) {
+	for _, state := range []etcdpb.CollectionState{
+		etcdpb.CollectionState_CollectionRestoring, etcdpb.CollectionState_CollectionCreated,
+		etcdpb.CollectionState_CollectionDropping, etcdpb.CollectionState_CollectionDropped,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			mt := &MetaTable{collID2Meta: map[int64]*model.Collection{10: {CollectionID: 10, State: state}}}
+			core := &Core{meta: mt}
+			req := &milvuspb.DescribeCollectionRequest{CollectionID: 10}
+			_, err := core.describeCollection(t.Context(), req, false)
+			switch state {
+			case etcdpb.CollectionState_CollectionRestoring:
+				require.ErrorIs(t, err, merr.ErrServiceNotReady, "replicated Load must keep retrying")
+			case etcdpb.CollectionState_CollectionCreated:
+				require.NoError(t, err)
+			default:
+				require.ErrorIs(t, err, merr.ErrCollectionNotFound, "a real drop remains terminal for Load")
+			}
+			user := metadata.NewIncomingContext(t.Context(), metadata.Pairs(util.HeaderAuthorize, "user request"))
+			_, err = core.describeCollection(user, req, false)
+			if state == etcdpb.CollectionState_CollectionCreated {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrCollectionNotFound, "unavailable collection remains hidden from users")
+			}
+			info, err := core.describeCollection(t.Context(), req, true)
+			require.NoError(t, err)
+			require.Equal(t, state, info.State, "restore/recovery internal lookup still returns the full recipe")
+		})
+	}
+	core := &Core{meta: &MetaTable{collID2Meta: map[int64]*model.Collection{}}}
+	_, err := core.describeCollection(t.Context(), &milvuspb.DescribeCollectionRequest{CollectionID: 10}, false)
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+}
+
+func TestRestoreInternalDescribePublicationRace(t *testing.T) {
+	for _, lookupErr := range []error{nil, merr.ErrServiceUnavailable} {
+		mockey.PatchConvey("publication can race the availability lookup", t, func() {
+			mockey.Mock((*MetaTable).GetCollectionByID).To(func(_ *MetaTable, _ context.Context, _ string, _ int64, _ uint64, allowUnavailable bool) (*model.Collection, error) {
+				if !allowUnavailable {
+					return nil, merr.WrapErrCollectionNotFound(10)
+				}
+				return &model.Collection{CollectionID: 10, State: etcdpb.CollectionState_CollectionCreated}, lookupErr
+			}).Build()
+			core := &Core{meta: &MetaTable{}}
+			info, err := core.describeCollection(t.Context(), &milvuspb.DescribeCollectionRequest{CollectionID: 10}, false)
+			if lookupErr != nil {
+				require.ErrorIs(t, err, lookupErr, "a metadata failure must not be acknowledged as a drop")
+			} else {
+				require.NoError(t, err)
+				require.EqualValues(t, 10, info.CollectionID)
+			}
+		})
+	}
 }
 
 func TestRestoreCollectionLifecycleChecks(t *testing.T) {
