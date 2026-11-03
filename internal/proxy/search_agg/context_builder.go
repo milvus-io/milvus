@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -543,7 +542,7 @@ func resolveFieldID(fieldExpr string, schema *schemapb.CollectionSchema, dynamic
 		return 0, merr.WrapErrParameterInvalidMsg("field is empty")
 	}
 
-	if field := typeutil.GetFieldByName(schema, fieldExpr); field != nil && !common.IsSystemField(field.GetFieldID()) {
+	if field := typeutil.GetFieldByName(schema, fieldExpr); field != nil {
 		return field.GetFieldID(), nil
 	}
 
@@ -551,7 +550,7 @@ func resolveFieldID(fieldExpr string, schema *schemapb.CollectionSchema, dynamic
 	if hasBrackets {
 		baseName := strings.Split(fieldExpr, "[")[0]
 		if baseName != "" {
-			if baseField := typeutil.GetFieldByName(schema, baseName); baseField != nil && !common.IsSystemField(baseField.GetFieldID()) {
+			if baseField := typeutil.GetFieldByName(schema, baseName); baseField != nil {
 				if _, err := typeutil2.ParseAndVerifyNestedPath(fieldExpr, schema, baseField.GetFieldID()); err != nil {
 					return 0, err
 				}

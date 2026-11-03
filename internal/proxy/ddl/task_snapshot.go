@@ -61,7 +61,7 @@ func resolveCollectionNames(ctx context.Context, metaCache Cache, collectionID i
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return "", ""
 	}
-	return collInfo.DBName, collInfo.Name
+	return collInfo.DBName, collInfo.Schema.Name
 }
 
 type CreateSnapshotTask struct {

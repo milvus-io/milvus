@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
-	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -323,10 +322,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 			mlog.String("collectionName", collectionName), mlog.Int64("collectionID", t.CollectionID), mlog.Err(err2))
 		return err2
 	}
-	t.schema, err = collectionInfo.GetReadSchema(ctx)
-	if err != nil {
-		return err
-	}
+	t.schema = collectionInfo.Schema
 	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
@@ -334,7 +330,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
 	t.resolvedDBName = collectionInfo.DBName
-	t.resolvedCollectionName = collectionInfo.Name
+	t.resolvedCollectionName = collectionInfo.Schema.GetName()
 
 	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
@@ -475,14 +471,13 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 		t.Username = username
 	}
 
-	collectionTTL := metacache.GetCollectionTTL(t.schema.GetProperties())
-	if collectionTTL != 0 {
+	if collectionInfo.CollectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
-		expireTime := physicalTime.Add(-time.Duration(collectionTTL))
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
 		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionTTL)
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
 

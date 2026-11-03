@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -43,30 +42,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func TestImportTaskExcludesStorageColumns(t *testing.T) {
-	cache := &metacache.MetaCache{}
-	coord := &mocks.MockMixCoordClient{}
-	p := mockey.Mock((*metacache.MetaCache).GetDatabaseInfo).Return(&metacache.DatabaseInfo{DBID: 1}, nil).Build()
-	defer p.UnPatch()
-	raw := &schemapb.CollectionSchema{Version: 3, Fields: []*schemapb.FieldSchema{
-		{FieldID: 0, Name: "RowID", DataType: schemapb.DataType_Int64},
-		{FieldID: 1, Name: "Timestamp", DataType: schemapb.DataType_Int64},
-		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-	}}
-	p = mockey.Mock((*mocks.MockMixCoordClient).ImportV2).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *internalpb.ImportRequestInternal, _ ...grpc.CallOption) (*internalpb.ImportResponse, error) {
-		require.NotSame(t, raw, req.Schema)
-		require.EqualValues(t, 3, req.Schema.Version)
-		require.Len(t, req.Schema.Fields, 1)
-		require.Same(t, raw.Fields[2], req.Schema.Fields[0])
-		return &internalpb.ImportResponse{Status: merr.Success()}, nil
-	}).Build()
-	defer p.UnPatch()
-	task := &ImportTask{ctx: t.Context(), mixCoord: coord, req: &internalpb.ImportRequest{}, resp: &internalpb.ImportResponse{}, schema: &schemaInfo{CollectionSchema: raw}}
-	task.MetaCache = cache
-	require.NoError(t, task.Execute(t.Context()))
-	require.Len(t, raw.Fields, 3)
-}
 
 func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 	paramtable.Init()
@@ -138,9 +113,9 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			cache := &MetaCache{}
 			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
 			defer idPatch.UnPatch()
-			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
-				CollID: 100, DBName: "default",
-			}, schema), nil).Build()
+			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+				CollID: 100, DBName: "default", Schema: schema,
+			}, nil).Build()
 			defer schemaPatch.UnPatch()
 			partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).To(
 				func(_ *MetaCache, _ context.Context, _, _, name string) (int64, error) {
@@ -643,9 +618,10 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair, 
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(100), nil).Maybe()
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
-		Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		Return(&collectionInfo{
 			CollID: int64(100),
-		}, &schemaInfo{CollectionSchema: collectionSchema}), nil).Maybe()
+			Schema: &schemaInfo{CollectionSchema: collectionSchema},
+		}, nil).Maybe()
 
 	// Only reached by the ordinary-import case, which runs past the gate into
 	// partition resolution.

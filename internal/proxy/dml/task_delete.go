@@ -384,10 +384,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
 
-	dr.schema, err = colInfo.GetReadSchema(ctx)
-	if err != nil {
-		return err
-	}
+	dr.schema = colInfo.Schema
 	if err := dql.ValidateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}

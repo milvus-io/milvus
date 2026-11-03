@@ -21,10 +21,7 @@ func (t *UpsertTask) upsertReadSchema(ctx context.Context, outputFields []string
 	if info.CollID != t.collectionID {
 		return nil, merr.WrapErrCollectionNotFound(t.collectionID)
 	}
-	readSchema, err := info.GetReadSchema(ctx)
-	if err != nil {
-		return nil, err
-	}
+	readSchema := info.Schema
 	if readSchema.GetVersion() == t.schema.GetVersion() {
 		return readSchema, nil
 	}

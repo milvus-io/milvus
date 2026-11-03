@@ -64,7 +64,7 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 			EnableNamespace: true,
 		})
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, schema), nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
 		mockTest(t, ValidatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
@@ -125,7 +125,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 		schemaInfo := mustNewSchemaInfo(schema)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, schemaInfo), nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schemaInfo, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitionsIndex, partitionNames, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitions, partitionIDs, nil)

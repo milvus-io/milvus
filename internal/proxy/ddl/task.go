@@ -2239,7 +2239,7 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if collInfo == nil || collInfo.Name == "" {
+		if collInfo == nil || collInfo.Schema == nil || collInfo.Schema.GetName() == "" {
 			return merr.WrapErrServiceInternalMsg("failed to resolve collection metadata for alter collection target %d", collectionID)
 		}
 		t.CollectionID = collectionID
@@ -2270,10 +2270,7 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	if err := resolveCollectionInfo(); err != nil {
 		return err
 	}
-	collSchema, err := collInfo.GetReadSchema(ctx)
-	if err != nil {
-		return err
-	}
+	collSchema := collInfo.Schema
 
 	if len(t.GetProperties()) > 0 {
 		hasMmap := hasMmapProp(t.Properties...)
@@ -2597,10 +2594,6 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	collSchema, err := t.GetMetaCache().GetCollectionSchema(ctx, t.GetDbName(), t.CollectionName)
 	if err != nil {
 		return err
-	}
-
-	if field := typeutil.GetFieldByName(collSchema.CollectionSchema, t.FieldName); field != nil && common.IsSystemField(field.GetFieldID()) {
-		return merr.WrapErrParameterInvalidMsg("cannot alter system field %s", t.FieldName)
 	}
 
 	isCollectionLoadedFn := func() (bool, error) {
@@ -3303,7 +3296,7 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && (len(loadFields) == 0 || loadFieldsSet.Contain(field.GetFieldID())) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3570,7 +3563,7 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && (len(loadFields) == 0 || loadFieldsSet.Contain(field.GetFieldID())) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}

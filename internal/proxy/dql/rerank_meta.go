@@ -5,7 +5,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -83,9 +82,6 @@ func newDataFrameInputPlanFromFieldNames(
 	plan := &chain.DataFrameInputPlan{Inputs: make([]chain.ResolvedChainInput, 0, len(fieldNames))}
 	fieldsByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
 	for _, field := range schema.GetFields() {
-		if common.IsSystemField(field.GetFieldID()) {
-			continue
-		}
 		fieldsByName[field.GetName()] = field
 	}
 	seen := make(map[string]struct{}, len(fieldNames))

@@ -1125,7 +1125,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		c, err := cache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
-		assert.Equal(t, c.Name, "bar")
+		assert.Equal(t, c.Schema.Name, "bar")
 	})
 
 	t.Run("update with name", func(t *testing.T) {
@@ -1152,7 +1152,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		c, err := cache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
-		assert.Equal(t, c.Name, "bar")
+		assert.Equal(t, c.Schema.Name, "bar")
 	})
 }
 
@@ -1399,7 +1399,7 @@ func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
 	// first id-only lookup primes the by-id index (one describe, recorded as a miss)
 	info, err := cache.GetCollectionInfo(ctx, "", "", 1)
 	assert.NoError(t, err)
-	assert.Equal(t, "foo", info.Name)
+	assert.Equal(t, "foo", info.Schema.GetName())
 
 	// a second id-only lookup must be served from the by-id index as a HIT, with
 	// no additional describe and no cache-miss metric
@@ -2921,6 +2921,7 @@ func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2962,9 +2963,6 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
-	for id := int64(1); id <= 2; id++ {
-		assert.NoError(t, cache.SeedSchemaForTest(t, id, &schemapb.CollectionSchema{Name: "collection"}))
-	}
 
 	type result struct {
 		db    string
@@ -3183,7 +3181,7 @@ func metaCacheConsistencyViolations(cache *MetaCache) []string {
 			v = append(v, fmt.Sprintf("primary key %d != entry.CollID %d", id, e.CollID))
 		}
 		db := normalizeDBName(e.DBName)
-		name := e.Name
+		name := e.Schema.GetName()
 		if gotID, ok := snapshot.NameIdx[db][name]; !ok {
 			v = append(v, fmt.Sprintf("primary %q/%q (id %d) has no name hint", db, name, id))
 		} else if gotID != id {
@@ -3209,7 +3207,7 @@ func metaCacheConsistencyViolations(cache *MetaCache) []string {
 			if got := normalizeDBName(e.DBName); got != db {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry db is %q", db, name, id, got))
 			}
-			if got := e.Name; got != name {
+			if got := e.Schema.GetName(); got != name {
 				v = append(v, fmt.Sprintf("name hint %q/%q -> id %d: entry real name is %q", db, name, id, got))
 			}
 		}
@@ -3534,6 +3532,7 @@ func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
 // concurrently. Run under -race it flags any data race; the final consistency
 // check flags any primary-store/name-hint desync left behind.
 func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3571,9 +3570,6 @@ func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
-	for id := int64(1); id <= 5; id++ {
-		assert.NoError(t, cache.SeedSchemaForTest(t, id, &schemapb.CollectionSchema{Name: fmt.Sprintf("coll%d", id)}))
-	}
 
 	var wg sync.WaitGroup
 	for g := 0; g < 8; g++ {

@@ -1282,15 +1282,7 @@ func checkFieldsDataBySchema(ctx context.Context, allFields []*schemapb.FieldSch
 	hasPkData := false
 	needAutoGenPk := false
 
-	expectedNum := 0
 	for _, fieldSchema := range allFields {
-		if common.IsSystemField(fieldSchema.GetFieldID()) {
-			if dataNameSet.Contain(fieldSchema.GetName()) {
-				return merr.WrapErrParameterInvalidMsg("cannot write system field %s", fieldSchema.GetName())
-			}
-			continue
-		}
-		expectedNum++
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
 			log.Warn(ctx, "not primary key field, but set autoID true", mlog.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
@@ -1334,6 +1326,7 @@ func checkFieldsDataBySchema(ctx context.Context, allFields []*schemapb.FieldSch
 			mlog.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
+	expectedNum := len(allFields)
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
 	if expectedNum != actualNum {
@@ -1720,9 +1713,6 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 	}
 
 	for _, fieldSchema := range schema.Fields {
-		if common.IsSystemField(fieldSchema.GetFieldID()) {
-			continue
-		}
 		if bm25Fields.Contain(fieldSchema.GetName()) {
 			continue
 		}
@@ -2007,9 +1997,6 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 				}
 				if !skipStaticFieldNameCheck {
 					for _, f := range schema.GetFields() {
-						if common.IsSystemField(f.GetFieldID()) {
-							continue
-						}
 						if _, ok := jsonData[f.GetName()]; ok {
 							mlog.Info(context.TODO(), "dynamic field name include the static field name", mlog.String("fieldName", f.GetName()))
 							return merr.WrapErrParameterInvalidMsg("dynamic field name cannot include the static field name: %s", f.GetName())

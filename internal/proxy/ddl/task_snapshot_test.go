@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1088,13 +1087,14 @@ func TestResolveCollectionNames_GetCollectionInfoError(t *testing.T) {
 func TestResolveCollectionNames_Success(t *testing.T) {
 	cache := &MetaCache{}
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
-		Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		Return(&collectionInfo{
 			DBName: "test_db",
-		}, &schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{
-				Name: "test_collection",
+			Schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+				},
 			},
-		}), nil).Build()
+		}, nil).Build()
 	defer mockGetCollectionInfo.UnPatch()
 
 	dbName, collName := resolveCollectionNames(context.Background(), cache, 100)
@@ -1296,13 +1296,14 @@ func TestGetRestoreSnapshotStateTask_Execute_Success(t *testing.T) {
 
 	// Mock resolveCollectionNames via meta cache GetCollectionInfo
 	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).
-		Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		Return(&collectionInfo{
 			DBName: "test_db",
-		}, &schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{
-				Name: "test_collection",
+			Schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+				},
 			},
-		}), nil).Build()
+		}, nil).Build()
 	defer mockGetCollectionInfo.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -1551,17 +1552,19 @@ func TestListRestoreSnapshotJobsTask_Execute_Success(t *testing.T) {
 			callCount++
 			switch collectionID {
 			case 100:
-				return metacache.CollectionInfoForTest(t, &collectionInfo{
+				return &collectionInfo{
 					DBName: "db1",
-				}, &schemaInfo{
-					CollectionSchema: &schemapb.CollectionSchema{Name: "coll1"},
-				}), nil
+					Schema: &schemaInfo{
+						CollectionSchema: &schemapb.CollectionSchema{Name: "coll1"},
+					},
+				}, nil
 			case 200:
-				return metacache.CollectionInfoForTest(t, &collectionInfo{
+				return &collectionInfo{
 					DBName: "db2",
-				}, &schemaInfo{
-					CollectionSchema: &schemapb.CollectionSchema{Name: "coll2"},
-				}), nil
+					Schema: &schemaInfo{
+						CollectionSchema: &schemapb.CollectionSchema{Name: "coll2"},
+					},
+				}, nil
 			default:
 				return nil, errors.New("unknown collection")
 			}

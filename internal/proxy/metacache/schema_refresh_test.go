@@ -35,7 +35,7 @@ func TestMetaCacheMissRefreshesSchemaBeforePublication(t *testing.T) {
 	}).Build()
 	defer p.UnPatch()
 	refreshErr := error(merr.ErrServiceUnavailable)
-	p = mockey.Mock((*schemaTestClient).GetCurrentWriteSchema).To(func(_ *schemaTestClient, _ context.Context, req streaming.GetCurrentWriteSchemaRequest) (*SchemaInfo, error) {
+	p = mockey.Mock((*schemaTestClient).GetSchemaVersion).To(func(_ *schemaTestClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*SchemaInfo, error) {
 		refreshes++
 		require.True(t, req.BypassCache)
 		require.Equal(t, "p_1v0", req.VChannel)
@@ -45,7 +45,12 @@ func TestMetaCacheMissRefreshesSchemaBeforePublication(t *testing.T) {
 		if refreshErr != nil {
 			return nil, refreshErr
 		}
-		return &SchemaInfo{CollectionSchema: &schemapb.CollectionSchema{Version: 4}}, nil
+		require.EqualValues(t, 3, req.Version)
+		return NewSchemaInfo(&schemapb.CollectionSchema{Name: "c", Description: description, Version: req.Version, Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: "RowID", DataType: schemapb.DataType_Int64},
+			{FieldID: 1, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		}})
 	}).Build()
 	defer p.UnPatch()
 	_, err = cache.UpdateByName(t.Context(), "default", "c")
@@ -54,7 +59,7 @@ func TestMetaCacheMissRefreshesSchemaBeforePublication(t *testing.T) {
 	refreshErr = nil
 	info, err := cache.UpdateByName(t.Context(), "default", "c")
 	require.NoError(t, err)
-	require.EqualValues(t, 3, info.ReadSchemaVersion, "refresh must not publish the SN write version as a read version")
+	require.EqualValues(t, 3, info.Schema.GetVersion(), "refresh must not publish the SN write version as a read version")
 	require.Equal(t, 2, refreshes)
 	hit, err := cache.UpdateByID(t.Context(), "", 1)
 	require.NoError(t, err)
@@ -62,7 +67,7 @@ func TestMetaCacheMissRefreshesSchemaBeforePublication(t *testing.T) {
 	hit, err = cache.GetCollectionInfo(t.Context(), "default", "c", 1)
 	require.NoError(t, err)
 	require.Same(t, info, hit, "metadata getters must not create per-request schema views")
-	hit, err = cache.GetCollectionWriteInfo(t.Context(), "default", "c", 1)
+	hit, err = cache.GetCollectionInfo(t.Context(), "default", "c", 1)
 	require.NoError(t, err)
 	require.Same(t, info, hit)
 	require.Equal(t, 2, refreshes)
@@ -71,10 +76,14 @@ func TestMetaCacheMissRefreshesSchemaBeforePublication(t *testing.T) {
 	description = "after alter"
 	info, err = cache.UpdateByID(t.Context(), "", 1)
 	require.NoError(t, err)
-	require.EqualValues(t, 3, info.ReadSchemaVersion)
+	require.EqualValues(t, 3, info.Schema.GetVersion())
 	require.Equal(t, 3, refreshes, "same-version invalidation must force another refresh")
 	require.Equal(t, 3, describes)
-	err = refreshSchema(t.Context(), &CollectionInfo{CollID: 1})
+	require.Equal(t, "after alter", info.Schema.Description)
+	require.Len(t, info.Schema.Fields, 1)
+	_, err = info.Schema.SchemaHelper.GetFieldFromName("RowID")
+	require.Error(t, err)
+	_, err = loadCollectionSchema(t.Context(), &milvuspb.DescribeCollectionResponse{CollectionID: 1})
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
 
@@ -95,7 +104,7 @@ func TestMetaCacheInvalidationDrainsSchemaRefresh(t *testing.T) {
 	var once sync.Once
 	defer once.Do(func() { close(release) })
 	var refreshes atomic.Int32
-	p = mockey.Mock((*schemaTestClient).GetCurrentWriteSchema).To(func(_ *schemaTestClient, ctx context.Context, req streaming.GetCurrentWriteSchemaRequest) (*SchemaInfo, error) {
+	p = mockey.Mock((*schemaTestClient).GetSchemaVersion).To(func(_ *schemaTestClient, ctx context.Context, req streaming.GetSchemaVersionRequest) (*SchemaInfo, error) {
 		if refreshes.Add(1) == 1 {
 			close(started)
 			select {
@@ -104,7 +113,7 @@ func TestMetaCacheInvalidationDrainsSchemaRefresh(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}
-		return &SchemaInfo{CollectionSchema: &schemapb.CollectionSchema{}}, nil
+		return NewSchemaInfo(&schemapb.CollectionSchema{Name: "c"})
 	}).Build()
 	defer p.UnPatch()
 	filled := make(chan error, 1)

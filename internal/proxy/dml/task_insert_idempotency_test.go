@@ -239,16 +239,17 @@ func TestMergeDuplicateInsertResultsAcrossVChannels(t *testing.T) {
 }
 
 func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) Cache {
+	metacache.MockWriteSchemaForTest(t)
 	t.Helper()
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
-		CollID: 100,
-		DBName: "db",
-
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		CollID:     100,
+		DBName:     "db",
+		Schema:     schema,
 		Properties: properties,
-	}, schema), nil)
+	}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	return cache
 }

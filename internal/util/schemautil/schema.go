@@ -140,7 +140,7 @@ func (s *SchemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 			continue
 		}
 
-		fieldSchema, err := s.SchemaHelper.GetUserFieldFromName(name)
+		fieldSchema, err := s.SchemaHelper.GetFieldFromName(name)
 		if err != nil {
 			return nil, err
 		}

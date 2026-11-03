@@ -50,7 +50,7 @@ type Cache interface {
 	GetCollectionID(ctx context.Context, database, collectionName string) (typeutil.UniqueID, error)
 	// GetCollectionName get collection's name and database by id
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
-	// GetCollectionInfo returns routing metadata and the published read version.
+	// GetCollectionInfo get collection's information by name or collection id, such as Schema, and etc.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*CollectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
@@ -64,7 +64,6 @@ type Cache interface {
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's Schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*SchemaInfo, error)
-	GetCollectionWriteInfo(ctx context.Context, database, collectionName string, collectionID int64) (*CollectionInfo, error)
 	// ResolveCollectionAlias returns the actual collection name if input is an alias,
 	// or returns the input name if it's already a collection name.
 	ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error)
@@ -107,27 +106,24 @@ type Cache interface {
 	Close()
 }
 
-// CollectionInfo holds collection metadata and its published schema version.
-// Schema bodies and derived indices are owned exclusively by SchemaClient.
 type CollectionInfo struct {
-	CollID                   typeutil.UniqueID
-	DBID                     typeutil.UniqueID
-	DBName                   string
-	Name                     string
-	ReadSchemaVersion        int32
-	IsPartitionKeyCollection bool
-	CreatedTimestamp         uint64
-	CreatedUtcTimestamp      uint64
-	ConsistencyLevel         commonpb.ConsistencyLevel
-	PartitionKeyIsolation    bool
-	QueryMode                string
-	UpdateTimestamp          uint64
-	NumPartitions            int64
-	VChannels                []string
-	PChannels                []string
-	ShardsNum                int32
-	Aliases                  []string
-	Properties               []*commonpb.KeyValuePair
+	CollID                typeutil.UniqueID
+	DBID                  typeutil.UniqueID
+	DBName                string
+	Schema                *SchemaInfo
+	CreatedTimestamp      uint64
+	CreatedUtcTimestamp   uint64
+	ConsistencyLevel      commonpb.ConsistencyLevel
+	PartitionKeyIsolation bool
+	QueryMode             string
+	UpdateTimestamp       uint64
+	CollectionTTL         uint64
+	NumPartitions         int64
+	VChannels             []string
+	PChannels             []string
+	ShardsNum             int32
+	Aliases               []string
+	Properties            []*commonpb.KeyValuePair
 }
 
 type DatabaseInfo struct {
@@ -136,7 +132,7 @@ type DatabaseInfo struct {
 	CreatedTimestamp uint64
 }
 
-// SchemaInfo is a shared, immutable schema with reusable field indices.
+// SchemaInfo preserves the Proxy schema API; read and write snapshots share its type.
 type SchemaInfo = schemautil.SchemaInfo
 
 var NewSchemaInfo = schemautil.NewSchemaInfo
@@ -159,7 +155,7 @@ type PartitionInfo struct {
 }
 
 func (info *CollectionInfo) isCollectionCached() bool {
-	return info != nil && info.CollID != typeutil.UniqueID(0)
+	return info != nil && info.CollID != typeutil.UniqueID(0) && info.Schema != nil
 }
 
 // make sure MetaCache implements Cache.
@@ -307,7 +303,7 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	if ids, ok := m.nameIdx[database]; ok {
 		if id, ok := ids[collectionName]; ok {
 			if entry, ok := m.liveLocked(id); ok &&
-				entry.Name == collectionName && normalizeDBName(entry.DBName) == database {
+				entry.Schema.GetName() == collectionName && normalizeDBName(entry.DBName) == database {
 				return entry, entry.isCollectionCached()
 			}
 		}
@@ -318,7 +314,7 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 			if ids, ok := m.nameIdx[database]; ok {
 				if id, ok := ids[target]; ok {
 					if entry, ok := m.liveLocked(id); ok &&
-						entry.Name == target && normalizeDBName(entry.DBName) == database {
+						entry.Schema.GetName() == target && normalizeDBName(entry.DBName) == database {
 						return entry, entry.isCollectionCached()
 					}
 				}
@@ -339,7 +335,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	realName := collection.GetSchema().GetName()
+	realName := collection.Schema.GetName()
 	// the caller may have addressed the collection by an alias; cache under the
 	// real name (the alias hint comes from the declared-Aliases loop below)
 	if collectionName == "" || (realName != "" && realName != collectionName) {
@@ -350,10 +346,9 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 	queryMode := common.GetQueryMode(collection.Properties...)
-	info := newCollectionInfo(collection, isolation, queryMode)
-	// Complete the refresh before publishing metadata. Invalidation drains this
-	// fill through fillMu, so the next miss cannot reuse a pre-invalidation flight.
-	if err := refreshSchema(ctx, info); err != nil {
+
+	schemaInfo, err := loadCollectionSchema(ctx, collection)
+	if err != nil {
 		return nil, err
 	}
 
@@ -366,12 +361,13 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			// the response uncached instead of inventing a compat mechanism for
 			// an upgrade-window-only entry class -- repeat lookups just
 			// re-describe until the rootcoords are upgraded.
-			return info, nil
+			return newCollectionInfo(collection, schemaInfo, isolation, queryMode), nil
 		}
 		// By-name lookup: the request database is authoritative.
 		bucketDB = normalizeDBName(database)
 	}
 
+	info := newCollectionInfo(collection, schemaInfo, isolation, queryMode)
 	if info.DBName == "" {
 		info.DBName = bucketDB // authoritative for by-name fills
 	}
@@ -382,8 +378,8 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	// id re-fills under a new canonical (database, name) location. Delete the
 	// previous name hint when either coordinate changed so nothing dangles (no
 	// background GC exists to catch it later).
-	if prev, ok := m.collections[collection.GetCollectionID()]; ok && prev.Name != "" {
-		prevName := prev.Name
+	if prev, ok := m.collections[collection.GetCollectionID()]; ok && prev.Schema != nil {
+		prevName := prev.Schema.GetName()
 		prevDB := normalizeDBName(prev.DBName)
 		if prevName != "" && (prevDB != bucketDB || prevName != collectionName) {
 			if ids, ok := m.nameIdx[prevDB]; ok && ids[prevName] == collection.GetCollectionID() {
@@ -440,26 +436,25 @@ func NormalizeDBName(database string) string {
 // newCollectionInfo builds a CollectionInfo from a describe response. It does
 // not touch any cache map, so it is safe to use for entries that are returned
 // without being cached.
-func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, isolation bool, queryMode string) *CollectionInfo {
+func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaInfo *SchemaInfo, isolation bool, queryMode string) *CollectionInfo {
 	return &CollectionInfo{
-		CollID:                   collection.CollectionID,
-		DBID:                     collection.GetDbId(),
-		DBName:                   collection.GetDbName(),
-		Name:                     collection.GetSchema().GetName(),
-		ReadSchemaVersion:        collection.GetSchema().GetVersion(),
-		IsPartitionKeyCollection: hasPartitionKey(collection.GetSchema()),
-		CreatedTimestamp:         collection.CreatedTimestamp,
-		CreatedUtcTimestamp:      collection.CreatedUtcTimestamp,
-		ConsistencyLevel:         collection.ConsistencyLevel,
-		PartitionKeyIsolation:    isolation,
-		QueryMode:                queryMode,
-		UpdateTimestamp:          collection.UpdateTimestamp,
-		VChannels:                collection.VirtualChannelNames,
-		PChannels:                collection.PhysicalChannelNames,
-		NumPartitions:            collection.NumPartitions,
-		ShardsNum:                collection.ShardsNum,
-		Aliases:                  collection.Aliases,
-		Properties:               collection.Properties,
+		CollID:                collection.CollectionID,
+		DBID:                  collection.GetDbId(),
+		DBName:                collection.GetDbName(),
+		Schema:                schemaInfo,
+		CreatedTimestamp:      collection.CreatedTimestamp,
+		CreatedUtcTimestamp:   collection.CreatedUtcTimestamp,
+		ConsistencyLevel:      collection.ConsistencyLevel,
+		PartitionKeyIsolation: isolation,
+		QueryMode:             queryMode,
+		UpdateTimestamp:       collection.UpdateTimestamp,
+		CollectionTTL:         GetCollectionTTL(schemaInfo.GetProperties()),
+		VChannels:             collection.VirtualChannelNames,
+		PChannels:             collection.PhysicalChannelNames,
+		NumPartitions:         collection.NumPartitions,
+		ShardsNum:             collection.ShardsNum,
+		Aliases:               collection.Aliases,
+		Properties:            collection.Properties,
 	}
 }
 
@@ -588,16 +583,14 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 		}
 
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return collInfo.Name, nil
+		return collInfo.Schema.Name, nil
 	}
 	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
 
-	return collInfo.Name, nil
+	return collInfo.Schema.Name, nil
 }
 
-// getCollectionMetadata returns a read-only cached snapshot without a schema
-// body. Routing and metadata-only Describe must not trigger a read-schema RPC.
-func (m *MetaCache) getCollectionMetadata(ctx context.Context, database string, collectionName string, collectionID int64) (*CollectionInfo, error) {
+func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*CollectionInfo, error) {
 	// Pass collectionID through so an id-only lookup (collectionName == "") hits
 	// the cluster-wide id index instead of probing id 0, which always misses and
 	// forces a needless UpdateByID/singleflight round plus a spurious cache-miss
@@ -632,13 +625,27 @@ func (m *MetaCache) getCollectionMetadata(ctx context.Context, database string, 
 	return collInfo, nil
 }
 
-// GetCollectionSchema is a resolving facade; MetaCache retains no schema bodies.
 func (m *MetaCache) GetCollectionSchema(ctx context.Context, database, collectionName string) (*SchemaInfo, error) {
-	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
-	if err != nil {
-		return nil, err
+	collInfo, ok := m.getCollection(database, collectionName, 0)
+
+	method := "GetCollectionSchema"
+	if !ok {
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheMissLabel).Inc()
+
+		collInfo, err := m.UpdateByName(ctx, database, collectionName)
+		if err != nil {
+			return nil, err
+		}
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(paramtable.GetStringNodeID(), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		mlog.Debug(ctx, "Reload collection from root coordinator ",
+			mlog.String("collectionName", collectionName),
+			mlog.Int64("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
+		return collInfo.Schema, nil
 	}
-	return info.GetReadSchema(ctx)
+	metrics.ProxyCacheStatsCounter.WithLabelValues(paramtable.GetStringNodeID(), method, metrics.CacheHitLabel).Inc()
+
+	return collInfo.Schema, nil
 }
 
 // setAliasLocked sets an alias hint (alias -> real name). Caller must hold m.mu
@@ -719,21 +726,21 @@ func (m *MetaCache) RemoveAliasHolders(ctx context.Context, database, alias stri
 // against the literal name and the task fails not-found later, as before.
 func (m *MetaCache) ResolveCollectionAlias(ctx context.Context, database, nameOrAlias string) (string, error) {
 	if collInfo, ok := m.getCollection(database, nameOrAlias, 0); ok {
-		if collInfo.Name != "" {
-			return collInfo.Name, nil
+		if collInfo.Schema != nil && collInfo.Schema.GetName() != "" {
+			return collInfo.Schema.GetName(), nil
 		}
 		return nameOrAlias, nil
 	}
 
-	info, err := m.getCollectionMetadata(ctx, database, nameOrAlias, 0)
+	info, err := m.GetCollectionInfo(ctx, database, nameOrAlias, 0)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrAliasNotFound) {
 			return nameOrAlias, nil
 		}
 		return "", err
 	}
-	if info.Name != "" {
-		return info.Name, nil
+	if info.Schema != nil && info.Schema.GetName() != "" {
+		return info.Schema.GetName(), nil
 	}
 	return nameOrAlias, nil
 }
@@ -779,7 +786,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 // entry itself so the partition fill can reuse its already-parsed schema rather
 // than describing the same collection a second time.
 func (m *MetaCache) resolvePartitionCollection(ctx context.Context, database, collectionName string) (*CollectionInfo, string, error) {
-	info, err := m.getCollectionMetadata(ctx, database, collectionName, 0)
+	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
 	if err != nil {
 		return nil, "", err
 	}
@@ -851,7 +858,7 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*PartitionInfos, error) {
 		// Partition-key status is fixed at creation, so the resolved schema answers
 		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
-		isPartitionKey := collection.IsPartitionKeyCollection
+		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
 		resp, err := m.showPartitions(ctx, rpcDB, "", collectionID)
 		if err != nil {
 			return nil, err
@@ -920,9 +927,13 @@ func (m *MetaCache) describeCollection(ctx context.Context, database, collection
 	if err != nil {
 		return nil, err
 	}
-	if coll.Schema == nil {
-		return nil, merr.WrapErrServiceInternalMsg("DescribeCollection returned no schema")
+	userFields := make([]*schemapb.FieldSchema, 0)
+	for _, field := range coll.Schema.Fields {
+		if field.FieldID >= common.StartOfUserFieldID {
+			userFields = append(userFields, field)
+		}
 	}
+	coll.Schema.Fields = userFields
 	return coll, nil
 }
 
@@ -1190,8 +1201,8 @@ func (m *MetaCache) evictCollectionEntryLocked(collectionID typeutil.UniqueID) (
 		return "", false
 	}
 	name := ""
-	if entry.Name != "" {
-		name = entry.Name
+	if entry.Schema != nil {
+		name = entry.Schema.GetName()
 	}
 	db := normalizeDBName(entry.DBName)
 	if Aliases, ok := m.aliasInfo[db]; ok {
@@ -1450,13 +1461,4 @@ func (m *MetaCache) Close() {
 	m.closeOnce.Do(func() {
 		close(m.stopCh)
 	})
-}
-
-func hasPartitionKey(schema *schemapb.CollectionSchema) bool {
-	for _, field := range schema.GetFields() {
-		if field.GetIsPartitionKey() {
-			return true
-		}
-	}
-	return false
 }

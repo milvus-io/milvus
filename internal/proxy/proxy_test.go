@@ -4629,6 +4629,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
@@ -4651,9 +4652,11 @@ func TestProxy_Import(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "dummy", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
 			DBID: 1,

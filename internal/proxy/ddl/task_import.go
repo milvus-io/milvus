@@ -26,11 +26,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -116,21 +114,18 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if colInfo == nil {
+	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
 		return merr.WrapErrImportSysFailed("collection schema is unavailable")
 	}
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = req.GetDbName()
 	}
-	canonicalCollectionName := colInfo.Name
+	canonicalCollectionName := colInfo.Schema.GetName()
 	req.DbName = canonicalDBName
 	req.CollectionName = canonicalCollectionName
 
-	schema, err := colInfo.GetReadSchema(ctx)
-	if err != nil {
-		return err
-	}
+	schema := colInfo.Schema
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportSysFailed("collection schema has no fields")
 	}
@@ -294,19 +289,13 @@ func (it *ImportTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// Import readers consume user-provided columns; RowID and Timestamp are
-	// generated separately by the import pipeline. Detach only this RPC envelope.
-	importSchema := schemautil.ShallowSchema(it.schema.CollectionSchema)
-	importSchema.Fields = lo.Filter(it.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-		return !common.IsSystemField(field.GetFieldID())
-	})
 	importReq := &internalpb.ImportRequestInternal{
 		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,
 		CollectionName: it.req.GetCollectionName(),
 		PartitionIDs:   it.partitionIDs,
 		ChannelNames:   it.vchannels,
-		Schema:         importSchema,
+		Schema:         it.schema.CollectionSchema,
 		Files:          it.req.GetFiles(),
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback

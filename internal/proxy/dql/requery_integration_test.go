@@ -76,7 +76,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, UniqueID(0), nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": UniqueID(1)}, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{}, schema), nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema}, nil)
 
 	node := &namespaceRequeryMockNode{}
 
@@ -246,7 +246,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	collectionID := int64(1000)
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{CollID: collectionID}, schemaInfo), nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: schemaInfo}, nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": 1}, nil)
 
 	qn := getQueryNodeClient()

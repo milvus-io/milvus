@@ -72,6 +72,7 @@ func nullableUpsertVector(dataType schemapb.DataType, values []int64, valid []bo
 }
 
 func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	for _, dataType := range []schemapb.DataType{
 		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
 		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
@@ -165,8 +166,7 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 							t.Cleanup(func() { m.UnPatch() })
 						}
 						patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-						patch((*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{}, task.schema), nil)
-						patch((*metacache.MetaCache).GetCollectionWriteInfo, metacache.CollectionInfoForTest(t, &collectionInfo{}, task.schema), nil)
+						patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
 						patch((*metacache.MetaCache).GetPartitionID, int64(1002), nil)
 						allocation := mockey.Mock(common.AllocAutoID).To(func(_ func(uint32) (int64, int64, error), rowNum uint32, _ uint64) (int64, int64, error) {
 							return 1000, 1000 + int64(rowNum), nil

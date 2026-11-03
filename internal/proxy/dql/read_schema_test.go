@@ -30,7 +30,7 @@ func TestInternalQueryKeepsParentReadSchema(t *testing.T) {
 	id := int64(1001)
 	lookup := mockey.Mock((*metacache.MetaCache).GetCollectionID).To(func(*metacache.MetaCache, context.Context, string, string) (int64, error) { return id, nil }).Build()
 	defer lookup.UnPatch()
-	info := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{CollID: id}, latest), nil).Build()
+	info := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{CollID: id, Schema: latest}, nil).Build()
 	defer info.UnPatch()
 	partition := mockey.Mock(IsPartitionKeyMode).Return(false, nil).Build()
 	defer partition.UnPatch()

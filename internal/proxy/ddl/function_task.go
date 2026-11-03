@@ -19,12 +19,13 @@ package ddl
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
-	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -109,16 +110,12 @@ func (t *AlterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 			mlog.Err(err))
 		return err
 	}
-	schema, err := coll.GetReadSchema(ctx)
-	if err != nil {
-		return err
-	}
-	if err := rejectExternalCollectionFunctionMutation(schema.CollectionSchema); err != nil {
+	if err := rejectExternalCollectionFunctionMutation(coll.Schema.CollectionSchema); err != nil {
 		return err
 	}
 	funcExist := false
 	newFunctions := []*schemapb.FunctionSchema{}
-	for _, fSchema := range schema.Functions {
+	for _, fSchema := range coll.Schema.Functions {
 		if t.FunctionName == fSchema.Name {
 			if fSchema.Type == schemapb.FunctionType_BM25 {
 				return merr.WrapErrParameterInvalidMsg("currently does not support alter BM25 function")
@@ -136,7 +133,7 @@ func (t *AlterCollectionFunctionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("function %s not found", t.FunctionName)
 	}
 
-	newColl := schemautil.ShallowSchema(schema.CollectionSchema)
+	newColl := proto.Clone(coll.Schema.CollectionSchema).(*schemapb.CollectionSchema)
 	newColl.Functions = newFunctions
 	if err := validator.ValidateFunction(newColl, t.FunctionName, false); err != nil {
 		return err
@@ -166,5 +163,6 @@ func getCollectionInfo(ctx context.Context, metaCache Cache, dbName string, coll
 	if err != nil {
 		return nil, err
 	}
+	coll.Schema.DbName = dbName
 	return coll, nil
 }

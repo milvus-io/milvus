@@ -18,11 +18,9 @@ See [Analyzer execution](analyzer.md) for routing, schema and lifetime rules.
 ## Collection schemas
 
 `streaming.WAL().SchemaClient()` caches immutable `schemautil.SchemaInfo` values,
-including the complete schema and derived field indices. Proxy and native node
-consumers share the same schema, including RowID/Timestamp. User input validation,
-output enumeration and name resolution enforce system-column visibility at their
-own boundaries; the cache does not create a separate user schema. User-name
-lookups reuse the complete indices and preserve dynamic JSON key fallback.
+including the complete schema and derived field indices. Native node consumers
+and write-side Proxy validation use the complete schema, including RowID/Timestamp.
+Write-side validation enforces the user-column constraints locally.
 Current-write lookups confirm write admission with SN on every call but reuse the
 compiled object for the same cached collection/version. Exact-version reads,
 including zero, use the cache directly.
@@ -32,12 +30,17 @@ bypasses older flights and logically invalidates metadata in all cached versions
 of that collection without scanning other entries. Older RPC completions cannot
 publish over the new epoch. Cache bodies and epochs expire when idle.
 
-Proxy MetaCache refreshes the current write schema before publishing a miss fill.
-`CollectionInfo` stores routing metadata and the published read version, not a
-schema pointer. Its `GetReadSchema`/`GetWriteSchema` methods return SchemaClient's
-shared object without per-request metadata projection, shallow copies or index
-reconstruction. Read and write versions remain independent. SN exact-version
-responses combine that version's fields/TTL with current non-versioned metadata;
-allocation-time WAL history remains unchanged. AlterCollection's consuming-side
-ACK precedes coordinator callback/invalidation, so the subsequent refresh can
-observe the update even when SchemaVersion did not change.
+On a miss, Proxy MetaCache fetches the published version from Coord, then obtains
+that exact version through SchemaClient with `BypassCache`. It shallow-copies the
+schema envelope and filters system fields, building a matching set of read indices
+once before publishing `CollectionInfo.Schema`. Field nodes remain shared and
+immutable. Read-side Proxy code uses this cached schema with its existing field
+visibility; write-side code independently selects the current SN schema. Upsert
+internal reads and Search requery retain their selected published read snapshot.
+
+SN exact-version responses combine that version's fields/TTL with current
+non-versioned metadata; allocation-time WAL history remains unchanged.
+AlterCollection's consuming-side ACK precedes coordinator callback/invalidation,
+so the subsequent refresh observes metadata updates even without a schema-version
+change. MetaCache's fill lock orders the schema fetch and publication against
+invalidation.

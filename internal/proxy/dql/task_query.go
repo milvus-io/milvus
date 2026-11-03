@@ -259,9 +259,7 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 
 	fieldNameToSchema := make(map[string]*schemapb.FieldSchema, len(schema.Fields))
 	for _, field := range schema.Fields {
-		if !common.IsSystemField(field.GetFieldID()) {
-			fieldNameToSchema[field.Name] = field
-		}
+		fieldNameToSchema[field.Name] = field
 	}
 
 	groupByFieldIds := make([]UniqueID, 0, len(groupByFieldNames))
@@ -397,7 +395,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 		for _, reqField := range outputFields {
 			var fieldFound bool
 			for _, field := range schema.Fields {
-				if reqField == field.Name && !common.IsSystemField(field.GetFieldID()) {
+				if reqField == field.Name {
 					outputFieldIDs = append(outputFieldIDs, field.FieldID)
 					fieldFound = true
 					break
@@ -408,7 +406,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 			structFieldLoop:
 				for _, structField := range schema.StructArrayFields {
 					for _, field := range structField.Fields {
-						if reqField == field.Name && !common.IsSystemField(field.GetFieldID()) {
+						if reqField == field.Name {
 							outputFieldIDs = append(outputFieldIDs, field.FieldID)
 							fieldFound = true
 							break structFieldLoop
@@ -831,10 +829,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrServiceUnavailableMsg("collection identity changed during internal query")
 		}
 	} else {
-		schema, err = colInfo.GetReadSchema(ctx)
-		if err != nil {
-			return err
-		}
+		schema = colInfo.Schema
 	}
 	t.schema = schema
 	t.SchemaVersion = schema.GetVersion()
@@ -1034,7 +1029,10 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	t.IsIterator = queryParams.isIterator
 
-	collectionTTL := metacache.GetCollectionTTL(t.schema.GetProperties())
+	collectionTTL := collectionInfo.CollectionTTL
+	if t.boundReadSchema != nil {
+		collectionTTL = metacache.GetCollectionTTL(t.boundReadSchema.GetProperties())
+	}
 	if collectionTTL != 0 {
 		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionTTL))

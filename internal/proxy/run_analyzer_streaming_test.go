@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -54,9 +53,9 @@ func TestFieldAnalyzerRouting(t *testing.T) {
 					id = 8
 					return nil, merr.WrapErrCollectionNotFound(collectionID)
 				}
-				info := metacache.CollectionInfoForTest(t, &collectionInfo{CollID: 7, VChannels: []string{"test_7v0"}}, mustNewSchemaInfo(&schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{{Name: "text", FieldID: 101}}}))
+				info := &collectionInfo{CollID: 7, VChannels: []string{"test_7v0"}, Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{{Name: "text", FieldID: 101}}})}
 				if scenario == "field missing" {
-					metacache.CollectionInfoForTest(t, info, mustNewSchemaInfo(&schemapb.CollectionSchema{}))
+					info.Schema = mustNewSchemaInfo(&schemapb.CollectionSchema{})
 				}
 				if scenario == "no channel" {
 					info.VChannels = nil

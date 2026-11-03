@@ -28,6 +28,7 @@ import (
 )
 
 func TestPartitionKey(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 	qc := mocks.NewMockMixCoordClient(t)
 	qc.EXPECT().Close().Return(nil).Maybe()
@@ -70,8 +71,7 @@ func TestPartitionKey(t *testing.T) {
 	}
 	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
 	schema.Fields = append(schema.Fields, partitionKeyField)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{CollID: collectionID}, mustNewSchemaInfo(schema)), nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionWriteInfo, metacache.CollectionInfoForTest(t, &collectionInfo{CollID: collectionID}, mustNewSchemaInfo(schema)), nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -216,6 +216,7 @@ func TestPartitionKey(t *testing.T) {
 }
 
 func TestDefaultPartition(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Skip("TODO: rewrite with mockey for non-partition-key default-partition streaming path")
 
 	streaming.SetupNoopWALForTest()
@@ -252,8 +253,7 @@ func TestDefaultPartition(t *testing.T) {
 	fieldName2Type["varChar_field"] = schemapb.DataType_VarChar
 	fieldName2Type["fvec_field"] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, metacache.CollectionInfoForTest(t, &collectionInfo{CollID: collectionID}, mustNewSchemaInfo(schema)), nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionWriteInfo, metacache.CollectionInfoForTest(t, &collectionInfo{CollID: collectionID}, mustNewSchemaInfo(schema)), nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema)}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 	collectionID, err := cache.GetCollectionID(ctx, "", collectionName)
 	assert.NoError(t, err)

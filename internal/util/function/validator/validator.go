@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -33,8 +32,6 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 	nameMap := lo.SliceToMap(coll.GetFields(), func(field *schemapb.FieldSchema) (string, *schemapb.FieldSchema) {
 		return field.GetName(), field
 	})
-	// CreateCollection validates functions before assigning field IDs. System
-	// column names are reserved on both unassigned and persisted schemas.
 	usedOutputField := typeutil.NewSet[string]()
 	usedFunctionName := typeutil.NewSet[string]()
 
@@ -51,7 +48,7 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 		inputFields := []*schemapb.FieldSchema{}
 		for _, name := range function.GetInputFieldNames() {
 			inputField, ok := nameMap[name]
-			if !ok || name == common.RowIDFieldName || name == common.TimeStampFieldName {
+			if !ok {
 				return merr.WrapErrParameterInvalidMsg("function input field not found: %s", name)
 			}
 			inputFields = append(inputFields, inputField)
@@ -64,7 +61,7 @@ func ValidateFunction(coll *schemapb.CollectionSchema, needValidateFunctionName 
 		outputFields := make([]*schemapb.FieldSchema, len(function.GetOutputFieldNames()))
 		for i, name := range function.GetOutputFieldNames() {
 			outputField, ok := nameMap[name]
-			if !ok || name == common.RowIDFieldName || name == common.TimeStampFieldName {
+			if !ok {
 				return merr.WrapErrParameterInvalidMsg("function output field not found: %s", name)
 			}
 

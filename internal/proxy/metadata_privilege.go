@@ -64,10 +64,10 @@ func replicaPrivilegeRequestByID(ctx context.Context, cache Cache, req *milvuspb
 	// IDs are cluster-wide: neither the connection database nor a caller-supplied
 	// DbName establishes which database owns this collection. Older coordinators
 	// can omit the real database; never authorize such an ID against a guessed DB.
-	if info == nil || info.CollID != req.GetCollectionID() || info.DBName == "" || info.Name == "" {
+	if info == nil || info.CollID != req.GetCollectionID() || info.DBName == "" || info.Schema == nil || info.Schema.GetName() == "" {
 		return nil, merr.WrapErrServiceUnavailable("cannot resolve collection identity for authorization")
 	}
-	return &milvuspb.GetLoadStateRequest{DbName: info.DBName, CollectionName: info.Name}, nil
+	return &milvuspb.GetLoadStateRequest{DbName: info.DBName, CollectionName: info.Schema.GetName()}, nil
 }
 
 func replicaPrivilegeDenied() error {

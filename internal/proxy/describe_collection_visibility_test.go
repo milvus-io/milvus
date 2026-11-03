@@ -158,7 +158,7 @@ func TestDescribeCollectionVisibilityFailsClosed(t *testing.T) {
 	require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	t.Cleanup(func() { Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key) })
 	ctx := NewContextWithMetadata(context.Background(), "alice", "tenant_a")
-	collection := metacache.CollectionInfoForTest(t, &collectionInfo{CollID: 77, DBName: "tenant_b"}, mustNewSchemaInfo(&schemapb.CollectionSchema{Name: "orders"}))
+	collection := &collectionInfo{CollID: 77, DBName: "tenant_b", Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{Name: "orders"})}
 	for _, tc := range []struct {
 		name string
 		resp *milvuspb.DescribeCollectionResponse

@@ -102,8 +102,8 @@ func (c *metadataPrivilegeCoordinator) GetReplicas(_ context.Context, req *milvu
 }
 
 func setupMetadataPrivileges(t *testing.T) (*metadataPrivilegeCoordinator, func(string, ...commonpb.ObjectPrivilege)) {
-	t.Helper()
 	metacache.MockPublishedSchemaForTest(t)
+	t.Helper()
 	paramtable.Init()
 	for key, value := range map[string]string{
 		Params.CommonCfg.AuthorizationEnabled.Key:    "true",
@@ -328,9 +328,9 @@ func TestReplicaPrivilegeFailsClosed(t *testing.T) {
 		incompleteMetadataCache{},
 		incompleteMetadataCache{info: &collectionInfo{CollID: 41}},
 		incompleteMetadataCache{info: &collectionInfo{CollID: 41, DBName: "tenant_b"}},
-		incompleteMetadataCache{info: metacache.CollectionInfoForTest(t, &collectionInfo{CollID: 41}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "records"}})},
-		incompleteMetadataCache{info: metacache.CollectionInfoForTest(t, &collectionInfo{CollID: 41, DBName: "tenant_b"}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}})},
-		incompleteMetadataCache{info: metacache.CollectionInfoForTest(t, &collectionInfo{CollID: 42, DBName: "tenant_b"}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "records"}})},
+		incompleteMetadataCache{info: &collectionInfo{CollID: 41, Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "records"}}}},
+		incompleteMetadataCache{info: &collectionInfo{CollID: 41, DBName: "tenant_b", Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}}}},
+		incompleteMetadataCache{info: &collectionInfo{CollID: 42, DBName: "tenant_b", Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "records"}}}},
 		incompleteMetadataCache{err: merr.WrapErrServiceUnavailable("coordinator unavailable")},
 	} {
 		_, err := PrivilegeInterceptorWithMetaCache(func() Cache { return cache })(ctx, &milvuspb.GetReplicasRequest{CollectionID: 41})

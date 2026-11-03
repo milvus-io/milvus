@@ -4030,11 +4030,11 @@ func (s *SearchPipelineSuite) TestMergeIDsFunc() {
 func (s *SearchPipelineSuite) TestParseOrderByFields() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64},
-			{Name: "score", FieldID: 101, DataType: schemapb.DataType_Float},
-			{Name: "name", FieldID: 102, DataType: schemapb.DataType_VarChar},
-			{Name: "active", FieldID: 103, DataType: schemapb.DataType_Bool},
-			{Name: "vector", FieldID: 104, DataType: schemapb.DataType_FloatVector},
+			{Name: "id", DataType: schemapb.DataType_Int64},
+			{Name: "score", DataType: schemapb.DataType_Float},
+			{Name: "name", DataType: schemapb.DataType_VarChar},
+			{Name: "active", DataType: schemapb.DataType_Bool},
+			{Name: "vector", DataType: schemapb.DataType_FloatVector},
 		},
 	}
 
@@ -4136,9 +4136,9 @@ func (s *SearchPipelineSuite) TestParseOrderByFields() {
 func (s *SearchPipelineSuite) TestParseOrderByFieldsEdgeCases() {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64},
-			{Name: "score", FieldID: 101, DataType: schemapb.DataType_Float},
-			{Name: "name", FieldID: 102, DataType: schemapb.DataType_VarChar},
+			{Name: "id", DataType: schemapb.DataType_Int64},
+			{Name: "score", DataType: schemapb.DataType_Float},
+			{Name: "name", DataType: schemapb.DataType_VarChar},
 		},
 	}
 
@@ -4236,15 +4236,15 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsEdgeCases() {
 	// Test all supported sortable types
 	schemaAllTypes := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "f_bool", FieldID: 103, DataType: schemapb.DataType_Bool},
-			{Name: "f_int8", FieldID: 104, DataType: schemapb.DataType_Int8},
-			{Name: "f_int16", FieldID: 105, DataType: schemapb.DataType_Int16},
-			{Name: "f_int32", FieldID: 106, DataType: schemapb.DataType_Int32},
-			{Name: "f_int64", FieldID: 107, DataType: schemapb.DataType_Int64},
-			{Name: "f_float", FieldID: 108, DataType: schemapb.DataType_Float},
-			{Name: "f_double", FieldID: 109, DataType: schemapb.DataType_Double},
-			{Name: "f_string", FieldID: 110, DataType: schemapb.DataType_String},
-			{Name: "f_varchar", FieldID: 111, DataType: schemapb.DataType_VarChar},
+			{Name: "f_bool", DataType: schemapb.DataType_Bool},
+			{Name: "f_int8", DataType: schemapb.DataType_Int8},
+			{Name: "f_int16", DataType: schemapb.DataType_Int16},
+			{Name: "f_int32", DataType: schemapb.DataType_Int32},
+			{Name: "f_int64", DataType: schemapb.DataType_Int64},
+			{Name: "f_float", DataType: schemapb.DataType_Float},
+			{Name: "f_double", DataType: schemapb.DataType_Double},
+			{Name: "f_string", DataType: schemapb.DataType_String},
+			{Name: "f_varchar", DataType: schemapb.DataType_VarChar},
 		},
 	}
 
@@ -4261,10 +4261,10 @@ func (s *SearchPipelineSuite) TestParseOrderByFieldsEdgeCases() {
 	// Note: JSON without path syntax is not directly sortable; use path syntax like field["key"] instead
 	schemaUnsortable := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
-			{Name: "f_float_vector", FieldID: 112, DataType: schemapb.DataType_FloatVector},
-			{Name: "f_binary_vector", FieldID: 113, DataType: schemapb.DataType_BinaryVector},
-			{Name: "f_array", FieldID: 114, DataType: schemapb.DataType_Array},
-			{Name: "f_json", FieldID: 115, DataType: schemapb.DataType_JSON},
+			{Name: "f_float_vector", DataType: schemapb.DataType_FloatVector},
+			{Name: "f_binary_vector", DataType: schemapb.DataType_BinaryVector},
+			{Name: "f_array", DataType: schemapb.DataType_Array},
+			{Name: "f_json", DataType: schemapb.DataType_JSON},
 		},
 	}
 

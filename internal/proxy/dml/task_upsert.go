@@ -2006,12 +2006,12 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.collectionID = collID
 
-	colInfo, err := it.GetMetaCache().GetCollectionWriteInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
 	}
-	it.collectionName = colInfo.Name
+	it.collectionName = colInfo.Schema.GetName()
 	canonicalDBName := colInfo.DBName
 	if canonicalDBName == "" {
 		canonicalDBName = it.req.GetDbName()

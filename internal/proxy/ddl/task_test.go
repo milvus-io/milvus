@@ -5485,6 +5485,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 }
 
 func TestAlterCollectionFieldOnStruct(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 
 	qc := NewMixCoordMock()

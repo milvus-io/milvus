@@ -205,7 +205,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.collectionID = collID
 
-	colInfo, err := it.GetMetaCache().GetCollectionWriteInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err
@@ -214,7 +214,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = it.insertMsg.GetDbName()
 	}
-	collectionName = colInfo.Name
+	collectionName = colInfo.Schema.GetName()
 	it.insertMsg.DbName = canonicalDBName
 	it.insertMsg.CollectionName = collectionName
 	it.insertMsg.CollectionID = collID

@@ -527,6 +527,7 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockCache := NewMockCache(t)
 	ctx := context.Background()
 
@@ -541,14 +542,15 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 			schemaTimestamp: 99,
 		}
 		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
-		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
 			UpdateTimestamp: 100,
-		}, mustNewSchemaInfo(&schemapb.CollectionSchema{
-			Name: "col-0",
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			},
-		})), nil)
+			Schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+				Name: "col-0",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				},
+			}),
+		}, nil)
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
@@ -1805,6 +1807,7 @@ func (c *upsertMessageTestCipher) Decrypt(data []byte) ([]byte, error) {
 }
 
 func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	const (
 		existingPK  = int64(10)
 		generatedPK = int64(1001)
@@ -1818,7 +1821,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 
 	m := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, task.schema), nil).Build()
+	m = mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(task.schema, nil).Build()
 	defer m.UnPatch()
@@ -2838,6 +2841,7 @@ func TestQueryPreExecuteFullAutoIDRejectsMalformedResults(t *testing.T) {
 }
 
 func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -2876,9 +2880,10 @@ func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
 		t.Helper()
 		collectionIDPatch := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		t.Cleanup(func() { collectionIDPatch.UnPatch() })
-		collectionInfoPatch := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		collectionInfoPatch := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
-		}, schema), nil).Build()
+			Schema:          schema,
+		}, nil).Build()
 		t.Cleanup(func() { collectionInfoPatch.UnPatch() })
 		collectionSchemaPatch := mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		t.Cleanup(func() { collectionSchemaPatch.UnPatch() })
@@ -3853,14 +3858,16 @@ func TestUpdateTask_queryPreExecute_EmptyOldIDs(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_Success(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Run("mocked dependencies", func(t *testing.T) {
 		patch1 := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		defer patch1.UnPatch()
 
 		schema := createTestSchema()
-		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
-		}, schema), nil).Build()
+			Schema:          schema,
+		}, nil).Build()
 		defer patch2.UnPatch()
 
 		patch3 := mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
@@ -3917,12 +3924,14 @@ func TestUpdateTask_PreExecute_Success(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	m := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 	defer m.UnPatch()
 	schema := createTestSchema()
-	m = mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+	m = mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 		UpdateTimestamp: 12345,
-	}, schema), nil).Build()
+		Schema:          schema,
+	}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 	defer m.UnPatch()
@@ -3971,13 +3980,15 @@ func TestUpdateTask_PreExecute_GetCollectionIDError(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestUpdateTask_PreExecute_PartitionKeyModeError", t, func() {
 		schema := createTestSchema()
 		schema.HasPartitionKeyField = true
 		mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
-		}, schema), nil).Build()
+			Schema:          schema,
+		}, nil).Build()
 
 		task := createTestUpdateTask()
 		task.req.PartitionName = "custom_partition" // This should cause error in partition key mode
@@ -3990,12 +4001,14 @@ func TestUpdateTask_PreExecute_PartitionKeyModeError(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestUpdateTask_PreExecute_InvalidNumRows", t, func() {
 		schema := createTestSchema()
 		mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-		mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
-		}, schema), nil).Build()
+			Schema:          schema,
+		}, nil).Build()
 		mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		mockey.Mock(dql.IsPartitionKeyMode).Return(false, nil).Build()
 		mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&partitionInfo{
@@ -4014,13 +4027,15 @@ func TestUpdateTask_PreExecute_InvalidNumRows(t *testing.T) {
 }
 
 func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Run("mocked dependencies", func(t *testing.T) {
 		schema := createTestSchema()
 		patch1 := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 		defer patch1.UnPatch()
-		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+		patch2 := mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{
 			UpdateTimestamp: 12345,
-		}, schema), nil).Build()
+			Schema:          schema,
+		}, nil).Build()
 		defer patch2.UnPatch()
 		patch3 := mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 		defer patch3.UnPatch()
@@ -4392,6 +4407,7 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 }
 
 func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Skip("TODO: end-to-end query channel assertion needs rework in dml package")
 	for _, scenario := range []struct {
 		name      string
@@ -4454,7 +4470,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 				t.Cleanup(func() { m.UnPatch() })
 			}
 			patch((*metacache.MetaCache).GetCollectionID, task.collectionID, nil)
-			patch((*metacache.MetaCache).GetCollectionWriteInfo, metacache.CollectionInfoForTest(t, &collectionInfo{}, task.schema), nil)
+			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, nil)
 			patch((*metacache.MetaCache).GetCollectionSchema, task.schema, nil)
 			patch((*metacache.MetaCache).GetPartitionID, int64(100), nil)
 			patch((*metacache.MetaCache).GetPartitionsIndex, []string{"_default_0"}, nil)
@@ -6384,6 +6400,7 @@ func TestUpsertTask_NoDuplicatePK(t *testing.T) {
 // 3. Columns a and b have 10 rows of data, column c has FieldData but empty data array
 // 4. Verifies both nullable and non-nullable scenarios for column c
 func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	numRows := 10
 	dim := 128
 
@@ -6450,7 +6467,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{UpdateTimestamp: 12345}, schema), nil).Build()
+			mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(dql.IsPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
@@ -6567,7 +6584,7 @@ func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
 		mockey.PatchConvey("test non-nullable field", t, func() {
 			// Setup mocks using mockey
 			mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			mockey.Mock((*metacache.MetaCache).GetCollectionWriteInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{UpdateTimestamp: 12345}, schema), nil).Build()
+			mockey.Mock((*metacache.MetaCache).GetCollectionInfo).Return(&collectionInfo{UpdateTimestamp: 12345, Schema: schema}, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetCollectionSchema).Return(schema, nil).Build()
 			mockey.Mock(dql.IsPartitionKeyMode).Return(false, nil).Build()
 			mockey.Mock((*metacache.MetaCache).GetPartitionInfo).Return(&partitionInfo{Name: "_default"}, nil).Build()
@@ -7773,6 +7790,7 @@ func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
 
 // Rejected request preparation must not reach the new Strong read or publish DML.
 func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	for _, stage := range []string{"valid_data", "collection_info", "text_storage", "field_ops", "namespace", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "insert", "delete", "implicit_partial_namespace"} {
 		t.Run(stage, func(t *testing.T) {
 			task := createTestUpdateTask()
@@ -7792,7 +7810,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			}
 			patch(validateAndNormalizeFieldDataValidData, failure("valid_data"))
 			patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-			patch((*metacache.MetaCache).GetCollectionWriteInfo, metacache.CollectionInfoForTest(t, &collectionInfo{}, task.schema), failure("collection_info"))
+			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
 			patch((*metacache.MetaCache).GetCollectionSchema, task.schema, failure("schema"))
 			patch(dql.ValidateTextStorageV3Enabled, failure("text_storage"))
 			implicit := stage == "implicit_partial_namespace"

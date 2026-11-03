@@ -1545,6 +1545,7 @@ func TestProxy_AllocTimestamp(t *testing.T) {
 }
 
 func TestProxy_Delete(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	collectionName := "test_delete"
 	collectionID := int64(111)
 	partitionName := "default"
@@ -1571,12 +1572,11 @@ func TestProxy_Delete(t *testing.T) {
 		},
 	}
 	schema := mustNewSchemaInfo(collSchema)
-	basicInfo := metacache.CollectionInfoForTest(t, &collectionInfo{
-		CollID: collectionID,
-
+	basicInfo := &collectionInfo{
+		CollID:    collectionID,
+		Schema:    schema,
 		VChannels: channels,
-	}, schema)
-
+	}
 	paramtable.Init()
 
 	t.Run("delete run failed", func(t *testing.T) {
@@ -1639,6 +1639,7 @@ func TestProxy_Delete(t *testing.T) {
 }
 
 func TestProxy_ImportV2(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 
@@ -1691,7 +1692,9 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// schema has no fields
 		mc = NewMockCache(t)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}}), nil).Once()
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
+		}, nil).Once()
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{},
@@ -1709,9 +1712,11 @@ func TestProxy_ImportV2(t *testing.T) {
 				{IsPartitionKey: true},
 			}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
+			}},
+		}, nil)
 		node.setMetaCache(mc)
 		chMgr.EXPECT().GetVChannels(mock.Anything).Return(nil, mockErr).Once()
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
@@ -1734,9 +1739,11 @@ func TestProxy_ImportV2(t *testing.T) {
 				{IsPartitionKey: true},
 			}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{IsPartitionKey: true}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(nil, mockErr)
 		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa"})
@@ -1749,9 +1756,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, mockErr)
 		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
@@ -1764,9 +1773,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		node.setMetaCache(mc)
 		rsp, err = node.ImportV2(ctx, &internalpb.ImportRequest{CollectionName: "aaa", PartitionName: "bbb"})
@@ -1791,9 +1802,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
 			DBID: 1,
@@ -1845,9 +1858,11 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1}}},
 		}, nil)
-		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
-		}}), nil)
+		mc.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(0)).Return(&collectionInfo{
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+				Name: "aaa", Fields: []*schemapb.FieldSchema{{FieldID: 1}},
+			}},
+		}, nil)
 		mc.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
 		mc.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{DBID: 1}, nil)
 		node.setMetaCache(mc)
@@ -2643,13 +2658,14 @@ func searchByPKRequest(ids []int64) *milvuspb.SearchRequest {
 // treats the Nq dimension positionally: result block N belongs to ids[N]. The
 // rewritten placeholder group must therefore follow the request's ID order.
 func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrder", t, func() {
 		paramtable.Init()
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(searchByPKTestSchema(false))), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(false))}, nil)
 		node := &Proxy{metaCache: cache}
 
 		// query returns PK ascending: 1, 2, 3
@@ -2684,6 +2700,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 // the value the query result's PK column yields, and looked up with the value
 // the request's IDs yield; both must be the same Go type for a string key.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK", t, func() {
 		paramtable.Init()
 
@@ -2694,7 +2711,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(schema)), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
 		node := &Proxy{metaCache: cache}
 
 		// query returns PK ascending: "a", "b", "c"
@@ -2737,13 +2754,14 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 // validData is consumed positionally by adjustSearchResultsForNullVectors, so
 // it must follow the request's ID order too, not the query result's PK order.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForValidData", t, func() {
 		paramtable.Init()
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(searchByPKTestSchema(true))), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
 		node := &Proxy{metaCache: cache}
 
 		// PK ascending 1, 2, 3 where row of PK 1 has a null vector, so the
@@ -2780,13 +2798,14 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 // block per requested ID. Reordering the fetched rows must not lose the
 // typed-but-empty vector payload that carries this case.
 func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch", t, func() {
 		paramtable.Init()
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(searchByPKTestSchema(true))), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKTestSchema(true))}, nil)
 		node := &Proxy{metaCache: cache}
 
 		// Every requested row is null, so the float payload is empty while the
@@ -2883,13 +2902,14 @@ func searchByPKBM25QueryResult(pks []int64, texts []string, validData []bool) *m
 // so that Nq equals the number of true entries in validData -- the contract
 // adjustSearchResultsForNullVectors re-expands the result blocks from.
 func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_CompactsNullableBM25Text", t, func() {
 		paramtable.Init()
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(searchByPKBM25Schema())), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKBM25Schema())}, nil)
 		node := &Proxy{metaCache: cache}
 
 		// PK ascending 1, 2, 3 where the row of PK 1 has a null text.
@@ -2919,13 +2939,14 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 }
 
 func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch", t, func() {
 		paramtable.Init()
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
 			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(searchByPKBM25Schema())), nil)
+			Return(&collectionInfo{Schema: mustNewSchemaInfo(searchByPKBM25Schema())}, nil)
 		node := &Proxy{metaCache: cache}
 
 		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, _ *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
@@ -3010,6 +3031,7 @@ func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
 }
 
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	cache := &MetaCache{}
 
 	// Create external collection schema
@@ -3022,7 +3044,9 @@ func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
 	}
 
 	m1 := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1), nil).Build()
-	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{}, mustNewSchemaInfo(externalSchema)), nil).Build()
+	m2 := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+		Schema: mustNewSchemaInfo(externalSchema),
+	}, nil).Build()
 	defer m1.UnPatch()
 	defer m2.UnPatch()
 
@@ -3936,6 +3960,7 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 }
 
 func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	node, err := NewProxy(ctx, factory)
@@ -3951,9 +3976,10 @@ func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t 
 				{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
 			},
 		}
-		return metacache.CollectionInfoForTest(t, &collectionInfo{
+		return &collectionInfo{
 			CollID: 1,
-		}, &schemaInfo{CollectionSchema: schema})
+			Schema: &schemaInfo{CollectionSchema: schema},
+		}
 	}
 
 	cases := []struct {
@@ -4044,6 +4070,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
 }
 
 func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	ctx := context.Background()
 	node := &Proxy{mixCoord: &MixCoordMock{}}
@@ -4058,11 +4085,12 @@ func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
 			{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"},
 		},
 	}
-	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(metacache.CollectionInfoForTest(t, &collectionInfo{
+	mockGetCollectionInfo := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 		CollID: 101,
-	}, &schemaInfo{
-		CollectionSchema: schema,
-	}), nil).Build()
+		Schema: &schemaInfo{
+			CollectionSchema: schema,
+		},
+	}, nil).Build()
 	defer mockGetCollectionInfo.UnPatch()
 
 	var capturedCollectionID int64
