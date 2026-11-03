@@ -602,7 +602,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, RestRequestInterceptorErr
 		}
 		body, _ := c.Get(gin.BodyBytesKey)
-		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+		filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -619,6 +619,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 			return nil, err
 		}
 		queryReq.Expr = filter
+		queryReq.ExprTemplateValues = idTemplateValues
 		return h.proxy.Query(reqCtx, queryReq)
 	})
 	if err == RestRequestInterceptorErr {
@@ -681,7 +682,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 		deleteReq.Expr = httpReq.Filter
 		if deleteReq.Expr == "" {
 			body, _ := c.Get(gin.BodyBytesKey)
-			filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
+			filter, idTemplateValues, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 			if err != nil {
 				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -690,6 +691,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 				return nil, RestRequestInterceptorErr
 			}
 			deleteReq.Expr = filter
+			deleteReq.ExprTemplateValues = idTemplateValues
 		}
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{

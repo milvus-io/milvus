@@ -74,6 +74,9 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    proxy:
+      http:
+        strictValidation: true
     grpc:
       client:
         compressionEnabled: true

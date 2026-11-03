@@ -547,7 +547,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 						dstIndices[i] = int64(i)
 					}
 					if op == schemapb.FieldPartialUpdateOp_REPLACE {
-						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
+						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices, Params.HTTPCfg.StrictValidation.GetAsBool()); err != nil {
 							return err
 						}
 					} else {
