@@ -37,6 +37,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/BinaryRangeExpr.h"
+#include "exec/expression/ExistsExpr.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/JsonContainsExpr.h"
 #include "index/Meta.h"
@@ -1769,6 +1770,48 @@ TEST(JsonStatsExecPathTest, FlatIndexWinsOverJsonStats) {
     f.Install("", "JSON");
     EXPECT_EQ(f.Path(unary), exec::ExprExecPath::ScalarIndex);
     EXPECT_TRUE(f.Eval(unary) == expected);
+}
+
+TEST(JsonStatsExecPathTest, ExistsUsesRelativeFlatIndexPath) {
+    const std::vector<std::string> rows = {R"({"a":{"b":1}})",
+                                           R"({"a":{"a":{"b":2}}})",
+                                           R"({"a":{"b":null}})",
+                                           R"({"a":{}})",
+                                           R"({})",
+                                           R"({"a":{"b":{"c":1}}})"};
+    JsonStatsExecFixture raw(rows, 1340, false);
+    auto exists = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(raw.field, DataType::JSON, {"a", "b"}));
+    auto negation = std::make_shared<expr::LogicalUnaryExpr>(
+        expr::LogicalUnaryExpr::OpType::LogicalNot, exists);
+    const auto expected = raw.Eval(exists);
+    const auto expected_not = raw.Eval(negation);
+    ASSERT_TRUE(bool(expected[0]));
+    ASSERT_FALSE(bool(expected[1]));
+
+    int64_t id = 1341;
+    for (const bool with_stats : {false, true}) {
+        for (const std::string index_path : {"", "/a"}) {
+            SCOPED_TRACE(with_stats);
+            SCOPED_TRACE(index_path);
+            JsonStatsExecFixture indexed(rows, id++, with_stats);
+            ASSERT_EQ(indexed.field.get(), raw.field.get());
+            indexed.Install(index_path, "JSON");
+            JsonStatsExecPathProbe<exec::PhyExistsFilterExpr> phy(
+                {},
+                exists,
+                "exists",
+                nullptr,
+                indexed.segment.get(),
+                indexed.count,
+                indexed.count,
+                0);
+            phy.EnsureExecPathDetermined();
+            ASSERT_EQ(phy.GetExecPath(), exec::ExprExecPath::ScalarIndex);
+            EXPECT_TRUE(indexed.Eval(exists) == expected);
+            EXPECT_TRUE(indexed.Eval(negation) == expected_not);
+        }
+    }
 }
 
 TEST(JsonStatsExecPathTest,
