@@ -46,7 +46,7 @@ class IIndexReaderBase {
     virtual ~IIndexReaderBase() = default;
 
     // Reader self-description for consistency checks. Execution-path selection
-    // uses the inventory's metadata-derived copy before pinning the reader.
+    // uses the inventory's metadata-derived copy before creating the reader.
     virtual ReaderCaps
     Caps() const = 0;
 

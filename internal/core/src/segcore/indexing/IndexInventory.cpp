@@ -193,7 +193,7 @@ IndexInventory::SnapshotEntries() const {
     return result;
 }
 
-IndexReaderHandle
+index::IIndexReaderBasePtr
 IndexInventory::CreateIndexReader(milvus::OpContext* op_ctx,
                                   const IndexKey& key) const {
     const auto field_it = entries_.find(key.field_id);
@@ -208,12 +208,11 @@ IndexInventory::CreateIndexReader(milvus::OpContext* op_ctx,
 
     const auto& entry = it->second;
     const auto& resolved = entry->Resolve(op_ctx);
-    std::shared_ptr<index::IIndexReaderBase> reader =
-        resolved.index->CreateReader(op_ctx);
+    auto reader = resolved.index->CreateReader(op_ctx);
     AssertInfo(reader != nullptr, "index returned a null request reader");
     AssertInfo(SameCaps(resolved.caps, reader->Caps()),
                "index capability metadata disagrees with request reader");
-    return IndexReaderHandle(std::move(reader));
+    return reader;
 }
 
 }  // namespace milvus::segcore

@@ -339,8 +339,8 @@ TestIndexOwner(const IndexInventory& inventory,
     for (const auto& entry : capability.entries()) {
         if ((family.empty() || entry.family == family) &&
             (path.empty() || entry.json_path == path)) {
-            // Drop from a copied inventory exposes the exact retained slot
-            // without pinning a cold reader or changing the tested snapshot.
+            // Drop from a copied inventory exposes the retained Index
+            // without creating a reader or changing the tested snapshot.
             auto copy = inventory;
             return copy.Drop(entry.key)->Peek();
         }
@@ -348,8 +348,8 @@ TestIndexOwner(const IndexInventory& inventory,
     return nullptr;
 }
 
-IndexReaderHandle
-PinTestTextIndex(const SegmentInterface& segment, FieldId field) {
+index::IIndexReaderBasePtr
+CreateTestTextReader(const SegmentInterface& segment, FieldId field) {
     const auto capability = segment.ResolveIndexCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if (entry.family == index::families::kText) {
@@ -1615,7 +1615,7 @@ TEST(Sealed, CreateTextIndexFromNullableScalarIndexRawData) {
     segment->LoadIndex(load_info);
 
     ASSERT_NO_THROW(segment->CreateTextIndex(text_fid));
-    auto text_index = PinTestTextIndex(*segment, text_fid);
+    auto text_index = CreateTestTextReader(*segment, text_fid);
     ASSERT_TRUE(text_index);
     const auto* null_reader =
         dynamic_cast<const index::INullReader*>(text_index.get());
@@ -2592,7 +2592,7 @@ TEST(Sealed, LoadScalarIndex) {
     std::cout << json.dump(1);
 }
 
-TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
+TEST(Sealed, BulkSubscriptSkipsReaderCreationWhenIndexHasNoRawData) {
     size_t N = ROW_COUNT;
     auto schema = std::make_shared<Schema>();
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
@@ -2606,7 +2606,7 @@ TEST(Sealed, BulkSubscriptSkipsPinIndexWhenIndexHasNoRawData) {
 
     // Load a scalar index whose metadata reports no raw data (as INVERTED
     // does). ContextObservingIndex records the OpContext when a reader is
-    // actually materialized, so we can assert bulk_subscript never pins it.
+    // actually materialized, so we can assert bulk_subscript never creates one.
     auto index = BuildTestScalarIndex<double>(
         index::families::kInverted, N, double_col.data());
     milvus::OpContext* observed_ctx = nullptr;
@@ -5437,7 +5437,7 @@ TEST(SealedSegmentCowState, StagedTextIndexIsInvisibleBeforePublish) {
             published_before->runtime->indexes, text, index::families::kText)
             .size(),
         0);
-    EXPECT_FALSE(PinTestTextIndex(*sealed, text));
+    EXPECT_FALSE(CreateTestTextReader(*sealed, text));
     EXPECT_FALSE(sealed->TestGetLoadInfoSnapshot()->HasTextIndexCreated(text));
 }
 
@@ -5475,7 +5475,7 @@ TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
               1);
     EXPECT_TRUE(published_with_index->load_info->HasTextIndexCreated(text));
 
-    auto old_pin = PinTestTextIndex(*sealed, text);
+    auto old_pin = CreateTestTextReader(*sealed, text);
     ASSERT_NE(old_pin.get(), nullptr);
 
     auto new_schema = std::make_shared<Schema>();
@@ -5490,7 +5490,7 @@ TEST(SealedSegmentCowState, PublishedTextIndexFollowsSnapshotLifetime) {
                                index::families::kText)
                   .size(),
               0);
-    EXPECT_FALSE(PinTestTextIndex(*sealed, text));
+    EXPECT_FALSE(CreateTestTextReader(*sealed, text));
     EXPECT_NE(old_pin.get(), nullptr);
     EXPECT_EQ(TestIndexEntries(published_with_index->runtime->indexes,
                                text,

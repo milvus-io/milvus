@@ -267,7 +267,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             if constexpr (std::is_same_v<ValueType, int64_t>) {
-                if (PinnedJsonIndexIsFlat()) {
+                if (SelectedJsonIndexIsFlat()) {
                     return ExecVisitorImplForIndex<int64_t>();
                 }
                 return ExecVisitorImplForIndex<double>();
@@ -1306,7 +1306,7 @@ PhyTermFilterExpr::DetermineExecPath() {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
             });
     }
-    SelectAndPinIndex(req);
+    SelectAndCreateIndexReader(req);
 }
 
 void

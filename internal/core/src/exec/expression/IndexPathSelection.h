@@ -38,7 +38,7 @@
 // not compare cold-index fetch cost with an already-resident column scan.
 // TODO: add such cost modeling separately if needed. Metadata-only literal/type
 // constraints live in ExprIndexRequirement; reader-specific guards are queried
-// on the chosen pinned interface after metadata selection.
+// on the chosen reader interface after metadata selection.
 
 namespace milvus::exec {
 
@@ -50,7 +50,7 @@ namespace milvus::exec {
 // to include the expression kernels.
 enum class ExprExecPath {
     RawData,      // brute-force scan of the raw column
-    ScalarIndex,  // a pinned index reader interface
+    ScalarIndex,  // a selected index reader interface
     PkIndex,      // segment_->pk_range / search_ids
     TextIndex,    // the text-match interface
     // Shredded JSON column scan, not an index lookup. Kept distinct while execution
@@ -115,7 +115,7 @@ struct ExprIndexRequirement {
 struct ExecPathDecision {
     ExprExecPath path{ExprExecPath::RawData};
 
-    // Which inventory entry to pin. Present exactly when the selected path is
+    // Which inventory entry to create a reader from. Present exactly when the selected path is
     // index-backed. The caller passes this straight to
     // `segcore::SegmentInterface::CreateIndexReader` — ONCE, for the whole expression node.
     std::optional<segcore::IndexKey> key;
@@ -126,7 +126,7 @@ struct ExecPathDecision {
 // UnaryExpr, TermExpr, BinaryRangeExpr, NullExpr, ExistsExpr, JsonContainsExpr,
 // GIS expressions, BloomFilterExpr, and RoaringFilterExpr. Family support is a
 // caps read; expression literal/type checks populate ExprIndexRequirement.
-// Runtime literal-dependent guards still belong on the selected pinned reader.
+// Runtime literal-dependent guards still belong on the selected reader.
 namespace index_path_detail {
 
 inline bool
@@ -183,7 +183,7 @@ ReaderMatches(const ExprIndexRequirement& req,
     const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
         // Field-level JSON null checks cannot use a typed path view. The
-        // selector resolves views after pinning, and Resolve(JSON) is absent.
+        // selector resolves views after reader creation, and Resolve(JSON) is absent.
         if (req.reader == RequiredReader::Null &&
             req.value_type == DataType::JSON) {
             return false;
@@ -338,7 +338,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
 
 // Per-call eligibility cannot live in ReaderCaps. Ngram min-length checks and
 // FM count-first cost guards depend on the concrete literal, so ask the chosen
-// pinned query interface after metadata-only selection. A false answer requests
+// selected query interface after metadata-only selection. A false answer requests
 // a fallback; it is not an unsupported-operation exception.
 
 }  // namespace milvus::exec

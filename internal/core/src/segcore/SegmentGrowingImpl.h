@@ -520,7 +520,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return registrations;
     }
 
-    IndexReaderHandle
+    index::IIndexReaderBasePtr
     CreateIndexReader(milvus::OpContext*, const IndexKey&) const override {
         return {};
     }

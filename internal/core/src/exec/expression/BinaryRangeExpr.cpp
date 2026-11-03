@@ -131,11 +131,11 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // executor and gather the requested rows instead.
             const bool use_json_flat_raw_offsets =
                 exec_path_ == ExprExecPath::ScalarIndex && has_offset_input_ &&
-                PinnedJsonIndexIsFlat() && num_data_chunk_ > 0;
+                SelectedJsonIndexIsFlat() && num_data_chunk_ > 0;
             if (exec_path_ == ExprExecPath::ScalarIndex &&
                 !use_json_flat_raw_offsets) {
                 if (is_numeric) {
-                    if (!use_double && PinnedJsonIndexIsFlat()) {
+                    if (!use_double && SelectedJsonIndexIsFlat()) {
                         result = ExecRangeVisitorImplForIndex<int64_t>(input);
                     } else {
                         proto::plan::GenericValue double_lower_val;
@@ -443,7 +443,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             return func(reader, val1, val2, lower_inclusive, upper_inclusive);
         };
     if (input != nullptr) {
-        if (PinnedJsonIndexIsFlat()) {
+        if (SelectedJsonIndexIsFlat()) {
             return ProcessIndexChunksAndGatherByOffsets<T>(
                 execute_sub_batch, *input, val1, val2);
         }
@@ -1236,7 +1236,7 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
 
     auto req = MakeIndexRequirement(RequiredReader::Predicate);
     req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
-    SelectAndPinIndex(req);
+    SelectAndCreateIndexReader(req);
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }

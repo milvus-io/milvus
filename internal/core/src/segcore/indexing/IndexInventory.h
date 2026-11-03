@@ -31,10 +31,10 @@
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
 #include "segcore/indexing/FieldIndexCapability.h"
-#include "segcore/indexing/IndexReaderHandle.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 
 // Sealed index registrations, resolved owners, and request readers.
-// Keep an IndexReaderHandle alive while using its borrowed reader.
+// Keep each request reader alive while using interfaces borrowed from it.
 namespace milvus::segcore {
 
 class IndexInventory {
@@ -107,8 +107,8 @@ class IndexInventory {
     SnapshotEntries() const;
 
     // Resolves the selected key and retains its request reader.
-    // Missing keys return an empty handle; resolution, load, and caps errors propagate.
-    IndexReaderHandle
+    // Missing keys return nullptr; resolution, load, and caps errors propagate.
+    index::IIndexReaderBasePtr
     CreateIndexReader(milvus::OpContext* op_ctx, const IndexKey& key) const;
 
  private:

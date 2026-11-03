@@ -53,7 +53,7 @@ SearchOnSealedIndex(const FieldMeta& field,
                     int64_t num_queries,
                     const BitsetView& bitset,
                     SearchResult& search_result) {
-    // The reader stays pinned for the lifetime of the SearchResult that owns
+    // The reader stays alive for the lifetime of the SearchResult that owns
     // the recreator.
     const auto* reader_ptr = &reader;
     auto register_vector_search_provider = [&] {

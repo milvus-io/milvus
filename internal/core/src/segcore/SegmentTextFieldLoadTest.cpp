@@ -264,7 +264,7 @@ TEST(SegmentTextFieldLoadTest, SealedTextIndexDecodesRemoteLobReferences) {
     sealed->SetTextLobPathForTesting(FieldId(101), lob_path);
     segment->LoadFieldData(info);
     sealed->CreateTextIndex(FieldId(101));
-    auto pin = PinSealedText(*sealed, FieldId(101));
+    auto pin = CreateSealedTextReader(*sealed, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ExpectOnlyTextMatchHit(TextReader(*pin.get()), term, 1, texts.size());
 }

@@ -897,7 +897,7 @@ ChunkedSegmentSealedImpl::IndexRegistrations(FieldId field_id) const {
                               : std::vector<IndexRegistration>{};
 }
 
-IndexReaderHandle
+index::IIndexReaderBasePtr
 ChunkedSegmentSealedImpl::CreateIndexReader(milvus::OpContext* op_ctx,
                                             const IndexKey& key) const {
     // Search/Retrieve holds the segment read lease across metadata selection
@@ -905,7 +905,7 @@ ChunkedSegmentSealedImpl::CreateIndexReader(milvus::OpContext* op_ctx,
     // between the two calls.
     auto runtime = CaptureRuntimeResourceState();
     return runtime != nullptr ? runtime->indexes.CreateIndexReader(op_ctx, key)
-                              : IndexReaderHandle{};
+                              : index::IIndexReaderBasePtr{};
 }
 
 bool
@@ -3798,7 +3798,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByRange(
         auto index_reader = index_key.has_value()
                                 ? snapshot->runtime->indexes.CreateIndexReader(
                                       op_ctx, *index_key)
-                                : IndexReaderHandle{};
+                                : index::IIndexReaderBasePtr{};
         if (index_reader) {
             const auto* vec_index =
                 dynamic_cast<const index::IVectorReader*>(index_reader.get());
@@ -3858,7 +3858,7 @@ ChunkedSegmentSealedImpl::ApplyFieldValidDataByOffsets(
         auto index_reader = index_key.has_value()
                                 ? snapshot->runtime->indexes.CreateIndexReader(
                                       op_ctx, *index_key)
-                                : IndexReaderHandle{};
+                                : index::IIndexReaderBasePtr{};
         if (index_reader) {
             const auto* vec_index =
                 dynamic_cast<const index::IVectorReader*>(index_reader.get());
@@ -4168,7 +4168,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         auto index_reader =
             index_key.has_value()
                 ? runtime->indexes.CreateIndexReader(op_context, *index_key)
-                : IndexReaderHandle{};
+                : index::IIndexReaderBasePtr{};
         AssertInfo(index_reader,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4186,8 +4186,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    bitset,
                                    output);
         if (output.vector_iterators_.has_value()) {
-            output.resource_pins_.emplace_back(
-                std::move(index_reader).IntoSharedLifetime());
+            output.resource_pins_.emplace_back(std::move(index_reader));
         }
         output.used_interim_index_ = true;
         milvus::tracer::AddEvent(
@@ -4201,7 +4200,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
         auto index_reader =
             index_key.has_value()
                 ? runtime->indexes.CreateIndexReader(op_context, *index_key)
-                : IndexReaderHandle{};
+                : index::IIndexReaderBasePtr{};
         AssertInfo(index_reader,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4219,8 +4218,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    bitset,
                                    output);
         if (output.vector_iterators_.has_value()) {
-            output.resource_pins_.emplace_back(
-                std::move(index_reader).IntoSharedLifetime());
+            output.resource_pins_.emplace_back(std::move(index_reader));
         }
         milvus::tracer::AddEvent("finish_searching_vector_index");
     } else {
@@ -4330,7 +4328,7 @@ ChunkedSegmentSealedImpl::get_vector_from_state(
     auto index_reader =
         index_key.has_value()
             ? snapshot.runtime->indexes.CreateIndexReader(op_ctx, *index_key)
-            : IndexReaderHandle{};
+            : index::IIndexReaderBasePtr{};
     AssertInfo(index_reader, "vector index is not ready");
     auto* reader =
         dynamic_cast<const index::IVectorReader*>(index_reader.get());
@@ -4413,7 +4411,7 @@ ChunkedSegmentSealedImpl::get_emb_list_from_state(
     auto index_reader =
         index_key.has_value()
             ? snapshot.runtime->indexes.CreateIndexReader(op_ctx, *index_key)
-            : IndexReaderHandle{};
+            : index::IIndexReaderBasePtr{};
     AssertInfo(index_reader, "vector index is not ready");
     auto* reader =
         dynamic_cast<const index::IVectorReader*>(index_reader.get());
@@ -7213,7 +7211,7 @@ ChunkedSegmentSealedImpl::CalcDistByIDs(
     auto index_reader =
         index_key.has_value()
             ? runtime->indexes.CreateIndexReader(op_ctx, *index_key)
-            : IndexReaderHandle{};
+            : index::IIndexReaderBasePtr{};
     if (!index_reader) {
         return false;
     }
@@ -7247,7 +7245,7 @@ ChunkedSegmentSealedImpl::IsIndexRefineEnabledLocked(
     auto index_reader =
         index_key.has_value()
             ? runtime->indexes.CreateIndexReader(op_ctx, *index_key)
-            : IndexReaderHandle{};
+            : index::IIndexReaderBasePtr{};
     if (!index_reader) {
         return false;
     }
@@ -11371,7 +11369,7 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
     auto index_reader =
         index_key.has_value()
             ? runtime->indexes.CreateIndexReader(op_ctx, *index_key)
-            : IndexReaderHandle{};
+            : index::IIndexReaderBasePtr{};
     if (!index_reader) {
         this->prefetch_chunks_locked(op_ctx, field_id);
     }

@@ -26,9 +26,9 @@ Sealed and growing indexes use different ownership and publication mechanisms:
   and an `IIndex`. A lazy entry retains a factory that resolves metadata and creates its Index
   on first use. Each concrete Index owns its storage or engine cache.
 
-`IndexReaderHandle`
-: The move-only owner of a request reader for sealed queries. It exposes a borrowed
-  `IIndexReaderBase*`; deferred operations can retain the reader through a shared lifetime handle.
+`IIndexReaderBasePtr`
+: The unique pointer owning a request reader. Deferred operations can transfer it to a shared
+  lifetime owner in the query result; ordinary queries do not allocate shared ownership state.
 
 `GrowingIndexSet`
 : Solely holds one `IGrowingIndex` publisher per field. Writes reach the owner through a separate

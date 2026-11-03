@@ -182,7 +182,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<IndexRegistration>
     IndexRegistrations(FieldId field_id) const override;
 
-    IndexReaderHandle
+    index::IIndexReaderBasePtr
     CreateIndexReader(milvus::OpContext* op_ctx,
                       const IndexKey& key) const override;
 

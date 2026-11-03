@@ -202,8 +202,8 @@ TEST(IndexInventoryTest, LifecycleReadsDoNotResolveLazyEntry) {
     EXPECT_EQ(capability.entries().front().family, entry.family);
     EXPECT_EQ(calls.load(), 1);
 
-    auto pin = inventory.CreateIndexReader(nullptr, entry.key);
-    EXPECT_TRUE(pin);
+    auto reader = inventory.CreateIndexReader(nullptr, entry.key);
+    EXPECT_TRUE(reader);
     EXPECT_EQ(calls.load(), 1);
     ASSERT_EQ(ResolvedIndexes(inventory).size(), 1);
 }
@@ -237,10 +237,17 @@ TEST(IndexInventoryTest,
     EXPECT_EQ(index->contexts,
               (std::vector<OpContext*>{&first_context, &second_context}));
     const auto* reader = first.get();
-    auto lifetime = std::move(first).IntoSharedLifetime();
+    std::shared_ptr<void> lifetime = std::move(first);
+    EXPECT_FALSE(first);
+    std::weak_ptr<index::IIndex> owner = index;
+    index.reset();
+    second.reset();
     snapshot = {};
     retired.reset();
+    EXPECT_FALSE(owner.expired());
     EXPECT_EQ(reader->Count(), 1);
+    lifetime.reset();
+    EXPECT_TRUE(owner.expired());
 }
 
 TEST(IndexInventoryTest, FieldLookupResolvesOnlyRequestedField) {
@@ -278,17 +285,15 @@ TEST(IndexInventoryTest, FieldLookupResolvesOnlyRequestedField) {
     EXPECT_EQ(calls[1], 1);
     EXPECT_EQ(calls[2], 0);
 
-    auto pin = inventory.CreateIndexReader(nullptr, entries[2].key);
-    ASSERT_TRUE(pin);
-    EXPECT_EQ(pin->Count(), 3);
+    auto reader = inventory.CreateIndexReader(nullptr, entries[2].key);
+    ASSERT_TRUE(reader);
+    EXPECT_EQ(reader->Count(), 3);
     EXPECT_EQ(calls[2], 1);
     EXPECT_EQ(ResolvedIndexes(inventory).size(), 3);
     EXPECT_TRUE(
-        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(10), 3).key)
-            .empty());
+        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(10), 3).key) == nullptr);
     EXPECT_TRUE(
-        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(12), 1).key)
-            .empty());
+        inventory.CreateIndexReader(nullptr, TestEntry(FieldId(12), 1).key) == nullptr);
 }
 
 TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
@@ -323,7 +328,7 @@ TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
     EXPECT_TRUE(inventory.Entries(first.key.field_id).empty());
     EXPECT_TRUE(
         inventory.ResolveCapability(nullptr, first.key.field_id).empty());
-    EXPECT_TRUE(inventory.CreateIndexReader(nullptr, first.key).empty());
+    EXPECT_TRUE(inventory.CreateIndexReader(nullptr, first.key) == nullptr);
     EXPECT_EQ(inventory.Drop(first.key), nullptr);
     ASSERT_EQ(inventory.Entries().size(), 1);
     EXPECT_EQ(inventory.Entries().front().key, other.key);
@@ -609,19 +614,19 @@ TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
 
     auto dropped_snapshot = old_snapshot;
     EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
-    EXPECT_TRUE(dropped_snapshot.CreateIndexReader(nullptr, entry.key).empty());
-    auto old_pin = old_snapshot.CreateIndexReader(nullptr, entry.key);
-    ASSERT_TRUE(old_pin);
-    EXPECT_EQ(old_pin->Count(), 7);
+    EXPECT_TRUE(dropped_snapshot.CreateIndexReader(nullptr, entry.key) == nullptr);
+    auto old_reader = old_snapshot.CreateIndexReader(nullptr, entry.key);
+    ASSERT_TRUE(old_reader);
+    EXPECT_EQ(old_reader->Count(), 7);
     EXPECT_EQ(old_factory_calls.load(), 1);
 
     auto replaced_snapshot = old_snapshot;
     replaced_snapshot.Register(std::make_shared<IndexInventory::Entry>(
         entry, TestSlot("inventory-new", {.predicate = true}, 11)));
-    auto new_pin = replaced_snapshot.CreateIndexReader(nullptr, entry.key);
-    ASSERT_TRUE(new_pin);
-    EXPECT_EQ(new_pin->Count(), 11);
-    EXPECT_EQ(old_pin->Count(), 7);
+    auto new_reader = replaced_snapshot.CreateIndexReader(nullptr, entry.key);
+    ASSERT_TRUE(new_reader);
+    EXPECT_EQ(new_reader->Count(), 11);
+    EXPECT_EQ(old_reader->Count(), 7);
     EXPECT_EQ(old_factory_calls.load(), 1);
 }
 

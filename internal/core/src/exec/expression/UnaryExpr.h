@@ -1082,7 +1082,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // the family name is recorded at load time, so this never casts to a
     // concrete index implementation.
     bool
-    PinnedIndexIsFMIndex() const;
+    SelectedIndexIsFMIndex() const;
 
     // True when the selected pattern reader answers this expression's
     // operation with a CANDIDATE SUPERSET instead of the exact result

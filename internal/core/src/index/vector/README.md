@@ -51,7 +51,7 @@ The shared live engine allows Add to change the traversal of approximate search,
 never returns IDs beyond its fixed prefix. This is a logical prefix pin and must not be described as
 a physically immutable snapshot of the underlying ANN engine.
 
-The knowhere iterators returned by `Iterators` carry no reader pin and borrow the bitset passed in;
+Iterators returned by the request reader retain their engine cell and borrow the bitset passed in;
 a merge iterator consumed later may also hold a raw pointer to the reader's offset mapping. A Growing
 consumer must keep the same `GrowingIndexSnapshotPin` and the materialized prefix bitset alive
 together with the results until iterator consumption finishes; the iterator's shared handle alone is

@@ -540,7 +540,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                              ? value_type_
                              : expr_->column_.element_type_;
         req.json_array_cast = expr_->column_.data_type_ == DataType::JSON;
-        SelectAndPinIndex(req);
+        SelectAndCreateIndexReader(req);
     }
 
  private:

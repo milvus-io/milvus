@@ -30,13 +30,13 @@
 namespace milvus::exec {
 
 // One expression-local value source. Resolving a sealed lazy index may read
-// artifact metadata; the selected entry then creates a reader. An empty handle means the
-// caller scans raw column data.
-class PinnedValueLookup final {
+// artifact metadata; the selected entry then creates a reader. Without a reader,
+// the caller scans raw column data.
+class ValueLookupSource final {
  public:
-    PinnedValueLookup() = default;
+    ValueLookupSource() = default;
 
-    PinnedValueLookup(const segcore::SegmentInternalInterface* segment,
+    ValueLookupSource(const segcore::SegmentInternalInterface* segment,
                       OpContext* op_ctx,
                       FieldId field_id,
                       DataType data_type,
@@ -81,17 +81,17 @@ class PinnedValueLookup final {
         reader_ = reader;
     }
 
-    PinnedValueLookup(const PinnedValueLookup&) = delete;
-    PinnedValueLookup&
-    operator=(const PinnedValueLookup&) = delete;
-    PinnedValueLookup(PinnedValueLookup&& other) noexcept
+    ValueLookupSource(const ValueLookupSource&) = delete;
+    ValueLookupSource&
+    operator=(const ValueLookupSource&) = delete;
+    ValueLookupSource(ValueLookupSource&& other) noexcept
         : index_reader_(std::move(other.index_reader_)),
           growing_pin_(std::move(other.growing_pin_)),
           reader_(std::exchange(other.reader_, nullptr)),
           covered_end_(std::exchange(other.covered_end_, 0)) {
     }
-    PinnedValueLookup&
-    operator=(PinnedValueLookup&& other) noexcept {
+    ValueLookupSource&
+    operator=(ValueLookupSource&& other) noexcept {
         if (this == &other) {
             return *this;
         }
@@ -179,7 +179,7 @@ class PinnedValueLookup final {
     }
 
     // Borrowed interfaces are destroyed before their owning reader or snapshot.
-    segcore::IndexReaderHandle index_reader_;
+    index::IIndexReaderBasePtr index_reader_;
     index::GrowingIndexSnapshotPin growing_pin_;
     const index::IIndexReaderBase* reader_{nullptr};
     int64_t covered_end_{0};
