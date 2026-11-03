@@ -17,7 +17,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
-| RestoreSnapshot | Broadcast: target VChannels + CChannel (AckSyncUp); legacy CChannel-only | Yes for target creation | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| RestoreSnapshot | Broadcast: target VChannels + CChannel (AckSyncUp); legacy CChannel-only | Yes for target creation | SharedDBName + ExclusiveCollectionName + SharedSnapshotName (local source) |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |

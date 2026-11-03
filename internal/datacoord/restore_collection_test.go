@@ -64,7 +64,11 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 		}).Build()
 		mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(77), nil).Build()
 		capture := &captureBroadcastAPI{}
-		mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(capture, nil).Build()
+		mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(func(_ context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			require.Contains(t, keys, message.NewSharedSnapshotNameResourceKey(10, "snapshot"),
+				"replicated restore must wait for source snapshot publication before pinning it")
+			return capture, nil
+		}).Build()
 		calls := 0
 		mockey.Mock((*captureBroadcastAPI).Broadcast).To(func(_ *captureBroadcastAPI, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 			calls++

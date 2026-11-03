@@ -72,8 +72,15 @@ func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snaps
 			return 0, err
 		}
 	}
-	b, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(db), message.NewExclusiveCollectionNameResourceKey(db, target))
+	keys := []message.ResourceKey{
+		message.NewSharedDBNameResourceKey(db), message.NewExclusiveCollectionNameResourceKey(db, target),
+	}
+	if !external {
+		// A replica may still be creating this snapshot after an earlier Restore.
+		// Order source acquisition after CreateSnapshot and before DropSnapshot.
+		keys = append(keys, message.NewSharedSnapshotNameResourceKey(sourceID, name))
+	}
+	b, err := broadcast.StartBroadcastWithResourceKeys(ctx, keys...)
 	if err != nil {
 		return 0, err
 	}

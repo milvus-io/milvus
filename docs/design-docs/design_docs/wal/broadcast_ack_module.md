@@ -234,3 +234,10 @@ Growing/Transforming MVCC frontiers are not introduced here.
 Validation covers per-channel timestamps including a higher CChannel tick,
 empty channels, readiness retries, segment/job persistence failures, callback
 replay, timeout during a partial commit, and initial/commit/rollback routing.
+
+A Restore creation recipe that reads a local snapshot also carries a shared
+source-snapshot resource key. This orders a replicated Restore after the
+CreateSnapshot callback that publishes its source, including when that callback
+is retrying behind an earlier asynchronous Restore. The same dependency orders
+DropSnapshot after source pin admission. External restores read their immutable
+external bundle and do not acquire this local source key.
