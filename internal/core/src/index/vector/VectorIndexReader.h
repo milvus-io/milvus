@@ -48,7 +48,8 @@ class VectorIndex final : public IIndex,
     VectorIndex(std::shared_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot,
                 DataType physical_type,
                 IndexType index_type,
-                MetricType metric);
+                MetricType metric,
+                std::optional<uint32_t> disk_ann_beamwidth = std::nullopt);
     VectorIndex(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
     VectorIndex(KnowhereEngine engine,
                 int64_t logical_count,

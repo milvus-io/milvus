@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -28,13 +29,15 @@
 
 namespace milvus::index {
 
+class KnowhereEngine;
+
 /**
- * @brief Loads disk Knowhere readers from legacy artifacts.
+ * @brief Loads disk Knowhere engines from legacy artifacts.
  *
  * Non-streaming backends materialize a unique DiskFileManager generation.
  * Streaming backends open exact raw, unsliced inventory objects; legacy
- * sidecars still use FileSource. Owns the opened source and fixed load options;
- * each Load creates a new reader.
+ * sidecars still use FileSource. Native lazy backends own their cache; other
+ * cached loads transfer the source and fixed options to a typed engine slot.
  */
 class VectorDiskLoader final : public IndexLoader {
  public:
@@ -70,7 +73,7 @@ class VectorDiskLoader final : public IndexLoader {
                     const storage::LoadOptions& opts);
 
  private:
-    LegacyIndexSource source_;
+    std::optional<LegacyIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -83,6 +86,11 @@ class VectorDiskLoader final : public IndexLoader {
      * sidecars.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
+    static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+    LoadEngine(storage::FileSource& source,
+               const storage::LoadOptions& opts,
+               bool use_async);
+
     static folly::coro::Task<IndexPtr>
     LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,

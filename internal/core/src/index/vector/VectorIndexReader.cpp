@@ -155,13 +155,20 @@ VectorIndex::VectorIndex(
     std::shared_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot,
     DataType physical_type,
     IndexType index_type,
-    MetricType metric)
+    MetricType metric,
+    std::optional<uint32_t> disk_ann_beamwidth)
     : engine_(CachedEngine{std::move(slot),
                            physical_type,
                            std::move(index_type),
-                           std::move(metric)}) {
-    AssertInfo(std::get<CachedEngine>(engine_).slot != nullptr,
-               "vector index requires a cache slot");
+                           std::move(metric)}),
+      backend_(disk_ann_beamwidth ? Backend::Disk : Backend::Memory),
+      disk_ann_beamwidth_(disk_ann_beamwidth.value_or(8)) {
+    const auto& cached = std::get<CachedEngine>(engine_);
+    AssertInfo(cached.slot != nullptr, "vector index requires a cache slot");
+    if (disk_ann_beamwidth &&
+        cached.index_type == knowhere::IndexEnum::INDEX_DISKANN) {
+        vector_disk_ann::ValidateBeamwidth(*disk_ann_beamwidth);
+    }
 }
 
 VectorIndex::VectorIndex(uint32_t disk_ann_beamwidth, KnowhereEngine engine)

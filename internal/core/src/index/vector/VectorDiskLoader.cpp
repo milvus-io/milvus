@@ -18,6 +18,9 @@
 #include "storage/LocalFileIOPool.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
+#include "knowhere/index/index_factory.h"
 #include "index/vector/VectorLoadUtils.h"
 
 #include <cstdint>
@@ -329,13 +332,13 @@ MakeEngine(const RuntimeParams& params,
 
 // Select streaming or materialized engine input, restore sidecars and
 // deserialize one reader.
-folly::coro::Task<IndexPtr>
-OpenIndex(bool use_async,
-          storage::FileSource& source,
-          const RuntimeParams& params,
-          const DiskOpenOptions& open_options,
-          const EntryPlan& plan,
-          const storage::LoadOptions& opts) {
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+OpenEngine(bool use_async,
+           storage::FileSource& source,
+           const RuntimeParams& params,
+           const DiskOpenOptions& open_options,
+           const EntryPlan& plan,
+           const storage::LoadOptions& opts) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -498,8 +501,7 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_shared<VectorIndex>(open_options.beamwidth,
-                                                  std::move(engine));
+    co_return std::make_unique<KnowhereEngine>(std::move(engine));
 }
 
 }  // namespace
@@ -515,16 +517,41 @@ VectorDiskLoader::Create(OpenedIndexSource source,
         std::get<LegacyIndexSource>(std::move(source)), std::move(options)));
     const auto runtime = ParseRuntimeParams(loader->options_.params);
     (void)ParseOpenOptions(loader->options_.params, runtime);
-    (void)PlanEntries(*loader->source_.source, runtime);
+    (void)PlanEntries(*loader->source_->source, runtime);
     co_return loader;
 }
 
 folly::coro::Task<IndexPtr>
 VectorDiskLoader::Load(milvus::OpContext* context,
                        const IndexCacheConfig* cache) {
-    AssertInfo(cache == nullptr,
-               "cached loading is not yet migrated for this family");
-    return RunLegacyLoad(source_, options_, &LoadLegacy, context);
+    AssertInfo(source_.has_value(),
+               "cached vector construction consumed this loader");
+    const auto params = ParseRuntimeParams(options_.params);
+    // Native lazy engines own their data cache; retain the engine itself directly.
+    if (!cache || knowhere::IndexFactory::Instance().FeatureCheck(
+                      params.index_type, knowhere::feature::LAZY_LOAD)) {
+        co_return co_await RunLegacyLoad(
+            *source_, options_, &LoadLegacy, context);
+    }
+    const auto open_options = ParseOpenOptions(options_.params, params);
+    const bool use_async = source_->use_async;
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunLegacyLoad<std::unique_ptr<KnowhereEngine>>(
+            source, options, &LoadEngine, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                *cache, use_async, std::move(load)),
+            context);
+    co_return std::make_shared<VectorIndex>(std::move(slot),
+                                            params.physical_type,
+                                            params.index_type,
+                                            params.metric_type,
+                                            open_options.beamwidth);
 }
 
 ReaderCaps
@@ -539,6 +566,17 @@ folly::coro::Task<IndexPtr>
 VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
+    const auto params = ParseDiskLoadMetadata(opts.params);
+    const auto open_options = ParseOpenOptions(opts.params, params);
+    auto engine = co_await LoadEngine(source, opts, use_async);
+    co_return std::make_shared<VectorIndex>(open_options.beamwidth,
+                                            std::move(*engine));
+}
+
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+VectorDiskLoader::LoadEngine(storage::FileSource& source,
+                             const storage::LoadOptions& opts,
+                             bool use_async) {
     auto params = ParseDiskLoadMetadata(opts.params);
     const auto open_options = ParseOpenOptions(opts.params, params);
     ParseIdMapMmapMetadata(opts.params, params);
@@ -547,7 +585,7 @@ VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                   "disk vector indexes have no V3 persisted format");
     }
     const auto plan = PlanEntries(source, params);
-    co_return co_await OpenIndex(
+    co_return co_await OpenEngine(
         use_async, source, params, open_options, plan, opts);
 }
 

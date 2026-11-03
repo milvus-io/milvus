@@ -223,3 +223,5 @@ JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings �
 普通 ARRAY 的 nested Bitmap、Sorted、Inverted 沿用对应类型的 Storage cache，Count 和结果 bitmap 使用元素坐标。测试以 3 个父行、6 个元素检查 legacy/packed、同步/异步、heap/mmap 路径，确认 LoadInfo 的父行数不替换元素计数；JSON ARRAY 则保留父行坐标。
 
 内存向量由 VectorIndex 保存常驻 engine 或 CacheSlot<KnowhereEngine>，两种状态使用 variant 表达。Reader 的单次查询、取向量或有效性检查持有对应 engine pin，返回的迭代器继续持有该 pin，直到迭代器释放。类型、metric 和索引名称来自固定配置，不触发加载；未知 Count 从实际 engine 读取，不能用 VECTOR_ARRAY 的父行数代替。原有加载器的数量、维度、validity 校验仍在缓存发布前执行，稀疏向量使用同一加载路径。
+
+磁盘向量的普通后端同样使用 KnowhereEngine cell，文件句柄、validity 和 embedding-list sidecar 随 engine 一起保留。声明 LAZY_LOAD 能力的后端直接由 VectorIndex 持有 engine，初始化仍走既有加载流程，数据加载和缓存由后端管理；不再创建外层整引擎 slot。Index 的延迟创建仍由 inventory factory 控制，CreateReader 只建立请求视图。

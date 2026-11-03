@@ -36,6 +36,7 @@
 
 #include "arrow/buffer.h"
 #include "common/Utils.h"
+#include "common/OpContext.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
@@ -256,6 +257,8 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
+    bool cached = false;
+    OpContext* reader_context = nullptr;
 };
 
 template <typename T>
@@ -368,19 +371,35 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
-    opened.base =
-        LoaderRegistry::Instance()
-            .Lookup(adapted.family)
-            .Load({IndexFiles{context,
-                              std::move(paths),
-                              LegacyIndexStorageConfig{
-                                  storage::V1SourceLayout::DiskFiles}},
-                   options})->CreateReader(nullptr);
+    std::optional<IndexCacheConfig> cache;
+    if (build.cached) {
+        cache.emplace(IndexCacheConfig{
+            staging_dir + "/engine_cache",
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096});
+    }
+    auto index = LoaderRegistry::Instance()
+                     .Lookup(adapted.family)
+                     .Load({IndexFiles{context,
+                                       std::move(paths),
+                                       LegacyIndexStorageConfig{
+                                           storage::V1SourceLayout::DiskFiles}},
+                            options,
+                            cache});
+    if (build.cached)
+        EXPECT_FALSE(index->Metadata().count.has_value());
+    opened.base = index->CreateReader(build.reader_context);
 }
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
+RunOrdinaryDiskSearch(bool mmap, bool resident = false, bool cached = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
@@ -390,7 +409,9 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              {.mmap = mmap, .tensor = resident ? values.data() : nullptr});
+              {.mmap = mmap,
+               .tensor = resident ? values.data() : nullptr,
+               .cached = cached});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -650,6 +671,37 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
             EXPECT_EQ(calls, 3);
         }
     }
+}
+
+TEST(VectorDiskCacheTest, ColdMetadataAndCancelledCountDoNotOpenEngine) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_cold_XXXXXX", "vector disk cold test");
+    const auto raw_path = files->Path() + "/raw";
+    const auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+    OpContext context(cancellation.getToken());
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.cached = true, .reader_context = &context});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    EXPECT_EQ(vector->Metric(), "L2");
+    EXPECT_EQ(vector->KnowhereIndexType(), knowhere::IndexEnum::INDEX_DISKANN);
+    try {
+        (void)opened.base->Count();
+        FAIL() << "cancelled cold disk load unexpectedly succeeded";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+TEST(VectorDiskFamilyTest, CachedFloatBuildLoadSearchAndRawCapability) {
+    RunOrdinaryDiskSearch<float>(false, false, true);
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
