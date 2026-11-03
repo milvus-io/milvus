@@ -1029,7 +1029,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + last * kDim),
                    params,
                    BitsetView{},
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], logical_ids[last]);
@@ -1041,7 +1040,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + (last - 1) * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    filtered_result);
     ASSERT_EQ(filtered_result.seg_offsets_.size(), 1);
     EXPECT_EQ(filtered_result.seg_offsets_[0], allowed);

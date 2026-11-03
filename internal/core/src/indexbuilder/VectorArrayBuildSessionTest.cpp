@@ -514,7 +514,6 @@ TEST_F(VectorArrayBuildSessionTest, HnswNonemptyListsReserveBeforeBuild) {
             reader->Search(EmbeddingQueries(query_values, query_offsets),
                            search,
                            nullptr,
-                           nullptr,
                            result);
             ASSERT_EQ(result.seg_offsets_.size(), 3);
             for (const auto offset : result.seg_offsets_) {
@@ -596,7 +595,7 @@ TEST_F(VectorArrayBuildSessionTest, HnswElementNullableElementLevel) {
         }
 
         SearchResult result;
-        reader->Search(queries, search, nullptr, nullptr, result);
+        reader->Search(queries, search, nullptr, result);
         EXPECT_EQ(result.total_nq_, 2);
         ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
         expect_valid_elements(result);
@@ -608,7 +607,7 @@ TEST_F(VectorArrayBuildSessionTest, HnswElementNullableElementLevel) {
         TargetBitmap filter(logical, false);
         filter.set(targets[0]);
         SearchResult filtered;
-        reader->Search(queries, search, BitsetView(filter), nullptr, filtered);
+        reader->Search(queries, search, BitsetView(filter), filtered);
         ASSERT_EQ(filtered.seg_offsets_.size(), 2 * topk);
         expect_valid_elements(filtered);
         EXPECT_TRUE(
@@ -787,7 +786,7 @@ TEST_F(VectorArrayBuildSessionTest,
         Config{{knowhere::meta::METRIC_TYPE, search.metric_type_},
                {index::DISK_ANN_QUERY_LIST, topk * 4}};
     SearchResult result;
-    reader->Search(queries, search, nullptr, nullptr, result);
+    reader->Search(queries, search, nullptr, result);
     EXPECT_EQ(result.total_nq_, 2);
     ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
     EXPECT_TRUE(std::all_of(
@@ -851,7 +850,7 @@ TEST_F(VectorArrayBuildSessionTest, DiskAnnElementNullableElementLevel) {
         }
     };
     SearchResult result;
-    reader->Search(queries, search, nullptr, nullptr, result);
+    reader->Search(queries, search, nullptr, result);
     ASSERT_EQ(result.seg_offsets_.size(), 2 * topk);
     expect_valid_elements(result);
     EXPECT_EQ(result.seg_offsets_[0], targets[0]);
@@ -860,7 +859,7 @@ TEST_F(VectorArrayBuildSessionTest, DiskAnnElementNullableElementLevel) {
     TargetBitmap filter(logical, false);
     filter.set(targets[0]);
     SearchResult filtered;
-    reader->Search(queries, search, BitsetView(filter), nullptr, filtered);
+    reader->Search(queries, search, BitsetView(filter), filtered);
     ASSERT_EQ(filtered.seg_offsets_.size(), 2 * topk);
     expect_valid_elements(filtered);
     EXPECT_TRUE(

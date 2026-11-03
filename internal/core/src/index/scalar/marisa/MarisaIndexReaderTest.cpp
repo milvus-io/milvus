@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include "cachinglayer/CacheSlot.h"
+#include "folly/coro/BlockingWait.h"
 #include "storage/EntryStreamUtils.h"
 
 #include "index/SingleCellIndexStorageTranslator.h"
@@ -205,7 +206,7 @@ TEST_F(MarisaIndexCacheTest,
     observer->meta()->cache_warmup_policy =
         CacheWarmupPolicy::CacheWarmupPolicy_Sync;
     OpContext ctx;
-    slot->Warmup(&ctx);
+    folly::coro::blockingWait(slot->Warmup(&ctx));
     ASSERT_NE(slot->TryBorrowCell(0), nullptr);
     auto index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
     auto reader = index->CreateReader(&ctx);

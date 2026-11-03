@@ -1794,12 +1794,14 @@ TEST_F(LegacyIndexLoadTest,
     };
     auto load =
         [&](const Config& params, bool mmap, const std::string& family) {
-            return LoaderRegistry::Instance().Lookup(family).Load(
-                {IndexFiles{context_,
-                            paths_,
-                            LegacyIndexStorageConfig{
-                                storage::V1SourceLayout::MemoryEntries}},
-                 Options(params, mmap)});
+            return LoaderRegistry::Instance()
+                .Lookup(family)
+                .Load({IndexFiles{context_,
+                                  paths_,
+                                  LegacyIndexStorageConfig{
+                                      storage::V1SourceLayout::MemoryEntries}},
+                       Options(params, mmap)})
+                ->CreateReader(nullptr);
         };
     const std::vector<float> query{0, 1, 0, 0};
     auto search = [&](const IVectorReader& vectors, const std::string& metric) {
@@ -1812,7 +1814,6 @@ TEST_F(LegacyIndexLoadTest,
         vectors.Search(knowhere::GenDataSet(1, dim, query.data()),
                        params,
                        BitsetView{},
-                       nullptr,
                        result);
         return result;
     };

@@ -2273,7 +2273,6 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
         legacy.Search(element_query,
                       element_search,
                       milvus::BitsetView{},
-                      nullptr,
                       element_result);
         EXPECT_EQ(element_result.total_nq_, 1);
         ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);
