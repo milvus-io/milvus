@@ -594,6 +594,12 @@ func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name s
 	}
 }
 
+// isPaused reports whether GC of collectionID is paused, globally or for that
+// collection.
+func (gc *garbageCollector) isPaused(collectionID int64) bool {
+	return time.Now().Before(gc.pauseUntil.PauseUntil()) || gc.collectionGCPaused(collectionID)
+}
+
 func (gc *garbageCollector) collectionGCPaused(collectionID int64) bool {
 	collPauseUntil, has := gc.pausedCollection.Get(collectionID)
 	return has && time.Now().Before(collPauseUntil.PauseUntil())
