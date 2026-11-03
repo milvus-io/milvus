@@ -64,6 +64,7 @@ func TestPartitionKey(t *testing.T) {
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
 	partitionKeyField := &schemapb.FieldSchema{
 		Name:           "partition_key_field",
+		FieldID:        1000,
 		DataType:       schemapb.DataType_Int64,
 		IsPartitionKey: true,
 	}

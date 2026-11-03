@@ -569,7 +569,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
-					subFieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+					subFieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 					if err != nil {
 						log.Info(ctx, "get struct sub-field schema failed", mlog.Err(err))
 						return nil, err
@@ -587,7 +587,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 			continue
 		}
-		fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(fieldName)
+		fieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(fieldName)
 		if err != nil {
 			log.Info(ctx, "get field schema failed", mlog.Err(err))
 			return nil, err
@@ -796,7 +796,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				continue
 			}
 
-			fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(existField.GetFieldName())
+			fieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(existField.GetFieldName())
 			if err != nil {
 				log.Info(ctx, "get field schema failed", mlog.Err(err))
 				return nil, err
@@ -897,6 +897,9 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			return field.GetFieldName(), field
 		})
 		for _, fieldSchema := range it.schema.Fields {
+			if common.IsSystemField(fieldSchema.GetFieldID()) {
+				continue
+			}
 			if fieldData, ok := upsertFieldMap[fieldSchema.Name]; !ok {
 				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
 					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
@@ -1629,7 +1632,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
 				subField.GetFieldName(), fieldData.GetFieldName())
 		}
-		subFieldSchema, err := schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+		subFieldSchema, err := schemaHelper.GetUserFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 		if err != nil {
 			return err
 		}

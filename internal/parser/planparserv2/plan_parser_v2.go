@@ -327,7 +327,7 @@ func CreateSearchPlanArgs(schema *typeutil.SchemaHelper, exprStr string, vectorF
 		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
 	}
-	vectorField, err := schema.GetFieldFromName(vectorFieldName)
+	vectorField, err := schema.GetUserFieldFromName(vectorFieldName)
 	if err != nil {
 		mlog.Info(context.TODO(), "CreateSearchPlan failed", mlog.Err(err))
 		return nil, err
@@ -427,7 +427,7 @@ func prepareBoostRandomParams(schema *typeutil.SchemaHelper, bytes string) ([]*c
 				return nil, merr.WrapErrParameterInvalidMsg("random seed field name must be string")
 			}
 
-			field, err := schema.GetFieldFromName(name)
+			field, err := schema.GetUserFieldFromName(name)
 			if err != nil {
 				return nil, merr.WrapErrFieldNotFound(value, "random seed field not found")
 			}

@@ -44,6 +44,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestImportTaskExcludesStorageColumns(t *testing.T) {
+	cache := &metacache.MetaCache{}
+	coord := &mocks.MockMixCoordClient{}
+	p := mockey.Mock((*metacache.MetaCache).GetDatabaseInfo).Return(&metacache.DatabaseInfo{DBID: 1}, nil).Build()
+	defer p.UnPatch()
+	raw := &schemapb.CollectionSchema{Version: 3, Fields: []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "RowID", DataType: schemapb.DataType_Int64},
+		{FieldID: 1, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	p = mockey.Mock((*mocks.MockMixCoordClient).ImportV2).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *internalpb.ImportRequestInternal, _ ...grpc.CallOption) (*internalpb.ImportResponse, error) {
+		require.NotSame(t, raw, req.Schema)
+		require.EqualValues(t, 3, req.Schema.Version)
+		require.Len(t, req.Schema.Fields, 1)
+		require.Same(t, raw.Fields[2], req.Schema.Fields[0])
+		return &internalpb.ImportResponse{Status: merr.Success()}, nil
+	}).Build()
+	defer p.UnPatch()
+	task := &ImportTask{ctx: t.Context(), mixCoord: coord, req: &internalpb.ImportRequest{}, resp: &internalpb.ImportResponse{}, schema: &schemaInfo{CollectionSchema: raw}}
+	task.MetaCache = cache
+	require.NoError(t, task.Execute(t.Context()))
+	require.Len(t, raw.Fields, 3)
+}
+
 func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {

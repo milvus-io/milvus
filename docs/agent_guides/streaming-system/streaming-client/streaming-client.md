@@ -18,8 +18,11 @@ See [Analyzer execution](analyzer.md) for routing, schema and lifetime rules.
 ## Collection schemas
 
 `streaming.WAL().SchemaClient()` caches immutable `schemautil.SchemaInfo` values,
-including Proxy field indices and a user-field projection. `FullSchema` retains
-the complete schema, including system fields, for native node consumers.
+including the complete schema and derived field indices. Proxy and native node
+consumers share the same schema, including RowID/Timestamp. User input validation,
+output enumeration and name resolution enforce system-column visibility at their
+own boundaries; the cache does not create a separate user schema. User-name
+lookups reuse the complete indices and preserve dynamic JSON key fallback.
 Current-write lookups confirm write admission with SN on every call but reuse the
 compiled object for the same cached collection/version. Exact-version reads,
 including zero, use the cache directly.

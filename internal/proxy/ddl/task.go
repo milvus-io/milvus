@@ -2599,6 +2599,10 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if field := typeutil.GetFieldByName(collSchema.CollectionSchema, t.FieldName); field != nil && common.IsSystemField(field.GetFieldID()) {
+		return merr.WrapErrParameterInvalidMsg("cannot alter system field %s", t.FieldName)
+	}
+
 	isCollectionLoadedFn := func() (bool, error) {
 		collectionID, err := t.GetMetaCache().GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
 		if err != nil {
@@ -3299,7 +3303,7 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+		if typeutil.IsVectorType(field.GetDataType()) && (len(loadFields) == 0 || loadFieldsSet.Contain(field.GetFieldID())) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3566,7 +3570,7 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+		if typeutil.IsVectorType(field.GetDataType()) && (len(loadFields) == 0 || loadFieldsSet.Contain(field.GetFieldID())) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}

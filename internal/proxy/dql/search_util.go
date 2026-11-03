@@ -205,6 +205,9 @@ func parseOrderByFields(searchParamsPair []*commonpb.KeyValuePair, schema *schem
 	fieldSchemaMap := make(map[string]*schemapb.FieldSchema)
 	var dynamicField *schemapb.FieldSchema
 	for _, field := range schema.GetFields() {
+		if common.IsSystemField(field.GetFieldID()) {
+			continue
+		}
 		fieldSchemaMap[field.GetName()] = field
 		if field.GetIsDynamic() {
 			dynamicField = field
@@ -685,7 +688,7 @@ func getOutputFieldIDs(schema *schemaInfo, outputFields []string) (outputFieldID
 	outputFieldIDs = make([]UniqueID, 0, len(outputFields))
 	for _, name := range outputFields {
 		id, ok := schema.MapFieldID(name)
-		if !ok {
+		if !ok || common.IsSystemField(id) {
 			return nil, merr.WrapErrParameterInvalidMsg("Field %s not exist", name)
 		}
 		outputFieldIDs = append(outputFieldIDs, id)
@@ -898,6 +901,9 @@ func parseGroupByField(groupByFieldName string, schema *schemapb.CollectionSchem
 	fieldNameMap := make(map[string]*schemapb.FieldSchema, len(fields))
 	var dynamicField *schemapb.FieldSchema
 	for _, field := range fields {
+		if common.IsSystemField(field.GetFieldID()) {
+			continue
+		}
 		fieldNameMap[field.Name] = field
 		if field.GetIsDynamic() {
 			dynamicField = field

@@ -54,11 +54,11 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
-	if collection == nil || collection.FullSchema == nil {
+	if collection == nil || collection.CollectionSchema == nil {
 		return nil, false, merr.WrapErrServiceInternalMsg("collection metadata is incomplete")
 	}
-	if collection.FullSchema.GetVersion() != meta.GetSchemaVersion() {
-		return nil, false, merr.WrapErrServiceInternalMsg("query view requires schema %d, streaming returned %d", meta.GetSchemaVersion(), collection.FullSchema.GetVersion())
+	if collection.GetVersion() != meta.GetSchemaVersion() {
+		return nil, false, merr.WrapErrServiceInternalMsg("query view requires schema %d, streaming returned %d", meta.GetSchemaVersion(), collection.GetVersion())
 	}
 	loadInfo, err := m.loadInfo(ctx, meta)
 	if err != nil {
@@ -72,14 +72,14 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	defer m.mu.Unlock()
 	collections := m.collections[key]
 	if collections == nil {
-		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.FullSchema)
+		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.CollectionSchema)
 		collections = m.newCollections()
 		if err := collections.PutOrRef(
-			meta.GetCollectionId(), collection.FullSchema, indexMeta,
+			meta.GetCollectionId(), collection.CollectionSchema, indexMeta,
 			&querypb.LoadMetaInfo{
 				LoadType:     querypb.LoadType_LoadCollection,
 				CollectionID: meta.GetCollectionId(),
-				DbName:       collection.FullSchema.GetDbName(),
+				DbName:       collection.GetDbName(),
 			},
 		); err != nil {
 			return nil, false, err
@@ -91,7 +91,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
-		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo, collection.FullSchema))
+		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo, collection.CollectionSchema))
 		ccollection = localCollection.GetCCollection()
 	}
 	return &queryViewCollectionRuntimeGuard{
@@ -99,8 +99,8 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		key:           key,
 		collection:    localCollection,
 		collectionID:  meta.GetCollectionId(),
-		databaseName:  collection.FullSchema.GetDbName(),
-		schema:        collection.FullSchema,
+		databaseName:  collection.GetDbName(),
+		schema:        collection.CollectionSchema,
 		schemaVersion: int64(meta.GetSchemaVersion()),
 		ccollection:   ccollection,
 		indexes:       loadInfo.IndexInfos,

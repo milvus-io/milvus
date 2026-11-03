@@ -15,8 +15,6 @@ import (
 // with extra fields mapping and methods
 type SchemaInfo struct {
 	*schemapb.CollectionSchema
-	// FullSchema includes system fields for native node consumers.
-	FullSchema            *schemapb.CollectionSchema
 	FieldMap              *typeutil.ConcurrentMap[string, int64] // field name to id mapping
 	HasPartitionKeyField  bool
 	PkField               *schemapb.FieldSchema
@@ -55,7 +53,6 @@ func NewSchemaInfo(schema *schemapb.CollectionSchema) (*SchemaInfo, error) {
 	}
 	return &SchemaInfo{
 		CollectionSchema:      schema,
-		FullSchema:            schema,
 		FieldMap:              fieldMap,
 		HasPartitionKeyField:  hasPartitionkey,
 		PkField:               pkField,
@@ -143,7 +140,7 @@ func (s *SchemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 			continue
 		}
 
-		fieldSchema, err := s.SchemaHelper.GetFieldFromName(name)
+		fieldSchema, err := s.SchemaHelper.GetUserFieldFromName(name)
 		if err != nil {
 			return nil, err
 		}

@@ -204,7 +204,11 @@ func getMockQueryCoord() *mocks.MockMixCoordClient {
 func TestCreateIndexTask_PreExecute(t *testing.T) {
 	collectionName := "collection1"
 	collectionID := UniqueID(1)
-	fieldName := newTestSchema().Fields[0].Name
+	schema := newTestSchema()
+	for i, field := range schema.Fields {
+		field.FieldID = int64(100 + i)
+	}
+	fieldName := schema.Fields[0].Name
 
 	dc := NewMixCoordMock()
 	ctx := context.Background()
@@ -219,7 +223,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
-	).Return(mustNewSchemaInfo(newTestSchema()), nil)
+	).Return(mustNewSchemaInfo(schema), nil)
 	mockCache.On("GetCollectionInfo",
 		mock.Anything, // context.Context
 		mock.AnythingOfType("string"),

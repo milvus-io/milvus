@@ -49,6 +49,7 @@ func arrayIntFieldSchema(name string, isPK bool, maxCap int) *schemapb.FieldSche
 		typeParams = append(typeParams, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: itoa(maxCap)})
 	}
 	return &schemapb.FieldSchema{
+		FieldID:      1000,
 		Name:         name,
 		IsPrimaryKey: isPK,
 		DataType:     schemapb.DataType_Array,
@@ -599,9 +600,10 @@ func TestReplaceVectorArrayRowElement(t *testing.T) {
 			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
 				Name: "test_struct",
 				Fields: []*schemapb.FieldSchema{
-					{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+					{FieldID: 1000, Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
 					{
-						Name: "field2", DataType: schemapb.DataType_ArrayOfVector, ElementType: test.elementType,
+						FieldID: 1001,
+						Name:    "field2", DataType: schemapb.DataType_ArrayOfVector, ElementType: test.elementType,
 						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: strconv.FormatInt(test.dim, 10)}},
 					},
 				},
@@ -667,9 +669,10 @@ func TestCheckAndFlattenStructFieldDataRejectsInvalidVectorWidth(t *testing.T) {
 			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
 				Name: "test_struct",
 				Fields: []*schemapb.FieldSchema{
-					{Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+					{FieldID: 1000, Name: "field1", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
 					{
-						Name: "field2", DataType: schemapb.DataType_ArrayOfVector, ElementType: test.elementType,
+						FieldID: 1001,
+						Name:    "field2", DataType: schemapb.DataType_ArrayOfVector, ElementType: test.elementType,
 						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: test.dim}},
 					},
 				},
@@ -802,6 +805,7 @@ func TestValidateFieldPartialUpdateOps_RemoveOnArrayField(t *testing.T) {
 
 func TestValidateFieldPartialUpdateOps_RejectsRecursiveArrayOps(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID:     1000,
 		Name:        "nested",
 		DataType:    schemapb.DataType_Array,
 		ElementType: schemapb.DataType_Array,
@@ -879,7 +883,7 @@ func TestValidateFieldPartialUpdateOps_RejectsUnknownField(t *testing.T) {
 
 func TestValidateFieldPartialUpdateOps_RejectsNonArrayField(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{Name: "tags", DataType: schemapb.DataType_VarChar},
+		{FieldID: 1000, Name: "tags", DataType: schemapb.DataType_VarChar},
 	}}
 	req := &milvuspb.UpsertRequest{
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
@@ -896,7 +900,7 @@ func TestValidateFieldPartialUpdateOps_RejectsStructOps(t *testing.T) {
 			{
 				Name: "profile",
 				Fields: []*schemapb.FieldSchema{
-					{Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+					{FieldID: 1000, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 				},
 			},
 		},
@@ -920,7 +924,7 @@ func TestValidateFieldPartialUpdateOps_RejectsStructOps(t *testing.T) {
 
 func TestValidateFieldPartialUpdateOps_RejectsElementTypeMismatch(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+		{FieldID: 1000, Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
 	}}
 	req := &milvuspb.UpsertRequest{
 		FieldsData: []*schemapb.FieldData{arrayLongFieldData("tags", [][]int64{{1}})},
@@ -996,7 +1000,8 @@ func TestValidateFieldPartialUpdateOps_RejectsNilArrayData(t *testing.T) {
 
 func TestValidateFieldPartialUpdateOps_SkipsCapacityWhenMalformed(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
-		Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		FieldID: 1000,
+		Name:    "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "not-a-number"}},
 	}}}
 	req := &milvuspb.UpsertRequest{
@@ -1185,7 +1190,7 @@ func TestPathReplaceSynthesizesOmittedNullableStructChild(t *testing.T) {
 }
 
 func TestPathReplaceNullableStructVectorElement(t *testing.T) {
-	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}
+	schema := &schemapb.FieldSchema{FieldID: 1000, DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}
 	base := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}, ValidData: []bool{true, true}}
 	update := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}, ValidData: []bool{false}}
 	out, err := replaceNullableStructVectorElement(base, update, schema, 1, 2)
@@ -1195,7 +1200,7 @@ func TestPathReplaceNullableStructVectorElement(t *testing.T) {
 }
 
 func TestPathReplaceNullableStructScalarElementCompactAndDense(t *testing.T) {
-	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+	schema := &schemapb.FieldSchema{FieldID: 1000, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
 	malformed := structScalarChildFieldData("new", &schemapb.ScalarField{
 		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}, ValidData: []bool{false},
 	})
@@ -1981,20 +1986,20 @@ func TestScalarArrayRowElementCountRejectsInvalidPayload(t *testing.T) {
 }
 
 func TestReadMaxCapacity(t *testing.T) {
-	fs := &schemapb.FieldSchema{TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "42"}}}
+	fs := &schemapb.FieldSchema{FieldID: 1000, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "42"}}}
 	assert.Equal(t, 42, readMaxCapacity(fs))
 
-	fs = &schemapb.FieldSchema{TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "not-int"}}}
+	fs = &schemapb.FieldSchema{FieldID: 1000, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "not-int"}}}
 	assert.Equal(t, -1, readMaxCapacity(fs))
 
-	fs = &schemapb.FieldSchema{TypeParams: []*commonpb.KeyValuePair{{Key: "other", Value: "42"}}}
+	fs = &schemapb.FieldSchema{FieldID: 1000, TypeParams: []*commonpb.KeyValuePair{{Key: "other", Value: "42"}}}
 	assert.Equal(t, -1, readMaxCapacity(fs))
 
-	assert.Equal(t, -1, readMaxCapacity(&schemapb.FieldSchema{}))
+	assert.Equal(t, -1, readMaxCapacity(&schemapb.FieldSchema{FieldID: 1000}))
 }
 
 func TestFindFieldSchemaByName(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "tags"}, {Name: "scores"}}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 1000, Name: "tags"}, {FieldID: 1001, Name: "scores"}}}
 	got, err := findFieldSchemaByName(schema, "scores")
 	require.NoError(t, err)
 	assert.Equal(t, "scores", got.GetName())

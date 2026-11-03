@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -29,7 +28,7 @@ type (
 )
 
 // SchemaClient returns shared immutable SchemaInfo values. Callers must not
-// mutate their protobufs or indices. FullSchema is available to native consumers.
+// mutate their protobufs or indices. The schema includes system fields.
 type SchemaClient interface {
 	// GetCurrentWriteSchema confirms write admission with SN and reuses the
 	// immutable body and derived indices for the returned collection/version.
@@ -212,31 +211,13 @@ func (c *schemaClient) cacheSchemaLocked(key schemaIdentity, response *schemapb.
 			return cached.info, nil
 		}
 	}
-	info, err := newSchemaInfo(response)
+	info, err := schemautil.NewSchemaInfo(response)
 	if err != nil {
 		return nil, err
 	}
 	if publish {
 		c.bodies.store(key, cachedSchema{epoch, info})
 	}
-	return info, nil
-}
-
-// Build the user-field projection and indices only when publishing a new body.
-// Native node consumers retain the complete immutable schema from the RPC.
-func newSchemaInfo(full *schemapb.CollectionSchema) (*schemautil.SchemaInfo, error) {
-	user := schemautil.ShallowSchema(full)
-	user.Fields = make([]*schemapb.FieldSchema, 0, len(full.Fields))
-	for _, field := range full.Fields {
-		if !common.IsSystemField(field.GetFieldID()) {
-			user.Fields = append(user.Fields, field)
-		}
-	}
-	info, err := schemautil.NewSchemaInfo(user)
-	if err != nil {
-		return nil, err
-	}
-	info.FullSchema = full
 	return info, nil
 }
 

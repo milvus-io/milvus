@@ -50,8 +50,8 @@ func TestTranslateOutputFields(t *testing.T) {
 		Description: "TestTranslateOutputFields",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			{Name: idFieldName, FieldID: 0, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: tsFieldName, FieldID: 1, DataType: schemapb.DataType_Int64},
+			{Name: idFieldName, FieldID: 1000, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: tsFieldName, FieldID: 1001, DataType: schemapb.DataType_Int64},
 			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
 			{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
 			{Name: float16VectorFieldName, FieldID: 102, DataType: schemapb.DataType_Float16Vector},
@@ -195,8 +195,8 @@ func TestTranslateOutputFields(t *testing.T) {
 			AutoID:             false,
 			EnableDynamicField: true,
 			Fields: []*schemapb.FieldSchema{
-				{Name: idFieldName, FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{Name: tsFieldName, FieldID: 2, DataType: schemapb.DataType_Int64},
+				{Name: idFieldName, FieldID: 1001, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: tsFieldName, FieldID: 1002, DataType: schemapb.DataType_Int64},
 				{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
 				{Name: binaryVectorFieldName, FieldID: 101, DataType: schemapb.DataType_BinaryVector},
 				{Name: common.MetaFieldName, FieldID: 102, DataType: schemapb.DataType_JSON, IsDynamic: true},
@@ -263,8 +263,8 @@ func TestTranslateOutputFields_StructArrayField(t *testing.T) {
 		Description: "TestTranslateOutputFields",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			{Name: idFieldName, FieldID: 0, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{Name: tsFieldName, FieldID: 1, DataType: schemapb.DataType_Int64},
+			{Name: idFieldName, FieldID: 1000, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: tsFieldName, FieldID: 1001, DataType: schemapb.DataType_Int64},
 			{Name: floatVectorFieldName, FieldID: 100, DataType: schemapb.DataType_FloatVector},
 		},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{

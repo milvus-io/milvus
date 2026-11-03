@@ -1159,6 +1159,9 @@ func findStructChildFieldData(fields []*schemapb.FieldData, childSchema *schemap
 // schema. Returns a descriptive parameter-invalid error when not found.
 func findFieldSchemaByName(schema *schemapb.CollectionSchema, name string) (*schemapb.FieldSchema, error) {
 	for _, f := range schema.GetFields() {
+		if common.IsSystemField(f.GetFieldID()) {
+			continue
+		}
 		if f.GetName() == name {
 			return f, nil
 		}

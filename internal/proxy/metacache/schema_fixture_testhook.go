@@ -4,7 +4,6 @@ package metacache
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"testing"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -96,9 +94,6 @@ func MockPublishedSchemaForTest(t testing.TB) {
 		if response.Schema == nil {
 			return response, nil
 		}
-		response.Schema.Fields = slices.DeleteFunc(response.Schema.Fields, func(field *schemapb.FieldSchema) bool {
-			return common.IsSystemField(field.GetFieldID())
-		})
 		err = m.SeedSchemaForTest(t, response.GetCollectionID(), response.GetSchema())
 		if err != nil {
 			return nil, err

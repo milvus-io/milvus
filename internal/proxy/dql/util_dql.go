@@ -183,6 +183,9 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	useAllDyncamicFields := false
 	aggregates := make([]agg.AggregateBase, 0)
 	for _, field := range schema.Fields {
+		if common.IsSystemField(field.GetFieldID()) {
+			continue
+		}
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
 		}
@@ -653,6 +656,9 @@ func reconstructStructFieldData(
 
 	// record all regular field IDs
 	for _, field := range schema.Fields {
+		if common.IsSystemField(field.GetFieldID()) {
+			continue
+		}
 		regularFieldIDs[field.GetFieldID()] = nil
 	}
 

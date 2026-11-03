@@ -259,7 +259,9 @@ func translateGroupByFieldIds(groupByFieldNames []string, schema *schemapb.Colle
 
 	fieldNameToSchema := make(map[string]*schemapb.FieldSchema, len(schema.Fields))
 	for _, field := range schema.Fields {
-		fieldNameToSchema[field.Name] = field
+		if !common.IsSystemField(field.GetFieldID()) {
+			fieldNameToSchema[field.Name] = field
+		}
 	}
 
 	groupByFieldIds := make([]UniqueID, 0, len(groupByFieldNames))
@@ -395,7 +397,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 		for _, reqField := range outputFields {
 			var fieldFound bool
 			for _, field := range schema.Fields {
-				if reqField == field.Name {
+				if reqField == field.Name && !common.IsSystemField(field.GetFieldID()) {
 					outputFieldIDs = append(outputFieldIDs, field.FieldID)
 					fieldFound = true
 					break
@@ -406,7 +408,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 			structFieldLoop:
 				for _, structField := range schema.StructArrayFields {
 					for _, field := range structField.Fields {
-						if reqField == field.Name {
+						if reqField == field.Name && !common.IsSystemField(field.GetFieldID()) {
 							outputFieldIDs = append(outputFieldIDs, field.FieldID)
 							fieldFound = true
 							break structFieldLoop

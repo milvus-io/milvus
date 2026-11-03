@@ -81,7 +81,7 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 // The guard is schema-aware for backward compatibility: "null" only became a
 // create-time keyword in this change, so a legacy collection may own a field
 // literally named "null", and the bare identifier is the only syntax that can
-// reference a top-level scalar field. A strict GetFieldFromName (NOT the
+// reference a top-level scalar field. A strict GetUserFieldFromName (NOT the
 // DefaultJSON variant, whose dynamic-field fallback is exactly what produced
 // the original misparse) decides: a real declared field resolves as before,
 // anything else is rejected. A JSON key literally named "null" additionally
@@ -102,11 +102,11 @@ func (v *ParserVisitor) translateIdentifierWithText(identifier string, allowText
 		// Schema-aware: honor a legacy declared field literally named "null";
 		// strict lookup so a dynamic-field collection still rejects
 		// bare-null-as-JSON-key. See errNullLiteral.
-		if _, err := v.schema.GetFieldFromName(identifier); err != nil {
+		if _, err := v.schema.GetUserFieldFromName(identifier); err != nil {
 			return nil, errNullLiteral()
 		}
 	}
-	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
+	field, err := v.schema.GetUserFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -1459,7 +1459,7 @@ func (v *ParserVisitor) getColumnInfoFromStructSubField(tokenText string) (*plan
 	// Construct full field name for struct array field
 	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
 	// Get the struct array field info
-	field, err := v.schema.GetFieldFromName(fullFieldName)
+	field, err := v.schema.GetUserFieldFromName(fullFieldName)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("array field not found: %s, error: %s", fullFieldName, err)
 	}
@@ -1506,7 +1506,7 @@ func (v *ParserVisitor) getColumnInfoFromStructIndexField(identifier string) (*p
 	subField := strings.TrimSuffix(parts[2], "]")
 
 	structFieldName := fieldName + "[" + subField + "]"
-	field, err := v.schema.GetFieldFromName(structFieldName)
+	field, err := v.schema.GetUserFieldFromName(structFieldName)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", structFieldName, err)
 	}
@@ -1573,7 +1573,7 @@ func (v *ParserVisitor) getChildColumnInfo(identifier parser.IFieldNameContext, 
 
 func (v *ParserVisitor) getStructArrayParentColumnInfo(fieldName string) (*planpb.ColumnInfo, bool, error) {
 	fieldName = decodeUnicode(fieldName)
-	if _, err := v.schema.GetFieldFromName(fieldName); err == nil {
+	if _, err := v.schema.GetUserFieldFromName(fieldName); err == nil {
 		return nil, false, nil
 	}
 
@@ -2516,12 +2516,12 @@ func (v *ParserVisitor) getColumnInfoFromJSONIdentifier(identifier string) (*pla
 	// guard there: a legacy field literally named "null" resolves. See
 	// errNullLiteral.
 	if strings.EqualFold(fieldName, "null") {
-		if _, err := v.schema.GetFieldFromName(fieldName); err != nil {
+		if _, err := v.schema.GetUserFieldFromName(fieldName); err != nil {
 			return nil, errNullLiteral()
 		}
 	}
 	nestedPath := make([]string, 0)
-	field, err := v.schema.GetFieldFromNameDefaultJSON(fieldName)
+	field, err := v.schema.GetUserFieldFromNameDefaultJSON(fieldName)
 	if err != nil {
 		return nil, err
 	}
@@ -2602,7 +2602,7 @@ func (v *ParserVisitor) VisitJSONIdentifier(ctx *parser.JSONIdentifierContext) i
 
 // VisitStructField handles struct_array[sub_field] syntax for struct sub-field access.
 func (v *ParserVisitor) getColumnInfoFromStructField(identifier string) (*planpb.ColumnInfo, error) {
-	field, err := v.schema.GetFieldFromName(identifier)
+	field, err := v.schema.GetUserFieldFromName(identifier)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, err)
 	}
@@ -3157,7 +3157,7 @@ func (v *ParserVisitor) VisitArrayLength(ctx *parser.ArrayLengthContext) interfa
 	if ctx.StructFieldIdentifier() != nil {
 		// Handle struct_arr[sub_field] syntax: look up the full field name directly
 		identifier := ctx.StructFieldIdentifier().GetText()
-		field, fieldErr := v.schema.GetFieldFromName(identifier)
+		field, fieldErr := v.schema.GetUserFieldFromName(identifier)
 		if fieldErr != nil {
 			return merr.WrapErrParameterInvalidMsg("struct field not found: %s, error: %s", identifier, fieldErr)
 		}
@@ -3673,7 +3673,7 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 	// Construct full field name for struct array field
 	fullFieldName := typeutil.ConcatStructFieldName(v.currentStructArrayField, fieldName)
 	// Get the struct array field info
-	field, err := v.schema.GetFieldFromName(fullFieldName)
+	field, err := v.schema.GetUserFieldFromName(fullFieldName)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("array field not found: %s, error: %s", fullFieldName, err)
 	}

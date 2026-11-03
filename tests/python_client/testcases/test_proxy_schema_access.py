@@ -61,6 +61,41 @@ def ids(client, name):
 
 
 @pytest.mark.tags(CaseLabel.L1)
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_proxy_full_schema_system_columns(schema_access_client, dynamic):
+    client, stub, name = schema_access_client
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=dynamic)
+    schema.add_field("id", DataType.INT64, is_primary=True)
+    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+    index = client.prepare_index_params()
+    index.add_index("vector", index_type="FLAT", metric_type="L2")
+    client.create_collection(name, schema=schema, index_params=index, timeout=60)
+    data = {"id": 1, "vector": [1.0, 0.0, 0.0, 0.0]}
+    if dynamic:
+        data.update(RowID=7, Timestamp=11)
+    client.insert(name, data, timeout=60)
+    client.upsert(name, data, timeout=60)
+    response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=60)
+    assert {field.name for field in response.schema.fields} == {"id", "vector"}
+    rows = client.query(name, filter="id == 1", output_fields=["*"], consistency_level="Strong", timeout=60)
+    assert len(rows) == 1
+    if dynamic:
+        assert rows[0]["RowID"] == 7 and rows[0]["Timestamp"] == 11
+        assert client.query(name, filter="RowID == 7 and Timestamp == 11", output_fields=["id"],
+                            consistency_level="Strong", timeout=60) == [{"id": 1}]
+        results = client.search(name, [[1.0, 0.0, 0.0, 0.0]], filter="RowID == 7", limit=1,
+                                consistency_level="Strong", timeout=60)
+        assert results[0][0]["id"] == 1
+        client.delete(name, filter="Timestamp == 11", timeout=60)
+        assert ids(client, name) == []
+    else:
+        assert "RowID" not in rows[0] and "Timestamp" not in rows[0]
+        for field in ("RowID", "Timestamp"):
+            with pytest.raises(Exception, match="(?i)(field|schema|plan)"):
+                client.query(name, filter=f"{field} > 0", output_fields=["id"], timeout=60)
+
+
+@pytest.mark.tags(CaseLabel.L1)
 def test_proxy_schema_ttl_snapshots_and_mutations(schema_access_client):
     client, stub, name = schema_access_client
     create_collection(client, name)

@@ -26,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -292,13 +294,19 @@ func (it *ImportTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// Import readers consume user-provided columns; RowID and Timestamp are
+	// generated separately by the import pipeline. Detach only this RPC envelope.
+	importSchema := schemautil.ShallowSchema(it.schema.CollectionSchema)
+	importSchema.Fields = lo.Filter(it.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return !common.IsSystemField(field.GetFieldID())
+	})
 	importReq := &internalpb.ImportRequestInternal{
 		DbID:           dbInfo.DBID,
 		CollectionID:   it.collectionID,
 		CollectionName: it.req.GetCollectionName(),
 		PartitionIDs:   it.partitionIDs,
 		ChannelNames:   it.vchannels,
-		Schema:         it.schema.CollectionSchema,
+		Schema:         importSchema,
 		Files:          it.req.GetFiles(),
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback

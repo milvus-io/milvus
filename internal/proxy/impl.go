@@ -6646,7 +6646,7 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(err)}, nil
 		}
 		fieldID, exists := schema.MapFieldID(req.GetFieldName())
-		if !exists {
+		if !exists || common.IsSystemField(fieldID) {
 			return &milvuspb.RunAnalyzerResponse{Status: merr.Status(merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(req.GetFieldName())))}, nil
 		}
 		if len(info.VChannels) == 0 {

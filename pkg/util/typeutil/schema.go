@@ -561,6 +561,31 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 	return fieldSchema, nil
 }
 
+// GetUserFieldFromName resolves a user-supplied field name without exposing
+// storage system columns. Internal consumers can still use GetFieldFromName.
+func (helper *SchemaHelper) GetUserFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
+	field, err := helper.GetFieldFromName(fieldName)
+	if err != nil {
+		return nil, err
+	}
+	if common.IsSystemField(field.GetFieldID()) {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to get field schema by name: fieldName(%s) not found", fieldName)
+	}
+	return field, nil
+}
+
+// GetUserFieldFromNameDefaultJSON keeps dynamic-key resolution for names that
+// are not declared user fields, including names shared with system columns.
+func (helper *SchemaHelper) GetUserFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
+	if offset, ok := helper.nameOffset[fieldName]; ok {
+		field := helper.allFields[offset]
+		if !common.IsSystemField(field.GetFieldID()) {
+			return field, nil
+		}
+	}
+	return helper.getDefaultJSONField(fieldName)
+}
+
 func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schemapb.StructArrayFieldSchema {
 	for _, field := range helper.schema.StructArrayFields {
 		if field.Name == fieldName {

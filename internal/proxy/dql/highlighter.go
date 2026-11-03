@@ -155,7 +155,7 @@ func (h *LexicalHighlighter) initHighlightQueries(t *SearchTask, analyzerName st
 	// add query to highlight tasks
 	for _, query := range h.queries {
 		fieldID, ok := t.schema.MapFieldID(query.fieldName)
-		if !ok {
+		if !ok || common.IsSystemField(fieldID) {
 			return merr.WrapErrParameterInvalidMsg("highlight field not found in schema: %s", query.fieldName)
 		}
 		if err := h.addTaskWithQuery(t.schema, fieldID, query, analyzerName); err != nil {

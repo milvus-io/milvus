@@ -180,7 +180,7 @@ func validateChainOutputName(schemaHelper *typeutil.SchemaHelper, name string) e
 		return merr.WrapErrParameterInvalidMsg(
 			"JSON root or path cannot be used as a function chain output")
 	}
-	if field, err := schemaHelper.GetFieldFromName(name); err == nil {
+	if field, err := schemaHelper.GetUserFieldFromName(name); err == nil {
 		if field.GetDataType() == schemapb.DataType_JSON {
 			return merr.WrapErrParameterInvalidMsg(
 				"JSON root or path cannot be used as a function chain output")
@@ -242,7 +242,7 @@ func resolveSchemaChainInput(
 	// Schema field names may also be expression keywords (for example,
 	// "threshold"). Resolve exact names before parsing nested path expressions.
 	var nestedPath []string
-	field, err := schemaHelper.GetFieldFromName(name)
+	field, err := schemaHelper.GetUserFieldFromName(name)
 	if err != nil {
 		var columnInfo *planpb.ColumnInfo
 		if err := planparserv2.ParseIdentifier(schemaHelper, name, func(expr *planpb.Expr) error {

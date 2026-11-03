@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -54,7 +55,7 @@ func (t *UpsertTask) upsertReadSchema(ctx context.Context, outputFields []string
 func upsertInputSchema(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {
 	fields := make([]*schemapb.FieldSchema, 0, len(schema.GetFields()))
 	for _, field := range schema.GetFields() {
-		if !field.GetIsFunctionOutput() {
+		if !common.IsSystemField(field.GetFieldID()) && !field.GetIsFunctionOutput() {
 			fields = append(fields, field)
 		}
 	}

@@ -43,12 +43,10 @@ func TestSchemaClientSharedBodyAndFreshWriteVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, write, read)
 	require.EqualValues(t, 1, calls.Load())
-	user := write
-	require.Len(t, user.Fields, 1)
-	require.Len(t, write.FullSchema.Fields, 2)
-	require.Same(t, write.FullSchema.Fields[1], user.Fields[0])
-	again := read
-	require.Same(t, user, again)
+	require.Len(t, write.Fields, 2)
+	system, err := write.SchemaHelper.GetFieldFromID(0)
+	require.NoError(t, err)
+	require.Same(t, write.Fields[0], system)
 	current.Store(1)
 	next, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 	require.NoError(t, err)
