@@ -50,6 +50,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                "Primary key field is not INT64 or VARCHAR type");
 
     milvus::OpContext op_ctx;
+    op_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     auto field_data =
         bulk_subscript(&op_ctx, pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
@@ -72,6 +73,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
 
     std::unique_ptr<DataArray> field_data;
     milvus::OpContext op_ctx;
+    op_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
         auto& field_meta = plan->schema_->operator[](field_id);
@@ -205,6 +207,7 @@ SegmentInternalInterface::FillTargetEntry(
     };
 
     milvus::OpContext op_ctx;
+    op_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =

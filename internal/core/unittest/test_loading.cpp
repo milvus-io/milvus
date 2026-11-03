@@ -592,7 +592,7 @@ TEST(IndexLoadTest, ScalarV3SortUsesStreamConcurrencyBound) {
     EXPECT_EQ(small_mmap_request.max_memory_cost, kSmallIndexSize);
 }
 
-TEST(IndexLoadTest, ScalarV3EstimateUsesConfiguredLoadPriority) {
+TEST(IndexLoadTest, ScalarV3EstimateCoversQueryPriorityOverride) {
     auto& high_pool =
         milvus::ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     auto& low_pool =
@@ -602,7 +602,6 @@ TEST(IndexLoadTest, ScalarV3EstimateUsesConfiguredLoadPriority) {
 
     constexpr uint64_t kIndexSize = 1024UL * 1024 * 1024;
     const auto high_stream_overhead = 2UL * DEFAULT_INDEX_FILE_SLICE_SIZE;
-    const auto low_stream_overhead = DEFAULT_INDEX_FILE_SLICE_SIZE;
 
     auto estimate_mmap_peak = [](const std::string& index_type,
                                  const char* load_priority) {
@@ -622,13 +621,16 @@ TEST(IndexLoadTest, ScalarV3EstimateUsesConfiguredLoadPriority) {
                                    milvus::index::MARISA_TRIE,
                                    milvus::index::INVERTED_INDEX_TYPE,
                                    milvus::index::NGRAM_INDEX_TYPE}) {
-        EXPECT_EQ(estimate_mmap_peak(index_type, "LOW"), low_stream_overhead)
+        EXPECT_EQ(estimate_mmap_peak(index_type, "LOW"), high_stream_overhead)
             << index_type;
     }
     EXPECT_EQ(estimate_mmap_peak(milvus::index::BITMAP_INDEX_TYPE, "LOW"),
-              kIndexSize + low_stream_overhead);
+              kIndexSize + high_stream_overhead);
     EXPECT_EQ(estimate_mmap_peak(milvus::index::ASCENDING_SORT, nullptr),
               high_stream_overhead);
+    low_pool.Resize(3);
+    EXPECT_EQ(estimate_mmap_peak(milvus::index::ASCENDING_SORT, "LOW"),
+              3UL * DEFAULT_INDEX_FILE_SLICE_SIZE);
 }
 
 TEST(IndexLoadTest, ScalarV2SortRetainsWholeEntryBound) {

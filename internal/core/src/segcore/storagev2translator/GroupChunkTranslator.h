@@ -98,7 +98,8 @@ class GroupChunkTranslator
     // Load a single cell which may contain multiple row groups
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     const milvus::cachinglayer::cid_t cid);
+                     const milvus::cachinglayer::cid_t cid,
+                     milvus::proto::common::LoadPriority priority);
 
     int64_t segment_id_;
     GroupChunkType group_chunk_type_{GroupChunkType::DEFAULT};

@@ -2008,6 +2008,8 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                 }
 
                 milvus::OpContext op_ctx;
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 // Intentionally bypass bulk_subscript's scalar-index raw-data
                 // routing here: the sealed VARCHAR PK fast path reads the
                 // loaded column directly to avoid DataArray materialization

@@ -22,6 +22,7 @@
 #include "segcore/Utils.h"
 #include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -81,6 +82,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::JsonKeyStats>>>
 JsonStatsTranslator::get_cells(
     milvus::OpContext* ctx, const std::vector<milvus::cachinglayer::cid_t>&) {
+    auto config = config_;
+    if (ctx != nullptr && ctx->runtime_load_priority.has_value()) {
+        config[milvus::LOAD_PRIORITY] = *ctx->runtime_load_priority;
+    }
+
     auto stats = std::make_unique<milvus::index::JsonKeyStats>(
         file_manager_context_, /* is_load */ true);
 
@@ -93,7 +99,7 @@ JsonStatsTranslator::get_cells(
             },
             milvus::ScopedTimer::LogLevel::Info);
 
-        stats->Load(ctx_, config_);
+        stats->Load(ctx_, config);
 
         if (load_info_.enable_mmap) {
             stats->SetCellSize({0, load_info_.stats_size});

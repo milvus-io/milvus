@@ -26,3 +26,20 @@ TEST(ThreadPool, ThreadNum) {
                                           2.0);
     ASSERT_EQ(threadPool.GetMaxThreadNum(), 2.0 * milvus::CPU_NUM);
 }
+
+TEST(LoadPriorityTest, QueryOverrideDoesNotChangeBackgroundPriority) {
+    using milvus::proto::common::LoadPriority;
+    milvus::OpContext ctx;
+    for (const auto configured : {LoadPriority::HIGH, LoadPriority::LOW}) {
+        EXPECT_EQ(milvus::ResolveLoadPriority(nullptr, configured), configured);
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured), configured);
+        ctx.runtime_load_priority = LoadPriority::HIGH;
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured),
+                  LoadPriority::HIGH);
+        ctx.runtime_load_priority = LoadPriority::LOW;
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured),
+                  LoadPriority::LOW);
+        ctx.runtime_load_priority.reset();
+        EXPECT_EQ(milvus::ResolveLoadPriority(&ctx, configured), configured);
+    }
+}

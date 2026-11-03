@@ -18,6 +18,7 @@
 #define MILVUS_THREADPOOLS_H
 
 #include "common/Common.h"
+#include "common/OpContext.h"
 #include "ThreadPool.h"
 namespace milvus {
 
@@ -42,6 +43,16 @@ PriorityForLoad(const std::string& priority_str) {
         return milvus::proto::common::LoadPriority::LOW;
     }
     return milvus::proto::common::LoadPriority::HIGH;
+}
+
+// A query override applies only to this load; warmup retains its configured priority.
+inline milvus::proto::common::LoadPriority
+ResolveLoadPriority(const milvus::OpContext* ctx,
+                    milvus::proto::common::LoadPriority configured_priority) {
+    return ctx == nullptr
+               ? configured_priority
+               : static_cast<milvus::proto::common::LoadPriority>(
+                     ctx->runtime_load_priority.value_or(configured_priority));
 }
 
 class ThreadPools {
