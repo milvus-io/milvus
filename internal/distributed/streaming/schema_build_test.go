@@ -49,9 +49,9 @@ func TestSchemaClientBuildOutsideLock(t *testing.T) {
 			}()
 			<-started
 			// A blocked field-index build must not hold the client lock.
-			unlocked := c.mu.TryLock()
+			unlocked := c.shard(1).mu.TryLock()
 			if unlocked {
-				c.mu.Unlock()
+				c.shard(1).mu.Unlock()
 			}
 			require.True(t, unlocked)
 			hit, err := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_2v0", Version: 0})
@@ -69,8 +69,8 @@ func TestSchemaClientBuildOutsideLock(t *testing.T) {
 			got := <-done
 			if action == "close" {
 				require.ErrorIs(t, got.err, ErrWALAccesserClosed)
-				require.Empty(t, c.bodies.entries)
-				require.Empty(t, c.writeVersions.entries)
+				require.Empty(t, c.shard(1).bodies.entries)
+				require.Empty(t, c.shard(1).writeVersions.entries)
 				return
 			}
 			require.NoError(t, got.err)
@@ -78,7 +78,7 @@ func TestSchemaClientBuildOutsideLock(t *testing.T) {
 				require.Same(t, concurrent, got.info, "concurrent fills share the published object")
 			} else {
 				require.NotSame(t, concurrent, got.info, "an older build cannot publish into a refreshed epoch")
-				_, ok := c.writeVersions.load(1)
+				_, ok := c.shard(1).writeVersions.load(1)
 				require.False(t, ok)
 			}
 			hit, err = fetchTestSchema(t.Context(), c, "p_1v0", false, false)

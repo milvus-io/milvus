@@ -32,7 +32,10 @@ bypasses older flights and logically invalidates metadata in all cached versions
 of that collection without scanning other entries. Older RPC completions cannot
 publish over the new epoch. Refresh also clears the write selector: fetching an
 exact read version does not establish the current write version. Cache bodies,
-write selectors and epochs expire when idle.
+write selectors and epochs expire when idle. Collection IDs route these three
+maps to 32 cache shards, each with one mutex. Field-index construction runs
+outside that mutex and rechecks the epoch on publication. Idle cleanup visits
+one shard at a time, so a scan does not hold a process-wide schema lock.
 
 On a miss, Proxy MetaCache fetches the published version from Coord, then obtains
 that exact version through SchemaClient with `BypassCache`. It shallow-copies the

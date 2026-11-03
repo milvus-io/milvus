@@ -23,9 +23,12 @@ func BenchmarkSchemaClientCacheHit(b *testing.B) {
 				for i := range channels {
 					id := int64(i + 1)
 					channels[i] = fmt.Sprintf("p_%dv0", id)
-					epoch := c.schemaEpochLocked(id, false)
-					c.bodies.store(schemaIdentity{id, 0}, cachedSchema{epoch, info})
-					c.writeVersions.store(id, 0)
+					shard := c.shard(id)
+					shard.mu.Lock()
+					epoch := shard.schemaEpochLocked(id, false)
+					shard.bodies.store(schemaIdentity{id, 0}, cachedSchema{epoch, info})
+					shard.writeVersions.store(id, 0)
+					shard.mu.Unlock()
 				}
 				ctx := context.Background()
 				b.ReportAllocs()

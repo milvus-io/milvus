@@ -126,10 +126,10 @@ func TestSchemaClientRefreshCollectionIsolation(t *testing.T) {
 	defer p.UnPatch()
 	fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, true)
 	require.NoError(t, err)
-	cached, ok := c.bodies.load(schemaIdentity{1, 0})
+	cached, ok := c.shard(1).bodies.load(schemaIdentity{1, 0})
 	require.True(t, ok)
 	require.Same(t, fresh, cached.info)
-	_, ok = c.bodies.load(schemaIdentity{2, 0})
+	_, ok = c.shard(2).bodies.load(schemaIdentity{2, 0})
 	require.True(t, ok)
 }
 
@@ -141,20 +141,20 @@ func TestSchemaClientRefreshFailureAndExpiredEpoch(t *testing.T) {
 	_, err := fetchTestSchema(t.Context(), c, "p_1v0", false, true)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	p.UnPatch()
-	cached, ok := c.bodies.load(schemaIdentity{1, 0})
+	cached, ok := c.shard(1).bodies.load(schemaIdentity{1, 0})
 	require.True(t, ok)
 	require.Same(t, old, cached.info)
 	p = mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, _ *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
-		c.mu.Lock()
-		c.epochs.expire(time.Now().Add(2 * time.Hour))
-		c.mu.Unlock()
+		c.shard(1).mu.Lock()
+		c.shard(1).epochs.expire(time.Now().Add(2 * time.Hour))
+		c.shard(1).mu.Unlock()
 		return testSchema(0), nil
 	}).Build()
 	defer p.UnPatch()
 	fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, true)
 	require.NoError(t, err)
 	require.NotSame(t, old, fresh)
-	cached, ok = c.bodies.load(schemaIdentity{1, 0})
+	cached, ok = c.shard(1).bodies.load(schemaIdentity{1, 0})
 	require.True(t, ok)
 	require.Same(t, old, cached.info, "expired epochs cannot publish late responses")
 }
