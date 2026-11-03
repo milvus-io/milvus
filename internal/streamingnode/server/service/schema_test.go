@@ -43,11 +43,11 @@ func TestSchemaNativeTransport(t *testing.T) {
 			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{Version: version}, EffectiveTimeTick: 100}, nil
 		}).Build()
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(&analyzerManager{}))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///schema", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///schema", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)

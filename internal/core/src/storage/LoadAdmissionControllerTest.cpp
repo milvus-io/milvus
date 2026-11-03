@@ -134,11 +134,12 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsAdmissionLimits) {
     const auto check = [&](ResourceUsage expected) {
         const auto result =
             list.ReserveLoadingResourceWithTimeout(
-                    {}, overhead, &config, std::chrono::milliseconds(0))
+                    {{}, {}, overhead}, &config, std::chrono::milliseconds(0))
                 .get();
         ASSERT_TRUE(result.success);
         EXPECT_EQ(result.reserved, expected);
-        EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
+        EXPECT_EQ(list.ReleaseLoadingResource({{}, {}, overhead}, &config),
+                  expected);
         EXPECT_EQ(LoadMemoryOverheadController::GetInstance().GetOrCreate(),
                   memory);
         EXPECT_EQ(LoadFileOverheadController::GetInstance().GetOrCreate(),
@@ -209,11 +210,12 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsActiveMode) {
                            ResourceUsage expected) {
         const auto result =
             list.ReserveLoadingResourceWithTimeout(
-                    {}, overhead, &config, std::chrono::milliseconds(0))
+                    {{}, {}, overhead}, &config, std::chrono::milliseconds(0))
                 .get();
         ASSERT_TRUE(result.success);
         EXPECT_EQ(result.reserved, expected);
-        EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
+        EXPECT_EQ(list.ReleaseLoadingResource({{}, {}, overhead}, &config),
+                  expected);
     };
     budget_.SetCapacitySlots(8);
     budget_.SetCapacityBytes(600);
@@ -293,11 +295,11 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     const ResourceUsage demand{1000000, 1000000};
     const auto result =
         list.ReserveLoadingResourceWithTimeout(
-                {}, demand, &config, std::chrono::milliseconds(0))
+                {{}, {}, demand}, &config, std::chrono::milliseconds(0))
             .get();
     ASSERT_TRUE(result.success);
     EXPECT_EQ(result.reserved, demand);
-    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &config), demand);
+    EXPECT_EQ(list.ReleaseLoadingResource({{}, {}, demand}, &config), demand);
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest,
@@ -328,11 +330,12 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     const ResourceUsage expected{100, 50};
     const auto result =
         list.ReserveLoadingResourceWithTimeout(
-                {}, demand, &complete, std::chrono::milliseconds(0))
+                {{}, {}, demand}, &complete, std::chrono::milliseconds(0))
             .get();
     ASSERT_TRUE(result.success);
     EXPECT_EQ(result.reserved, expected);
-    EXPECT_EQ(list.ReleaseLoadingResource({}, demand, &complete), expected);
+    EXPECT_EQ(list.ReleaseLoadingResource({{}, {}, demand}, &complete),
+              expected);
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest, MetricsExposeReservationsAndCapacity) {

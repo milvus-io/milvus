@@ -29,6 +29,23 @@ import (
 
 var txnClient *txnkv.Client
 
+// pdAddrEnv names the environment variable with the PD address of a real TiKV
+// for these tests. When it is not set, the tests use the mock TiKV.
+const pdAddrEnv = "MILVUS_TIKV_TEST_PD"
+
+// usingMockTiKV is true when the tests run on the mock TiKV.
+var usingMockTiKV bool
+
+// skipOnMockTiKV skips a test that needs the pessimistic transaction behavior
+// of a real TiKV. The mock TiKV checks a write conflict at prewrite against
+// the start timestamp even on a key that the transaction locked
+// pessimistically, and real TiKV does not.
+func skipOnMockTiKV(t *testing.T) {
+	if usingMockTiKV {
+		t.Skipf("needs a real TiKV for pessimistic locks; set %s to its PD address", pdAddrEnv)
+	}
+}
+
 // creates a local TiKV Store for testing purpose.
 func setupLocalTiKV() {
 	setupLocalTxn()
@@ -47,9 +64,8 @@ func setupLocalTxn() {
 	txnClient = &txnkv.Client{KVStore: store}
 }
 
-// Connects to a remote TiKV service for testing purpose. By default, it assumes the TiKV is from localhost.
-func setupRemoteTiKV() {
-	pdsn := "127.0.0.1:2379"
+// Connects to a remote TiKV service for testing purpose at the PD address pdsn.
+func setupRemoteTiKV(pdsn string) {
 	var err error
 	txnClient, err = txnkv.NewClient([]string{pdsn})
 	if err != nil {
@@ -57,17 +73,18 @@ func setupRemoteTiKV() {
 	}
 }
 
-func setupTiKV(useRemote bool) {
-	if useRemote {
-		setupRemoteTiKV()
-	} else {
-		setupLocalTiKV()
+func setupTiKV() {
+	if pd := os.Getenv(pdAddrEnv); pd != "" {
+		setupRemoteTiKV(pd)
+		return
 	}
+	usingMockTiKV = true
+	setupLocalTiKV()
 }
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	setupTiKV(false)
+	setupTiKV()
 	code := m.Run()
 	os.Exit(code)
 }

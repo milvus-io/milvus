@@ -46,11 +46,11 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
-    auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
-        data_type = expr_->column_.element_type_;
+        result = ExecElementLevelNull(input);
+        return;
     }
-    switch (data_type) {
+    switch (expr_->column_.data_type_) {
         case DataType::BOOL: {
             result = ExecVisitorImpl<bool>(input);
             break;
@@ -135,15 +135,16 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
 void
 PhyNullExpr::DetermineExecPath() {
-    if (IsVectorDataType(expr_->column_.data_type_)) {
+    // Element validity is read from raw data; a field without null elements
+    // is not read at all.
+    if (expr_->column_.element_level_ ||
+        IsVectorDataType(expr_->column_.data_type_)) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
 
     auto req = MakeIndexRequirement(RequiredReader::Null);
-    req.value_type = expr_->column_.element_level_
-                         ? expr_->column_.element_type_
-                         : expr_->column_.data_type_;
+    req.value_type = expr_->column_.data_type_;
     SelectAndPinIndex(req);
     if (PinnedIndexIsNested()) {
         ClearSelectedIndex();
@@ -153,7 +154,8 @@ PhyNullExpr::DetermineExecPath() {
 
 void
 PhyNullExpr::MoveCursor() {
-    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+    if (!expr_->column_.element_level_ &&
+        IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
         if (!has_offset_input_ && !execute_all_at_once_) {
             current_data_global_pos_ +=
                 std::min(batch_size_, active_count_ - current_data_global_pos_);
@@ -166,7 +168,8 @@ PhyNullExpr::MoveCursor() {
 
 bool
 PhyNullExpr::CanExecuteAllAtOnce() const {
-    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+    if (expr_->column_.element_level_ ||
+        IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
         return false;
     }
     return SegmentExpr::CanExecuteAllAtOnce();
@@ -174,10 +177,32 @@ PhyNullExpr::CanExecuteAllAtOnce() const {
 
 void
 PhyNullExpr::PrefetchRawData() {
+    if (expr_->column_.element_level_) {
+        if (is_element_nullable_) {
+            SegmentExpr::PrefetchRawData();
+        }
+        return;
+    }
     if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
         return;
     }
     SegmentExpr::PrefetchRawData();
+}
+
+// `$[x] IS NULL` / `IS NOT NULL` on one struct element: true or false from
+// the element's own validity, never UNKNOWN. Elements of a NULL struct row
+// do not exist, so row validity plays no part.
+VectorPtr
+PhyNullExpr::ExecElementLevelNull(OffsetVector* input) {
+    auto next_batch_size = GetNextRealBatchSize(input, true);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    const auto elem_count = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(input, true, elem_count)) {
+        return res;
+    }
+    return BuildNullResult(ProcessElementValidity(input, elem_count));
 }
 
 VectorPtr

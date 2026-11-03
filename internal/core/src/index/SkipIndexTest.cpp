@@ -59,9 +59,10 @@ class SkipMetricsGroupTranslator final
     cell_id_of(cachinglayer::uid_t uid) const override {
         return uid;
     }
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
-        return {{0, 0}, {0, 0}};
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        return {};
     }
     int64_t
     cells_storage_bytes(
@@ -112,9 +113,10 @@ class SkipMetricsChunkTranslator final
     cell_id_of(cachinglayer::uid_t uid) const override {
         return uid;
     }
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
-        return {{0, 0}, {0, 0}};
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        return {};
     }
     int64_t
     cells_storage_bytes(

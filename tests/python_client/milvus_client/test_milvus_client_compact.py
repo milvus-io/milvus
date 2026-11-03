@@ -221,6 +221,15 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
             f"Expected at least {num_batches} sealed inputs, got {len(source_ids)}: {segments_before}"
         )
 
+        # Sorting creates new segments whose indexes may still be building.
+        # MixCompaction filters out unindexed inputs, even for a manual trigger.
+        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=180), (
+            f"Source vector index did not finish building for {collection_name}"
+        )
+        index_info, _ = self.describe_index(client, collection_name, default_vector_field_name)
+        assert index_info["state"] == "Finished", index_info
+        assert index_info["indexed_rows"] == total_rows, index_info
+
         compact_id = self.compact(client, collection_name)[0]
         self.wait_for_compaction_ready(client, compact_id, timeout=180)
 

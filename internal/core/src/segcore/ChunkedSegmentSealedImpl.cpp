@@ -757,8 +757,12 @@ class CompletedIndexTranslator final
         return 0;
     }
 
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        if (cids.empty()) {
+            return {};
+        }
         return {usage_, cachinglayer::ResourceUsage{}};
     }
 
@@ -6762,10 +6766,8 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
     }
 
     std::optional<ChunkedColumnInterface::OwnedTakeData> taken_data;
-    // Native-list arrays are read through BulkArrayValueAt, which serves null
-    // elements; Vortex Take rejects them.
     const bool use_owned_take =
-        !field_meta.is_vector() && !field_meta.is_native_list_array() &&
+        !field_meta.is_vector() &&
         field_meta.get_data_type() != DataType::JSON && column->IsNullable() &&
         column->GetLocalFormat() == ChunkedColumnInterface::LocalFormat::Vortex;
     if (use_owned_take) {
@@ -10938,10 +10940,13 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 inner_values == nullptr || inner_values->byte_width() == width,
                 "VECTOR_ARRAY field {} has unexpected vector width",
                 field_meta.get_name().get());
-            auto* va = data_array->mutable_vectors()
-                           ->mutable_vector_array()
-                           ->mutable_data();
-            data_array->mutable_vectors()->set_dim(dim);
+            auto* vectors = data_array->mutable_vectors();
+            vectors->set_dim(dim);
+            auto* vector_array = vectors->mutable_vector_array();
+            vector_array->set_dim(dim);
+            vector_array->set_element_type(
+                static_cast<proto::schema::DataType>(element_type));
+            auto* va = vector_array->mutable_data();
             for (int64_t i = 0; i < size; i++) {
                 auto idx = result_mapping[i];
                 int64_t start = outer_list->value_offset(idx);

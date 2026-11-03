@@ -76,7 +76,7 @@ type Runtime struct {
 }
 
 type AsyncTaskScheduler interface {
-	Submit(task nodescheduler.Task) nodescheduler.TaskHandle
+	Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle
 }
 
 type ModuleNotifier interface {

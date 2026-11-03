@@ -252,6 +252,10 @@ const (
 	// Layout: {rootPath}/walsummary/{pchannel}/{chunk|manifest}/...
 	WalSummaryRootPath = "walsummary"
 
+	// PKIndexPath storage path const for primary key index manifests and SSTs.
+	// Layout: {rootPath}/pk_index/{collectionID}/{vchannel}/{manifest|sst}/...
+	PKIndexPath = "pk_index"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -295,6 +299,7 @@ var InternalStorageRootSegments = []string{
 	WoodpeckerRootPath,
 	ExternalRefreshResultsRootPath,
 	WalSummaryRootPath,
+	PKIndexPath,
 }
 
 // LocalOnlyStorageRootSegments lists top-level directories that are rooted at
@@ -385,6 +390,7 @@ const (
 const (
 	EnableAnalyzerKey = `enable_analyzer`
 	AnalyzerParamKey  = `analyzer_params`
+	EnableMatchKey    = `enable_match`
 )
 
 //  Collection properties key

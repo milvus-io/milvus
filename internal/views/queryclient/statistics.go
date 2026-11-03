@@ -14,7 +14,8 @@ import (
 // Statistics makes one SN call per attempt, followed only by the selected QNs.
 // Counts are current physical statistics, not MVCC/TTL-filtered query results.
 // barrierMVCC reuses Phase 1 barrier coverage; zero uses ordinary Strong sampling.
-func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
+func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (count int64, err error) {
+	defer func() { err = toMilvusError(err) }()
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, collectionID)
 	if err != nil {
 		return 0, err

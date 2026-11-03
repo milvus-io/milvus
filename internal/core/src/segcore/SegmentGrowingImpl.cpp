@@ -2517,12 +2517,6 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
                "fields");
-    if (field_meta.has_nullable_array_element()) {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "expressions on element-nullable array field {} are not "
-                  "supported yet",
-                  field_meta.get_name().get());
-    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -2743,12 +2737,6 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
     AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_views_by_offsets only supports recursive "
                "ARRAY fields");
-    if (field_meta.has_nullable_array_element()) {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "expressions on element-nullable array field {} are not "
-                  "supported yet",
-                  field_meta.get_name().get());
-    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -3412,7 +3400,7 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = (*vec_ptr)[offset].output_data();
+            dst->at(i) = vec_ptr->view_element(offset).output_data();
         }
     }
 }
@@ -3603,7 +3591,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             for (int64_t i = 0; i < count; ++i) {
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET) {
-                    dst[i] = src[offset];
+                    src.view_element(offset).output_data(dst[i]);
                 } else {
                     dst[i] =
                         Array();  // Default-construct empty Array for invalid offsets
