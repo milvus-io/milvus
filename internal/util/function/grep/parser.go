@@ -17,6 +17,7 @@
 package grep
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -39,6 +40,14 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 		return nil, err
 	}
 	spec := &Spec{}
+	setMaxCount := func(value string) error {
+		count, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("grep max-count must be an unsigned decimal integer in [0, 18446744073709551615], got %q", value)
+		}
+		spec.maxCount = &count
+		return nil
+	}
 	appendPattern := func(value string) error {
 		if strings.IndexByte(value, '\n') >= 0 {
 			return merr.WrapErrParameterInvalidMsg("grep patterns must not contain literal LF")
@@ -70,7 +79,21 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 			return appendPattern(tokens[i].value)
 		}
 		if strings.HasPrefix(value, "--") {
+			// Value-taking flags consume the next token even if it resembles an option.
 			name, attached, hasValue := strings.Cut(value, "=")
+			if name == "--max-count" {
+				if !hasValue {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option %s requires a count", name)
+					}
+					i++
+					attached = tokens[i].value
+				}
+				if err := setMaxCount(attached); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if name == "--regexp" {
 				if hasValue {
 					err = appendPattern(attached)
@@ -129,6 +152,17 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 					err = consumePattern()
 				}
 				j = len(value) // -e consumes the remainder, not more flags.
+			case 'm':
+				count := value[j+1:]
+				if count == "" {
+					if i+1 >= len(tokens) {
+						return nil, merr.WrapErrParameterMissingMsg("grep option -m requires a count")
+					}
+					i++
+					count = tokens[i].value
+				}
+				err = setMaxCount(count)
+				j = len(value)
 			default:
 				flag, _ := utf8.DecodeRuneInString(value[j:])
 				return nil, merr.WrapErrParameterInvalidMsg("unsupported grep option -%c at token starting byte %d", flag, t.start)
