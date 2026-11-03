@@ -3358,3 +3358,49 @@ func TestDeltaSourceUnchangedOrderIndependent(t *testing.T) {
 	require.False(t, deltaSourceUnchanged(current, incoming))
 	require.True(t, deltaSourceUnchanged(nil, &querypb.SegmentLoadInfo{}))
 }
+
+func TestLocalSegmentReopenPreparationFailure(t *testing.T) {
+	oldInfo := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: "old"}
+	segment := newReopenTestSegment(milvusTableCollectionSchema(false), oldInfo)
+	injected := merr.WrapErrParameterInvalidMsg("invalid index load parameters")
+	patch := mockey.Mock(prepareIndexLoadParams).Return(injected).Build()
+	defer patch.UnPatch()
+	err := segment.reopen(context.Background(), &querypb.SegmentLoadInfo{ManifestPath: "new"}, func() error {
+		t.Fatal("delete replay must not run when index preparation fails")
+		return nil
+	})
+	require.ErrorIs(t, err, injected)
+	require.Same(t, oldInfo, segment.LoadInfo())
+}
+
+func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
+	paramtable.Init()
+	for _, failResource := range []bool{true, false} {
+		name := "missing_segment"
+		if failResource {
+			name = "resource_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			loader := &segmentLoader{manager: NewManager(), loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+			var resourceErr error
+			if failResource {
+				resourceErr = merr.Wrap(merr.ErrServiceNotReady, "resource reservation unavailable")
+			}
+			request := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, resourceErr).Build()
+			defer request.UnPatch()
+			freed := 0
+			free := mockey.Mock((*segmentLoader).freeRequestResource).To(func(_ *segmentLoader, _ requestResourceResult) {
+				freed++
+			}).Build()
+			defer free.UnPatch()
+			err := loader.ReopenSegments(context.Background(), []*querypb.SegmentLoadInfo{{CollectionID: 1000, SegmentID: 3000}})
+			if failResource {
+				require.ErrorIs(t, err, resourceErr)
+				require.Zero(t, freed)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, 1, freed)
+			}
+		})
+	}
+}
