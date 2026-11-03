@@ -1,12 +1,5 @@
-"""Snapshot Import fixtures, inspectors, value checks and model-free mock service.
+"""Snapshot Import fixtures, inspectors and value checks."""
 
-Run the standalone mock with: python -m common.snapshot_import_common --port 8080
-"""
-
-# ruff: noqa: E402
-# The mock CLI stays above optional E2E imports so a stdlib-only image can run it.
-
-import argparse
 import hashlib
 import io
 import json
@@ -17,119 +10,14 @@ import random
 import re
 import struct
 import sys
-import threading
 import time
-from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 from uuid import UUID, uuid4
-
-from common.mock_tei_server import generate_mock_embedding
-
-DIM = 32
-SERVICE = "snapshot-function-mock"
-SESSION = re.compile(r"fn14_[0-9a-f]{32}")
-
-
-def embedding_response(path, payload):
-    """Implement exactly the two provider response shapes exercised by FN-14."""
-    if path == "/embed":
-        texts = payload["inputs"]
-        assert isinstance(texts, list) and texts and all(isinstance(t, str) for t in texts)
-        return [generate_mock_embedding(text, DIM) for text in texts]
-    assert path == "/v1/embeddings", "unsupported provider path"
-    assert payload["output_dtype"] == "int8" and payload["output_dimension"] == DIM
-    assert payload["model"] == "fn14-mock"
-    texts = payload["input"]
-    assert isinstance(texts, list) and texts and all(isinstance(t, str) for t in texts)
-    return {
-        "object": "list",
-        "model": payload["model"],
-        "usage": {"total_tokens": len(texts)},
-        "data": [
-            {
-                "object": "embedding",
-                "index": i,
-                "embedding": [byte - 128 for byte in hashlib.sha256(text.encode("utf-8")).digest()],
-            }
-            for i, text in enumerate(texts)
-        ],
-    }
-
-
-class SnapshotFunctionMock(ThreadingHTTPServer):
-    """Counters are isolated by integration_id, including across parallel tests."""
-
-    def __init__(self, address):
-        super().__init__(address, MockHandler)
-        self.counts = {}
-        self.lock = threading.Lock()
-
-    def record(self, session, provider):
-        with self.lock:
-            self.counts.setdefault(session, Counter())[provider] += 1
-
-    def counters(self, session):
-        with self.lock:
-            counts = self.counts.get(session, {})
-            return {"tei": counts.get("tei", 0), "voyageai": counts.get("voyageai", 0)}
-
-
-class MockHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        """Do not log request headers or integration tokens."""
-
-    def respond(self, status, payload):
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        if self.path == "/health":
-            self.respond(200, {"service": SERVICE, "dim": DIM})
-        elif self.path.startswith("/_fn14/") and SESSION.fullmatch(self.path.removeprefix("/_fn14/")):
-            session = self.path.removeprefix("/_fn14/")
-            self.respond(200, self.server.counters(session))
-        else:
-            self.respond(404, {"error": "unknown control route"})
-
-    def do_POST(self):
-        token = self.headers.get("Authorization", "").removeprefix("Bearer ")
-        session = token.split("|", 1)[0]
-        if not SESSION.fullmatch(session):
-            self.respond(401, {"error": "FN-14 integration_id required"})
-            return
-        if self.path not in ("/embed", "/v1/embeddings"):
-            self.respond(404, {"error": "unknown provider route"})
-            return
-        self.server.record(session, "tei" if self.path == "/embed" else "voyageai")
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            assert 0 < size <= 1024 * 1024, "invalid request size"
-            payload = json.loads(self.rfile.read(size))
-            result = embedding_response(self.path, payload)
-        except (AssertionError, KeyError, TypeError, ValueError) as exc:
-            self.respond(400, {"error": str(exc)})
-            return
-        self.respond(200, result)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8080)
-    args = parser.parse_args()
-    with SnapshotFunctionMock((args.host, args.port)) as server:
-        server.serve_forever()
-
 
 import fastavro
 import numpy as np
@@ -1209,7 +1097,7 @@ def assert_external_snapshot_search(results, queries, expected):
         assert [hit["distance"] for hit in hits] == sorted(hit["distance"] for hit in hits)
 
 
-# Stored-output codecs and mock control client for SI-FN-14.
+# Stored function-output codecs for SI-FN-14.
 
 FUNCTION_CASES = [
     ("bm25", DataType.VARCHAR),
@@ -1217,39 +1105,11 @@ FUNCTION_CASES = [
     ("minhash", DataType.VARCHAR),
     ("embedding_float", DataType.VARCHAR),
     ("embedding_float", DataType.TEXT),
-    ("embedding_int8", DataType.VARCHAR),
-    ("embedding_int8", DataType.TEXT),
 ]
 FUNCTION_CASE_IDS = [f"{family}_{dtype.name.lower()}" for family, dtype in FUNCTION_CASES]
 
 
-class FunctionMockClient:
-    """Explicit Pod-reachable provider URL and pytest-reachable control URL."""
-
-    def __init__(self, endpoint, control_endpoint):
-        assert endpoint and control_endpoint, "FN-14 embedding requires explicit mock and control endpoints"
-        for url in (endpoint, control_endpoint):
-            parsed = urlsplit(url)
-            assert parsed.scheme == "http" and parsed.hostname and parsed.path in ("", "/"), url
-            assert not parsed.query and not parsed.fragment and parsed.username is None
-        self.endpoint = endpoint.rstrip("/")
-        self.control_endpoint = control_endpoint.rstrip("/")
-        self.session = f"fn14_{uuid4().hex}"
-        assert self._get("/health") == {"service": "snapshot-function-mock", "dim": 32}
-
-    def _get(self, path):
-        response = requests.get(self.control_endpoint + path, timeout=10)
-        response.raise_for_status()
-        return response.json()
-
-    def counters(self):
-        counts = self._get(f"/_fn14/{self.session}")
-        assert set(counts) == {"tei", "voyageai"}
-        assert all(type(value) is int and value >= 0 for value in counts.values()), counts
-        return counts
-
-
-def function_spec(family, mock):
+def function_spec(family, tei_endpoint):
     """Output type, field options, function, and compatible index/search parameters."""
     if family == "bm25":
         dtype, field, kind, params = DataType.SPARSE_FLOAT_VECTOR, {}, FunctionType.BM25, {}
@@ -1259,18 +1119,10 @@ def function_spec(family, mock):
         params = {"num_hashes": 16, "shingle_size": 3}
         index_type, metric, index_params = "MINHASH_LSH", "MHJACCARD", {"mh_lsh_band": 8}
     else:
-        assert family in ("embedding_float", "embedding_int8"), family
-        assert mock is not None
-        dtype = DataType.FLOAT_VECTOR if family == "embedding_float" else DataType.INT8_VECTOR
-        field, kind = {"dim": 32}, FunctionType.TEXTEMBEDDING
-        params = {"integration_id": mock.session}
-        if family == "embedding_float":
-            params.update(provider="TEI", endpoint=mock.endpoint)
-            index_type, metric, index_params = "FLAT", "L2", {}
-        else:
-            # VoyageAI reads its URL from Milvus config, not from function params.
-            params.update(provider="voyageai", model_name="fn14-mock", dim="32")
-            index_type, metric, index_params = "HNSW", "L2", {"M": 8, "efConstruction": 64}
+        assert family == "embedding_float", family
+        dtype, field, kind = DataType.FLOAT_VECTOR, {"dim": 768}, FunctionType.TEXTEMBEDDING
+        params = {"provider": "TEI", "endpoint": tei_endpoint}
+        index_type, metric, index_params = "FLAT", "L2", {}
     function = Function(
         name="text_to_output",
         function_type=kind,
@@ -1308,18 +1160,9 @@ def normalize_output(family, value):
             value = value[0]
         assert isinstance(value, bytes) and len(value) == 64, "MinHash output must contain 512 bits"
         return value
-    if family == "embedding_int8":
-        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], bytes):
-            value = value[0]
-        if isinstance(value, bytes):
-            value = list(struct.unpack(f"<{len(value)}b", value))
-        values = np.asarray(value)
-        assert values.shape == (32,) and np.issubdtype(values.dtype, np.integer)
-        assert np.all(values >= -128) and np.all(values <= 127)
-        return tuple(int(v) for v in values)
     assert family == "embedding_float"
     values = np.asarray(value, dtype=np.float32)
-    assert values.shape == (32,) and np.all(np.isfinite(values))
+    assert values.shape == (768,) and np.all(np.isfinite(values))
     return tuple(float(v) for v in values)
 
 

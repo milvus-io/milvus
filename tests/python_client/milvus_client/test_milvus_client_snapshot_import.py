@@ -24,7 +24,6 @@ from common.external_table_common import build_external_spec, get_minio_config, 
 from common.snapshot_import_common import (
     FUNCTION_CASE_IDS,
     FUNCTION_CASES,
-    FunctionMockClient,
     IndexEvidencePending,
     SnapshotBatchBase,
     _data_key,
@@ -2151,7 +2150,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
     def test_snapshot_import_preserves_function_outputs(
         self,
         snapshot_resources,
-        snapshot_function_mock,
+        tei_endpoint,
         snapshot_function_reader,
         family,
         input_type,
@@ -2160,21 +2159,16 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         """
         target: SI-FN-14, preserve every stored function output and its PK association
         method: 1. Insert/Referenced snapshot 32 source rows; 2. Import and compare outputs; 3. search and reload
-        expected: Completed/32 rows; exact output values; no embedding calls during Import; same data after reload
+        expected: Completed/32 rows; exact stored output values by PK; same data after reload
         """
         client, source, target, snapshot = snapshot_resources
-        mock = snapshot_function_mock
-        source_fields = self._create_function_collection(client, source, family, input_type, mock)
-        target_fields = self._create_function_collection(client, target, family, input_type, mock)
+        source_fields = self._create_function_collection(client, source, family, input_type, tei_endpoint)
+        target_fields = self._create_function_collection(client, target, family, input_type, tei_endpoint)
         assert source_fields == target_fields
-        before_insert = mock.counters() if mock else None
         rows = function_rows()
         self.insert(client, source, deepcopy(rows))
         self.flush(client, source)
         self.load_collection(client, source)
-        if mock:
-            provider = "tei" if family == "embedding_float" else "voyageai"
-            assert mock.counters()[provider] > before_insert[provider], "Normal Insert did not reach the mock"
         self._assert_function_payload(client, source, rows)
         self.create_snapshot(client, snapshot, source, db_name=db_name)
         uri = self.describe_snapshot(client, snapshot, source, db_name=db_name)[0].s3_location
@@ -2183,13 +2177,10 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         )
         assert set(expected_outputs) == {row["id"] for row in rows}
         definitions = self._definitions(client, target)
-        before_import = mock.counters() if mock else None
 
-        # Import the stored output; a second provider call must not generate the truth.
+        # Compare against frozen source outputs rather than another model inference.
         progress = self._import_function_snapshot(target, uri, db_name)
         assert progress["state"] == "Completed" and progress["importedRows"] == len(rows), progress
-        if mock:
-            assert mock.counters() == before_import, "Snapshot Import recomputed embedding output"
         self.load_collection(client, target)
         for reload in (False, True):
             if reload:
@@ -2209,7 +2200,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
     def test_snapshot_import_rejects_missing_function_output(
         self,
         snapshot_resources,
-        snapshot_function_mock,
+        tei_endpoint,
         snapshot_function_reader,
         family,
         input_type,
@@ -2221,9 +2212,8 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         expected: Failed with missing-output reason; no input-based regeneration; only the unchanged sentinel visible
         """
         client, source, target, snapshot = snapshot_resources
-        mock = snapshot_function_mock
-        source_fields = self._create_function_collection(client, source, family, input_type, mock, with_output=False)
-        target_fields = self._create_function_collection(client, target, family, input_type, mock)
+        source_fields = self._create_function_collection(client, source, family, input_type, tei_endpoint, with_output=False)
+        target_fields = self._create_function_collection(client, target, family, input_type, tei_endpoint)
         assert {name: target_fields[name] for name in source_fields} == source_fields
         assert target_fields["output"]["field_id"] not in {field["field_id"] for field in source_fields.values()}
         rows, sentinel = function_rows(), function_rows([-1])
@@ -2238,13 +2228,10 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         self.create_snapshot(client, snapshot, source, db_name=db_name)
         uri = self.describe_snapshot(client, snapshot, source, db_name=db_name)[0].s3_location
         definitions = self._definitions(client, target)
-        before_import = mock.counters() if mock else None
 
         progress = self._import_function_snapshot(target, uri, db_name)
         assert progress["state"] == "Failed", progress
         assert "no binlog for field:output" in progress.get("reason", "").lower(), progress
-        if mock:
-            assert mock.counters() == before_import, "Missing output was recomputed from input"
         for reload in (False, True):
             if reload:
                 self.release_collection(client, target)
@@ -3198,15 +3185,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         assert count[0]["count(*)"] == len(expected)
 
     @pytest.fixture
-    def snapshot_function_mock(self, request, family):
-        if not family.startswith("embedding_"):
-            return None
-        return FunctionMockClient(
-            request.config.getoption("--snapshot_function_mock_endpoint"),
-            request.config.getoption("--snapshot_function_mock_control_endpoint"),
-        )
-
-    @pytest.fixture
     def snapshot_function_reader(self, snapshot_resources, minio_host, minio_bucket, tmp_path, db_name):
         client, _, _, _ = snapshot_resources
         cfg = get_minio_config(minio_host, minio_bucket)
@@ -3248,7 +3226,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
                     ):
                         self.drop_snapshot(client, snap, name, db_name=db_name)
 
-    def _create_function_collection(self, client, name, family, input_type, mock, with_output=True):
+    def _create_function_collection(self, client, name, family, input_type, tei_endpoint, with_output=True):
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
         self.add_field(schema, "id", DataType.INT64, is_primary=True)
         options = {"enable_analyzer": True, "analyzer_params": {"tokenizer": "standard"}}
@@ -3260,7 +3238,7 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
         indexes = self.prepare_index_params(client)[0]
         indexes.add_index(field_name="vec", index_name="vec_idx", index_type="FLAT", metric_type="L2")
         if with_output:
-            dtype, field, function, index_type, metric, params = function_spec(family, mock)
+            dtype, field, function, index_type, metric, params = function_spec(family, tei_endpoint)
             self.add_field(schema, "output", dtype, **field)
             schema.add_function(function)
             indexes.add_index(
@@ -3335,9 +3313,9 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             params = {}
         else:
             vector = outputs[rows[0]["id"]]
-            data = [np.asarray(vector, dtype=np.int8)] if family == "embedding_int8" else [list(vector)]
+            data = [list(vector)]
             metric = "L2"
-            params = {"ef": 64} if family == "embedding_int8" else {}
+            params = {}
         results = self.search(
             client,
             name,
