@@ -2421,6 +2421,7 @@ type proxyConfig struct {
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
 	MaxNameLength                  ParamItem `refreshable:"true"`
 	MaxCollectionDescriptionLength ParamItem `refreshable:"true"`
+	MaxSnapshotDescriptionLength   ParamItem `refreshable:"true"`
 	MaxUsernameLength              ParamItem `refreshable:"true"`
 	MaxUserDescriptionLength       ParamItem `refreshable:"true"`
 	MinPasswordLength              ParamItem `refreshable:"true"`
@@ -2549,6 +2550,16 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxCollectionDescriptionLength.Init(base.mgr)
+
+	p.MaxSnapshotDescriptionLength = ParamItem{
+		Key:          "proxy.maxSnapshotDescriptionLength",
+		DefaultValue: "1024",
+		Version:      "3.0.5",
+		PanicIfEmpty: true,
+		Doc:          "The maximum byte length of a snapshot description accepted by CreateSnapshot. Enforced by Proxy. Existing snapshot descriptions are not revalidated or truncated.",
+		Export:       false,
+	}
+	p.MaxSnapshotDescriptionLength.Init(base.mgr)
 
 	p.MinPasswordLength = ParamItem{
 		Key:          "proxy.minPasswordLength",

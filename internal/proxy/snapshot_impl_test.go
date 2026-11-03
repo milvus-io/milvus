@@ -307,6 +307,10 @@ func TestProxy_ListSnapshots_Success(t *testing.T) {
 		if lst, ok := t.(*listSnapshotsTask); ok {
 			lst.SetResult(&milvuspb.ListSnapshotsResponse{
 				Status: merr.Success(),
+				SnapshotSummaries: []*milvuspb.SnapshotSummary{
+					{Name: "snapshot1", CreateTs: 9007199254740993, Description: "daily"},
+					{Name: "snapshot2"},
+				},
 				Snapshots: []string{
 					"snapshot1",
 					"snapshot2",
@@ -328,6 +332,11 @@ func TestProxy_ListSnapshots_Success(t *testing.T) {
 	assert.Len(t, result.GetSnapshots(), 2)
 	assert.Equal(t, "snapshot1", result.GetSnapshots()[0])
 	assert.Equal(t, "snapshot2", result.GetSnapshots()[1])
+	assert.Len(t, result.GetSnapshotSummaries(), 2)
+	assert.Equal(t, "snapshot1", result.GetSnapshotSummaries()[0].GetName())
+	assert.Equal(t, int64(9007199254740993), result.GetSnapshotSummaries()[0].GetCreateTs())
+	assert.Equal(t, "daily", result.GetSnapshotSummaries()[0].GetDescription())
+	assert.Equal(t, "snapshot2", result.GetSnapshotSummaries()[1].GetName())
 }
 
 func TestProxy_ListSnapshots_EnqueueFailure(t *testing.T) {
