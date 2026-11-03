@@ -1057,8 +1057,10 @@ template <typename T, typename Posting>
 IndexPtr
 BitmapIndexLoader::CreateCached(const IndexCacheConfig& cache,
                                 milvus::OpContext* context) {
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
     const IndexMetadata metadata{
-        DeriveCaps(options_.params),
+        caps,
         state_->meta.nested ? Domain::Element : Domain::Row,
         state_->params.value_type,
         static_cast<int64_t>(state_->meta.count)};
@@ -1081,7 +1083,10 @@ BitmapIndexLoader::CreateCached(const IndexCacheConfig& cache,
                             BitmapPostingStorage<T, Posting>>>(
                             cache, use_async, std::move(load)),
                         context);
-    return CreateBitmapIndex<T, Posting>(std::move(slot), metadata);
+    return CreateBitmapIndex<T, Posting>(
+        std::move(slot),
+        metadata,
+        JsonProjectedSpec(options_.params, metadata.count));
 }
 
 template <typename T, typename Posting>
@@ -1116,9 +1121,19 @@ BitmapIndexLoader::LoadStorage(OpenedIndexSource& source,
         options,
         [&prepared](storage::FileSource& files,
                     const storage::LoadOptions& opts,
-                    bool use_async) {
-            return LoadBitmapPayload<T, Posting>(
+                    bool use_async)
+            -> folly::coro::Task<
+                std::unique_ptr<BitmapPostingStorage<T, Posting>>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kBitmap, files, opts);
+            auto storage = co_await LoadBitmapPayload<T, Posting>(
                 use_async, files, opts, prepared.params, prepared.meta);
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        files,
+                                        storage->options.total_num_rows);
+            co_return storage;
         },
         context);
 }
@@ -1129,9 +1144,6 @@ BitmapIndexLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached bitmap construction consumed this loader");
     if (cache) {
-        AssertInfo(
-            !DeriveCaps(options_.params).json_paths,
-            "JSON projection cache migration is separate from bitmap storage");
         co_return DispatchBitmapType<IndexPtr>(
             state_->params.value_type, [&]<typename T>() {
                 return state_->layout == BitmapLayout::Roaring
@@ -1376,6 +1388,8 @@ BitmapIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                                  std::move(*state->validity),
                                                  state->rebuild_validity);
     }
+    storage->json_exists = FinishPackedJsonExists(
+        std::move(state->projection), storage->options.total_num_rows);
     co_return storage;
 }
 
@@ -1384,8 +1398,12 @@ folly::coro::Task<IndexPtr>
 BitmapIndexLoader::FinishPackedIndex(IndexLoadPlan& plan,
                                      const storage::LoadOptions& opts,
                                      bool use_async) {
-    co_return CreateBitmapIndex<T, Posting>(
-        co_await FinishPackedStorage<T, Posting>(plan, opts, use_async));
+    auto storage =
+        co_await FinishPackedStorage<T, Posting>(plan, opts, use_async);
+    auto projection =
+        JsonProjectedSpec(opts.params, storage->options.total_num_rows);
+    co_return CreateBitmapIndex<T, Posting>(std::move(storage),
+                                            std::move(projection));
 }
 
 folly::coro::Task<IndexPtr>
@@ -1402,8 +1420,7 @@ BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
                        : FinishPackedIndex<T, TargetBitmap>(
                              plan, opts, use_async);
         });
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            std::move(inner));
+    co_return inner;
 }
 
 namespace {

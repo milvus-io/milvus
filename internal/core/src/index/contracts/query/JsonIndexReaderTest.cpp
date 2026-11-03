@@ -172,18 +172,26 @@ CheckCachedJsonFlat() {
 }
 
 void
-CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
+CheckCachedStringProjection(const char* backend_name,
+                            bool corrupt = false,
+                            bool roaring = false) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>(backend_name);
-    ScalarTestData<std::string_view> data({"apple", "pear", "", ""});
+    std::vector<std::string> values{"apple", "pear", "", ""};
+    const size_t row_count = roaring ? 600 : 4;
+    values.reserve(row_count);
+    for (size_t i = values.size(); i < row_count; ++i) {
+        values.push_back("value-" + std::to_string(i));
+    }
+    ScalarTestData<std::string_view> data(std::move(values));
     data.validity.reset(2);
     data.validity.reset(3);
     const ScalarTestInput<std::string_view> input(data);
     auto artifact = std::make_unique<JsonProjectedIndexArtifact>(
-        backend.Build(input.View(), {.row_count = 4}),
+        backend.Build(input.View(), {.row_count = row_count}),
         "/a",
         JsonCastType::FromString("VARCHAR"),
-        4,
+        row_count,
         std::vector<size_t>{3},
         true);
     for (const bool known_count : {false, true}) {
@@ -199,7 +207,7 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                     auto persisted = packed ? SerializeV3(*artifact)
                                             : SerializeV1V2(*artifact);
                     if (corrupt) {
-                        const size_t bad_offset = 4;
+                        const size_t bad_offset = row_count;
                         auto& bytes = persisted.entries.at(
                             std::string(INDEX_NON_EXIST_OFFSET_FILE_NAME));
                         std::memcpy(
@@ -236,21 +244,23 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                                     input, input->Size()))};
                     }();
                     storage::LoadOptions options;
-                    options.params = backend.LoadParams({.row_count = 4});
+                    options.params =
+                        backend.LoadParams({.row_count = row_count});
                     options.params["field_type"] = DataType::JSON;
                     options.params[INDEX_TYPE] =
                         backend.Family() == families::kMarisa
                             ? HYBRID_INDEX_TYPE
                         : backend.Family() == families::kNgram
                             ? NGRAM_INDEX_TYPE
-                        : backend.Family() == families::kSort
-                            ? ASCENDING_SORT
+                        : backend.Family() == families::kSort ? ASCENDING_SORT
+                        : backend.Family() == families::kBitmap
+                            ? BITMAP_INDEX_TYPE
                             : INVERTED_INDEX_TYPE;
                     options.params[JSON_PATH] = "/a";
                     options.params[JSON_CAST_TYPE] = "VARCHAR";
                     options.enable_mmap = mmap;
                     if (known_count)
-                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                        options.params[INDEX_NUM_ROWS_KEY] = row_count;
                     else
                         options.params.erase(INDEX_NUM_ROWS_KEY);
                     options.mmap_dir_path = staging->Path();
@@ -294,6 +304,7 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                                      .Load({std::move(source), options, cache});
                     const bool count_known =
                         known_count || backend.Family() == families::kSort ||
+                        backend.Family() == families::kBitmap ||
                         (packed && backend.Family() == families::kMarisa);
                     EXPECT_EQ(index->Metadata().count.has_value(), count_known);
                     folly::CancellationSource cancellation;
@@ -301,7 +312,7 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                     OpContext cancelled(cancellation.getToken());
                     auto reader = index->CreateReader(&cancelled);
                     if (count_known)
-                        EXPECT_EQ(reader->Count(), 4);
+                        EXPECT_EQ(reader->Count(), row_count);
                     else
                         ExpectSegcoreError(ErrorCode::FollyCancel,
                                            [&] { (void)reader->Count(); });
@@ -319,28 +330,35 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                     OpContext retry;
                     reader = index->CreateReader(&retry);
                     index.reset();
-                    EXPECT_EQ(reader->Count(), 4);
+                    EXPECT_EQ(reader->Count(), row_count);
                     json = dynamic_cast<const IJsonIndexReader*>(reader.get());
                     ASSERT_NE(json, nullptr);
-                    ExpectBitmap(json->Exists("/a"), Hits(4, {0, 1, 2}));
+                    TargetBitmap expected_exists(row_count, true);
+                    expected_exists.reset(3);
+                    ExpectBitmap(json->Exists("/a"), expected_exists);
                     auto path = json->Resolve(
                         "/a", JsonCastType::FromString("VARCHAR"));
                     if (backend.Family() == families::kNgram) {
                         const auto* ngram =
                             dynamic_cast<const INgramReader*>(path.get());
                         ASSERT_NE(ngram, nullptr);
-                        TargetBitmap candidates(4, true);
+                        TargetBitmap candidates(row_count, true);
                         ngram->Candidates(
                             "app", PatternOp::InnerMatch, candidates);
-                        ExpectBitmap(candidates, Hits(4, {0}));
+                        ExpectBitmap(candidates, Hits(row_count, {0}));
                     } else {
                         const auto* predicate = dynamic_cast<
                             const IScalarPredicateReader<std::string_view>*>(
                             path.get());
                         ASSERT_NE(predicate, nullptr);
                         const std::string_view value = "apple";
-                        ExpectBitmap(predicate->In(1, &value), Hits(4, {0}));
-                        ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {1}));
+                        ExpectBitmap(predicate->In(1, &value),
+                                     Hits(row_count, {0}));
+                        TargetBitmap expected_not_in(row_count, true);
+                        for (const auto row : {0, 2, 3})
+                            expected_not_in.reset(row);
+                        ExpectBitmap(predicate->NotIn(1, &value),
+                                     expected_not_in);
                     }
                 }
             }
@@ -432,11 +450,22 @@ CheckCachedArrayProjection(const char* backend_name) {
                 {1024 * 1024, 1024 * 1024},
                 {},
                 4096};
-            auto index = LoaderRegistry::Instance()
-                             .Lookup(backend.Family())
-                             .Load({std::move(source), options, cache});
+            const auto family =
+                packed ? ResolvePackedLoadFamily(
+                             backend.Family(),
+                             std::get<PackedIndexSource>(source).Metadata(),
+                             options.params)
+                       : ResolveLoadFamily(
+                             backend.Family(),
+                             *std::get<LegacyIndexSource>(source).source);
+            if (backend.Family() == families::kHybrid) {
+                EXPECT_EQ(family, families::kBitmap);
+            }
+            auto index = LoaderRegistry::Instance().Lookup(family).Load(
+                {std::move(source), options, cache});
             EXPECT_EQ(index->Metadata().count.has_value(),
-                      known_count || backend.Family() == families::kSort);
+                      known_count || family == families::kSort ||
+                          family == families::kBitmap);
             EXPECT_FALSE(index->Metadata().caps.nested);
             OpContext ctx;
             auto reader = index->CreateReader(&ctx);
@@ -474,6 +503,20 @@ TEST(JsonPathIndexCacheTest, SortedStorageLoadsExistenceWithRequestContext) {
 TEST(JsonPathIndexCacheTest,
      SortedWarmupRejectsInvalidExistenceBeforePublication) {
     CheckCachedStringProjection("SortedVarchar", true);
+}
+
+TEST(JsonPathIndexCacheTest, BitmapStorageLoadsExistenceWithRequestContext) {
+    for (const bool roaring : {false, true})
+        CheckCachedStringProjection("BitmapVarchar", false, roaring);
+}
+TEST(JsonPathIndexCacheTest,
+     BitmapWarmupRejectsInvalidExistenceBeforePublication) {
+    for (const bool roaring : {false, true})
+        CheckCachedStringProjection("BitmapVarchar", true, roaring);
+}
+TEST(JsonPathIndexCacheTest,
+     BitmapArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedHybridArrayVarchar");
 }
 
 TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/scalar/json/JsonPathIndexReader.h"
+
 #include <cstddef>
 #include <map>
 #include <memory>
@@ -131,6 +133,7 @@ struct BitmapPostingStorage {
     BitmapPostingMap<T, Posting> postings;
     BitmapReaderOptions options;
     std::vector<const T*> offset_cache;
+    std::shared_ptr<const TargetBitmap> json_exists;
 };
 
 // Long-lived factory result. Reader creation reuses the prepared mappings.
@@ -147,14 +150,17 @@ CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
 
 template <typename T, typename Posting>
 IndexPtr
-CreateBitmapIndex(std::unique_ptr<BitmapPostingStorage<T, Posting>> storage);
+CreateBitmapIndex(
+    std::unique_ptr<BitmapPostingStorage<T, Posting>> storage,
+    std::optional<JsonProjectedIndexSpec> projection = std::nullopt);
 
 template <typename T, typename Posting>
 IndexPtr
 CreateBitmapIndex(
     std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, Posting>>>
         slot,
-    IndexMetadata metadata);
+    IndexMetadata metadata,
+    std::optional<JsonProjectedIndexSpec> projection = std::nullopt);
 
 // Transitional loader factories; removed when IndexLoader returns Index.
 template <typename T>

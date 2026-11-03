@@ -153,6 +153,7 @@ class BitmapIndexImpl final
 
  private:
     friend class BitmapIndexReaderImplCommon<T, Posting>;
+    friend class ::milvus::index::JsonPathIndex;
 
     std::shared_ptr<const Storage>
     PinStorage(milvus::OpContext* op_ctx) const {
@@ -616,6 +617,13 @@ BitmapPostingStorage<T, Posting>::CellByteSize() const {
     auto total = static_cast<int64_t>(options.valid_bitset.size_in_bytes());
     total += PostingMapHeapBytes(postings, mmap_owner != nullptr);
     total += static_cast<int64_t>(offset_cache.capacity() * sizeof(const T*));
+    if (json_exists) {
+        const auto bytes = static_cast<int64_t>(sizeof(TargetBitmap) +
+                                                json_exists->size_in_bytes());
+        AssertInfo(total <= std::numeric_limits<int64_t>::max() - bytes,
+                   "bitmap reader resource size exceeds int64 capacity");
+        total += bytes;
+    }
     return {
         total,
         mmap_owner == nullptr ? 0 : static_cast<int64_t>(mmap_owner->Size())};
@@ -688,9 +696,15 @@ CreateBitmapIndexReader(BitmapBitsetPostingMap<T> postings,
 
 template <typename T, typename Posting>
 IndexPtr
-CreateBitmapIndex(std::unique_ptr<BitmapPostingStorage<T, Posting>> storage) {
-    return std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
+CreateBitmapIndex(std::unique_ptr<BitmapPostingStorage<T, Posting>> storage,
+                  std::optional<JsonProjectedIndexSpec> projection) {
+    auto index = std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
         std::move(storage));
+    if (projection) {
+        return JsonPathIndex::FromStorage(std::move(index),
+                                          std::move(*projection));
+    }
+    return index;
 }
 
 template <typename T, typename Posting>
@@ -698,18 +712,26 @@ IndexPtr
 CreateBitmapIndex(
     std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, Posting>>>
         slot,
-    IndexMetadata metadata) {
-    return std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
+    IndexMetadata metadata,
+    std::optional<JsonProjectedIndexSpec> projection) {
+    auto index = std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
         std::move(slot), metadata);
+    if (projection) {
+        return JsonPathIndex::FromStorage(std::move(index),
+                                          std::move(*projection));
+    }
+    return index;
 }
 
 #define INSTANTIATE_BITMAP_STORAGE(T, P)                                      \
     template struct BitmapPostingStorage<T, P>;                               \
     template IndexPtr CreateBitmapIndex<T, P>(                                \
-        std::unique_ptr<BitmapPostingStorage<T, P>>);                         \
+        std::unique_ptr<BitmapPostingStorage<T, P>>,                          \
+        std::optional<JsonProjectedIndexSpec>);                               \
     template IndexPtr CreateBitmapIndex<T, P>(                                \
         std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, P>>>, \
-        IndexMetadata);
+        IndexMetadata,                                                        \
+        std::optional<JsonProjectedIndexSpec>);
 
 #define INSTANTIATE_BITMAP_READER(T)                                          \
     INSTANTIATE_BITMAP_STORAGE(T, roaring::Roaring)                           \

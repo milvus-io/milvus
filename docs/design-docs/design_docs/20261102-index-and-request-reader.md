@@ -218,4 +218,4 @@ Text 的文件加载入口直接创建 `TextIndex`，由它持有 `TextIndexStor
 
 JSON flat 直接缓存 `JsonFlatIndexStorage`。根路径和已知行数保留在 Index 上，创建根 Reader 与 CastTypesOf 不加载 Storage。Resolve 是访问索引的一次操作，返回的路径 Reader 持有具体 Storage 的 pin，覆盖后续多次谓词查询；释放路径 Reader 后该 cell 可以被淘汰。Exists 与字段 null 查询只在本次操作期间持有 pin。
 
-JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings 或 trie 在同一个 cell 内完成加载、校验和淘汰。JsonPathIndex 只保存路径路由与子 Index，通过子 Index 的 pin 获取 bitmap；不为 sidecar 创建第二个共享 FileSource 的 slot。已迁移的 Marisa、Ngram、Inverted 和 Sorted 支持这个模式，其他家族按批次接入。旧索引缺少行数时，路径与类型判断仍不做 I/O，Count 和 Exists 使用请求上下文加载实际 Storage。
+JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings 或 trie 在同一个 cell 内完成加载、校验和淘汰。JsonPathIndex 只保存路径路由与子 Index，通过子 Index 的 pin 获取 bitmap；不为 sidecar 创建第二个共享 FileSource 的 slot。Marisa、Ngram、Inverted、Sorted 和 Bitmap 均支持这个模式。Bitmap 的 bitset 与 Roaring 使用相同的存在性 bitmap 生命周期，HYBRID 选择的 JSON ARRAY 仍按父行查询。旧索引缺少行数时，路径与类型判断仍不做 I/O，Count 和 Exists 使用请求上下文加载实际 Storage。
