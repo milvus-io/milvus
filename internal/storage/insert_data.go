@@ -221,8 +221,9 @@ type FieldData interface {
 	AppendValidDataRows(rows interface{}) error
 
 	// CopyFrom appends the selected source rows in indices order.
-	// Source and destination must have matching types and nullability, and
-	// indices must refer to valid source rows. Nil or empty indices append nothing.
+	// Source and destination must have matching types and nullability;
+	// dense vectors must also have matching dimensions.
+	// Indices must refer to valid source rows. Nil or empty indices append nothing.
 	CopyFrom(src FieldData, indices []int) error
 	GetDataType() schemapb.DataType
 	GetNullable() bool
@@ -1358,6 +1359,9 @@ func (data *BinaryVectorFieldData) CopyFrom(src FieldData, indices []int) error 
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("BinaryVectorFieldData.CopyFrom requires a non-nil BinaryVectorFieldData source")
 	}
+	if source.Dim != data.Dim {
+		return merr.WrapErrServiceInternalMsg("BinaryVectorFieldData.CopyFrom dimension mismatch: source=%d, destination=%d", source.Dim, data.Dim)
+	}
 	rowWidth := data.Dim / 8
 	if data.Nullable {
 		validCount := countSelectedValidRows(source.ValidData, indices)
@@ -1408,6 +1412,9 @@ func (data *FloatVectorFieldData) CopyFrom(src FieldData, indices []int) error {
 	source, ok := src.(*FloatVectorFieldData)
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("FloatVectorFieldData.CopyFrom requires a non-nil FloatVectorFieldData source")
+	}
+	if source.Dim != data.Dim {
+		return merr.WrapErrServiceInternalMsg("FloatVectorFieldData.CopyFrom dimension mismatch: source=%d, destination=%d", source.Dim, data.Dim)
 	}
 	rowWidth := data.Dim
 	if data.Nullable {
@@ -1460,6 +1467,9 @@ func (data *Float16VectorFieldData) CopyFrom(src FieldData, indices []int) error
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("Float16VectorFieldData.CopyFrom requires a non-nil Float16VectorFieldData source")
 	}
+	if source.Dim != data.Dim {
+		return merr.WrapErrServiceInternalMsg("Float16VectorFieldData.CopyFrom dimension mismatch: source=%d, destination=%d", source.Dim, data.Dim)
+	}
 	rowWidth := data.Dim * 2
 	if data.Nullable {
 		validCount := countSelectedValidRows(source.ValidData, indices)
@@ -1511,6 +1521,9 @@ func (data *BFloat16VectorFieldData) CopyFrom(src FieldData, indices []int) erro
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("BFloat16VectorFieldData.CopyFrom requires a non-nil BFloat16VectorFieldData source")
 	}
+	if source.Dim != data.Dim {
+		return merr.WrapErrServiceInternalMsg("BFloat16VectorFieldData.CopyFrom dimension mismatch: source=%d, destination=%d", source.Dim, data.Dim)
+	}
 	rowWidth := data.Dim * 2
 	if data.Nullable {
 		validCount := countSelectedValidRows(source.ValidData, indices)
@@ -1561,6 +1574,8 @@ func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+// CopyFrom appends the selected source rows without validating sparse vector indices or values.
+// Callers must ensure that source data has already been validated.
 func (data *SparseFloatVectorFieldData) CopyFrom(src FieldData, indices []int) error {
 	if len(indices) == 0 {
 		return nil
@@ -1613,6 +1628,9 @@ func (data *Int8VectorFieldData) CopyFrom(src FieldData, indices []int) error {
 	source, ok := src.(*Int8VectorFieldData)
 	if !ok || source == nil {
 		return merr.WrapErrServiceInternalMsg("Int8VectorFieldData.CopyFrom requires a non-nil Int8VectorFieldData source")
+	}
+	if source.Dim != data.Dim {
+		return merr.WrapErrServiceInternalMsg("Int8VectorFieldData.CopyFrom dimension mismatch: source=%d, destination=%d", source.Dim, data.Dim)
 	}
 	rowWidth := data.Dim
 	if data.Nullable {

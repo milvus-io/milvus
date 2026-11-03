@@ -785,6 +785,57 @@ func TestFloatVectorFieldDataCopyFrom(t *testing.T) {
 	require.Equal(t, []bool{true, false, true}, src.ValidData)
 }
 
+func TestDenseVectorFieldDataCopyFromDimMismatch(t *testing.T) {
+	for _, vector := range []struct {
+		name     string
+		newField func(dim int, nullable bool) (FieldData, any)
+	}{
+		{"Binary", func(dim int, nullable bool) (FieldData, any) {
+			return &BinaryVectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim/8)
+		}},
+		{"Float", func(dim int, nullable bool) (FieldData, any) {
+			return &FloatVectorFieldData{Dim: dim, Nullable: nullable}, make([]float32, dim)
+		}},
+		{"Float16", func(dim int, nullable bool) (FieldData, any) {
+			return &Float16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"BFloat16", func(dim int, nullable bool) (FieldData, any) {
+			return &BFloat16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"Int8", func(dim int, nullable bool) (FieldData, any) {
+			return &Int8VectorFieldData{Dim: dim, Nullable: nullable}, make([]int8, dim)
+		}},
+	} {
+		t.Run(vector.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				srcDim   int
+				dstDim   int
+				nullable bool
+			}{
+				{"wider source", 16, 8, false},
+				{"narrower source", 8, 16, false},
+				{"nullable wider source", 16, 8, true},
+				{"nullable narrower source", 8, 16, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					src, row := vector.newField(tc.srcDim, tc.nullable)
+					dst, original := vector.newField(tc.dstDim, tc.nullable)
+					require.NoError(t, src.AppendRow(row))
+					require.NoError(t, dst.AppendRow(original))
+
+					require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+					require.Equal(t, 1, dst.RowNum())
+					require.Equal(t, original, dst.GetRow(0))
+					if tc.nullable {
+						require.Equal(t, []bool{true}, dst.GetValidData())
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestFieldDataCopyFromSourceValidation(t *testing.T) {
 	for _, tc := range []struct {
 		target    FieldData
