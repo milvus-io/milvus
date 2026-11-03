@@ -102,10 +102,11 @@ not enough to conclude that the lifetime is safe.
   exact=true cannot replace a complete capability check.
 - `IVectorReader` provides both dense and sparse getters, and sparse retrieval on the disk backend
   still returns Unsupported.
-- The reader's `MemoryUsage` and `CellByteSize` return an explicitly recorded unavailable-zero
+- `KnowhereEngine::CellByteSize()` returns an explicitly recorded unavailable-zero
   sentinel; this does not mean the knowhere resident/file footprint was measured as zero.
+  For these engine cells, CacheSlot charges the translator's loaded-resource estimate.
   `LoadOptions::estimated_bytes` and `VectorLoadResource`/`IndexLoadResource` remain responsible for
-  pre-load admission; the existing estimates and safety factors of the live sealed translator and
+  pre-load admission; the existing estimates and safety factors of the sealed index loader and
   the growing segment are unchanged. Splitting native memory/file usage exactly by backend is a
   follow-up and does not block verification of the current production wiring.
 - The Growing owner's initial Build, subsequent Add, and publication have `index_tests` behavior

@@ -188,6 +188,7 @@ TEST_P(FmIndexV3OwnershipTest, ReaderOwnsPersistedState) {
     const auto usage = storage->CellByteSize();
     auto index = std::make_shared<FmIndex>(std::move(storage));
     auto reader = index->CreateReader(nullptr);
+    index.reset();
     artifact.reset();
     persisted.entries.clear();
     persisted.metadata.clear();
