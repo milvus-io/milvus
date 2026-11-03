@@ -155,6 +155,15 @@ CheckGcpRegistration(const bool legacy_first, const bool use_iam) {
                       .find("GOOG4-HMAC-SHA256 Credential=legacy-access-key/"),
                   0);
     }
+
+    storage_config.address = "primary-gcs.example:443";
+    manager.BuildGoogleCloudClient(storage_config, client_config);
+    EXPECT_TRUE(registry.MayCarryBearerToken(
+        Aws::Http::URI("https://primary-gcs.example/legacy-only-bucket/key")));
+    EXPECT_TRUE(registry.MayCarryBearerToken(
+        Aws::Http::URI("https://legacy-only-bucket.primary-gcs.example/key")));
+    EXPECT_FALSE(registry.MayCarryBearerToken(
+        Aws::Http::URI("https://external-gcs.example/legacy-only-bucket/key")));
 }
 
 class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
@@ -187,6 +196,16 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
         return arrow::Status::OK();
     }
 
+    bool
+    IssuesBearerToken() const override {
+        return mode_ != Mode::kNoToken;
+    }
+
+    std::string
+    Identity() const override {
+        return "fake";
+    }
+
     int
     calls() const {
         return calls_;
@@ -204,9 +223,10 @@ RegisterFakeProvider(const std::string& endpoint,
                      const std::string& bucket,
                      FakeGcpCredentialProvider::Mode mode) {
     auto provider = std::make_shared<FakeGcpCredentialProvider>(mode);
-    milvus_storage::GcpCredentialRegistry::Instance().Register(
+    auto status = milvus_storage::GcpCredentialRegistry::Instance().Register(
         {milvus_storage::NormalizeGcpEndpoint(endpoint, true), bucket},
         provider);
+    EXPECT_TRUE(status.ok()) << status;
     return provider;
 }
 
@@ -259,14 +279,14 @@ CheckMilvusBucketKeepsItsProvider() {
     const auto milvus_provider = registry.Lookup(own_uri);
     ASSERT_NE(milvus_provider, nullptr);
 
-    // milvus-storage registers another identity for the same bucket, as for
-    // an external table on it. Milvus' own requests keep Milvus' provider.
+    // An external table cannot replace Milvus's identity for its own bucket.
     const milvus_storage::GcpBucketKey own_key{
         milvus_storage::NormalizeGcpEndpoint(storage_config.address, true),
         storage_config.bucket_name};
     auto replacement = std::make_shared<FakeGcpCredentialProvider>(
         FakeGcpCredentialProvider::Mode::kToken);
-    registry.Register(own_key, replacement);
+    EXPECT_TRUE(registry.Register(own_key, replacement).IsInvalid());
+    EXPECT_EQ(registry.Lookup(own_uri), milvus_provider);
     for (const auto* uri :
          {"https://storage.googleapis.com/milvus-own-bucket/key",
           "https://milvus-own-bucket.storage.googleapis.com/key"}) {
