@@ -1183,8 +1183,6 @@ message StreamingNodeGetCollectionSchemaRequest {
 
 message StreamingNodeGetCollectionSchemaResponse {
     schema.CollectionSchema schema = 1;
-    reserved 2;
-    reserved "effective_time_tick";
 }
 
 // Analyzer validation is collection-independent. Business failures use Status;
