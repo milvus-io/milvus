@@ -77,7 +77,6 @@ func TestSchemaCacheIdleExpiryAndIndependentSelectors(t *testing.T) {
 	require.Equal(t, "c", body.Name)
 	disabled := newSchemaCache[int, int](0)
 	disabled.store(1, 1)
-	require.Equal(t, 2, disabled.loadOrStore(1, 2))
 	_, ok = disabled.load(1)
 	require.False(t, ok)
 	renewed := newSchemaCache[int, int](time.Hour)

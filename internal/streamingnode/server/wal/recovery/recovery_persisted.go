@@ -99,7 +99,7 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	); err != nil {
 		return err
 	}
-	if err := r.alignCollectionSchemaMetadata(ctx, vchannelMetas); err != nil {
+	if err := r.alignCollectionSchema(ctx, vchannelMetas); err != nil {
 		return err
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))

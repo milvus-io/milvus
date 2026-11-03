@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"maps"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -13,17 +14,17 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// alignCollectionSchemaMetadata fills metadata that older StreamingNodes did
-// not apply from AlterCollection. Run after legacy normalization and before WAL
-// replay/module construction, so later messages use the ordinary apply path.
-func (r *recoveryStorageImpl) alignCollectionSchemaMetadata(ctx context.Context, vchannels map[string]*streamingpb.VChannelMeta) error {
+// alignCollectionSchema replaces the latest retained schema with the coordinator
+// snapshot once when upgrading recovery metadata. Older nodes did not apply all
+// AlterCollection updates. Align before module construction and WAL replay.
+func (r *recoveryStorageImpl) alignCollectionSchema(ctx context.Context, vchannels map[string]*streamingpb.VChannelMeta) error {
 	if r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned {
 		return nil
 	}
@@ -40,7 +41,7 @@ func (r *recoveryStorageImpl) alignCollectionSchemaMetadata(ctx context.Context,
 			metadata, err = r.describeCollectionSchema(ctx, id)
 			if err != nil {
 				if !errors.Is(err, merr.ErrCollectionNotFound) {
-					return merr.Wrapf(err, "align collection %d schema metadata", id)
+					return merr.Wrapf(err, "align collection %d schema", id)
 				}
 				// A dropped collection can still own retained WAL data. Keep its
 				// encoding schemas until replay applies its DropCollection.
@@ -54,7 +55,10 @@ func (r *recoveryStorageImpl) alignCollectionSchemaMetadata(ctx context.Context,
 		updated := proto.Clone(meta).(*streamingpb.VChannelMeta)
 		schemas := updated.CollectionInfo.Schemas
 		latest := schemas[len(schemas)-1]
-		latest.Schema = schemaWithCoordinatorMetadata(latest.Schema, metadata)
+		latest.Schema = proto.Clone(metadata).(*schemapb.CollectionSchema)
+		latest.Schema.Properties = slices.DeleteFunc(latest.Schema.Properties, func(property *commonpb.KeyValuePair) bool {
+			return property.GetKey() == common.CollectionOnTruncatingKey
+		})
 		aligned[name] = updated
 	}
 	checkpoint := r.checkpoint.Clone()
@@ -64,11 +68,11 @@ func (r *recoveryStorageImpl) alignCollectionSchemaMetadata(ctx context.Context,
 	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
 		VChannels: aligned, ConsumeCheckpoint: checkpoint.IntoProto(),
 	}); err != nil {
-		return merr.Wrap(err, "persist collection schema metadata alignment")
+		return merr.Wrap(err, "persist collection schema alignment")
 	}
 	maps.Copy(vchannels, aligned)
 	r.installCheckpoint(checkpoint)
-	r.Logger().Info(ctx, "aligned collection schema metadata", mlog.Int("vchannels", len(aligned)), mlog.Int64("magic", checkpoint.Magic))
+	r.Logger().Info(ctx, "aligned collection schema", mlog.Int("vchannels", len(aligned)), mlog.Int64("magic", checkpoint.Magic))
 	return nil
 }
 
@@ -88,10 +92,4 @@ func (r *recoveryStorageImpl) describeCollectionSchema(ctx context.Context, coll
 		return nil, merr.WrapErrServiceInternalMsg("collection %d describe response has no schema", collectionID)
 	}
 	return resp.GetSchema(), nil
-}
-
-func schemaWithCoordinatorMetadata(current, metadata *schemapb.CollectionSchema) *schemapb.CollectionSchema {
-	schema := proto.Clone(current).(*schemapb.CollectionSchema)
-	messageutil.CopyCollectionSchemaMetadata(schema, metadata)
-	return schema
 }

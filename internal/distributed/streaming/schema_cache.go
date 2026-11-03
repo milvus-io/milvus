@@ -45,18 +45,6 @@ func (c *schemaCache[K, V]) store(key K, value V) {
 	}
 }
 
-func (c *schemaCache[K, V]) loadOrStore(key K, value V) V {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := time.Now()
-	if entry, ok := c.entries[key]; ok && now.Sub(entry.accessed) < c.ttl {
-		value = entry.value
-	}
-	if c.ttl > 0 {
-		c.entries[key] = schemaCacheEntry[V]{value, now}
-	}
-	return value
-}
 func (c *schemaCache[K, V]) erase(key K) { c.mu.Lock(); defer c.mu.Unlock(); delete(c.entries, key) }
 func (c *schemaCache[K, V]) expire(now time.Time) {
 	c.mu.Lock()
