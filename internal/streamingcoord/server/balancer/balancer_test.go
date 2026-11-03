@@ -33,7 +33,7 @@ import (
 )
 
 func TestBalancer(t *testing.T) {
-	paramtable.Init()
+	setupBalancerConfigSource(t)
 	paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("3")
 	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("")
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
@@ -292,7 +292,7 @@ func TestBalancerFreezeNodeInOtherResourceGroup(t *testing.T) {
 	// (GetAllStreamingNodes) but invisible to CollectAllStatus (because it
 	// belongs to a non-primary resource group) must NOT be silently unfrozen
 	// during the freeze cleanup in fetchStreamingNodeStatus.
-	paramtable.Init()
+	setupBalancerConfigSource(t)
 	oldRootPath := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(fmt.Sprintf("freeze-other-rg-%d", time.Now().UnixNano()))
 	oldMetaSubPath := paramtable.Get().EtcdCfg.MetaSubPath.SwapTempValue("meta")
 	oldExpectedStreamingNodeNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")

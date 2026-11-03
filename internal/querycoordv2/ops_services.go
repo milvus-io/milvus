@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -451,6 +453,36 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 // if no channel_name specified, default to transfer all channel on the source node.
 // if no target_nodeId specified, default to move channel to all other nodes
 func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		return s.transferLegacyChannel(ctx, req)
+	}
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return merr.Status(err), nil
+	}
+	if req.GetCopyMode() {
+		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "WAL transfer does not support copy mode")), nil
+	}
+	if req.GetSourceNodeID() <= 0 || (!req.GetToAllNodes() && (req.GetTargetNodeID() <= 0 || req.GetTargetNodeID() == req.GetSourceNodeID())) {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("expected a positive source SN and a different positive target SN")), nil
+	}
+	if !req.GetTransferAll() && req.GetChannelName() == "" {
+		return merr.Status(merr.WrapErrParameterInvalidMsg("channel_name is required unless transfer_all is set")), nil
+	}
+	transfer := walbalancer.TransferChannelsRequest{SourceNodeID: req.GetSourceNodeID()}
+	if !req.GetToAllNodes() {
+		transfer.TargetNodeID = req.GetTargetNodeID()
+	}
+	if !req.GetTransferAll() {
+		transfer.ChannelName = req.GetChannelName()
+	}
+	b, err := walbalance.GetWithContext(ctx)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	return merr.Status(b.TransferChannels(ctx, transfer)), nil
+}
+
+func (s *Server) transferLegacyChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
 	log := mlog.With()
 
 	log.Info(ctx, "TransferChannel request received",

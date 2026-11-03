@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,8 +17,10 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -171,8 +174,48 @@ func (s *mixCoordImpl) ControlDatacoordGC(w http.ResponseWriter, req *http.Reque
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-// HandleStreamingNodes handles GET requests to list streaming and query nodes.
+// HandleStreamingNodes lists StreamingNodes, retaining legacy mixed-node behavior when streaming is disabled.
 func (s *mixCoordImpl) HandleStreamingNodes(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.HandleStreamingNodesLegacy(w, req)
+		return
+	}
+	nodes, err := streaming.WAL().Balancer().ListStreamingNode(req.Context())
+	if err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	frozen, err := streaming.WAL().Balancer().GetFrozenNodeIDs(req.Context())
+	if err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	frozenSet := make(map[int64]struct{}, len(frozen))
+	for _, id := range frozen {
+		frozenSet[id] = struct{}{}
+	}
+	type nodeResponse struct {
+		ID      int64  `json:"ID"`
+		Address string `json:"address"`
+		State   string `json:"state"`
+	}
+	infos := make([]nodeResponse, 0, len(nodes))
+	for _, node := range nodes {
+		state := "active"
+		if _, ok := frozenSet[node.ServerID]; ok {
+			state = "suspended"
+		}
+		infos = append(infos, nodeResponse{ID: node.ServerID, Address: node.Address, State: state})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Msg       string         `json:"msg"`
+		NodeInfos []nodeResponse `json:"nodeInfos"`
+	}{Msg: "OK", NodeInfos: infos})
+}
+
+func (s *mixCoordImpl) HandleStreamingNodesLegacy(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 
 	// 1. Fetch data from the streaming service.
@@ -333,6 +376,33 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 
 // GetStreamingNodeDistribution handles GET requests to retrieve streaming node distribution.
 func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.GetStreamingNodeDistributionLegacy(w, req)
+		return
+	}
+	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
+	if err != nil || nodeID <= 0 {
+		writeJSONError(w, "invalid node_id", http.StatusBadRequest)
+		return
+	}
+	assignment, err := streaming.WAL().Balancer().GetWALDistribution(req.Context(), nodeID)
+	if err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	names := make([]string, 0, len(assignment.Channels))
+	for name := range assignment.Channels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		ChannelNames     []string `json:"channel_names"`
+		SealedSegmentIDs []string `json:"sealed_segmentIDs"`
+	}{ChannelNames: names, SealedSegmentIDs: []string{}})
+}
+
+func (s *mixCoordImpl) GetStreamingNodeDistributionLegacy(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
 		logger.Info(req.Context(), "GetStreamingNodeDistribution failed to parse form", mlog.Err(err))
@@ -647,6 +717,19 @@ func (s *mixCoordImpl) HandleStreamingBalanceStatus(w http.ResponseWriter, req *
 
 // getStreamingBalanceStatus handles GET requests to fetch the balance status.
 func (s *mixCoordImpl) getStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.getStreamingBalanceStatusLegacy(w, req)
+		return
+	}
+	state := "active"
+	if !paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool() {
+		state = "suspended"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"msg": "OK", "status": state})
+}
+
+func (s *mixCoordImpl) getStreamingBalanceStatusLegacy(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	isSuspended, err := streaming.WAL().Balancer().IsRebalanceSuspended(req.Context())
 	if err != nil && !errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
@@ -688,6 +771,36 @@ func (s *mixCoordImpl) getStreamingBalanceStatus(w http.ResponseWriter, req *htt
 
 // controlStreamingBalanceStatus handles PUT requests to change the balance status.
 func (s *mixCoordImpl) controlStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.controlStreamingBalanceStatusLegacy(w, req)
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	var enabled bool
+	switch body.Status {
+	case "suspended":
+		enabled = false
+	case "resumed", "active":
+		enabled = true
+	default:
+		writeJSONError(w, "Invalid status value. Use 'suspended', 'resumed' or 'active'.", http.StatusBadRequest)
+		return
+	}
+	if err := walbalancer.SetRebalanceEnabled(enabled); err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+func (s *mixCoordImpl) controlStreamingBalanceStatusLegacy(w http.ResponseWriter, req *http.Request) {
 	var requestBody struct {
 		Status string `json:"status"`
 	}
@@ -750,6 +863,68 @@ func (s *mixCoordImpl) HandleStreamingNodeStatus(w http.ResponseWriter, req *htt
 
 // handleGetNodeStatus handles GET requests to retrieve a node's status.
 func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.handleGetStreamingNodeStatusLegacy(w, req)
+		return
+	}
+	logger := mlog.With(mlog.String("Scope", "Rolling"))
+	// Parse the request form to access URL query parameters.
+	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
+		logger.Info(req.Context(), "handleGetStreamingNodeStatus parse form failed", mlog.Err(err))
+		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form, %s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	// Access the query parameter from the populated req.Form field.
+	nodeIDStr := req.Form.Get("node_id")
+	if nodeIDStr == "" {
+		logger.Info(req.Context(), "handleGetStreamingNodeStatus missing node_id")
+		http.Error(w, `{"msg": "node_id query parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
+	if err != nil || nodeID <= 0 {
+		logger.Info(req.Context(), "handleGetStreamingNodeStatus invalid node_id", mlog.Err(err))
+		http.Error(w, `{"msg": "Invalid node_id parameter"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := checkStreamingNode(req.Context(), nodeID); err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	// 1. Call GetFrozenNodeIDs to get the list of suspended nodes.
+	frozenNodeIDs, err := streaming.WAL().Balancer().GetFrozenNodeIDs(req.Context())
+	if err != nil {
+		logger.Info(req.Context(), "handleGetStreamingNodeStatus getFrozenNodeIDs failed", mlog.Err(err))
+		http.Error(w, fmt.Sprintf(`{"msg": "failed to get frozen nodes, %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	logger.Info(req.Context(), "handleGetStreamingNodeStatus getFrozenNodeIDs", mlog.Any("frozen nodes", frozenNodeIDs))
+
+	// 2. Use lo.Contains to check if the nodeID is in the list.
+	isSuspended := lo.Contains(frozenNodeIDs, nodeID)
+
+	status := "active"
+	if isSuspended {
+		status = "suspended"
+	}
+
+	responseBody := struct {
+		NodeID int64  `json:"node_id"`
+		Status string `json:"status"`
+	}{
+		NodeID: nodeID,
+		Status: status,
+	}
+	logger.Info(req.Context(), "handleGetStreamingNodeStatus success", mlog.Any("responseBody", responseBody))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(responseBody)
+}
+
+func (s *mixCoordImpl) handleGetStreamingNodeStatusLegacy(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	// Parse the request form to access URL query parameters.
 	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
@@ -821,6 +996,56 @@ func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *
 
 // handlePutNodeStatus handles PUT requests to update a node's status.
 func (s *mixCoordImpl) handlePutStreamingNodeStatus(w http.ResponseWriter, req *http.Request) {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		s.handlePutStreamingNodeStatusLegacy(w, req)
+		return
+	}
+	var requestBody struct {
+		Status string `json:"status"`
+		NodeID int64  `json:"node_id"`
+	}
+	logger := mlog.With(mlog.String("Scope", "Rolling"))
+	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
+		logger.Info(req.Context(), "handlePutStreamingNodeStatus json decoder failed", mlog.Err(err))
+		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.NodeID <= 0 {
+		logger.Info(req.Context(), "handlePutStreamingNodeStatus missing node_id")
+		http.Error(w, `{"msg": "node_id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	nodeIDs := []int64{requestBody.NodeID}
+	var err error
+	var errMsg string
+
+	switch requestBody.Status {
+	case "suspended":
+		err = streaming.WAL().Balancer().FreezeNodeIDs(req.Context(), nodeIDs)
+		errMsg = "failed to suspend streaming node"
+	case "active":
+		err = streaming.WAL().Balancer().DefreezeNodeIDs(req.Context(), nodeIDs)
+		errMsg = "failed to activate streaming node"
+	default:
+		logger.Info(req.Context(), "handlePutStreamingNodeStatus invalid status value", mlog.Any("status", requestBody.Status))
+		http.Error(w, `{"msg": "Invalid status value. Use 'suspended' or 'active'."}`, http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		logger.Info(req.Context(), "handlePutStreamingNodeStatus failed", mlog.Err(err))
+		writeStreamingManagementError(w, merr.Wrap(err, errMsg))
+		return
+	}
+	logger.Info(req.Context(), "handlePutStreamingNodeStatus success", mlog.Any("status", requestBody.Status))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+func (s *mixCoordImpl) handlePutStreamingNodeStatusLegacy(w http.ResponseWriter, req *http.Request) {
 	var requestBody struct {
 		Status string `json:"status"`
 		NodeID int64  `json:"node_id"`
@@ -1071,7 +1296,7 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-// TransferStreamingChannel handles the transfer and defreeze operation.
+// TransferStreamingChannel transfers WAL ownership; node freeze state is managed separately.
 func (s *mixCoordImpl) TransferStreamingChannel(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	if req.Method != http.MethodPost {
@@ -1479,4 +1704,25 @@ func writeJSONResponse(w http.ResponseWriter, statusCode int, resp interface{}) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(resp)
+}
+
+func writeStreamingManagementError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+	if errors.Is(err, merr.ErrNodeNotFound) {
+		code = http.StatusNotFound
+	}
+	writeJSONError(w, err.Error(), code)
+}
+
+func checkStreamingNode(ctx context.Context, nodeID int64) error {
+	nodes, err := streaming.WAL().Balancer().ListStreamingNode(ctx)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.ServerID == nodeID {
+			return nil
+		}
+	}
+	return merr.WrapErrNodeNotFound(nodeID, "StreamingNode not found")
 }

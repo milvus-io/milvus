@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -726,6 +728,8 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 }
 
 func (suite *OpsServiceSuite) TestTransferChannel() {
+	legacy := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(false).Build()
+	defer legacy.UnPatch()
 	ctx := context.Background()
 
 	// test server unhealthy
