@@ -34,7 +34,8 @@ type RecoverySnapshot struct {
 	// PKIndex is the primary key index of the pchannel, nil when the node
 	// has no index. The WAL recovery owns it and closes it with the WAL; the
 	// interceptor only uses it.
-	PKIndex *indexmanager.PChannelIndexManager
+	PKIndex      indexmanager.PChannel
+	PKIndexState func(string) (vchannel.PKIndexState, bool)
 }
 
 type dirtyPersistSnapshot struct {

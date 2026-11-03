@@ -25,28 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-// Put is one key that a message inserts, with the segment of the row.
-type Put struct {
-	PK        dedup.PK
-	SegmentID int64
-}
-
-// Write is the index change of one WAL message: the keys it deletes and the
-// keys it puts, at the time tick the message takes effect. The recovery of
-// the pchannel builds it from a message, so this package reads no message.
-// An autocommit write takes effect at its own time tick, a transaction at
-// the time tick of its commit, with every body in one Write: its puts can go
-// to more than one segment.
-type Write struct {
-	// Puts are the keys the message inserts, each with its segment.
-	Puts []Put
-	// Deletes are the keys the message deletes. They are written before Puts,
-	// so a key in both ends up present: a companion delete must not hide the
-	// insert of the same message.
-	Deletes  []dedup.PK
-	TimeTick uint64
-}
-
 // Apply writes w to the engine as one batch, tombstones first, then puts,
 // and then tells the Decider that the keys are applied, which retires
 // their entries of the in-flight set (rule A: the engine first, then the
@@ -61,8 +39,8 @@ type Write struct {
 // Only the observe of the WAL recovery calls it, in time tick order, one
 // message at a time. The whole batch goes to one generation: engine.Write
 // holds the generation for the whole call, so a rotate can not split it.
-func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) {
-	if w.TimeTick <= idx.LastCommittedTimeTick() || w.TimeTick < idx.cfg.CheckpointTimeTick {
+func (idx *indexImpl) Apply(ctx context.Context, w Write) (dirtied bool, err error) {
+	if w.TimeTick <= idx.HandoverState().LastCommittedTimeTick || w.TimeTick < idx.cfg.CheckpointTimeTick {
 		return false, nil
 	}
 	muts := make([]engine.Mutation, 0, len(w.Deletes)+len(w.Puts))
@@ -82,6 +60,7 @@ func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) 
 		return false, nil
 	}
 	if err := idx.write(ctx, muts); err != nil {
+		idx.markCorrupted(err)
 		return false, err
 	}
 	keys := make([]dedup.PK, 0, len(w.Deletes)+len(w.Puts))
@@ -94,7 +73,7 @@ func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) 
 }
 
 // write writes one batch to the engine, through the test hooks.
-func (idx *Index) write(ctx context.Context, muts []engine.Mutation) error {
+func (idx *indexImpl) write(ctx context.Context, muts []engine.Mutation) error {
 	if fail := idx.failWrites.Load(); fail != nil {
 		return *fail
 	}
@@ -125,16 +104,17 @@ func (idx *Index) write(ctx context.Context, muts []engine.Mutation) error {
 //
 // It reports whether the Index went from clean to dirty, so that the caller
 // adds it to the LastAcked heap of the pchannel.
-func (idx *Index) TruncateUntil(ctx context.Context, tt uint64) (dirtied bool, err error) {
+func (idx *indexImpl) TruncateUntil(ctx context.Context, tt uint64) (dirtied bool, err error) {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
-	if tt <= idx.LastCommittedTimeTick() || tt < idx.cfg.CheckpointTimeTick {
+	if tt <= idx.HandoverState().LastCommittedTimeTick || tt < idx.cfg.CheckpointTimeTick {
 		return false, nil
 	}
 	if err := idx.closedOr(nil); err != nil {
 		return false, err
 	}
 	if err := idx.eng.Reset(ctx); err != nil {
+		idx.markCorrupted(err)
 		return false, err
 	}
 	idx.resetTT.Store(tt)

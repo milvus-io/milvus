@@ -77,7 +77,7 @@ The index ID is a level in every key:
 | Object storage | `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst/<id>.sst` |
 | Local disk of the streaming node | `<root>/<vchannel>/<indexID>/` |
 
-- `internal/pkindex/objpath.go` builds the object keys, and
+- `internal/pkindex/manifest/path.go` builds the object keys, and
   `internal/datacoord/pkindex/manifest/metakey.go` builds the pointer keys.
 - The streaming node takes the index ID from `pk_index.index_id` of the
   vchannel meta and sends it in `CommitFlushRequest.index_id`. The first flush
@@ -142,7 +142,7 @@ CreateIndex.
 ### Observe
 
 The observe of the WAL recovery handles a TruncateCollection on a data vchannel
-with an open Index (`PChannelIndexManager.ResetIndex`, `index/reset.go`):
+with an open Index (`PChannel.TruncateUntil`, `index/apply.go`):
 
 - It keeps the Index and its Decider. The observe runs after the append, so the
   in-flight set can hold writes after T that the append path decided. A new

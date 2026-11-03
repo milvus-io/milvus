@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // defaultManifestReadConcurrency is the number of parallel manifest body
@@ -44,8 +45,12 @@ var manifestLookupBatch = manifest.MaxRecoveryManifests
 //
 // A fenced or rejected lookup ends the WAL open. Every other error is
 // retried until ctx, the context of the WAL open, ends.
-func (c *PChannelIndexManager) RecoverIndexes(ctx context.Context, specs []IndexSpec) ([]*index.Index, error) {
-	opened := make([]*index.Index, 0, len(specs))
+func (c *pchannel) RecoverIndexes(ctx context.Context, specs []IndexSpec) ([]index.Index, error) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, errClosed("pchannel " + c.info.Name)
+	}
+	defer c.lifetime.Done()
+	opened := make([]index.Index, 0, len(specs))
 	for _, spec := range specs {
 		idx, _, err := c.OpenIndex(ctx, spec)
 		if err != nil {
@@ -98,7 +103,7 @@ func (c *PChannelIndexManager) RecoverIndexes(ctx context.Context, specs []Index
 		if _, ok := found[idx.VChannel()]; !ok {
 			// No manifest: the committed set is empty, so the Index is ready
 			// before the replay, see Index.MarkReady.
-			idx.MarkReady(ctx)
+			idx.SetCommitted(nil)
 		}
 	}
 	c.logger.Info(ctx, "primary key index manifests read", mlog.Int("vchannels", len(opened)), mlog.Int("withManifest", len(found)))
@@ -110,7 +115,7 @@ func (c *PChannelIndexManager) RecoverIndexes(ctx context.Context, specs []Index
 // its Index. The first failed read cancels the other reads: the whole Recover
 // fails. It returns a fatal error of any read before the error of a canceled
 // sibling.
-func (c *PChannelIndexManager) readManifests(ctx context.Context, found map[string]manifest.RecoveryManifest, opts []retry.Option) error {
+func (c *pchannel) readManifests(ctx context.Context, found map[string]manifest.RecoveryManifest, opts []retry.Option) error {
 	concurrency := c.m.cfg.ManifestReadConcurrency
 	if concurrency <= 0 {
 		concurrency = defaultManifestReadConcurrency
@@ -143,7 +148,7 @@ func (c *PChannelIndexManager) readManifests(ctx context.Context, found map[stri
 				cancelReads()
 				return struct{}{}, errors.Wrapf(err, "read the manifest of vchannel %s", vchannel)
 			}
-			idx.SetCommitted(view)
+			idx.SetCommitted(&view)
 			return struct{}{}, nil
 		}))
 	}
@@ -161,7 +166,7 @@ func (c *PChannelIndexManager) readManifests(ctx context.Context, found map[stri
 
 // retryOptions returns the retry options of the recovery: no attempt limit,
 // a backoff from BackoffBase up to MaxBackoff.
-func (c *PChannelIndexManager) retryOptions() []retry.Option {
+func (c *pchannel) retryOptions() []retry.Option {
 	p := c.m.cfg.Params()
 	return []retry.Option{retry.AttemptAlways(), retry.Sleep(p.BackoffBase), retry.MaxSleepTime(p.MaxBackoff)}
 }

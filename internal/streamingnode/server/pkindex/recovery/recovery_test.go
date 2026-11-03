@@ -74,16 +74,16 @@ func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
 
-	m := env.Manager.GetForTest("p")
+	m := indexmanager.GetForTest(env.Manager, "p")
 	require.NotNil(t, m)
-	v1 := m.IndexForTest("v1")
+	v1 := indexmanager.IndexForTest(m, "v1")
 	require.NotNil(t, v1)
-	assert.Equal(t, uint64(100), v1.LastCommittedTimeTick())
+	assert.Equal(t, uint64(100), v1.HandoverState().LastCommittedTimeTick)
 	assert.False(t, v1.Ready(), "waits for the install")
-	v2 := m.IndexForTest("v2")
+	v2 := indexmanager.IndexForTest(m, "v2")
 	require.NotNil(t, v2)
 	assert.True(t, v2.Ready(), "no manifest: ready at once")
-	assert.Nil(t, m.IndexForTest("v3"))
+	assert.Nil(t, indexmanager.IndexForTest(m, "v3"))
 	assert.Equal(t, uint64(80), m.LastAcked(), "nothing dirty: the watermark seed")
 	assert.Equal(t, uint64(80), rec.LastAcked())
 }
@@ -97,7 +97,7 @@ func TestRecoverFailsOnAFencedLookupAndLeavesNothingOpen(t *testing.T) {
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.ErrorIs(t, err, manifest.ErrFenced)
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 }
 
 func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testing.T) {
@@ -113,12 +113,12 @@ func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testin
 		},
 	})
 	require.NoError(t, err)
-	m := env.Manager.GetForTest("p")
+	m := indexmanager.GetForTest(env.Manager, "p")
 	require.NotNil(t, m)
-	assert.NotNil(t, m.IndexForTest("v1"))
-	assert.Nil(t, m.IndexForTest("v2"), "a dropped vchannel gets no index")
+	assert.NotNil(t, indexmanager.IndexForTest(m, "v1"))
+	assert.Nil(t, indexmanager.IndexForTest(m, "v2"), "a dropped vchannel gets no index")
 	rec.Close(ctx)
-	require.Nil(t, env.Manager.GetForTest("p"))
+	require.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 
 	_, err = Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 4}},
@@ -128,7 +128,7 @@ func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testin
 		},
 	})
 	require.Error(t, err)
-	assert.Nil(t, env.Manager.GetForTest("p"), "an unsupported primary key leaves nothing open")
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"), "an unsupported primary key leaves nothing open")
 }
 
 func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
@@ -139,7 +139,7 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.NoError(t, err)
-	m := env.Manager.GetForTest("p")
+	m := indexmanager.GetForTest(env.Manager, "p")
 	require.NotNil(t, m)
 	require.NoError(t, rec.Run(ctx))
 
@@ -149,7 +149,7 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 	assert.True(t, idx.Ready(), "after Run a new collection is ready at once")
 
 	rec.Close(ctx)
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 	rec.Close(ctx) // a second Close does nothing
 	err = rec.Run(ctx)
 	require.Error(t, err, "Run after Close")
@@ -166,7 +166,7 @@ func TestRecoverFailsOnAStoppedManager(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, pkroot.ErrUnavailable), "got %v", err)
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 }
 
 func TestRecoverRetriesATransientLookupFailure(t *testing.T) {
@@ -179,7 +179,7 @@ func TestRecoverRetriesATransientLookupFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
-	assert.True(t, env.Manager.GetForTest("p").IndexForTest("v1").Ready(), "the lookup went through after the retries")
+	assert.True(t, indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1").Ready(), "the lookup went through after the retries")
 }
 
 // readOverride is an ObjectReader whose reads of some manifest body keys are
@@ -206,7 +206,7 @@ func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	m := &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
 	env.Committer.SetManifest("v1", m)
-	env.Manager.SetReaderForTest(&readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
+	indexmanager.SetReaderForTest(env.Manager, &readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
 		manifest.FakeRecoveryManifest("v1", m).BodyKey: func(context.Context) (manifest.View, error) {
 			view := m.View
 			view.Version = 3
@@ -218,7 +218,7 @@ func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.ErrorIs(t, err, manifest.ErrRejected)
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 }
 
 func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
@@ -228,7 +228,7 @@ func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 	m2 := &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 50, SSTBasePath: "root/2/v2"}}
 	env.Committer.SetManifest("v1", m1)
 	env.Committer.SetManifest("v2", m2)
-	env.Manager.SetReaderForTest(&readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
+	indexmanager.SetReaderForTest(env.Manager, &readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
 		// v1: the body names another version, a fatal error
 		manifest.FakeRecoveryManifest("v1", m1).BodyKey: func(context.Context) (manifest.View, error) {
 			view := m1.View
@@ -251,7 +251,7 @@ func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 	})
 	require.ErrorIs(t, err, manifest.ErrRejected)
 	assert.Less(t, time.Since(start), 5*time.Second, "the transient retry of v2 ends with the fatal error of v1")
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 }
 
 // countingScheduler counts the submitted tasks and passes them on.
@@ -272,20 +272,20 @@ func TestRunSkipsTheInstallOfADroppedIndex(t *testing.T) {
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}
-	env.Manager.SetSchedForTest(sched)
+	indexmanager.SetSchedForTest(env.Manager, sched)
 	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
-	m := env.Manager.GetForTest("p")
-	require.False(t, m.IndexForTest("v1").Ready(), "waits for the install")
+	m := indexmanager.GetForTest(env.Manager, "p")
+	require.False(t, indexmanager.IndexForTest(m, "v1").Ready(), "waits for the install")
 
 	after := rec.ObserveMessage(ctx, dropCollectionMsg("v1", 1, 20))
 	require.NotNil(t, after)
 	after(ctx)
-	require.Nil(t, m.IndexForTest("v1"))
+	require.Nil(t, indexmanager.IndexForTest(m, "v1"))
 	require.NoError(t, rec.Run(ctx))
 	assert.Zero(t, sched.submitted.Load(), "no install of a dropped index")
 }
@@ -297,7 +297,7 @@ func TestRunRunsOnce(t *testing.T) {
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}
-	env.Manager.SetSchedForTest(sched)
+	indexmanager.SetSchedForTest(env.Manager, sched)
 	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
@@ -307,5 +307,5 @@ func TestRunRunsOnce(t *testing.T) {
 	require.NoError(t, rec.Run(ctx))
 	require.NoError(t, rec.Run(ctx))
 	assert.Equal(t, int32(1), sched.submitted.Load(), "the install is submitted once")
-	require.Eventually(t, env.Manager.GetForTest("p").IndexForTest("v1").Ready, 10*time.Second, 10*time.Millisecond)
+	require.Eventually(t, indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1").Ready, 10*time.Second, 10*time.Millisecond)
 }

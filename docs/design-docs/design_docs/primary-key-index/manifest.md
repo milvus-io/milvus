@@ -3,7 +3,7 @@
 - **Created:** 2026-10-12
 - **Author:** bigsheeper
 - **Status:** Draft
-- **Component:** DataCoord, `internal/datacoord/pkindex/manifest`, `internal/pkindex/objpath.go`
+- **Component:** DataCoord, `internal/datacoord/pkindex/manifest`, `internal/pkindex/manifest/path.go`
 - **Related work:** Primary Key Index Core Library (#53910), issue #52305
 
 ## Summary
@@ -125,8 +125,8 @@ Rules of the model:
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
 - `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst`. The
-  function `pkindex.SSTBasePath(rootPath, collectionID, indexID, vchannel)` in
-  `internal/pkindex/objpath.go` builds it. That file builds all object
+  function `manifest.SSTBasePath(rootPath, collectionID, indexID, vchannel)` in
+  `internal/pkindex/manifest/path.go` builds it. That file builds all object
   keys of the primary key index. The writer of the SSTs, the manifest writer
   and GC all use it, so they cannot disagree. The first version records the
   value, and readers and GC use the recorded value.
@@ -343,7 +343,7 @@ reads the body from object storage.
   `manifestRetainDuration`, so a body that a caller reads a few seconds after
   this call still exists. If the read fails, the caller asks again.
 - The SST base path of a vchannel without a manifest comes from
-  `pkindex.SSTBasePath`, not from this call.
+  `manifest.SSTBasePath`, not from this call.
 
 ## Fencing by Pchannel Term
 

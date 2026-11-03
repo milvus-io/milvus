@@ -30,7 +30,7 @@ Explore is a separate layout: local temporary manifests live under
   `minio.rootPath/pk_index/<collectionID>/<indexID>/<vchannel>/`: manifest bodies in
   `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
   manifest service and its GC build these keys with
-  `internal/pkindex/objpath.go`. `pk_index` is `common.PKIndexPath` and is
+  `internal/pkindex/manifest/path.go`. `pk_index` is `common.PKIndexPath` and is
   listed in `InternalStorageRootSegments`. The manifest pointers are meta kv
   keys `pkindex-meta/manifest/<collectionID>/<indexID>/<vchannel>`, built by
   `internal/datacoord/pkindex/manifest`. A flush also reads the streaming
@@ -162,7 +162,7 @@ directory from the output manifest base.
 - Compatibility: `internal/datacoord/meta_local_manifest*.go` and
   `snapshot_local_manifest_test.go`.
 - Cleanup: `internal/datacoord/garbage_collector*.go` and `task_stats*.go`.
-- Primary key index: `internal/pkindex/objpath.go`,
+- Primary key index: `internal/pkindex/manifest/path.go`,
   `internal/datacoord/pkindex/manifest/metakey.go`,
   `internal/datacoord/pkindex/gc`.
 

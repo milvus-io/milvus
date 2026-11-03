@@ -193,7 +193,7 @@ type recoveryStorageImpl struct {
 	// when the node has no index manager. The recovery storage owns it: it
 	// creates it in initRecoveryModules, feeds it the replay, ends it at the
 	// barrier and closes it in closeRecoveryResources.
-	pkindex       *pkrecovery.Recovery
+	pkindex       pkrecovery.Recovery
 	nodeScheduler nodescheduler.Scheduler
 	taskScheduler *scopedTaskScheduler
 	dirtyCounter  int // records the message count since last persist snapshot.
@@ -316,13 +316,13 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	if mgr := resource.Resource().PKIndexManager(); mgr != nil {
 		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.RecoverConfig{
 			PChannelConfig: indexmanager.PChannelConfig{
-				PChannel:      r.channel,
-				Seed:          r.checkpoint.TimeTick,
-				OnFatal:       r.fatalHandler("primary key index stopped"),
-				VChannelState: pkindexVChannelState(manager),
+				PChannel: r.channel,
+				Seed:     r.checkpoint.TimeTick,
+				OnFatal:  r.fatalHandler("primary key index stopped"),
 			},
-			Metas: vchannels,
-			Tail:  r.pkindexTailLocked,
+			Metas:        vchannels,
+			PKIndexState: manager.PKIndexState,
+			Tail:         r.pkindexTailLocked,
 		})
 		if err != nil {
 			return merr.Wrap(err, "recover the primary key index")
@@ -330,21 +330,6 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		r.pkindex = rec
 	}
 	return nil
-}
-
-// pkindexVChannelState returns the vchannel state that the primary key index
-// reads: the write history, the enabled primary key index and the schema of
-// a vchannel, as the vchannel module of manager holds them now. The observe
-// of the primary key index reads it after the vchannel module observed the
-// same message, so it holds the state at that message.
-func pkindexVChannelState(manager *vchannel.PChannelRecoveryManager) func(string) (indexmanager.VChannelState, bool) {
-	return func(vchannel string) (indexmanager.VChannelState, bool) {
-		state, ok := manager.PKIndexState(vchannel)
-		if !ok {
-			return indexmanager.VChannelState{}, false
-		}
-		return indexmanager.VChannelState{EverWritten: state.EverWritten, PKIndex: state.PKIndex, Schema: state.Schema}, true
-	}
 }
 
 // pkindexTailLocked reports the WAL tail to the primary key index at a

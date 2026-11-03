@@ -88,7 +88,7 @@ func initResourceForTest(t *testing.T) {
 
 // initResourceForTestWithPKIndex is initResourceForTest with pkMgr as the
 // primary key index manager of the resource. A nil pkMgr leaves it unset.
-func initResourceForTestWithPKIndex(t *testing.T, pkMgr *indexmanager.Manager) {
+func initResourceForTestWithPKIndex(t *testing.T, pkMgr indexmanager.Manager) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")

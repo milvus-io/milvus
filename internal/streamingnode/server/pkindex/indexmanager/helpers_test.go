@@ -86,11 +86,13 @@ type asyncScheduler struct{}
 
 func (asyncScheduler) Submit(t nodescheduler.Task) nodescheduler.TaskHandle {
 	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		defer cancel()
 		defer close(done)
-		_ = t.Execute(context.Background())
+		_ = t.Execute(ctx)
 	}()
-	return chanHandle{done: done}
+	return chanHandle{done: done, cancel: cancel}
 }
 
 // droppingScheduler finishes every task without running it, like a closed scheduler.
@@ -102,9 +104,16 @@ func (droppingScheduler) Submit(t nodescheduler.Task) nodescheduler.TaskHandle {
 	return chanHandle{done: done}
 }
 
-type chanHandle struct{ done chan struct{} }
+type chanHandle struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+}
 
-func (h chanHandle) Cancel() {}
+func (h chanHandle) Cancel() {
+	if h.cancel != nil {
+		h.cancel()
+	}
+}
 
 func (h chanHandle) Wait(ctx context.Context) error {
 	select {
@@ -126,7 +135,7 @@ type testEnv struct {
 	root   string
 	store  *countingStore
 	client *FakeCommitter
-	mgr    *Manager
+	mgr    *managerImpl
 	params atomic.Pointer[Params]
 
 	fatalMu sync.Mutex
@@ -159,14 +168,14 @@ func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
 	nextID.Store(1000)
 	env.mgr = NewManager(ManagerConfig{
 		Root:            env.root,
-		Shared:          shared,
+		Engine:          shared,
 		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
 		Store:           env.store,
 		StorageRootPath: testStorageRoot,
 		Committer:       env.client,
 		Sched:           sched,
 		Params:          func() Params { return *env.params.Load() },
-	})
+	}).(*managerImpl)
 	t.Cleanup(env.mgr.Close)
 	return env
 }
@@ -177,19 +186,19 @@ func (env *testEnv) setParams(f func(p *Params)) {
 	env.params.Store(&p)
 }
 
-// channel opens a started PChannelIndexManager without the driver goroutine.
+// channel opens a started pchannel without the driver goroutine.
 // Every Index that a test adds to it is the Index of a new collection, ready
 // at once.
-func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
+func (env *testEnv) channel(seed uint64) *pchannel {
 	ch := env.openChannel(seed)
 	ch.start(false)
 	return ch
 }
 
-// recoveredChannel opens a PChannelIndexManager that is not started yet and
+// recoveredChannel opens a pchannel that is not started yet and
 // adds the indexes of vchannels as the indexes of existing collections. They
 // are not ready: the recovery would mark them.
-func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannelIndexManager {
+func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *pchannel {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
 		_, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: v, CollectionID: testCollectionID, IndexID: testIndexID})
@@ -199,11 +208,11 @@ func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannel
 	return ch
 }
 
-// openChannel opens the PChannelIndexManager of the test pchannel, whose
+// openChannel opens the pchannel of the test pchannel, whose
 // term is the assigned term of the pchannel.
-func (env *testEnv) openChannel(seed uint64) *PChannelIndexManager {
+func (env *testEnv) openChannel(seed uint64) *pchannel {
 	info := types.PChannelInfo{Name: "test-dml_0", Term: testTerm}
-	ch := env.mgr.New(PChannelConfig{PChannel: info, Seed: seed, OnFatal: env.onFatal})
+	ch := env.mgr.New(PChannelConfig{PChannel: info, Seed: seed, OnFatal: env.onFatal}).(*pchannel)
 	env.client.assign(testTerm)
 	return ch
 }
@@ -234,7 +243,7 @@ func (env *testEnv) waitFatal() error {
 }
 
 // add opens the Index of vchannel and waits until it is ready.
-func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index {
+func (env *testEnv) add(ch *pchannel, vchannel string) index.Index {
 	idx, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: vchannel, CollectionID: testCollectionID, IndexID: testIndexID})
 	require.NoError(env.t, err)
 	require.True(env.t, created)
@@ -243,9 +252,9 @@ func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index 
 	return idx
 }
 
-func waitReady(t *testing.T, idx *index.Index) {
+func waitReady(t *testing.T, idx index.Index) {
 	select {
-	case <-idx.ReadyForTest():
+	case <-index.ReadyForTest(idx):
 	case <-time.After(waitTimeout):
 		t.Fatalf("manifest lookup of %s did not finish", idx.VChannel())
 	}
@@ -254,7 +263,7 @@ func waitReady(t *testing.T, idx *index.Index) {
 // insert applies an autocommit insert the way the observe of the WAL
 // recovery does, at the time tick after the last observed one: a write that
 // the next TimeTick covers.
-func insert(t *testing.T, ch *PChannelIndexManager, idx *index.Index, segmentID int64, pks ...int64) {
+func insert(t *testing.T, ch *pchannel, idx index.Index, segmentID int64, pks ...int64) {
 	require.NoError(t, ch.Apply(context.Background(), idx.VChannel(), index.Write{Puts: puts(segmentID, pks...), TimeTick: ch.LastObserved() + 1}))
 }
 
@@ -269,15 +278,15 @@ func puts(segmentID int64, pks ...int64) []index.Put {
 
 // handover runs one handover step of idx by hand, as the driver would, and
 // reports whether it committed.
-func handover(t *testing.T, idx *index.Index) bool {
+func handover(t *testing.T, idx index.Index) bool {
 	committed, err := idx.Handover(context.Background())
 	require.NoError(t, err)
 	return committed
 }
 
 // segmentOf returns the segment of pk in the engine, 0 when pk is absent.
-func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
-	vs, err := idx.EngineForTest().MultiGet(context.Background(), [][]byte{codec.EncodeInt64PK(pk)})
+func segmentOf(t *testing.T, idx index.Index, pk int64) int64 {
+	vs, err := index.EngineForTest(idx).MultiGet(context.Background(), [][]byte{codec.EncodeInt64PK(pk)})
 	require.NoError(t, err)
 	if vs[0] == nil {
 		return 0
@@ -304,23 +313,23 @@ func int64PKs(values ...int64) []dedup.PK {
 }
 
 // picks returns the indexes that the driver would hand over at now.
-func picks(ch *PChannelIndexManager, now time.Time) []*index.Index {
+func picks(ch *pchannel, now time.Time) []index.Index {
 	out, _, _ := ch.pickHandovers(now)
 	return out
 }
 
 // scheduleOf returns the driver bookkeeping of idx.
-func scheduleOf(ch *PChannelIndexManager, idx *index.Index) *handoverSchedule {
+func scheduleOf(ch *pchannel, idx index.Index) *handoverSchedule {
 	return ch.scheduleOf(idx)
 }
 
-// inHeap reports whether idx is in the LastAcked heap of its PChannelIndexManager.
-func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
+// inHeap reports whether idx is in the LastAcked heap of its pchannel.
+func inHeap(ch *pchannel, idx index.Index) bool {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 	return ch.acked.contains(idx)
 }
 
-func insertRequest(idx *index.Index, pks ...int64) dedup.DecideRequest {
+func insertRequest(idx index.Index, pks ...int64) dedup.DecideRequest {
 	return dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(pks...)}
 }

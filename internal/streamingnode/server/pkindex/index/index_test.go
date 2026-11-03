@@ -73,7 +73,7 @@ func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
 	assert.FileExists(t, leftover, "the open keeps the committed directory")
 	assert.Empty(t, idx.eng.FrozenGenerations())
 	assert.Zero(t, idx.segmentOf(t, 1))
-	idx.SetCommitted(manifest.View{Version: 1})
+	idx.SetCommitted(&manifest.View{Version: 1})
 	require.NoError(t, idx.Install(ctx))
 	assert.NoFileExists(t, leftover, "the install removes what the manifest does not list")
 }
@@ -81,8 +81,8 @@ func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
 func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
 	ctx := context.Background()
 	idx := newTestIndex(t)
-	require.NoError(t, os.MkdirAll(idx.committedDir, 0o755))
-	kept := filepath.Join(idx.committedDir, "7.sst")
+	require.NoError(t, os.MkdirAll(idx.cfg.Dir+"/committed", 0o755))
+	kept := filepath.Join(idx.cfg.Dir+"/committed", "7.sst")
 	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
 	idx.insert(t, 1, 5)
 	engineDir := filepath.Join(Dir(idx.root, testVChannel, testIndexID), "engine")
@@ -91,7 +91,7 @@ func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
 
 	idx.open(t)
 	assert.FileExists(t, kept)
-	idx.MarkReady(ctx)
+	idx.markReady(ctx)
 	g, err := idx.Decider().Decide(ctx, insertRequest(5))
 	require.NoError(t, err)
 	assert.Empty(t, g.CompanionDeletePKs(), "the engine dir was wiped")
@@ -152,7 +152,7 @@ func TestNotReadyIndexWaits(t *testing.T) {
 		t.Fatalf("Wait returned before the Index was ready: %v", err)
 	case <-time.After(20 * time.Millisecond):
 	}
-	idx.MarkReady(ctx)
+	idx.markReady(ctx)
 	select {
 	case err := <-done:
 		require.NoError(t, err)
@@ -175,7 +175,7 @@ func TestInstallDownloadsMissingTables(t *testing.T) {
 	require.NotEmpty(t, first.Tables)
 
 	// the next install needs the first tables, which are not on this node
-	require.NoError(t, os.RemoveAll(idx.committedDir))
+	require.NoError(t, os.RemoveAll(idx.cfg.Dir+"/committed"))
 	idx.installedPaths = nil
 	idx.insert(t, 20, 3)
 	idx.observed.Store(20)
@@ -183,9 +183,9 @@ func TestInstallDownloadsMissingTables(t *testing.T) {
 
 	assert.EqualValues(t, len(first.Tables), idx.store.downloads.Load())
 	for _, id := range sstIDs(first) {
-		assert.FileExists(t, committedPath(idx.committedDir, sst.ID(id)))
+		assert.FileExists(t, committedPath(idx.cfg.Dir+"/committed", sst.ID(id)))
 	}
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.HandoverState().LastCommittedTimeTick)
 	assert.EqualValues(t, 10, idx.segmentOf(t, 1))
 }
 
@@ -220,12 +220,12 @@ func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	ref := p.request.AddTables[0]
-	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)), p.local[ref.ID]))
 	// corrupt the local copy: wrong size
-	local := committedPath(idx.committedDir, ref.ID)
+	local := committedPath(idx.cfg.Dir+"/committed", ref.ID)
 	require.NoError(t, os.WriteFile(local, []byte("short"), 0o600))
 
-	view := manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
+	view := manifest.View{Version: 1, SSTBasePath: idx.cfg.SSTBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
 	require.NoError(t, idx.installIfNewer(ctx, view, nil))
 	fi, err := os.Stat(local)
 	require.NoError(t, err)
@@ -241,10 +241,10 @@ func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	ref := p.request.AddTables[0]
-	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)), p.local[ref.ID]))
 	// a download would fail, so the install must use the local file
 	idx.store.FailDownloads(1)
 
-	view := manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
+	view := manifest.View{Version: 1, SSTBasePath: idx.cfg.SSTBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
 	require.NoError(t, idx.installIfNewer(ctx, view, nil))
 }

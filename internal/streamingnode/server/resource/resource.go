@@ -40,7 +40,7 @@ func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 }
 
 // OptPKIndexManager provides the primary key index manager to the resource.
-func OptPKIndexManager(m *indexmanager.Manager) optResourceInit {
+func OptPKIndexManager(m indexmanager.Manager) optResourceInit {
 	return func(r *resourceImpl) {
 		r.pkindexManager = m
 	}
@@ -120,7 +120,7 @@ type resourceImpl struct {
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
-	pkindexManager       *indexmanager.Manager
+	pkindexManager       indexmanager.Manager
 
 	// TODO: Global flusher components, should be removed afteer flushering in wal refactoring.
 	syncMgr syncmgr.SyncManager
@@ -148,7 +148,7 @@ func (r *resourceImpl) ChunkManager() storage.ChunkManager {
 }
 
 // PKIndexManager returns the primary key index manager, nil when it is not set.
-func (r *resourceImpl) PKIndexManager() *indexmanager.Manager {
+func (r *resourceImpl) PKIndexManager() indexmanager.Manager {
 	return r.pkindexManager
 }
 

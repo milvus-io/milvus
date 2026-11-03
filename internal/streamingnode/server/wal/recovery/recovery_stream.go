@@ -113,7 +113,8 @@ func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 		snapshot.WritePathRecovery = r.vchannelManager.RecoverySnapshot()
 	}
 	if r.pkindex != nil {
-		snapshot.PKIndex = r.pkindex.Manager()
+		snapshot.PKIndex = r.pkindex.PChannel()
+		snapshot.PKIndexState = r.vchannelManager.PKIndexState
 	}
 	return snapshot
 }

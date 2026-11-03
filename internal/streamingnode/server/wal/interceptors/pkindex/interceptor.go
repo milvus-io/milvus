@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	vchannel "github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -50,7 +51,7 @@ type txnSessions interface {
 // appendInterceptor translates WAL messages into primary key index requests and
 // appends what the Decider asks for. It holds no index logic of its own.
 type appendInterceptor struct {
-	ch       *indexmanager.PChannelIndexManager
+	ch       indexmanager.PChannel
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
@@ -101,7 +102,7 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 	if t == nil {
 		return appendOp(ctx, msg)
 	}
-	if i.ch.Decider(msg.VChannel()) == nil && !i.ch.Closed() {
+	if idx, err := i.ch.IndexOf(msg.VChannel()); idx == nil && err == nil {
 		// The observe of the WAL recovery dropped the Index: the vchannel was
 		// not empty at the enabling CreateIndex, or a drop whose append
 		// failed is in the WAL. The writes pass through from now on.
@@ -150,7 +151,10 @@ func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.M
 	if funcutil.IsControlChannel(msg.VChannel()) || header.GetIndexType() != common.PrimaryKeyIndexType || msg.ReplicateHeader() != nil {
 		return appendOp(ctx, msg)
 	}
-	state, _ := i.ch.VChannelState(msg.VChannel())
+	var state vchannel.PKIndexState
+	if i.registry.pkIndexState != nil {
+		state, _ = i.registry.pkIndexState(msg.VChannel())
+	}
 	id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 	if err != nil {
 		if tt != 0 && !errors.Is(err, redo.ErrRedo) {
@@ -190,7 +194,7 @@ func (i *appendInterceptor) appendDropIndex(ctx context.Context, msg message.Mut
 	if funcutil.IsControlChannel(msg.VChannel()) || header.GetIndexType() != common.PrimaryKeyIndexType {
 		return id, nil
 	}
-	idx := i.ch.IndexOf(msg.VChannel())
+	idx, _ := i.ch.IndexOf(msg.VChannel())
 	if idx != nil && (len(header.GetIndexIds()) == 0 || slices.Contains(header.GetIndexIds(), idx.IndexID())) {
 		i.registry.drop(msg.VChannel())
 	}
@@ -388,13 +392,16 @@ func discard(intent *dedup.WriteIntent, err error, tt uint64) {
 // decide asks the Decider of the vchannel and classifies its error for the WAL.
 func (i *appendInterceptor) decide(ctx context.Context, t *target, vchannel string, req dedup.DecideRequest) (*dedup.WriteIntent, error) {
 	start := time.Now()
-	a := i.ch.Decider(vchannel)
-	if a == nil {
+	idx, err := i.ch.IndexOf(vchannel)
+	if err != nil {
+		return nil, decideError(err)
+	}
+	if idx == nil {
 		// The index closed between the lookup of the target and this call:
 		// the WAL closes, or a DropCollection raced with the write.
 		return nil, decideError(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", vchannel))
 	}
-	intent, err := a.Decide(ctx, req)
+	intent, err := idx.Decider().Decide(ctx, req)
 	if err != nil {
 		// The wait needs observe to advance, which needs the WAL lock that this
 		// interceptor runs under, so the redo interceptor waits outside the lock.
@@ -455,11 +462,11 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 		return
 	}
 	i.registry.forEach(func(vchannel string, _ *target) {
-		a := i.ch.Decider(vchannel)
-		if a == nil {
+		idx, err := i.ch.IndexOf(vchannel)
+		if err != nil || idx == nil {
 			return
 		}
-		a.DropEndedTxns(func(txnID int64) bool {
+		idx.Decider().DropEndedTxns(func(txnID int64) bool {
 			_, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID))
 			return err != nil
 		})

@@ -21,8 +21,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cockroachdb/errors"
-
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
@@ -37,12 +35,17 @@ import (
 // LastCommittedTimeTick until the next handover. It runs once, at the open,
 // before any Replay and before any write of the Index. The manifest version
 // is at least 1.
-func (idx *Index) SetCommitted(v manifest.View) {
+func (idx *indexImpl) SetCommitted(v *manifest.View) {
+	if v == nil {
+		// no manifest: the committed set is empty, the Index is ready at once
+		idx.markReady(idx.ctx)
+		return
+	}
 	idx.installMu.Lock()
-	view := v
+	view := *v
 	idx.recovered = &view
 	idx.installMu.Unlock()
-	idx.lastCommitted.Store(v.CheckpointTimeTick)
+	idx.lastCommitted.Store(view.CheckpointTimeTick)
 	idx.cfg.OnRefresh(idx)
 }
 
@@ -54,7 +57,7 @@ func (idx *Index) SetCommitted(v manifest.View) {
 // returns and the caller retries, so every step is idempotent. It ends with
 // the error of ctx when ctx ends, and with an error that wraps
 // engine.ErrClosed when the Index closes.
-func (idx *Index) Install(ctx context.Context) error {
+func (idx *indexImpl) Install(ctx context.Context) error {
 	ctx, cancel := contextutil.MergeContext(ctx, idx.ctx)
 	defer cancel()
 	if err := idx.closedOr(nil); err != nil {
@@ -65,7 +68,7 @@ func (idx *Index) Install(ctx context.Context) error {
 	idx.installMu.Unlock()
 	if view == nil {
 		// nothing to install, see MarkReady
-		idx.MarkReady(ctx)
+		idx.markReady(ctx)
 		return nil
 	}
 	if err := idx.reconcileCommittedDir(ctx, view); err != nil {
@@ -74,16 +77,16 @@ func (idx *Index) Install(ctx context.Context) error {
 	if err := idx.installIfNewer(ctx, *view, nil); err != nil {
 		return idx.closedOr(err)
 	}
-	idx.MarkReady(ctx)
+	idx.markReady(ctx)
 	return nil
 }
 
 // closedOr returns the closed error of the Index when the Index closed, else
 // err. The closed error wraps engine.ErrClosed and is marked
 // pkroot.ErrUnavailable.
-func (idx *Index) closedOr(err error) error {
+func (idx *indexImpl) closedOr(err error) error {
 	if idx.ctx.Err() != nil {
-		return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", idx.vchannel), pkroot.ErrUnavailable)
+		return engine.Closed("vchannel " + idx.vchannel)
 	}
 	return err
 }
@@ -91,7 +94,7 @@ func (idx *Index) closedOr(err error) error {
 // reconcileCommittedDir removes the files of the committed dir that the
 // manifest does not list: tables that a compaction replaced, and the
 // temporary files of downloads that did not finish.
-func (idx *Index) reconcileCommittedDir(ctx context.Context, view *manifest.View) error {
+func (idx *indexImpl) reconcileCommittedDir(ctx context.Context, view *manifest.View) error {
 	ents, err := os.ReadDir(idx.committedDir)
 	if os.IsNotExist(err) {
 		return nil
@@ -119,7 +122,7 @@ func (idx *Index) reconcileCommittedDir(ctx context.Context, view *manifest.View
 
 // currentInstalledVersion returns the version of the installed manifest, 0
 // when no manifest is installed.
-func (idx *Index) currentInstalledVersion() int64 {
+func (idx *indexImpl) currentInstalledVersion() int64 {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
 	return idx.installedVersion
@@ -135,7 +138,7 @@ func (idx *Index) currentInstalledVersion() int64 {
 // tables that the Index installed before, the committed directory (the links
 // survive a restart), and last a download from the store. It downloads
 // outside installMu and checks the version again under it.
-func (idx *Index) installIfNewer(ctx context.Context, m manifest.View, local map[sst.ID]string, gens ...engine.Generation) error {
+func (idx *indexImpl) installIfNewer(ctx context.Context, m manifest.View, local map[sst.ID]string, gens ...engine.Generation) error {
 	idx.installMu.Lock()
 	if m.CheckpointTimeTick < idx.resetTT.Load() {
 		idx.installMu.Unlock()
@@ -186,7 +189,7 @@ func (idx *Index) installIfNewer(ctx context.Context, m manifest.View, local map
 }
 
 // retireCovered drops gens when a newer manifest than m is installed.
-func (idx *Index) retireCovered(ctx context.Context, m manifest.View, gens []engine.Generation) error {
+func (idx *indexImpl) retireCovered(ctx context.Context, m manifest.View, gens []engine.Generation) error {
 	if len(gens) == 0 {
 		return nil
 	}
@@ -200,7 +203,7 @@ func (idx *Index) retireCovered(ctx context.Context, m manifest.View, gens []eng
 // so the installed tables hold the data of gens. Without the drop, gens stay
 // frozen, and the next handover sends their committed tables again. The
 // caller holds installMu.
-func (idx *Index) retireCoveredLocked(ctx context.Context, m manifest.View, gens []engine.Generation) error {
+func (idx *indexImpl) retireCoveredLocked(ctx context.Context, m manifest.View, gens []engine.Generation) error {
 	if len(gens) == 0 {
 		return nil
 	}
@@ -218,7 +221,7 @@ func (idx *Index) retireCoveredLocked(ctx context.Context, m manifest.View, gens
 // replaced by a download. The paths of local and known were installed by
 // this process under the same table ID, so they are reused without a size
 // check.
-func (idx *Index) resolveLocal(ctx context.Context, basePath string, ref manifest.TableRef, local, known map[sst.ID]string) (string, error) {
+func (idx *indexImpl) resolveLocal(ctx context.Context, basePath string, ref manifest.TableRef, local, known map[sst.ID]string) (string, error) {
 	id := ref.ID
 	if p, ok := local[id]; ok {
 		return p, nil

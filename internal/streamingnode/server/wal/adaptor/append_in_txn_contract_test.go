@@ -211,7 +211,7 @@ func openChainWAL(t *testing.T, name string, extra interceptors.InterceptorBuild
 
 // openChainWALWithPKIndex is openChainWAL with pkMgr as the primary key index
 // manager of the streaming node resource. A nil pkMgr leaves it unset.
-func openChainWALWithPKIndex(t *testing.T, name string, extra interceptors.InterceptorBuilder, pkMgr *indexmanager.Manager) wal.WAL {
+func openChainWALWithPKIndex(t *testing.T, name string, extra interceptors.InterceptorBuilder, pkMgr indexmanager.Manager) wal.WAL {
 	walimplstest.Reset()
 	initResourceForTestWithPKIndex(t, pkMgr)
 	// Concurrent appends fill the 10 KiB write-ahead buffer. Keep the slowdown

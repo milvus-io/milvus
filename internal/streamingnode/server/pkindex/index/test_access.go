@@ -32,14 +32,14 @@ import (
 
 // EngineForTest returns the engine of the Index. A write through it does not
 // mark the Index dirty.
-func (idx *Index) EngineForTest() *engine.Engine {
-	return idx.eng
+func EngineForTest(idx Index) *engine.Engine {
+	return idx.(*indexImpl).eng
 }
 
 // SetDeciderEngineForTest makes the Decider of the Index read eng instead of
 // the engine of the Index. Call it before the first decision.
-func (idx *Index) SetDeciderEngineForTest(eng engine.RW) {
-	idx.auth = dedup.New(idx.vchannel, eng, dedup.Config{Ready: idx.ready})
+func SetDeciderEngineForTest(idx Index, eng engine.RW) {
+	idx.(*indexImpl).auth = dedup.New(idx.(*indexImpl).vchannel, eng, dedup.Config{Ready: idx.(*indexImpl).ready})
 }
 
 // PendingHandover is the prepared handover of an Index, for the tests of
@@ -47,56 +47,56 @@ func (idx *Index) SetDeciderEngineForTest(eng engine.RW) {
 type PendingHandover = pendingHandover
 
 // PrepareForTest runs the prepare phase of a handover.
-func (idx *Index) PrepareForTest(ctx context.Context) (*PendingHandover, error) {
-	return idx.prepare(ctx)
+func PrepareForTest(ctx context.Context, idx Index) (*PendingHandover, error) {
+	return idx.(*indexImpl).prepare(ctx)
 }
 
 // CommitForTest runs the commit phase of a handover.
-func (idx *Index) CommitForTest(ctx context.Context, p *PendingHandover) error {
-	return idx.commit(ctx, p)
+func CommitForTest(ctx context.Context, idx Index, p *PendingHandover) error {
+	return idx.(*indexImpl).commit(ctx, p)
 }
 
 // PendingForTest returns the prepared handover that waits for its commit,
 // nil when there is none.
-func (idx *Index) PendingForTest() *PendingHandover {
-	return idx.pending.Load()
+func PendingForTest(idx Index) *PendingHandover {
+	return idx.(*indexImpl).pending.Load()
 }
 
 // SetLastCommittedForTest sets the LastCommittedTimeTick of the Index.
-func (idx *Index) SetLastCommittedForTest(tt uint64) {
-	idx.lastCommitted.Store(tt)
+func SetLastCommittedForTest(idx Index, tt uint64) {
+	idx.(*indexImpl).lastCommitted.Store(tt)
 }
 
 // InstalledVersionForTest returns the version of the installed table set.
-func (idx *Index) InstalledVersionForTest() int64 {
-	return idx.currentInstalledVersion()
+func InstalledVersionForTest(idx Index) int64 {
+	return idx.(*indexImpl).currentInstalledVersion()
 }
 
 // ForgetInstalledPathsForTest drops the local paths of the installed tables,
 // as if the Index did not know where they are.
-func (idx *Index) ForgetInstalledPathsForTest() {
-	idx.installMu.Lock()
-	defer idx.installMu.Unlock()
-	idx.installedPaths = nil
+func ForgetInstalledPathsForTest(idx Index) {
+	idx.(*indexImpl).installMu.Lock()
+	defer idx.(*indexImpl).installMu.Unlock()
+	idx.(*indexImpl).installedPaths = nil
 }
 
 // SSTBasePathForTest returns the object key prefix of the tables.
-func (idx *Index) SSTBasePathForTest() string { return idx.sstBasePath }
+func SSTBasePathForTest(idx Index) string { return idx.(*indexImpl).cfg.SSTBasePath }
 
 // CommittedDirForTest returns the local directory of the committed tables.
-func (idx *Index) CommittedDirForTest() string { return idx.committedDir }
+func CommittedDirForTest(idx Index) string { return idx.(*indexImpl).committedDir }
 
 // ReadyForTest returns a channel that is closed when the Index is ready.
-func (idx *Index) ReadyForTest() <-chan struct{} { return idx.ready }
+func ReadyForTest(idx Index) <-chan struct{} { return idx.(*indexImpl).ready }
 
 // DirtyForTest reports whether the Index has writes since its last rotate.
-func (idx *Index) DirtyForTest() bool {
-	return idx.dirtyFlag.Load()
+func DirtyForTest(idx Index) bool {
+	return idx.(*indexImpl).dirtyFlag.Load()
 }
 
 // LastObservedForTest returns the lastObserved of the pchannel of the Index.
-func (idx *Index) LastObservedForTest() uint64 {
-	return idx.cfg.LastObserved()
+func LastObservedForTest(idx Index) uint64 {
+	return idx.(*indexImpl).cfg.LastObserved()
 }
 
 // The fields of a PendingHandover, for the tests of the two phases.
@@ -110,20 +110,23 @@ func CommittedPathForTest(dir string, id sst.ID) string { return committedPath(d
 
 // FailWritesForTest makes every engine write of Apply fail with err, nil
 // lets the writes through again.
-func (idx *Index) FailWritesForTest(err error) {
+func FailWritesForTest(idx Index, err error) {
 	if err == nil {
-		idx.failWrites.Store(nil)
+		idx.(*indexImpl).failWrites.Store(nil)
 		return
 	}
-	idx.failWrites.Store(&err)
+	idx.(*indexImpl).failWrites.Store(&err)
 }
 
 // OnWriteForTest runs hook before every engine write of Apply with the
 // batch, nil removes it.
-func (idx *Index) OnWriteForTest(hook func(muts []engine.Mutation)) {
+func OnWriteForTest(idx Index, hook func(muts []engine.Mutation)) {
 	if hook == nil {
-		idx.onWrite.Store(nil)
+		idx.(*indexImpl).onWrite.Store(nil)
 		return
 	}
-	idx.onWrite.Store(&hook)
+	idx.(*indexImpl).onWrite.Store(&hook)
 }
+
+// CheckpointTimeTickForTest returns the enabling vchannel metadata checkpoint.
+func CheckpointTimeTickForTest(idx Index) uint64 { return idx.(*indexImpl).cfg.CheckpointTimeTick }

@@ -15,8 +15,8 @@
 // limitations under the License.
 
 // Package indexmanager is the primary key index of a streaming node, at the
-// pchannel level and above. A Manager holds a PChannelIndexManager for each
-// pchannel. A PChannelIndexManager keeps the member table of its vchannels,
+// pchannel level and above. A Manager holds a pchannel for each
+// pchannel. A pchannel keeps the member table of its vchannels,
 // takes the writes and the TimeTicks of the observe of the WAL recovery,
 // drives the handovers and keeps the LastAcked bound. Each vchannel is an
 // index.Index (package index), which owns the engine of the vchannel and the
@@ -25,163 +25,37 @@
 package indexmanager
 
 import (
-	"context"
 	"sync"
-	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// defaultBackoffBase is the first wait after a failed manifest lookup or handover.
-const defaultBackoffBase = time.Second
-
-// Params are the tunables of the primary key index of a streaming node.
-type Params struct {
-	// Params of the Index: MemTableSize and ReuploadAfter.
-	index.Params
-	// ActiveBytes starts a handover when the active generation holds this many bytes.
-	ActiveBytes uint64
-	// TailBytes starts a handover when the WAL recovery tail reaches this size.
-	TailBytes uint64
-	// SoftWatermark is the WAL recovery tail size at which the WAL slows appends.
-	SoftWatermark uint64
-	// BackoffBase is the first wait after a failure.
-	BackoffBase time.Duration
-	// MaxBackoff is the longest wait after a failure.
-	MaxBackoff time.Duration
-	// StallTimeout is how long, by observed time, the index may hold the WAL
-	// checkpoint back before the driver hands over the oldest dirty Index.
-	StallTimeout time.Duration
-}
-
-// ParamsFromConfig reads the params from paramtable. ReuploadAfter is half
-// of the grace window of the garbage collection of the manifest service: the
-// garbage collection removes an uploaded table that no manifest references
-// after the grace window, so a retry that waits longer uploads again first.
-func ParamsFromConfig() Params {
-	cfg := &paramtable.Get().StreamingCfg
-	grace := paramtable.Get().DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second)
-	return Params{
-		Params: index.Params{
-			MemTableSize:  uint64(cfg.PKIndexMemTableSize.GetAsSize()),
-			ReuploadAfter: grace / 2,
-		},
-		ActiveBytes:   uint64(cfg.PKIndexHandoverActiveBytes.GetAsSize()),
-		TailBytes:     uint64(cfg.PKIndexHandoverTailBytes.GetAsSize()),
-		SoftWatermark: uint64(cfg.WALRecoveryTailSoftWatermark.GetAsSize()),
-		BackoffBase:   defaultBackoffBase,
-		MaxBackoff:    cfg.PKIndexHandoverMaxBackoff.GetAsDurationByParse(),
-		StallTimeout:  paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
-	}
-}
-
-// WALTailSnapshot is what the WAL recovery storage knows about its tail when
-// it observes a persisted TimeTick. The observe passes it to
-// ObserveTimeTick, so the index never calls the recovery storage back.
-type WALTailSnapshot struct {
-	// Bytes is the size of the WAL recovery tail.
-	Bytes uint64
-	// CompletedTimeTick is the time tick of the completed point of the ack
-	// tracker: the WAL recovery checkpoint before the LastAcked of the
-	// modules bounds it. The index holds the checkpoint back when its
-	// LastAcked is below it.
-	CompletedTimeTick uint64
-}
-
-// ManagerConfig configures a Manager.
-type ManagerConfig struct {
-	// Root is the local root directory of the primary key indexes.
-	Root string
-	// Shared are the node-level engine caches. The caller owns them.
-	Shared *engine.SharedResources
-	// AllocID allocates the IDs of new tables.
-	AllocID func(ctx context.Context) (int64, error)
-	// Store moves tables between local disk and object storage.
-	Store TableStore
-	// StorageRootPath is the root path of the object storage
-	// (ChunkManager.RootPath()). The SST base path of a vchannel is under it.
-	StorageRootPath string
-	// Committer changes and finds the manifests. It must not be nil.
-	Committer manifest.Committer
-	// Reader reads the manifest bodies that the lookups of Committer point to.
-	Reader manifest.ObjectReader
-	// Sched runs the handovers of all pchannels of the node.
-	Sched nodescheduler.Scheduler
-	// ManifestReadConcurrency bounds the parallel manifest body reads of a
-	// recovery. A value at or below 0 means 64.
-	ManifestReadConcurrency int
-	// Params returns the current params. The primary key index calls it on every
-	// use, because some params are refreshable.
-	Params func() Params
-}
-
 // Manager owns the primary key indexes of one streaming node. It opens one
-// PChannelIndexManager per pchannel.
+// pchannel per pchannel.
 //
-// The Manager does not own ManagerConfig.Shared. The caller releases it after
+// The Manager does not own ManagerConfig.Engine. The caller releases it after
 // Close returns.
-type Manager struct {
-	cfg      ManagerConfig
-	lifetime *typeutil.Lifetime
+type managerImpl struct {
+	cfg       ManagerConfig
+	lifetime  *typeutil.Lifetime
+	closeOnce sync.Once
 
 	mu       sync.Mutex
-	channels map[string]*PChannelIndexManager // by pchannel name
+	channels map[string]*pchannel // by pchannel name
 }
 
 // NewManager creates a Manager. It panics when cfg.Committer is nil: an
 // index that can not commit is never recovered, so a reopen of the WAL
 // would lose the writes before its checkpoint.
-func NewManager(cfg ManagerConfig) *Manager {
+func NewManager(cfg ManagerConfig) Manager {
 	if cfg.Committer == nil {
 		panic("the primary key index manager needs a Committer")
 	}
-	return &Manager{
+	return &managerImpl{
 		cfg:      cfg,
 		lifetime: typeutil.NewLifetime(),
-		channels: make(map[string]*PChannelIndexManager),
+		channels: make(map[string]*pchannel),
 	}
-}
-
-// PChannelConfig is what the WAL gives the primary key index of a pchannel.
-type PChannelConfig struct {
-	PChannel types.PChannelInfo
-	// Seed is the initial lastObserved: the time tick of the global
-	// checkpoint of the pchannel, where the WAL recovery starts to observe.
-	Seed uint64
-	// OnFatal marks the WAL unavailable. It must not block.
-	OnFatal func(error)
-	// VChannelState returns what the observe of the WAL recovery knows about
-	// a vchannel now, false when it has no collection of the vchannel. Nil
-	// means that no vchannel is known.
-	VChannelState func(vchannel string) (VChannelState, bool)
-}
-
-// VChannelState is what the observe of the WAL recovery knows about a
-// vchannel now: the vchannel meta after the last observed message.
-type VChannelState struct {
-	EverWritten streamingpb.VChannelWriteHistory
-	// PKIndex is the enabled primary key index, nil when none is enabled.
-	PKIndex *streamingpb.PKIndexOfVChannel
-	// Schema is the latest schema of the collection. It is shared and read only.
-	Schema *schemapb.CollectionSchema
-}
-
-// IndexSpec names the primary key index of a vchannel.
-type IndexSpec struct {
-	VChannel     string
-	CollectionID int64
-	IndexID      int64
-	// CheckpointTimeTick is the time tick of the CreateIndex that enabled the
-	// index on the vchannel.
-	CheckpointTimeTick uint64
 }
 
 // New creates the primary key index of a pchannel and registers it, so that
@@ -190,12 +64,12 @@ type IndexSpec struct {
 // The owner, the WAL recovery, opens the indexes of the vchannels with an
 // enabled primary key index with OpenIndex, recovers them, and then calls
 // Start.
-// It closes the PChannelIndexManager when the WAL closes.
+// It closes the pchannel when the WAL closes.
 //
-// After Close, New returns a closed PChannelIndexManager, see
-// PChannelIndexManager.Closed: OpenIndex on it fails.
-func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
-	c := newPChannelIndexManager(m, cfg)
+// After Close, New returns a closed PChannel: OpenIndex and RecoverIndexes
+// return an error that matches engine.ErrClosed.
+func (m *managerImpl) New(cfg PChannelConfig) PChannel {
+	c := newPChannel(m, cfg)
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {
 		c.Close()
 		return c
@@ -207,24 +81,8 @@ func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 	return c
 }
 
-// Root returns the local root directory of the indexes of the node.
-func (m *Manager) Root() string { return m.cfg.Root }
-
-// Committer returns the Committer of the node.
-func (m *Manager) Committer() manifest.Committer { return m.cfg.Committer }
-
-// Reader returns the reader of the manifest bodies of the node.
-func (m *Manager) Reader() manifest.ObjectReader { return m.cfg.Reader }
-
-// Scheduler returns the node scheduler that runs the tasks of the indexes.
-func (m *Manager) Scheduler() nodescheduler.Scheduler { return m.cfg.Sched }
-
-// Params reads the params now. The config field is a function that the
-// Manager calls on every use.
-func (m *Manager) Params() Params { return m.cfg.Params() }
-
-// forget removes a closed PChannelIndexManager from the Manager.
-func (m *Manager) forget(c *PChannelIndexManager) {
+// forget removes a closed pchannel from the Manager.
+func (m *managerImpl) forget(c *pchannel) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.channels[c.info.Name] == c {
@@ -232,13 +90,17 @@ func (m *Manager) forget(c *PChannelIndexManager) {
 	}
 }
 
-// Close closes every open PChannelIndexManager. It does not release ManagerConfig.Shared.
-func (m *Manager) Close() {
+// Close closes every open pchannel. It does not release ManagerConfig.Engine.
+func (m *managerImpl) Close() {
+	m.closeOnce.Do(m.close)
+}
+
+func (m *managerImpl) close() {
 	m.lifetime.SetState(typeutil.LifetimeStateStopped)
 	m.lifetime.Wait()
 
 	m.mu.Lock()
-	channels := make([]*PChannelIndexManager, 0, len(m.channels))
+	channels := make([]*pchannel, 0, len(m.channels))
 	for _, c := range m.channels {
 		channels = append(channels, c)
 	}
@@ -248,6 +110,4 @@ func (m *Manager) Close() {
 	}
 }
 
-// TableStore moves SST files between local disk and object storage. See
-// index.TableStore.
-type TableStore = index.TableStore
+var _ Manager = (*managerImpl)(nil)

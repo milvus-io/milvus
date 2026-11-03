@@ -64,7 +64,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	}
 	ch := param.InitialRecoverSnapshot.PKIndex
 	onFatal := onFatalOf(param)
-	reg := newRegistry(ch)
+	reg := newRegistry(ch, param.InitialRecoverSnapshot.PKIndexState)
 	// The WAL recovery opened the Index of every vchannel whose primary key
 	// index is enabled. The writes of those vchannels are decided.
 	// TODO: GetAllCollectionSchemaInfos skips a collection whose schema the
@@ -108,7 +108,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 // recovery applies them with the commit. A body that does not unmarshal, or
 // whose keys can not be read, ends the process, like a persisted body does
 // everywhere in the recovery.
-func restorePending(ctx context.Context, reg *registry, ch *indexmanager.PChannelIndexManager, buf *utility.TxnBuffer) error {
+func restorePending(ctx context.Context, reg *registry, ch indexmanager.PChannel, buf *utility.TxnBuffer) error {
 	for txnID, builder := range buf.GetUncommittedMessageBuilder() {
 		_, bodies := builder.Messages()
 		for _, body := range bodies {
@@ -116,12 +116,16 @@ func restorePending(ctx context.Context, reg *registry, ch *indexmanager.PChanne
 			if t == nil {
 				continue
 			}
-			a := ch.Decider(body.VChannel())
-			if a == nil {
+			idx, err := ch.IndexOf(body.VChannel())
+			if err != nil {
+				return err
+			}
+			if idx == nil {
 				continue
 			}
 			// The commit of the transaction encrypts its companion delete
 			// with the cipher config of its bodies.
+			a := idx.Decider()
 			t.rememberCipher(body)
 			switch body.MessageType() {
 			case message.MessageTypeInsert:

@@ -34,18 +34,18 @@ func TestWriteMarksTheIndexDirty(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	assert.False(t, idx.Dirty())
+	assert.False(t, idx.HandoverState().Dirty)
 
 	// a transaction body only records pending writes
 	body, err := idx.Decider().Decide(ctx, dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(1), TxnID: 7})
 	require.NoError(t, err)
 	body.Appended(3)
-	assert.False(t, idx.Dirty())
+	assert.False(t, idx.HandoverState().Dirty)
 	assert.False(t, inHeap(ch, idx))
 	assert.Equal(t, []int64{7}, dedup.PendingTxnIDsForTest(idx.Decider()))
 
 	insert(t, ch, idx, 4, 2)
-	assert.True(t, idx.DirtyForTest())
+	assert.True(t, index.DirtyForTest(idx))
 	assert.True(t, inHeap(ch, idx))
 
 	idx.Decider().DropEndedTxns(func(txnID int64) bool { return txnID == 7 })
@@ -85,18 +85,18 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 }
 
 // lastAckedRaw is LastAcked without the clamp.
-func (c *PChannelIndexManager) lastAckedRaw() uint64 {
+func (c *pchannel) lastAckedRaw() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastAckedLocked()
 }
 
 // bruteLastAcked computes the raw LastAcked over every Index.
-func bruteLastAcked(c *PChannelIndexManager) uint64 {
+func bruteLastAcked(c *pchannel) uint64 {
 	v := c.LastObserved()
 	for _, idx := range c.list() {
-		if idx.Dirty() && idx.LastCommittedTimeTick() < v {
-			v = idx.LastCommittedTimeTick()
+		if idx.HandoverState().Dirty && idx.HandoverState().LastCommittedTimeTick < v {
+			v = idx.HandoverState().LastCommittedTimeTick
 		}
 	}
 	return v
@@ -106,7 +106,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	vchannels := []string{"va", "vb", "vc", "vd"}
-	indexes := make([]*index.Index, 0, len(vchannels))
+	indexes := make([]index.Index, 0, len(vchannels))
 	for _, v := range vchannels {
 		indexes = append(indexes, env.add(ch, v))
 	}
@@ -125,7 +125,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			tt++
 			ch.ObserveTimeTick(tt, WALTailSnapshot{})
 		default:
-			if idx.Dirty() {
+			if idx.HandoverState().Dirty {
 				handover(t, idx)
 			}
 		}
@@ -138,7 +138,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 	assert.Empty(t, env.fatalList())
 }
 
-// TestLastAckedAfterClose: a closed PChannelIndexManager keeps the last value
+// TestLastAckedAfterClose: a closed pchannel keeps the last value
 // it returned. Only one that never had an Index reports +inf.
 func TestLastAckedAfterClose(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
@@ -148,7 +148,7 @@ func TestLastAckedAfterClose(t *testing.T) {
 	empty.Close()
 	assert.EqualValues(t, uint64(math.MaxUint64), empty.LastAcked(), "never had an Index")
 
-	// Close forgot the first PChannelIndexManager of the pchannel; a new one takes its place
+	// Close forgot the first pchannel of the pchannel; a new one takes its place
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
 	ch.ObserveTimeTick(10, WALTailSnapshot{})

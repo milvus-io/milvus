@@ -29,10 +29,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // fakeStorageRoot is the object storage root path of NewFakeEnv.
@@ -281,20 +283,29 @@ func (c *FakeCommitter) set(f func(c *FakeCommitter)) {
 type neverScheduler struct{}
 
 // Submit returns a handle whose task never runs.
-func (neverScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle { return neverHandle{} }
+func (neverScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle {
+	return &neverHandle{done: make(chan struct{})}
+}
 
-type neverHandle struct{}
+type neverHandle struct {
+	once sync.Once
+	done chan struct{}
+}
 
-func (neverHandle) Cancel() {}
+func (h *neverHandle) Cancel() { h.once.Do(func() { close(h.done) }) }
 
-func (neverHandle) Wait(ctx context.Context) error {
-	<-ctx.Done()
-	return ctx.Err()
+func (h *neverHandle) Wait(ctx context.Context) error {
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // FakeEnv is an index Manager over a real engine and the FakeCommitter it uses.
 type FakeEnv struct {
-	Manager   *Manager
+	Manager   Manager
 	Committer *FakeCommitter
 }
 
@@ -317,7 +328,7 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 	}
 	env.Manager = NewManager(ManagerConfig{
 		Root:            root,
-		Shared:          shared,
+		Engine:          shared,
 		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
 		Store:           index.NewFakeStore(),
 		StorageRootPath: fakeStorageRoot,
@@ -331,35 +342,40 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 }
 
 // NewManagerForTest creates the index Manager of NewFakeEnv.
-func NewManagerForTest(t *testing.T, root string) *Manager {
+func NewManagerForTest(t *testing.T, root string) Manager {
 	return NewFakeEnv(t, root).Manager
 }
 
 // IndexForTest returns the Index of a vchannel, nil when it does not exist.
-func (c *PChannelIndexManager) IndexForTest(vchannel string) *index.Index {
-	return c.get(vchannel)
+func IndexForTest(ch PChannel, vchannel string) index.Index {
+	return ch.(*pchannel).get(vchannel)
 }
 
 // RemoveForTest closes the Index of a vchannel and keeps its local files, as
 // a restart of the vchannel would.
-func (c *PChannelIndexManager) RemoveForTest(ctx context.Context, vchannel string) {
-	c.remove(ctx, vchannel)
+func RemoveForTest(ctx context.Context, ch PChannel, vchannel string) {
+	ch.(*pchannel).remove(ctx, vchannel)
 }
 
-// GetForTest returns the open PChannelIndexManager of a pchannel, nil when
+// GetForTest returns the open pchannel of a pchannel, nil when
 // none is open. Production code gets it from the recovery snapshot.
-func (m *Manager) GetForTest(pchannel string) *PChannelIndexManager {
+func GetForTest(mgr Manager, name string) PChannel {
+	m := mgr.(*managerImpl)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.channels[pchannel]
+	if ch := m.channels[name]; ch != nil {
+		return ch
+	}
+	return nil
 }
 
 // StoreForTest returns the table store of the Manager.
-func (m *Manager) StoreForTest() TableStore { return m.cfg.Store }
+func StoreForTest(m Manager) index.TableStore { return m.(*managerImpl).cfg.Store }
 
 // FlushTTForTest returns the time tick of the last flush that the observe
 // saw on a vchannel, 0 when it saw none or the vchannel has no Index.
-func (c *PChannelIndexManager) FlushTTForTest(vchannel string) uint64 {
+func FlushTTForTest(ch PChannel, vchannel string) uint64 {
+	c := ch.(*pchannel)
 	idx := c.get(vchannel)
 	if idx == nil {
 		return 0
@@ -368,11 +384,67 @@ func (c *PChannelIndexManager) FlushTTForTest(vchannel string) uint64 {
 }
 
 // SetCommitterForTest replaces the Committer of the Manager.
-func (m *Manager) SetCommitterForTest(c manifest.Committer) { m.cfg.Committer = c }
+func SetCommitterForTest(m Manager, value manifest.Committer) { m.(*managerImpl).cfg.Committer = value }
 
 // SetSchedForTest replaces the node scheduler of the Manager, which runs the
 // handovers and the installs.
-func (m *Manager) SetSchedForTest(s nodescheduler.Scheduler) { m.cfg.Sched = s }
+func SetSchedForTest(m Manager, value nodescheduler.Scheduler) { m.(*managerImpl).cfg.Sched = value }
 
 // SetReaderForTest replaces the manifest body reader of the Manager.
-func (m *Manager) SetReaderForTest(r manifest.ObjectReader) { m.cfg.Reader = r }
+func SetReaderForTest(m Manager, value manifest.ObjectReader) { m.(*managerImpl).cfg.Reader = value }
+
+// RootForTest returns the local root of the manager.
+func RootForTest(m Manager) string { return m.(*managerImpl).cfg.Root }
+
+// DeciderForTest returns the decider of a vchannel, or nil when none is open.
+func DeciderForTest(ch PChannel, name string) dedup.Decider {
+	idx := ch.(*pchannel).get(name)
+	if idx == nil {
+		return nil
+	}
+	return idx.Decider()
+}
+
+// SchedulerForTest returns the configured scheduler.
+func SchedulerForTest(m Manager) nodescheduler.Scheduler { return m.(*managerImpl).cfg.Sched }
+
+// dropIndexForTest performs both steps for tests of synchronous cleanup.
+func (c *pchannel) dropIndexForTest(ctx context.Context, name string, id int64) error {
+	if c.ctx.Err() != nil {
+		return errClosed("pchannel " + c.info.Name)
+	}
+	if drop := c.RemoveIndex(name, id); drop != nil {
+		return drop(ctx)
+	}
+	return nil
+}
+
+// CommitterForTest returns the configured committer.
+func CommitterForTest(m Manager) manifest.Committer { return m.(*managerImpl).cfg.Committer }
+
+// remove closes the Index of a vchannel. It waits for a running handover.
+// It keeps the local files, like Close does for every vchannel. Only the
+// tests call it, to replay the restart of one vchannel.
+func (c *pchannel) remove(ctx context.Context, vchannel string) {
+	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return
+	}
+	defer c.lifetime.Done()
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.closeIndex(ctx, vchannel)
+}
+
+// closeIndex detaches and closes the Index of a vchannel, if it is open. The
+// caller holds opMu.
+func (c *pchannel) closeIndex(ctx context.Context, vchannel string) {
+	c.mu.Lock()
+	idx, ok := c.indexes[vchannel]
+	if ok {
+		c.detachLocked(idx)
+	}
+	c.mu.Unlock()
+	if ok {
+		idx.Close(ctx)
+	}
+}

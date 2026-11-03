@@ -29,9 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
 
-// handoverIndex returns a ready Index of v0 on a PChannelIndexManager without
+// handoverIndex returns a ready Index of v0 on a pchannel without
 // the driver, so the tests call the steps of a handover directly.
-func handoverIndex(t *testing.T) (*testEnv, *PChannelIndexManager, *index.Index) {
+func handoverIndex(t *testing.T) (*testEnv, *pchannel, index.Index) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	return env, ch, env.add(ch, "v0")
@@ -47,7 +47,7 @@ func refIDs(refs []manifest.TableRef) []int64 {
 
 // presentIn reports whether the Decider of idx holds pk: in the engine or in
 // the in-flight set.
-func presentIn(t *testing.T, idx *index.Index, pk int64) bool {
+func presentIn(t *testing.T, idx index.Index, pk int64) bool {
 	t.Helper()
 	present, err := dedup.PresentForTest(context.Background(), idx.Decider(), dedup.Int64PK(pk))
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestTruncateUntilForgetsTheKeysBeforeTheTruncate(t *testing.T) {
 
 	require.NoError(t, ch.TruncateUntil(ctx, "v0", 5))
 	assert.False(t, presentIn(t, idx, 1), "the reset forgets the key before the truncate")
-	assert.Same(t, idx, ch.IndexOf("v0"), "the reset keeps the Index")
+	assert.Same(t, idx, IndexForTest(ch, "v0"), "the reset keeps the Index")
 
 	require.NoError(t, ch.Apply(ctx, "v0", index.Write{Puts: puts(8, 1), TimeTick: 6}))
 	assert.True(t, presentIn(t, idx, 1))
@@ -92,13 +92,13 @@ func TestTruncateUntilAtOrBeforeTheCommittedCheckpointDoesNothing(t *testing.T) 
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	require.NoError(t, ch.Apply(ctx, "v0", index.Write{Puts: puts(7, 1), TimeTick: 30}))
-	idx.SetLastCommittedForTest(20)
+	index.SetLastCommittedForTest(idx, 20)
 
 	dirtied, err := idx.TruncateUntil(ctx, 20)
 	require.NoError(t, err)
 	assert.False(t, dirtied)
 	assert.True(t, presentIn(t, idx, 1))
-	assert.Nil(t, idx.PendingForTest())
+	assert.Nil(t, index.PendingForTest(idx))
 }
 
 // TestHandoverCommitsATruncateWithoutNewWrites checks that a reset makes the
@@ -111,11 +111,11 @@ func TestHandoverCommitsATruncateWithoutNewWrites(t *testing.T) {
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	require.True(t, handover(t, idx))
 	require.NotEmpty(t, env.client.manifest("v0").Tables)
-	before := idx.LastCommittedTimeTick()
+	before := idx.HandoverState().LastCommittedTimeTick
 
 	require.NoError(t, ch.TruncateUntil(ctx, "v0", 15))
 	assert.Equal(t, before, ch.LastAcked(), "the reset holds LastAcked until it commits")
-	p, err := idx.PrepareForTest(ctx)
+	p, err := index.PrepareForTest(ctx, idx)
 	require.NoError(t, err)
 	assert.Nil(t, p, "the handover waits until the observe passes the truncate")
 
@@ -129,8 +129,8 @@ func TestHandoverCommitsATruncateWithoutNewWrites(t *testing.T) {
 	assert.Equal(t, uint64(20), reqs[1].CheckpointTimeTick)
 	m := env.client.manifest("v0")
 	assert.Empty(t, m.Tables, "the reset empties the manifest")
-	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
-	assert.Zero(t, idx.EngineForTest().Stats().CommittedTables)
+	assert.Equal(t, uint64(20), idx.HandoverState().LastCommittedTimeTick)
+	assert.Zero(t, index.EngineForTest(idx).Stats().CommittedTables)
 	assert.False(t, presentIn(t, idx, 1))
 	assert.Equal(t, uint64(20), ch.LastAcked())
 
@@ -167,10 +167,10 @@ func TestTruncateDuringACommitDropsItsResult(t *testing.T) {
 	<-done
 	env.client.set(func(c *FakeCommitter) { c.commitEntered, c.commitBlock = nil, nil })
 
-	assert.Zero(t, idx.LastCommittedTimeTick(), "the result of the flush before the reset is dropped")
-	assert.Zero(t, idx.EngineForTest().Stats().CommittedTables)
+	assert.Zero(t, idx.HandoverState().LastCommittedTimeTick, "the result of the flush before the reset is dropped")
+	assert.Zero(t, index.EngineForTest(idx).Stats().CommittedTables)
 	assert.False(t, presentIn(t, idx, 1))
-	assert.Nil(t, idx.PendingForTest())
+	assert.Nil(t, index.PendingForTest(idx))
 
 	ch.ObserveTimeTick(20, WALTailSnapshot{})
 	require.True(t, handover(t, idx))
@@ -178,7 +178,7 @@ func TestTruncateDuringACommitDropsItsResult(t *testing.T) {
 	require.Len(t, reqs, 2)
 	assert.Equal(t, uint64(15), reqs[1].ResetTimeTick)
 	assert.Empty(t, env.client.manifest("v0").Tables)
-	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(20), idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestTruncateBeforeTheCommitOfAPreparedHandoverSendsNothing checks a prepared
@@ -188,12 +188,12 @@ func TestTruncateBeforeTheCommitOfAPreparedHandoverSendsNothing(t *testing.T) {
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1)
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
-	p, err := idx.PrepareForTest(ctx)
+	p, err := index.PrepareForTest(ctx, idx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
 	require.NoError(t, ch.TruncateUntil(ctx, "v0", 15))
-	require.NoError(t, idx.CommitForTest(ctx, p))
+	require.NoError(t, index.CommitForTest(ctx, idx, p))
 	assert.Empty(t, env.client.requestList())
-	assert.Zero(t, idx.LastCommittedTimeTick())
+	assert.Zero(t, idx.HandoverState().LastCommittedTimeTick)
 }

@@ -38,12 +38,12 @@ func TestApplyOfADeleteBeforeTheInstallWritesEveryTombstone(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	ref := p.request.AddTables[0]
-	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
-	view := manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 50, Tables: []manifest.TableRef{ref}}
+	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)), p.local[ref.ID]))
+	view := manifest.View{Version: 1, SSTBasePath: idx.cfg.SSTBasePath, CheckpointTimeTick: 50, Tables: []manifest.TableRef{ref}}
 
 	// restart: empty engine, not ready, the delete of pk 1 is applied before the install
 	idx.reopen(t)
-	idx.SetCommitted(view)
+	idx.SetCommitted(&view)
 	_, err = idx.Apply(ctx, Write{Deletes: int64PKs(1), TimeTick: 60})
 	require.NoError(t, err)
 	require.NoError(t, idx.Install(ctx))
@@ -64,7 +64,7 @@ func TestInstallReconcilesTheCommittedDir(t *testing.T) {
 	partial := filepath.Join(dir, "5.sst.download-abc")
 	require.NoError(t, os.WriteFile(stale, []byte("x"), 0o600))
 	require.NoError(t, os.WriteFile(partial, []byte("x"), 0o600))
-	idx.SetCommitted(manifest.View{Version: 1, CheckpointTimeTick: 1})
+	idx.SetCommitted(&manifest.View{Version: 1, CheckpointTimeTick: 1})
 	require.NoError(t, idx.Install(ctx))
 	assert.NoFileExists(t, stale)
 	assert.NoFileExists(t, partial)
@@ -90,21 +90,21 @@ func TestInstallRetriesAfterAFailedDownload(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, p)
 		for _, ref := range p.request.AddTables {
-			require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+			require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)), p.local[ref.ID]))
 			if i == 0 || ref.ID != refs[0].ID {
 				refs = append(refs, ref)
 			}
 		}
 		if i == 0 {
-			require.NoError(t, idx.installIfNewer(ctx, manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: tt, Tables: refs}, p.local))
+			require.NoError(t, idx.installIfNewer(ctx, manifest.View{Version: 1, SSTBasePath: idx.cfg.SSTBasePath, CheckpointTimeTick: tt, Tables: refs}, p.local))
 		}
 	}
 	require.Len(t, refs, 2)
-	view := manifest.View{Version: 2, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 60, Tables: refs}
+	view := manifest.View{Version: 2, SSTBasePath: idx.cfg.SSTBasePath, CheckpointTimeTick: 60, Tables: refs}
 	dir := idx.committedDir
 
 	idx.reopen(t)
-	idx.SetCommitted(view)
+	idx.SetCommitted(&view)
 	for _, ref := range refs {
 		require.NoError(t, os.RemoveAll(committedPath(dir, ref.ID)))
 	}
@@ -121,4 +121,28 @@ func TestInstallRetriesAfterAFailedDownload(t *testing.T) {
 	}
 	require.NoError(t, idx.Install(ctx))
 	assert.True(t, idx.Ready())
+}
+
+// TestInstallAfterATruncateInstallsNothing checks that the install of the
+// manifest of the open does not bring back the tables before a reset.
+func TestInstallAfterATruncateInstallsNothing(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	idx.insert(t, 10, 1)
+	idx.observed.Store(10)
+	require.True(t, idx.handover(t))
+	m := idx.committer.manifest()
+	idx.reopen(t)
+
+	idx.SetCommitted(&m)
+	_, err := idx.TruncateUntil(ctx, 15)
+	require.NoError(t, err)
+	require.NoError(t, idx.Install(ctx))
+	assert.True(t, idx.Ready())
+	assert.Zero(t, idx.eng.Stats().CommittedTables)
+	assert.Zero(t, idx.segmentOf(t, 1))
+
+	// an install that read the manifest before the reset installs nothing either
+	require.NoError(t, idx.installIfNewer(ctx, m, nil))
+	assert.Zero(t, idx.eng.Stats().CommittedTables)
 }

@@ -53,6 +53,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -253,3 +254,8 @@ var (
 	// because it was never rotated or because it was already retired.
 	ErrNotFrozen = errors.New("generation is not frozen")
 )
+
+// Closed returns the closed error for a named primary key index resource.
+func Closed(what string) error {
+	return errors.Mark(errors.Wrapf(ErrClosed, "primary key index of %s is closed", what), pkroot.ErrUnavailable)
+}

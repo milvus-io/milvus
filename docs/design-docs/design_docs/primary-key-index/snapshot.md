@@ -19,7 +19,7 @@ future bound for WAL truncation.
 
 This document covers the handover, the coverage of a handover, `LastAcked`,
 the triggers and the failure handling. It also describes the structure
-(`Manager`, `PChannelIndexManager`, `Index`, `Decider`) that runs them.
+(`Manager`, `PChannel`, `Index`, `Decider`) that runs them.
 
 ## Motivation
 
@@ -36,93 +36,72 @@ problems stay:
 ## Components
 
 ```
-Manager                     one per streaming node: shared engine caches, config
- └─ PChannelIndexManager    one per pchannel: the member table, the handover driver,
-     │                      lastObserved, the triggers, LastAcked
-     └─ Index               one per vchannel: engine, Decider, lastCommittedTimeTick
-          │  └─ Decider     the write path decision over the engine (reads only)
-          ├─ Apply ◀── the observe of the WAL recovery, the only writer of the engine
-          └─ handover ── upload ──▶ object storage   (TableStore)
-                      ── commit ──▶ manifest service (Committer)
-                      ── install ─▶ engine           (InstallCommitted)
+server/pkindex/
+  indexmanager/  Manager and PChannel interfaces, setup, member table,
+                 manifest recovery, install tasks, handover driver, LastAcked
+  index/         Index interface, OpenConfig, engine ownership, Apply,
+                 TruncateUntil, committed-table installation and handover
+  recovery/      Recovery interface, RecoverConfig, WAL message translation
 
-packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/dedup  ──▶  pkindex/{codec, engine}
-           (Manager, PChannelIndexManager)   (Index, handover)      (Decider, WriteIntent)
+internal/pkindex/manifest/  View, TableRef, FlushArgs, Committer, ObjectReader,
+                           ReadBody, object paths and fatal-error sentinels
 ```
 
-- `internal/streamingnode/server/pkindex` is the pchannel level and above:
-  `Manager` opens a `PChannelIndexManager` per pchannel. The
-  `PChannelIndexManager` keeps the member table of its vchannels
-  (`OpenIndex`, `DetachIndex`, `DropIndex`, `ResetIndex`, `Decider(vchannel)`), takes the
-  writes and the TimeTicks from the observe of the WAL recovery (`Apply`,
-  `ObserveTimeTick`), evaluates the handover triggers at each TimeTick, drives
-  the handovers once the recovery started it (`Start`), and keeps
-  `lastObserved` and `LastAcked` (`lastacked.go`). The root package defines
-  `ManifestReader`, the part of the manifest service that the recovery of a
-  pchannel uses: `GetRecoveryManifests`.
-- `internal/streamingnode/server/pkindex/index` is the vchannel level: the
-  `Index` owns the engine of a vchannel and its `Decider`, and the handover
-  is a behavior of it: its two phases, Prepare and Commit, are methods of the
-  `Index`, and the pending request is a field of it. The package defines the
-  interfaces and types that the handover exchanges with object storage and
-  the manifest service: `TableStore`, `Committer` (only `CommitFlush`),
-  `ManifestView`, `FlushArgs`, `ErrFenced`, `ErrRejected`. The `Index` does
-  not import the pchannel level: `index.Config` carries what it needs from
-  it, and two callbacks (`LastObserved`, `OnRefresh`) that the
-  `PChannelIndexManager` points at its `lastObserved` and its `LastAcked`
-  heap. `Index.Apply` writes the change of one WAL message (`index.Write`:
-  the deletes, the puts each with its segment, and the time tick) into the
-  engine; it is the only engine write. Its order is the engine write, then
-  `Decider.Observe`, then the dirty mark. Neither package depends on the
-  WAL.
-- `internal/pkindex/dedup` holds the write path decision (`Decider`,
-  `WriteIntent`, the in-flight set that is also the key lock, and the pending
-  writes of transactions) over the `engine.RW` of a vchannel. It reads the
-  engine for its probes and never writes it. `Index.Apply` reports the
-  writes of the observe to it (`Observe`), which retires the entries of the
-  in-flight set, and `ObserveTimeTick` reports every observed TimeTick to
-  every index, also an idle one (`Observe` without keys), which removes the
-  in-doubt entries up to it. The `Index` owns one `Decider` and the
-  interceptor decides every write through `PChannelIndexManager.Decider(vchannel)`.
-  The package knows neither the `Index` nor the WAL.
-- `TableStore` has two methods, `UploadFile` and `DownloadFile`. The
-  handover defines this interface for its own use. It does not use the
-  object store interface of the manifest service.
-- The manifest service is used through two interfaces that the users define,
-  `ManifestReader` (the recovery of a pchannel) and `Committer` (the handover of a
-  vchannel); the root package's `Committer` is the union of the two, which the
-  one adapter of the streaming node implements. The index package imports
-  neither the manifest service, nor its client, nor its proto. The package
-  `internal/streamingnode/server/pkindex` imports only the proto, through two
-  narrow interfaces, `ManifestService` and `ObjectReader`. The shell package
-  `internal/streamingnode/server` imports the manifest service client and the
-  object store, which satisfy these interfaces, and injects them. The package
-  `internal/streamingnode/server/pkindex` does not import the client because
-  the client pulls in cgo, and the tests of the package must run without the
-  C++ build. See
-  [Committer](#committer).
+`Manager` owns the open pchannels of a streaming node. `PChannel` owns the
+vchannel indexes, their background tasks and the WAL checkpoint bound.
+`RecoverIndexes` opens existing indexes and reads their manifests before
+replay. `Start` submits pending installs and starts the handover driver.
+`OpenIndex` opens an index enabled after recovery. `IndexOf` distinguishes a
+missing index from a closed pchannel by returning an error for the latter.
+
+Each `Index` owns its engine, `Decider`, ready channel and handover state.
+`index.OpenConfig` supplies the local directory, SST prefix, shared engine
+resources and two callbacks: `LastObserved` and `OnRefresh`. The index does
+not import its manager or read WAL messages. `Apply` writes one
+`index.Write`, reports it to `Decider.Observe`, then marks the index dirty.
+`HandoverState` returns the fields the driver needs in one call.
+
+`RemoveIndex` detaches a matching index immediately and returns its close
+and directory cleanup. Recovery runs that closure outside its storage lock,
+before it observes the next message. `Close` of a pchannel runs once,
+cancels and waits for its install tasks, then closes its indexes. `Close` of
+an index removes its local directory if `Apply` or `TruncateUntil` recorded
+a corruption error.
+
+The write-path interceptor gets `PChannel` from `RecoverySnapshot.PKIndex`
+and reaches the decider through `IndexOf(...).Decider()`. Its vchannel-state
+callback comes directly from `RecoverySnapshot.PKIndexState`; the manager
+does not copy or interpret vchannel metadata. Message-to-key conversion
+shared with recovery is `dedup.PKsOf`.
+
+`manifest.Committer` is implemented by the DataCoord client. It carries both
+flush commits and recovery lookups. Manifest bodies are read through a
+separate `manifest.ObjectReader`; `manifest.ReadBody` decodes them. The
+shared manifest package also owns the object-path helpers and fatal-error
+sentinels. `TableStore` remains in `index` and moves SST files between local
+disk and object storage.
 
 ### Committer
 
-The index owns the types that it exchanges with the manifest service:
+The shared manifest package owns these data contracts:
 
 | Type | Fields |
 |---|---|
-| `ManifestView` | `Version`, `SSTBasePath`, `CheckpointTimeTick`, `Tables []TableRef` |
+| `manifest.View` | `Version`, `SSTBasePath`, `CheckpointTimeTick`, `Tables []TableRef` |
 | `TableRef` | the table info of the core library (`sst.Info`): `ID`, `TableFormat`, `Size`, `MinKey`, `MaxKey`, `NumEntries` |
 | `VChannelRef` | `CollectionID`, `IndexID`, `VChannel` |
 | `RecoveryManifest` | `Found bool`, `Version`, `BodyKey` (the object key of the manifest body), `Err` (the failure of this item) |
 | `FlushArgs` | `CollectionID`, `IndexID`, `VChannel`, `PChannelTerm`, `AddTables`, `CheckpointTimeTick`, `ResetTimeTick` (the time tick of a truncate that the flush commits, 0 when none) |
 
 ```go
-// package pkindex (pchannel level)
-type ManifestReader interface {
+// package manifest
+type Committer interface {
+    CommitFlush(ctx context.Context, args FlushArgs) (View, error)
     GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
 }
 
-// package index (vchannel level)
-type Committer interface {
-    CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error)
+type ObjectReader interface {
+    ReadObject(ctx context.Context, key string) ([]byte, error)
 }
 ```
 
@@ -143,14 +122,13 @@ change. A lookup carries no term, so it is never fenced.
 A `Committer` returns an error that matches one of two sentinels of the
 handover when a retry can not help:
 
-- `index.ErrFenced`: the pchannel is assigned to a higher term.
-- `index.ErrRejected`: the manifest service rejected the request for
+- `manifest.ErrFenced`: the pchannel is assigned to a higher term.
+- `manifest.ErrRejected`: the manifest service rejected the request for
   good. Examples are a bug of the caller, an invalid request, and a
   corrupted stored manifest.
 
 Every other error is retryable. The handover code does not look at merr
-codes. `NewManifestServiceCommitter` in the streaming node package
-(`internal/streamingnode/server/pkindex/manifest_service.go`) translates them:
+codes. The client in `internal/datacoord/pkindex/client` translates them:
 
 | Manifest service code | Handover error |
 |---|---|
@@ -168,23 +146,23 @@ service does not send it today.
 The same rule applies to the status of each entry of `GetRecoveryManifests`.
 A found entry whose pointer has no version or no body key is `ErrRejected`,
 and so is an answer whose entry count differs from the request.
-`ReadManifest` reads the body with `ObjectReader.ReadObject` (a missing
+`manifest.ReadBody` reads the body with `ObjectReader.ReadObject` (a missing
 object is `ErrCorrupted`, any other failure `ErrUnavailable`) and decodes the
 `Manifest` proto; a body that does not decode is `ErrCorrupted`. The caller
 checks that the body version equals the pointer version.
 
 The streaming node computes the SST base path of a vchannel itself, with
-`pkindex.SSTBasePath(rootPath, collectionID, indexID, vchannel)`:
+`manifest.SSTBasePath(rootPath, collectionID, indexID, vchannel)`:
 `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst`, where `rootPath` is
 `ChunkManager.RootPath()`. The handover uploads under the computed path. The
 manifest records its own `SSTBasePath`, and the install downloads with it.
 When the two differ, the commit is `ErrRejected`.
 
-`pkindex.SSTKey` builds the object key of a table:
-`<sst_base_path>/<id>.sst`. The file `internal/pkindex/objpath.go` builds
+`manifest.SSTKey` builds the object key of a table:
+`<sst_base_path>/<id>.sst`. The file `internal/pkindex/manifest/path.go` builds
 and parses all object keys of the primary key index. The manifest service and
 its garbage collection use the same functions, so both sides use one key
-format. `objpath.go` and the constant `common.PKIndexPath` are byte-identical to
+format. `manifest/path.go` and the constant `common.PKIndexPath` are byte-identical to
 the copies in the manifest service change. The change that merges second
 drops its copy at the rebase.
 
@@ -200,7 +178,7 @@ The pkindex interceptor is a thin shell. It translates WAL events into calls on
 the primary key index:
 
 - Before the downstream append, the interceptor calls
-  `PChannelIndexManager.Decider(vchannel).Decide`. `Decide` returns a
+  `Index.Decider().Decide`. `Decide` returns a
   `WriteIntent`. A vchannel without an index (it closed between the lookup of
   the target and the call) gives the on-shutdown error of the streaming node.
 - After the append, the interceptor calls `WriteIntent.Appended`,
@@ -208,7 +186,7 @@ the primary key index:
   `Index` dirty: the observe does, when it applies the message.
 - The observe of the WAL recovery storage applies every persisted message to
   the index: it translates the message into an `index.Write` and calls
-  `PChannelIndexManager.Apply(vchannel, write)`, in time tick order, one
+  `PChannel.Apply(vchannel, write)`, in time tick order, one
   message at a time, for the replay and for the live stream alike. At every
   persisted TimeTick it calls `ObserveTimeTick(tt, tail)` with the WAL tail
   of the recovery storage. When it sees a ManualFlush or a FlushAll, it calls
@@ -243,15 +221,11 @@ the primary key index:
   enables the index through the observe. A schema that the index rejects at
   the WAL open is a broken invariant for an existing index, and it panics. `Close` of the
   interceptor does not close the index.
-- `PChannelIndexManager.DropIndex(vchannel, indexID)` closes the `Index` and
-  removes its local directory `<root>/<vchannel>/<indexID>/`. Index ID 0
-  matches any `Index` and removes `<root>/<vchannel>/`: the drop of the
-  collection. Index IDs are not reused, so no later open of the same index ID
-  would remove the files. At a DropIndex or a DropCollection the interceptor
-  only forgets the vchannel. The observe of the WAL recovery detaches the
-  `Index` when it reaches the drop, after the writes before it, and closes it
-  in a task (see [recovery](recovery.md#observe)). A failed removal is only
-  logged.
+- `PChannel.RemoveIndex(vchannel, indexID)` detaches the matching index and
+  returns a closure that closes it and removes `<root>/<vchannel>/<indexID>/`.
+  Index ID 0 matches any index and removes `<root>/<vchannel>/`. A later
+  index uses a different ID and directory. The interceptor only forgets its
+  target; recovery runs the close after releasing the storage lock.
 
 ### Wiring into the streaming node
 
@@ -261,14 +235,11 @@ directory, the chunk manager as the `TableStore`, the node ID allocator and
 the node scheduler. The WAL interceptors get the `Manager` as a streaming
 node resource.
 
-The `Manager` also gets the `Committer`. The streaming node builds the
-manifest service client over its etcd client (`client.NewClient`) and the
-object store over the chunk manager (`objstore.New`), passes both to
-`NewManifestServiceCommitter`, and gives the result to `NewManager`. The
-object store is also the `TableStore`. Two compile-time assertions in
-`internal/streamingnode/server/pkindex.go` check that the client satisfies
-`ManifestService` and that `*objstore.Store` satisfies `ObjectReader`. At
-stop, the streaming node closes the `Manager`, then the manifest service
+`indexmanager.Setup` builds the object store and shared engine caches. The
+streaming node supplies a factory that creates the DataCoord client, which
+implements `manifest.Committer`, and a function that allocates SST IDs.
+The object store implements both `index.TableStore` and
+`manifest.ObjectReader`. The returned cleanup closes the manager, then the
 client, then the shared caches. The switch is false by default.
 
 The interceptor does not read `streaming.pkindex.enabled`. It uses the index
@@ -323,7 +294,7 @@ Commit (a retry sends the same pending request):
                    lastCommittedTimeTick = covered, clear the pending request
 ```
 
-A truncate of the collection resets the `Index` in place (`Index.Reset`,
+A truncate of the collection resets the `Index` in place (`Index.TruncateUntil`,
 [lifecycle](lifecycle.md#truncate-reset-the-index-in-place)). The reset sets
 `resetTT`, increments a reset epoch under the install lock, and asks for a
 handover that covers `resetTT`. The flush of that handover carries
@@ -450,7 +421,7 @@ version check runs again under the lock.
 ### Readiness
 
 An `Index` is ready when the committed table set of its vchannel is
-installed. `Index.Ready` reports it, and `Index.MarkReady` sets it once.
+installed. `Index.Ready` reports it, and `SetCommitted(nil)` or a completed `Install` sets it once.
 Until then the writes of the vchannel wait for it and the `Index` does not
 hand over.
 
@@ -461,9 +432,9 @@ Who marks an `Index` ready:
   items), and then marks an `Index` without a manifest ready right away, and
   an `Index` with a manifest after it downloaded and installed the committed
   set. It replays the WAL from the checkpoints and calls
-  `PChannelIndexManager.Start` when it is done. The recovery is a later
-  change; this change has no caller of `MarkReady` outside the tests.
-- The `PChannelIndexManager`, for an index enabled after `Start`. It has a
+  `PChannel.Start` when it is done. The recovery is the
+  module described in [recovery](recovery.md).
+- The `PChannel`, for an index enabled after `Start`. It has a
   new index ID, so no manifest can exist for it, and `OpenIndex` marks it
   ready at once. An index enabled before `Start` waits for the recovery.
 
@@ -492,7 +463,7 @@ empty; the recovery brings the committed set back.
 
 While an `Index` is not ready, its engine misses the committed records, so
 its `Decider` can not decide exactly. `dedup.Config.Ready` is the ready
-channel of the `Index`: until `MarkReady` closes it, `Decide` returns a
+channel of the `Index`: until the ready transition closes it, `Decide` returns a
 `*dedup.WaitError`, and the redo interceptor waits for the channel outside the
 WAL lock. The observe still applies the WAL to the engine meanwhile, so the
 `Index` is complete after the install. The alternative, a degraded decision
@@ -523,7 +494,7 @@ assembled transaction at the time tick of its commit, and `Index.Apply` writes
 the change of a message before the observe moves on. So when the observe sees
 a persisted TimeTick T, every change with tt ≤ T is in the engine.
 
-`lastObserved` is that T: an atomic value of the `PChannelIndexManager` that
+`lastObserved` is that T: an atomic value of the `PChannel` that
 only `ObserveTimeTick` moves, at a persisted TimeTick or the recovery barrier.
 Its seed is the time tick of the global checkpoint of the pchannel, where the
 observe starts. The order matters: the observe writes the engine first, then
@@ -566,7 +537,7 @@ a rotate outside the observe.
 
 ### Per-pchannel position
 
-TimeTick messages are per pchannel, so `PChannelIndexManager` keeps one
+TimeTick messages are per pchannel, so `PChannel` keeps one
 `lastObserved` for all its vchannels. A per-vchannel value would need a walk
 over all vchannels on every TimeTick. The shared value is never above the
 true value of any vchannel, so it is only more conservative.
@@ -588,14 +559,14 @@ generations, or a pending request.
   every write the observe applied to it is committed. WAL summary uses the
   same rule.
 - A min-heap keyed by `lastCommittedTimeTick` holds the dirty indexes.
-  `PChannelIndexManager.Apply` adds an `Index` when `Index.Apply` reports its
-  first write since a rotate. The end of each handover and `MarkReady` update
+  `PChannel.Apply` adds an `Index` when `Index.Apply` reports its
+  first write since a rotate. The end of each handover and the ready transition update
   or remove it. A pchannel with many vchannels does not compute a full minimum on
   each call.
 - After `Close`, the value is the last one returned before: the indexes are
   detached, but their uncommitted writes are not committed by that. Only a
   pchannel that never had an `Index` reports +inf.
-- The value is monotonic. `PChannelIndexManager` keeps the largest value that
+- The value is monotonic. `PChannel` keeps the largest value that
   it returned and never returns less. The clamp never reports too much: every
   returned value is at most the `lastObserved` of that time, and the observe
   adds an `Index` to the heap inside `Apply`, before it moves `lastObserved`
@@ -689,16 +660,16 @@ reach 64 MiB and hand over through triggers 2 and 4.
 | Case | Handling |
 |---|---|
 | Retryable upload, download or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A manifest lookup uses `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
-| Fenced (`index.ErrFenced`) on a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
+| Fenced (`manifest.ErrFenced`) on a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkindex.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkindex.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
-| Rejected commit (`index.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, a term that is not the assigned term, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
+| Rejected commit (`manifest.ErrRejected`: duplicate table, schema mismatch, regressed checkpoint, a term that is not the assigned term, an invalid request, a corrupted stored manifest), a returned manifest that does not have the flush in effect, or a manifest with another SST base path | `OnFatal` marks the WAL unavailable. There is no retry: the same request fails the same way again. A retry without a limit would only hold `LastAcked` back until the WAL rejects DML. |
 | Missing object on download | `DownloadFile` marks it as corrupted. A manifest lists the table, so a retry can not clear it. |
 | Local disk error when the index of an existing collection opens at WAL open | `OnFatal` marks the WAL unavailable. The streaming node and its other WALs keep running. |
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
 
 - `isFatal` checks only `ErrFenced`, `ErrRejected` and
-  `pkindex.ErrCorrupted`. `NewManifestServiceCommitter` maps the merr codes
+  `pkindex.ErrCorrupted`. The DataCoord client maps the merr codes
   of the manifest service to the sentinels (see [Committer](#committer)).
   The mapping relies on the manifest service to return a retryable code
   such as `ServiceUnavailable` for every transient failure. A transient
@@ -802,7 +773,7 @@ Common patterns:
   this change, so the interceptor passes the messages through. Until the
   recovery exists, an index after a restart starts empty and is never marked
   ready (see [Readiness](#readiness)).
-- **`LastAcked` for WAL truncation.** `PChannelIndexManager.LastAcked` exists, but the WAL
+- **`LastAcked` for WAL truncation.** `PChannel.LastAcked` exists, but the WAL
   recovery storage does not use it. It goes in with recovery, because the
   bound only matters with replay.
 - **Compaction and the view sync after it.** Nothing merges committed tables.
@@ -833,7 +804,7 @@ Unit tests cover these cases:
 - Apply: a write at or below the committed checkpoint is skipped; the
   deletes of a message are written before its puts, so a key in both is
   present; a delete writes a tombstone for a key the index never saw; the
-  first write since a rotate reports dirty and `PChannelIndexManager.Apply`
+  first write since a rotate reports dirty and `PChannel.Apply`
   puts the `Index` into the `LastAcked` heap.
 - Coverage: the observe never rotates, only the driver does; the covered
   time tick of a rotate is the `lastObserved` read before it, and a write
@@ -850,7 +821,7 @@ Unit tests cover these cases:
   another SST base path, is rejected, and the generations stay.
 - Install: a missing table is downloaded, and a missing object is fatal.
 - Readiness: an `Index` created before `Start` is not ready, makes its
-  writes wait, holds `LastAcked` back while dirty, and does not hand over; `MarkReady`
+  writes wait, holds `LastAcked` back while dirty, and does not hand over; the ready transition
   makes it a candidate; a collection created after `Start` is ready at once.
   A ready `Index` uploads under the SST base path that it computes and
   creates the manifest at version 1 with its first handover. An open with
@@ -864,7 +835,7 @@ Unit tests cover these cases:
   per-entry status of `GetRecoveryManifests`, a found entry without a
   version or a body key, a wrong entry count, and a manifest body that is
   missing or does not decode.
-- Object key: `pkindex.SSTKey` gives `<sst_base_path>/<id>.sst`.
+- Object key: `manifest.SSTKey` gives `<sst_base_path>/<id>.sst`.
 - Duplicate open: an `OpenIndex` of an `Index` that exists reports that it
   opened nothing. An `OpenIndex` of another index ID on the same vchannel
   fails.
@@ -874,7 +845,7 @@ Unit tests cover these cases:
 - Reset: a reset forgets the keys before the truncate and keeps the in-flight
   writes after it. A handover commits a reset without new writes. A reset
   during a commit drops its result, a reset before the commit of a prepared
-  handover sends nothing, and an install after a reset installs nothing. A drop on a closed `PChannelIndexManager` fails and keeps the files.
+  handover sends nothing, and an install after a reset installs nothing. A drop on a closed `PChannel` fails and keeps the files.
 - WAL open: a local disk error goes to `OnFatal` and does not panic. An
   existing collection with an unsupported primary key type panics.
 - Table store: remote failures are `ErrUnavailable`, local disk failures
@@ -891,7 +862,7 @@ Unit tests cover these cases:
   wake the driver for a pending `Index` in backoff. A stall pick restarts
   the stall clock.
 - `LastAcked`: idle vchannels do not hold it back, the heap minimum equals a
-  full minimum, and a closed `PChannelIndexManager` keeps its last value.
+  full minimum, and a closed `PChannel` keeps its last value.
 - `Apply` on a dropped `Index`: a write that finds the `Index` closed after a
   DropCollection is ignored; one on a closed `Index` that is still attached
   reports the closed engine.

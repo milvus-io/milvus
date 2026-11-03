@@ -36,8 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
+	vch "github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -239,14 +240,14 @@ func dropIndexMsg(vchannel string, collectionID int64, indexIDs []int64, tt uint
 // vchannel module observes the message before the index does.
 type fakeStates struct {
 	mu     sync.Mutex
-	states map[string]indexmanager.VChannelState
+	states map[string]vch.PKIndexState
 }
 
 func newFakeStates() *fakeStates {
-	return &fakeStates{states: make(map[string]indexmanager.VChannelState)}
+	return &fakeStates{states: make(map[string]vch.PKIndexState)}
 }
 
-func (s *fakeStates) get(vchannel string) (indexmanager.VChannelState, bool) {
+func (s *fakeStates) get(vchannel string) (vch.PKIndexState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, ok := s.states[vchannel]
@@ -266,7 +267,7 @@ func (s *fakeStates) written(vchannel string) {
 func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHistory, pk *streamingpb.PKIndexOfVChannel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.states[vchannel] = indexmanager.VChannelState{
+	s.states[vchannel] = vch.PKIndexState{
 		EverWritten: history,
 		PKIndex:     pk,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -277,12 +278,12 @@ func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHisto
 
 // recoverWithStates recovers the pchannel p over metas with the vchannel
 // states of states.
-func recoverWithStates(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) *Recovery {
+func recoverWithStates(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) Recovery {
 	ctx := context.Background()
-	env.Manager.SetSchedForTest(sched)
+	indexmanager.SetSchedForTest(env.Manager, sched)
 	rec, err := Recover(ctx, env.Manager, RecoverConfig{
-		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, VChannelState: states.get},
-		Metas:          metas,
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10}, PKIndexState: states.get,
+		Metas: metas,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
@@ -319,7 +320,7 @@ func withReplicate(msg message.MutableMessage, tt uint64) message.ImmutableMessa
 
 // present returns the keys of pks that the index of idx holds. The Index must
 // be ready, else every key counts as present.
-func present(t *testing.T, idx *index.Index, pks ...int64) []dedup.PK {
+func present(t *testing.T, idx index.Index, pks ...int64) []dedup.PK {
 	keys := make([]dedup.PK, 0, len(pks))
 	for _, pk := range pks {
 		keys = append(keys, dedup.Int64PK(pk))
@@ -327,7 +328,7 @@ func present(t *testing.T, idx *index.Index, pks ...int64) []dedup.PK {
 	return presentPKs(t, idx, keys)
 }
 
-func presentPKs(t *testing.T, idx *index.Index, keys []dedup.PK) []dedup.PK {
+func presentPKs(t *testing.T, idx index.Index, keys []dedup.PK) []dedup.PK {
 	ctx := context.Background()
 	require.True(t, idx.Ready())
 	g, err := idx.Decider().Decide(ctx, dedup.DecideRequest{Kind: dedup.KindInsert, PKs: keys})
@@ -338,8 +339,8 @@ func presentPKs(t *testing.T, idx *index.Index, keys []dedup.PK) []dedup.PK {
 
 // segmentOf returns the segment of pk in the engine of idx, 0 when the
 // engine has no record or a tombstone of pk.
-func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
-	vs, err := idx.EngineForTest().MultiGet(context.Background(), [][]byte{dedup.Int64PK(pk).Encode()})
+func segmentOf(t *testing.T, idx index.Index, pk int64) int64 {
+	vs, err := index.EngineForTest(idx).MultiGet(context.Background(), [][]byte{dedup.Int64PK(pk).Encode()})
 	require.NoError(t, err)
 	if vs[0] == nil || codec.IsTombstone(vs[0]) {
 		return 0
@@ -349,9 +350,9 @@ func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
 	return e.SegmentID
 }
 
-func recoverV1(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler) *Recovery {
+func recoverV1(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler) Recovery {
 	ctx := context.Background()
-	env.Manager.SetSchedForTest(sched)
+	indexmanager.SetSchedForTest(env.Manager, sched)
 	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
@@ -364,7 +365,7 @@ func recoverV1(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Sche
 func TestObserveReplaysLikeTheAppendPath(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1, 2, 3))
 	rec.ObserveMessage(ctx, deleteMsg("v1", 12, 2))
@@ -375,13 +376,13 @@ func TestObserveReplaysLikeTheAppendPath(t *testing.T) {
 	rec.ObserveMessage(ctx, timeTickMsg(15))
 	require.NoError(t, rec.Run(ctx))
 
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	assert.Equal(t, []dedup.PK{dedup.Int64PK(3), dedup.Int64PK(4)}, present(t, idx, 1, 2, 3, 4))
 	assert.Equal(t, int64(0), segmentOf(t, idx, 1))
 	assert.Equal(t, int64(0), segmentOf(t, idx, 2))
 	assert.Equal(t, int64(8), segmentOf(t, idx, 3), "the insert of the transaction replaces the segment")
 	assert.Equal(t, int64(9), segmentOf(t, idx, 4))
-	assert.Equal(t, uint64(15), idx.LastObservedForTest())
+	assert.Equal(t, uint64(15), index.LastObservedForTest(idx))
 }
 
 func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
@@ -397,7 +398,7 @@ func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 	rec.ObserveMessage(ctx, at(newVarCharInsert("v1", 7, "a", "b"), 11))
 	require.NoError(t, rec.Run(ctx))
 
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	keys := []dedup.PK{dedup.VarCharPK("a"), dedup.VarCharPK("b"), dedup.VarCharPK("c")}
 	assert.Equal(t, keys[:2], presentPKs(t, idx, keys))
 }
@@ -410,25 +411,25 @@ func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex.CheckpointTimeTick = 11 // the vchannel meta was persisted after the CreateIndex
 	states.enable("v1", testIndexIDOf(1), 11)
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
-	m := env.Manager.GetForTest("p")
-	idx := m.IndexForTest("v1")
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
+	m := indexmanager.GetForTest(env.Manager, "p")
+	idx := indexmanager.IndexForTest(m, "v1")
 	require.False(t, idx.Ready())
 
 	rec.ObserveMessage(ctx, createCollectionMsg("v1", 1, 9))
 	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, testIndexIDOf(1), 11))
-	assert.Same(t, idx, m.IndexForTest("v1"))
+	assert.Same(t, idx, indexmanager.IndexForTest(m, "v1"))
 	assert.False(t, idx.Ready(), "the index waits for its install")
-	rec.mu.Lock()
-	targets := len(rec.targets)
-	rec.mu.Unlock()
+	rec.(*recovery).mu.Lock()
+	targets := len(rec.(*recovery).targets)
+	rec.(*recovery).mu.Unlock()
 	assert.Equal(t, 1, targets)
 }
 
 func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	control := "p_" + funcutil.ControlChannelSuffix
 
 	rec.ObserveMessage(ctx, withReplicate(newInsert("v1", 7, 1), 11))
@@ -437,23 +438,23 @@ func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T)
 	rec.ObserveMessage(ctx, dropCollectionMsg(control, 2, 14))
 	require.NoError(t, rec.Run(ctx))
 
-	m := env.Manager.GetForTest("p")
-	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, m.IndexForTest("v1"), 1), "the index of a secondary cluster follows its WAL")
-	assert.Nil(t, m.IndexForTest(control))
+	m := indexmanager.GetForTest(env.Manager, "p")
+	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, indexmanager.IndexForTest(m, "v1"), 1), "the index of a secondary cluster follows its WAL")
+	assert.Nil(t, indexmanager.IndexForTest(m, control))
 }
 
 func TestObserveCreatesAndDropsCollections(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
-	m := env.Manager.GetForTest("p")
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, nil)
+	m := indexmanager.GetForTest(env.Manager, "p")
 
 	rec.ObserveMessage(ctx, createCollectionMsg("v2", 2, 11))
-	assert.Nil(t, m.IndexForTest("v2"), "a collection gets its index at the CreateIndex")
+	assert.Nil(t, indexmanager.IndexForTest(m, "v2"), "a collection gets its index at the CreateIndex")
 	states.enable("v2", 22, 12)
 	rec.ObserveMessage(ctx, createIndexMsg("v2", 2, 22, 12))
-	idx := m.IndexForTest("v2")
+	idx := indexmanager.IndexForTest(m, "v2")
 	require.NotNil(t, idx)
 	assert.EqualValues(t, 22, idx.IndexID())
 	assert.True(t, idx.Ready(), "an index enabled in this term has no manifest")
@@ -462,10 +463,10 @@ func TestObserveCreatesAndDropsCollections(t *testing.T) {
 
 	after := rec.ObserveMessage(ctx, dropCollectionMsg("v2", 2, 14))
 	require.NotNil(t, after)
-	assert.Nil(t, m.IndexForTest("v2"), "the drop detaches the index at once")
-	assert.DirExists(t, index.VChannelDir(env.Manager.Root(), "v2"), "the caller closes the index after the observe")
+	assert.Nil(t, indexmanager.IndexForTest(m, "v2"), "the drop detaches the index at once")
+	assert.DirExists(t, index.VChannelDir(indexmanager.RootForTest(env.Manager), "v2"), "the caller closes the index after the observe")
 	after(ctx)
-	assert.NoDirExists(t, index.VChannelDir(env.Manager.Root(), "v2"))
+	assert.NoDirExists(t, index.VChannelDir(indexmanager.RootForTest(env.Manager), "v2"))
 	assert.Nil(t, rec.ObserveMessage(ctx, dropCollectionMsg("v3", 3, 15)), "never seen: nothing happens")
 	assert.Nil(t, rec.ObserveMessage(ctx, insertMsg("v2", 16, 7, 1)), "dropped: nothing happens")
 	require.NoError(t, rec.Run(ctx))
@@ -487,8 +488,8 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
 	require.NoError(t, rec.Run(ctx))
-	m := env.Manager.GetForTest("p")
-	idx := m.IndexForTest("v1")
+	m := indexmanager.GetForTest(env.Manager, "p")
+	idx := indexmanager.IndexForTest(m, "v1")
 
 	// the interceptor appended the insert and then the drop; the observe sees
 	// the insert first and the index is still open
@@ -497,7 +498,7 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 	after := rec.ObserveMessage(ctx, dropCollectionMsg("v1", 1, 12))
 	require.NotNil(t, after)
 	after(ctx)
-	assert.Nil(t, m.IndexForTest("v1"))
+	assert.Nil(t, indexmanager.IndexForTest(m, "v1"))
 	rec.ObserveMessage(ctx, insertMsg("v1", 13, 7, 2)) // after the drop: skipped
 	rec.ObserveMessage(ctx, timeTickMsg(14))
 	assert.Empty(t, fatals)
@@ -511,9 +512,9 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 func TestObserveAppliesATransactionInOneBatch(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	require.NoError(t, rec.Run(ctx))
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	a := idx.Decider()
 
 	// the interceptor decided the transaction: pk 1 is deleted, pk 2 is inserted, both in flight at 12
@@ -529,7 +530,7 @@ func TestObserveAppliesATransactionInOneBatch(t *testing.T) {
 	require.Equal(t, 2, dedup.InflightLenForTest(a))
 
 	batches := 0
-	idx.OnWriteForTest(func(muts []engine.Mutation) {
+	index.OnWriteForTest(idx, func(muts []engine.Mutation) {
 		batches++
 		assert.Equal(t, 2, dedup.InflightLenForTest(a), "no entry leaves the set before the batch is written")
 		require.Len(t, muts, 2)
@@ -546,8 +547,8 @@ func TestObserveAppliesATransactionInOneBatch(t *testing.T) {
 func TestObserveKeepsTheFirstErrorAndRunReturnsIt(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
-	require.NoError(t, env.Manager.GetForTest("p").IndexForTest("v1").EngineForTest().Close())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
+	require.NoError(t, index.EngineForTest(indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")).Close())
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	rec.ObserveMessage(ctx, insertMsg("v1", 12, 7, 2)) // after the first error: ignored
@@ -555,7 +556,7 @@ func TestObserveKeepsTheFirstErrorAndRunReturnsIt(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, engine.ErrClosed), "got %v", err)
 	rec.ObserveMessage(ctx, timeTickMsg(13))
-	assert.Equal(t, uint64(10), env.Manager.GetForTest("p").LastAcked(), "nothing moves after the error")
+	assert.Equal(t, uint64(10), indexmanager.GetForTest(env.Manager, "p").LastAcked(), "nothing moves after the error")
 }
 
 // TestObserveAppliesBeforeAndAfterRun checks that the replay before the
@@ -563,16 +564,16 @@ func TestObserveKeepsTheFirstErrorAndRunReturnsIt(t *testing.T) {
 func TestObserveAppliesBeforeAndAfterRun(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	require.NoError(t, rec.Run(ctx))
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 12, 8, 2))
 	rec.ObserveMessage(ctx, timeTickMsg(13))
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	assert.Equal(t, int64(7), segmentOf(t, idx, 1))
 	assert.Equal(t, int64(8), segmentOf(t, idx, 2), "the live message is applied by the same observe")
-	assert.Equal(t, uint64(13), idx.LastObservedForTest())
+	assert.Equal(t, uint64(13), index.LastObservedForTest(idx))
 }
 
 // TestObserveAppliesTheDeleteOfATransactionBeforeItsPut checks the apply
@@ -581,13 +582,13 @@ func TestObserveAppliesBeforeAndAfterRun(t *testing.T) {
 func TestObserveAppliesTheDeleteOfATransactionBeforeItsPut(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	rec.ObserveMessage(ctx, txnMsg(t, "v1", 12, 100, newInsert("v1", 8, 1), newDelete("v1", 1)))
 	rec.ObserveMessage(ctx, txnMsg(t, "v1", 13, 101, newInsert("v1", 9, 2), newInsert("v1", 10, 3), newDelete("v1", 2, 3)))
 	require.NoError(t, rec.Run(ctx))
 
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	assert.Equal(t, int64(8), segmentOf(t, idx, 1), "the put of the transaction survives its delete")
 	assert.Equal(t, int64(9), segmentOf(t, idx, 2), "each insert keeps its own segment")
 	assert.Equal(t, int64(10), segmentOf(t, idx, 3))
@@ -599,9 +600,9 @@ func TestObserveAppliesTheDeleteOfATransactionBeforeItsPut(t *testing.T) {
 func TestObserveRetiresTheInFlightEntriesOfTheWrite(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	require.NoError(t, rec.Run(ctx))
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 	a := idx.Decider()
 
 	// the interceptor decided two writes and the WAL accepted them at 11 and 12
@@ -627,16 +628,16 @@ func TestObserveRetiresTheInFlightEntriesOfTheWrite(t *testing.T) {
 func TestObserveWritesTheEngineBeforeItMovesTheObservedTimeTick(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	require.NoError(t, rec.Run(ctx))
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
-	assert.Equal(t, uint64(10), idx.LastObservedForTest(), "a write does not move the observed time tick")
+	assert.Equal(t, uint64(10), index.LastObservedForTest(idx), "a write does not move the observed time tick")
 	assert.Equal(t, int64(7), segmentOf(t, idx, 1), "but it is in the engine")
 	rec.ObserveMessage(ctx, timeTickMsg(12))
-	assert.Equal(t, uint64(12), idx.LastObservedForTest())
-	p, err := idx.PrepareForTest(ctx)
+	assert.Equal(t, uint64(12), index.LastObservedForTest(idx))
+	p, err := index.PrepareForTest(ctx, idx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	assert.Equal(t, uint64(12), p.Covered(), "the handover covers the observed time tick it read before the rotate")
@@ -650,21 +651,21 @@ func TestObserveFlushRequestsACoveringHandover(t *testing.T) {
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	states.enable("v2", 22, 11)
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)})
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)})
 	rec.ObserveMessage(ctx, createIndexMsg("v2", 2, 22, 11))
 	require.NoError(t, rec.Run(ctx))
-	m := env.Manager.GetForTest("p")
+	m := indexmanager.GetForTest(env.Manager, "p")
 
 	rec.ObserveMessage(ctx, manualFlushMsg("v1", 12))
-	assert.Equal(t, uint64(12), m.FlushTTForTest("v1"))
-	assert.Zero(t, m.FlushTTForTest("v2"))
+	assert.Equal(t, uint64(12), indexmanager.FlushTTForTest(m, "v1"))
+	assert.Zero(t, indexmanager.FlushTTForTest(m, "v2"))
 	rec.ObserveMessage(ctx, flushAllMsg("p", 13))
-	assert.Equal(t, uint64(13), m.FlushTTForTest("v1"))
-	assert.Equal(t, uint64(13), m.FlushTTForTest("v2"))
+	assert.Equal(t, uint64(13), indexmanager.FlushTTForTest(m, "v1"))
+	assert.Equal(t, uint64(13), indexmanager.FlushTTForTest(m, "v2"))
 }
 
 // recoverV1WithFatal is recoverV1 with an OnFatal handler.
-func recoverV1WithFatal(t *testing.T, env *indexmanager.FakeEnv, onFatal func(error)) *Recovery {
+func recoverV1WithFatal(t *testing.T, env *indexmanager.FakeEnv, onFatal func(error)) Recovery {
 	ctx := context.Background()
 	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: onFatal},
@@ -684,8 +685,8 @@ func TestObserveStopsOnAClosedIndexAndKeepsTheObservedTimeTick(t *testing.T) {
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
-	m := env.Manager.GetForTest("p")
-	require.NoError(t, m.IndexForTest("v1").EngineForTest().Close())
+	m := indexmanager.GetForTest(env.Manager, "p")
+	require.NoError(t, index.EngineForTest(indexmanager.IndexForTest(m, "v1")).Close())
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	rec.ObserveMessage(ctx, timeTickMsg(12))
@@ -702,18 +703,18 @@ func TestObserveCallsOnFatalOnAnEngineError(t *testing.T) {
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
-	m := env.Manager.GetForTest("p")
-	idx := m.IndexForTest("v1")
+	m := indexmanager.GetForTest(env.Manager, "p")
+	idx := indexmanager.IndexForTest(m, "v1")
 	counter := metrics.StreamingNodePKIndexFatalTotal.WithLabelValues(paramtable.GetStringNodeID(), "io")
 	before := testutil.ToFloat64(counter)
 
-	idx.FailWritesForTest(pkroot.MarkIO(errors.New("disk"), "write"))
+	index.FailWritesForTest(idx, pkroot.MarkIO(errors.New("disk"), "write"))
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	require.Len(t, fatals, 1)
 	assert.True(t, errors.Is(fatals[0], pkroot.ErrIO), "got %v", fatals[0])
 	assert.Equal(t, before+1, testutil.ToFloat64(counter))
 
-	idx.FailWritesForTest(nil)
+	index.FailWritesForTest(idx, nil)
 	rec.ObserveMessage(ctx, insertMsg("v1", 12, 7, 2))
 	rec.ObserveMessage(ctx, timeTickMsg(13))
 	assert.Equal(t, int64(0), segmentOf(t, idx, 2), "the observe stopped")
@@ -730,12 +731,12 @@ func TestCloseWipesTheVChannelAfterACorruptedWrite(t *testing.T) {
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
-	dir := index.Dir(env.Manager.Root(), "v1", idx.IndexID())
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
+	dir := index.Dir(indexmanager.RootForTest(env.Manager), "v1", idx.IndexID())
 	_, err := os.Stat(dir)
 	require.NoError(t, err)
 
-	idx.FailWritesForTest(errors.Mark(errors.New("checksum"), pkroot.ErrCorrupted))
+	index.FailWritesForTest(idx, errors.Mark(errors.New("checksum"), pkroot.ErrCorrupted))
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	require.Len(t, fatals, 1)
 	assert.True(t, errors.Is(fatals[0], pkroot.ErrCorrupted))
@@ -749,7 +750,7 @@ func TestCloseWipesTheVChannelAfterACorruptedWrite(t *testing.T) {
 func TestObservePanicsOnAMalformedBody(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	rec := recoverV1(t, env, indexmanager.SchedulerForTest(env.Manager))
 	good := insertMsg("v1", 11, 7, 1)
 	bad := message.NewImmutableMesasge(good.MessageID(), []byte("not a protobuf"), good.Properties().ToRawMap())
 
@@ -762,15 +763,15 @@ func TestRecoverOpensOnlyTheVChannelsWithAPKIndex(t *testing.T) {
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	without := testMeta("b", 2, schemapb.DataType_Int64, false)
 	without.CollectionInfo.PkIndex = nil
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), newFakeStates(), map[string]*streamingpb.VChannelMeta{
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), newFakeStates(), map[string]*streamingpb.VChannelMeta{
 		"a": testMeta("a", 1, schemapb.DataType_Int64, false),
 		"b": without,
 	})
-	m := rec.Manager()
-	require.NotNil(t, m.IndexForTest("a"))
-	assert.EqualValues(t, testIndexIDOf(1), m.IndexForTest("a").IndexID())
-	assert.EqualValues(t, 1, m.IndexForTest("a").CheckpointTimeTick())
-	assert.Nil(t, m.Decider("b"))
+	m := rec.PChannel()
+	require.NotNil(t, indexmanager.IndexForTest(m, "a"))
+	assert.EqualValues(t, testIndexIDOf(1), indexmanager.IndexForTest(m, "a").IndexID())
+	assert.EqualValues(t, 1, index.CheckpointTimeTickForTest(indexmanager.IndexForTest(m, "a")))
+	assert.Nil(t, indexmanager.DeciderForTest(m, "b"))
 }
 
 // TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey checks the field
@@ -784,7 +785,7 @@ func TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey(t *testing.T) {
 		Metas:          map[string]*streamingpb.VChannelMeta{"a": meta},
 	})
 	require.Error(t, err)
-	assert.Nil(t, env.Manager.GetForTest("p"))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, "p"))
 }
 
 // TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend checks
@@ -794,21 +795,21 @@ func TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend(t *testin
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, nil)
 	require.NoError(t, rec.Run(ctx))
-	m := rec.Manager()
+	m := rec.PChannel()
 
 	// the interceptor read a stale write history and opened the index
 	_, created, err := m.OpenIndex(ctx, indexmanager.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, CheckpointTimeTick: 20})
 	require.NoError(t, err)
 	require.True(t, created)
-	dir := index.Dir(env.Manager.Root(), "c", 8)
+	dir := index.Dir(indexmanager.RootForTest(env.Manager), "c", 8)
 	require.DirExists(t, dir)
 
 	states.written("c")
 	after := rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
 	require.NotNil(t, after)
-	assert.Nil(t, m.Decider("c"), "the observe detaches the index at once")
+	assert.Nil(t, indexmanager.DeciderForTest(m, "c"), "the observe detaches the index at once")
 	assert.DirExists(t, dir, "the caller closes the index after the observe")
 	after(ctx)
 	assert.NoDirExists(t, dir)
@@ -825,22 +826,22 @@ func TestObserveDropIndexClosesOnlyTheNamedIndex(t *testing.T) {
 			ctx := context.Background()
 			env := indexmanager.NewFakeEnv(t, t.TempDir())
 			states := newFakeStates()
-			rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+			rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, nil)
 			require.NoError(t, rec.Run(ctx))
-			m := rec.Manager()
+			m := rec.PChannel()
 			states.enable("c", 8, 20)
 			rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
-			idx := m.IndexForTest("c")
+			idx := indexmanager.IndexForTest(m, "c")
 			require.NotNil(t, idx)
 
 			assert.Nil(t, rec.ObserveMessage(ctx, dropIndexMsg("c", 3, []int64{9}, 21)))
-			assert.Same(t, idx, m.IndexForTest("c"), "the DropIndex of another index changes nothing")
+			assert.Same(t, idx, indexmanager.IndexForTest(m, "c"), "the DropIndex of another index changes nothing")
 
 			after := rec.ObserveMessage(ctx, dropIndexMsg("c", 3, ids, 22))
 			require.NotNil(t, after)
-			assert.Nil(t, m.IndexForTest("c"))
+			assert.Nil(t, indexmanager.IndexForTest(m, "c"))
 			after(ctx)
-			assert.NoDirExists(t, index.Dir(env.Manager.Root(), "c", 8))
+			assert.NoDirExists(t, index.Dir(indexmanager.RootForTest(env.Manager), "c", 8))
 		})
 	}
 }
@@ -852,24 +853,24 @@ func TestObserveCreateIndexAfterADropBeforeTheDropCloses(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, nil)
 	require.NoError(t, rec.Run(ctx))
-	m := rec.Manager()
+	m := rec.PChannel()
 	states.enable("c", 8, 20)
 	rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
 	drop := rec.ObserveMessage(ctx, dropIndexMsg("c", 3, []int64{8}, 21))
 	require.NotNil(t, drop)
 	states.enable("c", 9, 22)
 	rec.ObserveMessage(ctx, createIndexMsg("c", 3, 9, 22))
-	idx := m.IndexForTest("c")
+	idx := indexmanager.IndexForTest(m, "c")
 	require.NotNil(t, idx)
 	assert.EqualValues(t, 9, idx.IndexID())
 
 	// the close of index 8 runs now
 	drop(ctx)
-	assert.Same(t, idx, m.IndexForTest("c"))
-	assert.NoDirExists(t, index.Dir(env.Manager.Root(), "c", 8))
-	assert.DirExists(t, index.Dir(env.Manager.Root(), "c", 9))
+	assert.Same(t, idx, indexmanager.IndexForTest(m, "c"))
+	assert.NoDirExists(t, index.Dir(indexmanager.RootForTest(env.Manager), "c", 8))
+	assert.DirExists(t, index.Dir(indexmanager.RootForTest(env.Manager), "c", 9))
 	rec.ObserveMessage(ctx, insertMsg("c", 23, 7, 1))
 	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, idx, 1))
 }
@@ -884,9 +885,9 @@ func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: 9, FieldId: testPKFieldID, CheckpointTimeTick: 30}
 	states.enable("v1", 9, 30)
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
-	m := rec.Manager()
-	idx := m.IndexForTest("v1")
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
+	m := rec.PChannel()
+	idx := indexmanager.IndexForTest(m, "v1")
 	require.NotNil(t, idx)
 
 	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, 8, 20))
@@ -895,7 +896,7 @@ func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
 	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, 9, 30))
 	rec.ObserveMessage(ctx, insertMsg("v1", 31, 7, 2))
 	require.NoError(t, rec.Run(ctx))
-	assert.Same(t, idx, m.IndexForTest("v1"))
+	assert.Same(t, idx, indexmanager.IndexForTest(m, "v1"))
 	assert.Equal(t, []dedup.PK{dedup.Int64PK(2)}, present(t, idx, 1, 2), "the write before the CreateIndex of the index is skipped")
 }
 
@@ -905,8 +906,8 @@ func TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing(t *t
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
-	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
-	m := rec.Manager()
+	rec := recoverWithStates(t, env, indexmanager.SchedulerForTest(env.Manager), states, nil)
+	m := rec.PChannel()
 	states.enable("c", 8, 20)
 	other := at(message.NewCreateIndexMessageBuilderV2().
 		WithVChannel("c").
@@ -914,9 +915,9 @@ func TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing(t *t
 		WithBody(&message.CreateIndexMessageBody{}).
 		MustBuildMutable(), 20)
 	rec.ObserveMessage(ctx, other)
-	assert.Nil(t, m.IndexForTest("c"))
+	assert.Nil(t, indexmanager.IndexForTest(m, "c"))
 	rec.ObserveMessage(ctx, createIndexMsg("p_"+funcutil.ControlChannelSuffix, 3, 8, 20))
-	assert.Nil(t, m.IndexForTest("p_"+funcutil.ControlChannelSuffix))
+	assert.Nil(t, indexmanager.IndexForTest(m, "p_"+funcutil.ControlChannelSuffix))
 	require.NoError(t, rec.Run(ctx))
 }
 
@@ -938,7 +939,7 @@ func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
 	rec := recoverV1(t, env, sched)
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 101, 7, 1))
 	rec.ObserveMessage(ctx, truncateMsg("v1", 1, 102))
@@ -946,13 +947,13 @@ func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 	rec.ObserveMessage(ctx, truncateMsg("p_"+funcutil.ControlChannelSuffix, 1, 104))
 	require.NoError(t, rec.Run(ctx))
 	select {
-	case <-idx.ReadyForTest():
+	case <-index.ReadyForTest(idx):
 	case <-time.After(10 * time.Second):
 		t.Fatal("the index did not get ready")
 	}
 	assert.Equal(t, []dedup.PK{dedup.Int64PK(2)}, present(t, idx, 1, 2))
-	assert.True(t, idx.Dirty(), "the reset waits for its handover")
-	assert.Equal(t, uint64(100), idx.LastCommittedTimeTick())
+	assert.True(t, idx.HandoverState().Dirty, "the reset waits for its handover")
+	assert.Equal(t, uint64(100), idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestObserveReplayOfACommittedTruncateDoesNothing checks the skip rule: a
@@ -964,13 +965,13 @@ func TestObserveReplayOfACommittedTruncateDoesNothing(t *testing.T) {
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
 	rec := recoverV1(t, env, sched)
-	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, "p"), "v1")
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 101, 7, 1))
 	rec.ObserveMessage(ctx, truncateMsg("v1", 1, 100))
 	require.NoError(t, rec.Run(ctx))
 	select {
-	case <-idx.ReadyForTest():
+	case <-index.ReadyForTest(idx):
 	case <-time.After(10 * time.Second):
 		t.Fatal("the index did not get ready")
 	}

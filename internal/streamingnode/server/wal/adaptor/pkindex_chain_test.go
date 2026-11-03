@@ -28,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -68,7 +68,7 @@ func openPKIndexWAL(t *testing.T, name string) wal.WAL {
 
 // openPKIndexWALWithManager is openPKIndexWAL that also returns the index
 // manager of the streaming node.
-func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *indexmanager.Manager) {
+func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, indexmanager.Manager) {
 	setPKIndexEnabled(t, "true")
 	mgr := indexmanager.NewManagerForTest(t, t.TempDir())
 	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), mgr)
@@ -82,14 +82,14 @@ func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *indexmanage
 // index indexID of testVChannel. The interceptor reads a write history that
 // the observe updates, so the observe decides a CreateIndex that follows the
 // CreateCollection at once.
-func waitPKChainIndex(t *testing.T, mgr *indexmanager.Manager, pchannel string, indexID int64) {
+func waitPKChainIndex(t *testing.T, mgr indexmanager.Manager, pchannel string, indexID int64) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		ch := mgr.GetForTest(pchannel)
+		ch := indexmanager.GetForTest(mgr, pchannel)
 		if ch == nil {
 			return false
 		}
-		idx := ch.IndexForTest(testVChannel)
+		idx := indexmanager.IndexForTest(ch, testVChannel)
 		return idx != nil && idx.IndexID() == indexID
 	}, 10*time.Second, 10*time.Millisecond, "the observe did not open the primary key index")
 }
@@ -415,9 +415,9 @@ func TestPKIndexChainUpsertLikeTxn(t *testing.T) {
 func TestPKIndexChainDropCollection(t *testing.T) {
 	w, mgr := openPKIndexWALWithManager(t, "pkindex-drop-collection")
 	ctx := context.Background()
-	idx := mgr.GetForTest("pkindex-drop-collection").IndexForTest(testVChannel)
+	idx := indexmanager.IndexForTest(indexmanager.GetForTest(mgr, "pkindex-drop-collection"), testVChannel)
 	require.NotNil(t, idx)
-	dir := index.Dir(mgr.Root(), testVChannel, idx.IndexID())
+	dir := index.Dir(indexmanager.RootForTest(mgr), testVChannel, idx.IndexID())
 	require.DirExists(t, dir)
 
 	_, err := w.Append(ctx, newPKChainInsert([]int64{1}, pkChainLastMarker()))
@@ -428,11 +428,11 @@ func TestPKIndexChainDropCollection(t *testing.T) {
 	appendPKChainDropCollection(t, w, pkChainCollectionID)
 
 	require.Eventually(t, func() bool {
-		ch := mgr.GetForTest("pkindex-drop-collection")
-		return ch != nil && ch.IndexForTest(testVChannel) == nil
+		ch := indexmanager.GetForTest(mgr, "pkindex-drop-collection")
+		return ch != nil && indexmanager.IndexForTest(ch, testVChannel) == nil
 	}, 10*time.Second, 10*time.Millisecond, "the observe drops the index of the dropped collection")
 	require.Eventually(t, func() bool {
-		_, err := os.Stat(index.VChannelDir(mgr.Root(), testVChannel))
+		_, err := os.Stat(index.VChannelDir(indexmanager.RootForTest(mgr), testVChannel))
 		return os.IsNotExist(err)
 	}, 10*time.Second, 10*time.Millisecond, "the drop removes the local files of the vchannel")
 

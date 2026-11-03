@@ -19,6 +19,7 @@ package indexmanager
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/objstore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -42,7 +44,7 @@ const openFileReserve = 10000
 // IDs of new tables, from the ID allocator of the resource. The returned
 // close function closes the manager, the committer and the shared caches, in
 // this order; call it after the WAL manager closes.
-func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(context.Context) (manifest.Committer, func(), error), allocID func(context.Context) (int64, error)) (*Manager, func(), error) {
+func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(context.Context) (manifest.Committer, func(), error), allocID func(context.Context) (int64, error)) (Manager, func(), error) {
 	cfg := &paramtable.Get().StreamingCfg
 	if !cfg.PKIndexEnabled.GetAsBool() {
 		return nil, nil, nil
@@ -66,7 +68,7 @@ func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(conte
 	}
 	mgr := NewManager(ManagerConfig{
 		Root:                    root,
-		Shared:                  shared,
+		Engine:                  shared,
 		AllocID:                 allocID,
 		Store:                   store,
 		StorageRootPath:         cm.RootPath(),
@@ -111,4 +113,25 @@ func openFileLimitShort(soft uint64, maxOpenFiles int) (uint64, bool) {
 	}
 	need := uint64(maxOpenFiles) + openFileReserve
 	return need, soft < need
+}
+
+// ParamsFromConfig reads the params from paramtable. ReuploadAfter is half
+// of the grace window of the garbage collection of the manifest service: the
+// garbage collection removes an uploaded table that no manifest references
+// after the grace window, so a retry that waits longer uploads again first.
+func ParamsFromConfig() Params {
+	cfg := &paramtable.Get().StreamingCfg
+	grace := paramtable.Get().DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second)
+	return Params{
+		Params: index.Params{
+			MemTableSize:  uint64(cfg.PKIndexMemTableSize.GetAsSize()),
+			ReuploadAfter: grace / 2,
+		},
+		ActiveBytes:   uint64(cfg.PKIndexHandoverActiveBytes.GetAsSize()),
+		TailBytes:     uint64(cfg.PKIndexHandoverTailBytes.GetAsSize()),
+		SoftWatermark: uint64(cfg.WALRecoveryTailSoftWatermark.GetAsSize()),
+		BackoffBase:   defaultBackoffBase,
+		MaxBackoff:    cfg.PKIndexHandoverMaxBackoff.GetAsDurationByParse(),
+		StallTimeout:  paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second),
+	}
 }

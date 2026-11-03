@@ -157,7 +157,7 @@ func (s *countingStore) DownloadFile(ctx context.Context, key, path string) erro
 // testIndex is an Index of testVChannel over a countingStore and a
 // fakeCommitter. observed stands for the lastObserved of its pchannel.
 type testIndex struct {
-	*Index
+	*indexImpl
 	root      string
 	shared    *engine.SharedResources
 	store     *countingStore
@@ -170,7 +170,7 @@ type testIndex struct {
 // newTestIndex opens a ready Index under a new local root.
 func newTestIndex(t *testing.T) *testIndex {
 	ti := openTestIndex(t)
-	ti.MarkReady(context.Background())
+	ti.markReady(context.Background())
 	return ti
 }
 
@@ -192,26 +192,25 @@ func openTestIndex(t *testing.T) *testIndex {
 
 // open opens the Index over the local files under root. The Index is not ready.
 func (ti *testIndex) open(t *testing.T) {
-	idx, err := Open(context.Background(), Config{
-		VChannel:        testVChannel,
-		CollectionID:    testCollectionID,
-		IndexID:         testIndexID,
-		Term:            testTerm,
-		Ctx:             context.Background(),
-		Logger:          mlog.With(mlog.FieldModule("pkindex")),
-		Root:            ti.root,
-		StorageRootPath: testStorageRoot,
-		Shared:          ti.shared,
-		AllocID:         func(context.Context) (int64, error) { return ti.nextID.Add(1), nil },
-		Store:           ti.store,
-		Committer:       ti.committer,
-		Params:          func() Params { return *ti.params.Load() },
-		LastObserved:    ti.observed.Load,
-		OnRefresh:       func(*Index) {},
+	idx, err := Open(context.Background(), OpenConfig{
+		VChannel:     testVChannel,
+		CollectionID: testCollectionID,
+		IndexID:      testIndexID,
+		Term:         testTerm,
+		Dir:          Dir(ti.root, testVChannel, testIndexID),
+		SSTBasePath:  manifest.SSTBasePath(testStorageRoot, testCollectionID, testIndexID, testVChannel),
+		Logger:       mlog.With(mlog.FieldModule("pkindex")),
+		Engine:       ti.shared,
+		AllocID:      func(context.Context) (int64, error) { return ti.nextID.Add(1), nil },
+		Store:        ti.store,
+		Committer:    ti.committer,
+		Params:       func() Params { return *ti.params.Load() },
+		LastObserved: ti.observed.Load,
+		OnRefresh:    func(Index) {},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { idx.Close(context.Background()) })
-	ti.Index = idx
+	ti.indexImpl = idx.(*indexImpl)
 }
 
 // reopen closes the Index and opens it again over the same local files,

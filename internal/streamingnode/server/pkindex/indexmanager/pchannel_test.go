@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // TestIndexCreatedBeforeStartWaitsForTheRecovery checks that an Index opened
@@ -55,9 +57,9 @@ func TestIndexCreatedBeforeStartWaitsForTheRecovery(t *testing.T) {
 	require.True(t, created)
 	assert.True(t, v1.Ready(), "a collection created after Start is ready at once")
 
-	v0.MarkReady(context.Background())
+	v0.SetCommitted(nil)
 	assert.True(t, v0.Ready())
-	assert.Equal(t, []*index.Index{v0}, picks(ch, farFuture))
+	assert.Equal(t, []index.Index{v0}, picks(ch, farFuture))
 	assert.Empty(t, env.fatalList())
 }
 
@@ -81,12 +83,12 @@ func TestDropRemovesTheLocalFiles(t *testing.T) {
 	insert(t, ch, idx, 10, 1)
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	ch.step(farFuture)
-	require.DirExists(t, idx.CommittedDirForTest())
+	require.DirExists(t, index.CommittedDirForTest(idx))
 
-	require.NoError(t, ch.DropIndex(context.Background(), "v0", 0))
+	require.NoError(t, ch.dropIndexForTest(context.Background(), "v0", 0))
 	assert.Nil(t, ch.get("v0"))
 	assert.NoDirExists(t, filepath.Join(env.root, "v0"))
-	require.NoError(t, ch.DropIndex(context.Background(), "v0", 0), "a drop of a vchannel with no Index is a no-op")
+	require.NoError(t, ch.dropIndexForTest(context.Background(), "v0", 0), "a drop of a vchannel with no Index is a no-op")
 
 	idx = env.add(ch, "v0")
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
@@ -97,9 +99,11 @@ func TestDropOfAClosedChannelFails(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	env.add(ch, "v0")
+	drop := ch.RemoveIndex("v0", 0)
+	require.NotNil(t, drop)
 	ch.Close()
 
-	err := ch.DropIndex(context.Background(), "v0", 0)
+	err := drop(context.Background())
 	require.ErrorIs(t, err, engine.ErrClosed)
 	assert.DirExists(t, filepath.Join(env.root, "v0"))
 }
@@ -176,11 +180,11 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 	err := env.waitFatal()
 	assert.True(t, errors.Is(err, manifest.ErrFenced))
 	assert.True(t, scheduleOf(ch, idx).stopped.Load())
-	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
+	assert.Len(t, index.EngineForTest(idx).FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
 	insert(t, ch, idx, 2, 2)
 	ch.ObserveTimeTick(20, WALTailSnapshot{})
-	assert.True(t, idx.Dirty())
+	assert.True(t, idx.HandoverState().Dirty)
 	assert.Empty(t, picks(ch, farFuture))
 	assert.EqualValues(t, 2, segmentOf(t, idx, 2))
 }
@@ -198,15 +202,15 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 	assert.True(t, errors.Is(err, manifest.ErrRejected))
 	assert.True(t, scheduleOf(ch, idx).stopped.Load())
 	assert.Zero(t, scheduleOf(ch, idx).failures, "no retry is scheduled")
-	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
+	assert.Len(t, index.EngineForTest(idx).FrozenGenerations(), 1, "the generations stay frozen")
 	assert.Empty(t, picks(ch, farFuture))
 	assert.Len(t, env.client.requestList(), 1)
 }
 
 // dropCommittedFiles makes the committed tables of idx missing on this node.
-func dropCommittedFiles(t *testing.T, idx *index.Index) {
-	require.NoError(t, os.RemoveAll(idx.CommittedDirForTest()))
-	idx.ForgetInstalledPathsForTest()
+func dropCommittedFiles(t *testing.T, idx index.Index) {
+	require.NoError(t, os.RemoveAll(index.CommittedDirForTest(idx)))
+	index.ForgetInstalledPathsForTest(idx)
 }
 
 func TestMissingObjectIsFatal(t *testing.T) {
@@ -216,7 +220,7 @@ func TestMissingObjectIsFatal(t *testing.T) {
 	insert(t, ch, idx, 1, 1)
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	ch.step(farFuture)
-	require.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	require.EqualValues(t, 10, idx.HandoverState().LastCommittedTimeTick)
 
 	// the next install needs the first tables, which are gone everywhere
 	dropCommittedFiles(t, idx)
@@ -282,7 +286,7 @@ func TestManagerApplyIgnoresADroppedIndex(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	dropped := env.add(ch, "v0")
-	require.NoError(t, ch.DropIndex(ctx, "v0", 0))
+	require.NoError(t, ch.dropIndexForTest(ctx, "v0", 0))
 	require.NoError(t, ch.apply(ctx, dropped, index.Write{Puts: puts(1, 1), TimeTick: 5}))
 
 	closed := env.add(ch, "v1")
@@ -306,18 +310,18 @@ func TestIndexesOfOneVChannelUseSeparateDirs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	env := NewFakeEnv(t, root)
-	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}}).(*pchannel)
 	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 7})
 	require.NoError(t, err)
 	assert.EqualValues(t, 7, idx.IndexID())
-	assert.Equal(t, "root/pk_index/1/7/v1/sst", idx.SSTBasePathForTest())
+	assert.Equal(t, "root/pk_index/1/7/v1/sst", index.SSTBasePathForTest(idx))
 	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 7), "engine"))
-	require.NoError(t, c.DropIndex(ctx, "v1", 0))
+	require.NoError(t, c.dropIndexForTest(ctx, "v1", 0))
 	assert.NoDirExists(t, index.VChannelDir(root, "v1"))
 
 	idx, _, err = c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
 	require.NoError(t, err)
-	assert.Equal(t, "root/pk_index/1/8/v1/sst", idx.SSTBasePathForTest())
+	assert.Equal(t, "root/pk_index/1/8/v1/sst", index.SSTBasePathForTest(idx))
 	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 8), "engine"))
 	assert.NoDirExists(t, index.Dir(root, "v1", 7))
 	assert.NotEqual(t, index.Dir(root, "v1", 7), index.Dir(root, "v1", 8))
@@ -329,14 +333,14 @@ func TestIndexesOfOneVChannelUseSeparateDirs(t *testing.T) {
 func TestApplySkipsTheWritesBeforeTheEnable(t *testing.T) {
 	ctx := context.Background()
 	env := NewFakeEnv(t, t.TempDir())
-	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}}).(*pchannel)
 	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexID, CheckpointTimeTick: 20})
 	require.NoError(t, err)
-	idx.MarkReady(ctx)
+	idx.SetCommitted(nil)
 	dirtied, err := idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 19})
 	require.NoError(t, err)
 	assert.False(t, dirtied)
-	assert.False(t, idx.Dirty())
+	assert.False(t, idx.HandoverState().Dirty)
 	dirtied, err = idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(2), SegmentID: 7}}, TimeTick: 21})
 	require.NoError(t, err)
 	assert.True(t, dirtied)
@@ -349,11 +353,11 @@ func TestApplySkipsTheWritesBeforeTheEnable(t *testing.T) {
 func TestResetBeforeTheEnableDoesNothing(t *testing.T) {
 	ctx := context.Background()
 	env := NewFakeEnv(t, t.TempDir())
-	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}}).(*pchannel)
 	defer c.Close()
 	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexID, CheckpointTimeTick: 20})
 	require.NoError(t, err)
-	idx.MarkReady(ctx)
+	idx.SetCommitted(nil)
 	_, err = idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 21})
 	require.NoError(t, err)
 
@@ -373,19 +377,145 @@ func TestResetBeforeTheEnableDoesNothing(t *testing.T) {
 func TestOpenIndexOfAnotherIndexIDFails(t *testing.T) {
 	ctx := context.Background()
 	env := NewFakeEnv(t, t.TempDir())
-	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}}).(*pchannel)
 	first, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 7})
 	require.NoError(t, err)
 	_, _, err = c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
 	require.ErrorIs(t, err, ErrOtherIndexOpen)
-	assert.False(t, c.DetachIndex("v1", 8), "another index ID does not match")
-	assert.True(t, c.DetachIndex("v1", 7))
-	assert.Nil(t, c.Decider("v1"))
+	assert.Nil(t, c.RemoveIndex("v1", 8), "another index ID does not match")
+	assert.NotNil(t, c.RemoveIndex("v1", 7))
+	assert.Nil(t, DeciderForTest(c, "v1"))
 	second, created, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
 	require.NoError(t, err)
 	assert.True(t, created)
 	assert.NotSame(t, first, second)
 	c.Close() // closes the detached Index too
-	_, err = first.EngineForTest().MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode()})
+	_, err = index.EngineForTest(first).MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode()})
 	assert.Error(t, err, "the detached Index is closed")
+}
+
+// TestRemoveIndexCapturesOnlyTheRemovedIndex checks that delayed cleanup does
+// not close a replacement, and that the returned cleanup runs only once.
+func TestRemoveIndexCapturesOnlyTheRemovedIndex(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t, syncScheduler{})
+	ch := env.channel(0)
+	first := env.add(ch, "v0")
+	drop := ch.RemoveIndex("v0", first.IndexID())
+	require.NotNil(t, drop)
+	idx, err := ch.IndexOf("v0")
+	require.NoError(t, err)
+	require.Nil(t, idx)
+	second, _, err := ch.OpenIndex(ctx, IndexSpec{VChannel: "v0", CollectionID: testCollectionID, IndexID: testIndexID + 1})
+	require.NoError(t, err)
+	require.NoError(t, drop(ctx))
+	assert.DirExists(t, index.Dir(env.root, "v0", second.IndexID()))
+	_, err = index.EngineForTest(first).MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode()})
+	require.ErrorIs(t, err, engine.ErrClosed)
+	_, err = second.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 1})
+	require.NoError(t, err)
+	ch.Close()
+	require.NoError(t, drop(ctx), "a completed cleanup is still complete after channel shutdown")
+}
+
+func TestClosedPChannelRejectsLookupAndEmptyRecovery(t *testing.T) {
+	env := NewFakeEnv(t, t.TempDir())
+	env.Manager.Close()
+	ch := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	_, err := ch.IndexOf("missing")
+	require.ErrorIs(t, err, engine.ErrClosed)
+	assert.True(t, errors.Is(err, pkroot.ErrUnavailable))
+	_, err = ch.RecoverIndexes(context.Background(), nil)
+	require.ErrorIs(t, err, engine.ErrClosed)
+}
+
+// TestStartCanInstallWithASynchronousScheduler checks that task submission
+// does not hold the member lock needed by the readiness callback.
+func TestStartCanInstallWithASynchronousScheduler(t *testing.T) {
+	env := NewFakeEnv(t, t.TempDir())
+	SetSchedForTest(env.Manager, syncScheduler{})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10}})
+	ch := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	indexes, err := ch.RecoverIndexes(context.Background(), []IndexSpec{{VChannel: "v1", CollectionID: 1, IndexID: 1}})
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() { ch.Start(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(waitTimeout):
+		t.Fatal("Start blocked while the install called back into the channel")
+	}
+	assert.True(t, indexes[0].Ready())
+}
+
+func TestStartAndRepeatedCloseCanRunConcurrently(t *testing.T) {
+	env := NewFakeEnv(t, t.TempDir())
+	for range 32 {
+		ch := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+		var wg sync.WaitGroup
+		for i := range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if i == 0 {
+					ch.Start()
+				}
+				ch.Close()
+			}()
+		}
+		wg.Wait()
+		_, err := ch.IndexOf("v1")
+		require.ErrorIs(t, err, engine.ErrClosed)
+	}
+}
+
+type delayedCancelHandle struct {
+	canceled chan struct{}
+	done     chan struct{}
+	waiting  chan context.Context
+}
+
+func (h *delayedCancelHandle) Cancel() { close(h.canceled) }
+func (h *delayedCancelHandle) Wait(ctx context.Context) error {
+	h.waiting <- ctx
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type delayedCancelScheduler struct{ handle *delayedCancelHandle }
+
+func (s delayedCancelScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle { return s.handle }
+
+func TestCloseWaitsForCanceledInstallToFinish(t *testing.T) {
+	env := NewFakeEnv(t, t.TempDir())
+	h := &delayedCancelHandle{canceled: make(chan struct{}), done: make(chan struct{}), waiting: make(chan context.Context, 1)}
+	defer close(h.done)
+	SetSchedForTest(env.Manager, delayedCancelScheduler{handle: h})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10}})
+	ch := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	_, err := ch.RecoverIndexes(context.Background(), []IndexSpec{{VChannel: "v1", CollectionID: 1, IndexID: 1}})
+	require.NoError(t, err)
+	ch.Start()
+	closed := make(chan struct{})
+	go func() { ch.Close(); close(closed) }()
+	select {
+	case <-h.canceled:
+	case <-time.After(waitTimeout):
+		t.Fatal("Close did not cancel the install")
+	}
+	select {
+	case ctx := <-h.waiting:
+		require.NoError(t, ctx.Err(), "Close must wait for completion with a live context")
+	case <-time.After(waitTimeout):
+		t.Fatal("Close did not wait for the install")
+	}
+	select {
+	case <-closed:
+		t.Fatal("Close returned before install cleanup finished")
+	default:
+	}
 }

@@ -44,7 +44,7 @@ import (
 )
 
 var (
-	_ Client            = (*client)(nil)
+	_ Client             = (*client)(nil)
 	_ manifest.Committer = Client(nil)
 )
 
@@ -204,7 +204,7 @@ func (c *client) GetRecoveryManifests(ctx context.Context, refs []manifest.VChan
 		p := e.GetPointer()
 		if p.GetVersion() <= 0 || p.GetBodyKey() == "" {
 			out[i].Err = errors.Wrapf(manifest.ErrRejected, "vchannel %s: a found manifest with version %d and body key %q",
-				refs[i].VChannel, p.GetVersion(), p.GetBodyKey())
+				refs[i].VChannel, p.GetVersion(), p.GetBodyKey()) // #nosec G602 -- entries and refs have equal lengths, checked above.
 			continue
 		}
 		out[i] = manifest.RecoveryManifest{Found: true, Version: p.GetVersion(), BodyKey: p.GetBodyKey()}

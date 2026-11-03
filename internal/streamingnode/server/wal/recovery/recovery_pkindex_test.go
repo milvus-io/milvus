@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -125,9 +126,9 @@ func pkTestBarrier(t *testing.T, tt uint64, lastConfirmed int64) message.Immutab
 
 // pkTestRecover recovers the primary key index of the storage over the
 // vchannel v1 from the checkpoint of the storage and attaches it.
-func pkTestRecover(t *testing.T, env *indexmanager.FakeEnv, rs *recoveryStorageImpl) *pkrecovery.Recovery {
+func pkTestRecover(t *testing.T, env *indexmanager.FakeEnv, rs *recoveryStorageImpl) pkrecovery.Recovery {
 	t.Helper()
-	env.Manager.SetSchedForTest(rs.nodeScheduler)
+	indexmanager.SetSchedForTest(env.Manager, rs.nodeScheduler)
 	rec, err := pkrecovery.Recover(context.Background(), env.Manager, pkrecovery.RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: rs.channel, Seed: rs.checkpoint.TimeTick},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": pkTestMeta("v1", 1)},
@@ -173,7 +174,7 @@ func TestRecoveryStoragePKIndexClampsTheCheckpoint(t *testing.T) {
 	assert.Equal(t, uint64(90), snapshot.Checkpoint.TimeTick, "the checkpoint does not pass the index")
 
 	rs.closeRecoveryResources()
-	assert.Nil(t, env.Manager.GetForTest(rs.channel.Name), "close releases the index")
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, rs.channel.Name), "close releases the index")
 }
 
 func TestRecoveryStoragePKIndexIsClosedWhenTheOpenFails(t *testing.T) {
@@ -181,13 +182,13 @@ func TestRecoveryStoragePKIndexIsClosedWhenTheOpenFails(t *testing.T) {
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	pkTestRecover(t, env, rs)
-	require.NotNil(t, env.Manager.GetForTest(rs.channel.Name))
+	require.NotNil(t, indexmanager.GetForTest(env.Manager, rs.channel.Name))
 
 	_, err := rs.runBoundedRecovery(context.Background(), &recordingRecoveryStreamBuilder{}, newAckTestTimeTickMessage(t, 3, 3))
 	require.ErrorContains(t, err, "ended before the startup barrier")
 
 	rs.closeRecoveryResources()
-	assert.Nil(t, env.Manager.GetForTest(rs.channel.Name), "the failed open releases the index")
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, rs.channel.Name), "the failed open releases the index")
 }
 
 // TestRecoveryStoragePKIndexIsInTheSnapshot checks that the recovery snapshot
@@ -204,10 +205,10 @@ func TestRecoveryStoragePKIndexIsInTheSnapshot(t *testing.T) {
 	stream.ch <- barrier
 	snapshot, err := rs.runBoundedRecovery(ctx, &recordingRecoveryStreamBuilder{stream: stream}, barrier)
 	require.NoError(t, err)
-	assert.Same(t, rec.Manager(), snapshot.PKIndex)
+	assert.Same(t, rec.PChannel(), snapshot.PKIndex)
 
 	rs.closeRecoveryResources()
-	assert.Nil(t, env.Manager.GetForTest(rs.channel.Name))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, rs.channel.Name))
 }
 
 // TestRecoveryStoragePKIndexAppliesTheLiveMessages checks that the messages
@@ -230,12 +231,12 @@ func TestRecoveryStoragePKIndexAppliesTheLiveMessages(t *testing.T) {
 	rs.observeMessage(ctx, pkTestInsert("v1", 4, 8, 2))
 	rs.observeMessage(ctx, newAckTestTimeTickMessage(t, 5, 5))
 
-	idx := rec.Manager().IndexForTest("v1")
-	vs, err := idx.EngineForTest().MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode(), dedup.Int64PK(2).Encode()})
+	idx := indexmanager.IndexForTest(rec.PChannel(), "v1")
+	vs, err := index.EngineForTest(idx).MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode(), dedup.Int64PK(2).Encode()})
 	require.NoError(t, err)
 	assert.NotNil(t, vs[0], "the replayed insert is in the index")
 	assert.NotNil(t, vs[1], "the live insert is in the index")
-	assert.Equal(t, uint64(5), rec.Manager().LastObserved())
+	assert.Equal(t, uint64(5), rec.PChannel().LastObserved())
 
 	rs.closeRecoveryResources()
 }
@@ -247,7 +248,7 @@ func TestRecoveryStoragePKIndexFinishErrorFailsTheOpen(t *testing.T) {
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	pkTestRecover(t, env, rs)
 	// A closed engine makes the replay of the insert fail.
-	require.NoError(t, env.Manager.GetForTest(rs.channel.Name).IndexForTest("v1").EngineForTest().Close())
+	require.NoError(t, index.EngineForTest(indexmanager.IndexForTest(indexmanager.GetForTest(env.Manager, rs.channel.Name), "v1")).Close())
 
 	rs.observeMessage(ctx, pkTestInsert("v1", 2, 7, 1))
 	barrier := pkTestBarrier(t, 3, 2)
@@ -258,7 +259,7 @@ func TestRecoveryStoragePKIndexFinishErrorFailsTheOpen(t *testing.T) {
 	assert.True(t, errors.Is(err, engine.ErrClosed), "got %v", err)
 
 	rs.closeRecoveryResources()
-	assert.Nil(t, env.Manager.GetForTest(rs.channel.Name))
+	assert.Nil(t, indexmanager.GetForTest(env.Manager, rs.channel.Name))
 }
 
 // TestRecoveryStoragePKIndexClosesADroppedIndexInTheObserve checks that the
@@ -270,10 +271,10 @@ func TestRecoveryStoragePKIndexClosesADroppedIndexInTheObserve(t *testing.T) {
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	rec := pkTestRecover(t, env, rs)
 	require.NoError(t, rec.Run(ctx))
-	require.NotNil(t, rec.Manager().IndexForTest("v1"))
+	require.NotNil(t, indexmanager.IndexForTest(rec.PChannel(), "v1"))
 
 	rs.observeMessage(ctx, pkTestDropCollection("v1", 2))
-	assert.Nil(t, rec.Manager().IndexForTest("v1"))
+	assert.Nil(t, indexmanager.IndexForTest(rec.PChannel(), "v1"))
 	require.True(t, rs.mu.TryLock(), "the storage lock is released")
 	rs.mu.Unlock()
 
@@ -285,7 +286,7 @@ func TestRecoveryStoragePKIndexClosesADroppedIndexInTheObserve(t *testing.T) {
 func TestPKIndexVChannelStateReadsTheVChannelModule(t *testing.T) {
 	createIndex := newAckExtraCreateIndex(t, "v1", 5, common.PrimaryKeyIndexType)
 	r := newAckExtraStorage(t, createIndex)
-	get := pkindexVChannelState(r.vchannelManager)
+	get := r.vchannelManager.PKIndexState
 
 	state, ok := get("v1")
 	require.True(t, ok)

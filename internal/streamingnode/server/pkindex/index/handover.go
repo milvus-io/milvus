@@ -67,7 +67,7 @@ type pendingHandover struct {
 // retry adds one frozen generation. The cause is a local disk error. The
 // design accepts it because such an error is rare, but a disk that keeps
 // failing adds one generation at each retry.
-func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
+func (idx *indexImpl) prepare(ctx context.Context) (*pendingHandover, error) {
 	// Read lastObserved before the rotate: the frozen generations then hold
 	// every change with tt <= covered. The changes above covered that the
 	// observe writes between the read and the swap land in the frozen
@@ -76,7 +76,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	// The manifest service treats a flush of the same term whose checkpoint
 	// does not move forward as an applied retry, and does not add its tables.
 	// So wait: the writes stay in the engine, and a later handover covers them.
-	if covered <= idx.LastCommittedTimeTick() {
+	if covered <= idx.HandoverState().LastCommittedTimeTick {
 		return nil, nil
 	}
 	// A reset commits with a checkpoint at or above its time tick, so wait
@@ -85,7 +85,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	epoch := idx.resetEpoch
 	idx.installMu.Unlock()
 	resetTT := idx.resetTT.Load()
-	reset := resetTT > idx.LastCommittedTimeTick()
+	reset := resetTT > idx.HandoverState().LastCommittedTimeTick
 	if reset && covered < resetTT {
 		return nil, nil
 	}
@@ -157,7 +157,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 // sends nothing when the Reset came before the flush, and installs nothing,
 // retires nothing and leaves LastCommittedTimeTick when it came during the
 // flush. The next handover commits the reset.
-func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
+func (idx *indexImpl) commit(ctx context.Context, p *pendingHandover) error {
 	cfg := idx.cfg
 	if p.request != nil && idx.resetSince(p.epoch) {
 		// the tables of the request are from before a Reset, see Reset
@@ -166,7 +166,7 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 	if p.request != nil && (p.uploadedAt.IsZero() || time.Since(p.uploadedAt) > cfg.Params().ReuploadAfter) {
 		start := time.Now()
 		for _, ref := range p.request.AddTables {
-			if err := cfg.Store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
+			if err := cfg.Store.UploadFile(ctx, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
 				return err
 			}
 		}
@@ -197,9 +197,9 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 		return errors.Wrapf(manifest.ErrRejected, "vchannel %s: the manifest after the flush has version %d and checkpoint %d, want at least version %d and checkpoint %d",
 			idx.vchannel, m.Version, m.CheckpointTimeTick, before, p.covered)
 	}
-	if m.SSTBasePath != idx.sstBasePath {
+	if m.SSTBasePath != idx.cfg.SSTBasePath {
 		return errors.Wrapf(manifest.ErrRejected, "vchannel %s: the manifest has the SST base path %s, the tables are uploaded under %s",
-			idx.vchannel, m.SSTBasePath, idx.sstBasePath)
+			idx.vchannel, m.SSTBasePath, idx.cfg.SSTBasePath)
 	}
 	if idx.resetSince(p.epoch) {
 		// The tables of the request are from before a Reset. The manifest
@@ -218,7 +218,7 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 }
 
 // resetSince reports whether a Reset ran after the reset epoch epoch.
-func (idx *Index) resetSince(epoch uint64) bool {
+func (idx *indexImpl) resetSince(epoch uint64) bool {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
 	return idx.resetEpoch != epoch

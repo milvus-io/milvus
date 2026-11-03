@@ -41,7 +41,7 @@ type Server struct {
 	walManager walmanager.Manager
 
 	// pkindex is nil when the primary key index is off.
-	pkindex *indexmanager.Manager
+	pkindex indexmanager.Manager
 	// closePKIndex closes the pkindex manager, its committer and its shared
 	// caches. It is nil when the primary key index is off.
 	closePKIndex func()

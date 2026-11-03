@@ -83,7 +83,7 @@ func TestHandoverNormal(t *testing.T) {
 	require.NotNil(t, p.request)
 	assert.Equal(t, uint64(50), p.covered)
 	assert.Empty(t, idx.committer.requestList())
-	assert.Zero(t, idx.LastCommittedTimeTick())
+	assert.Zero(t, idx.HandoverState().LastCommittedTimeTick)
 	assert.Equal(t, 0, idx.store.Len(), "prepare does not upload")
 	assert.True(t, p.uploadedAt.IsZero())
 
@@ -105,12 +105,12 @@ func TestHandoverNormal(t *testing.T) {
 		assert.NotZero(t, ref.TableFormat)
 		assert.Equal(t, codec.EncodeInt64PK(1), ref.MinKey)
 		assert.Equal(t, codec.EncodeInt64PK(3), ref.MaxKey)
-		path := committedPath(idx.committedDir, ref.ID)
+		path := committedPath(idx.cfg.Dir+"/committed", ref.ID)
 		assert.FileExists(t, path)
 		assert.Equal(t, path, p.local[ref.ID])
 	}
 	addIDs := refIDs(req.AddTables)
-	assert.ElementsMatch(t, addIDs, storeIDs(t, idx.store, idx.sstBasePath))
+	assert.ElementsMatch(t, addIDs, storeIDs(t, idx.store, idx.cfg.SSTBasePath))
 
 	assert.Equal(t, int64(1), idx.currentInstalledVersion(), "the first flush creates version 1")
 	for _, pk := range []int64{1, 2, 3} {
@@ -119,7 +119,7 @@ func TestHandoverNormal(t *testing.T) {
 	stats := idx.eng.Stats()
 	assert.Equal(t, 0, stats.FrozenGenerations)
 	assert.Equal(t, len(addIDs), stats.CommittedTables)
-	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(50), idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestFirstHandoverCreatesTheManifest checks that a ready Index uploads under
@@ -127,7 +127,7 @@ func TestHandoverNormal(t *testing.T) {
 // handover.
 func TestFirstHandoverCreatesTheManifest(t *testing.T) {
 	idx := newTestIndex(t)
-	assert.Equal(t, "root/pk_index/100/101/v0/sst", idx.sstBasePath)
+	assert.Equal(t, "root/pk_index/100/101/v0/sst", idx.cfg.SSTBasePath)
 
 	idx.insert(t, 10, 1)
 	idx.observed.Store(10)
@@ -137,10 +137,10 @@ func TestFirstHandoverCreatesTheManifest(t *testing.T) {
 	assert.Equal(t, testIndexID, reqs[0].IndexID)
 	m := idx.committer.manifest()
 	assert.EqualValues(t, 1, m.Version)
-	assert.Equal(t, idx.sstBasePath, m.SSTBasePath)
+	assert.Equal(t, idx.cfg.SSTBasePath, m.SSTBasePath)
 	keys := idx.store.Keys()
 	for _, ref := range m.Tables {
-		assert.Contains(t, keys, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)))
+		assert.Contains(t, keys, manifest.SSTKey(idx.cfg.SSTBasePath, int64(ref.ID)))
 	}
 }
 
@@ -154,7 +154,7 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	require.EqualValues(t, 1, first.Version, "the first flush creates the manifest")
 	require.EqualValues(t, 10, first.CheckpointTimeTick)
 	require.NotEmpty(t, first.Tables)
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.HandoverState().LastCommittedTimeTick)
 	assert.Empty(t, idx.eng.FrozenGenerations())
 
 	idx.insert(t, 20, 4, 5)
@@ -165,11 +165,11 @@ func TestTwoHandoversInOneProcess(t *testing.T) {
 	// the second install holds the tables of the first, which come from installedPaths
 	assert.Subset(t, sstIDs(second), sstIDs(first))
 	assert.Equal(t, len(second.Tables), idx.eng.Stats().CommittedTables)
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.HandoverState().LastCommittedTimeTick)
 	assert.EqualValues(t, 10, idx.segmentOf(t, 1))
 	assert.EqualValues(t, 20, idx.segmentOf(t, 4))
 	assert.Zero(t, idx.store.downloads.Load())
-	assert.False(t, idx.Dirty())
+	assert.False(t, idx.dirty())
 }
 
 func TestHandoverNothingToPublish(t *testing.T) {
@@ -190,7 +190,7 @@ func TestHandoverNothingToPublish(t *testing.T) {
 	assert.Empty(t, idx.committer.requestList())
 	assert.Equal(t, 0, idx.store.Len())
 	assert.Zero(t, idx.currentInstalledVersion())
-	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(20), idx.HandoverState().LastCommittedTimeTick)
 	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
 }
 
@@ -213,7 +213,7 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	assert.Empty(t, idx.committer.appliedList())
 	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
 	assert.Zero(t, idx.currentInstalledVersion())
-	assert.Zero(t, idx.LastCommittedTimeTick())
+	assert.Zero(t, idx.HandoverState().LastCommittedTimeTick)
 
 	require.NoError(t, idx.commit(ctx, p))
 
@@ -224,7 +224,7 @@ func TestHandoverCommitFailsBeforeApplyThenRetry(t *testing.T) {
 	assert.Equal(t, []bool{true}, idx.committer.appliedList())
 	assert.Equal(t, uint64(50), idx.committer.manifest().CheckpointTimeTick)
 	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
-	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(50), idx.HandoverState().LastCommittedTimeTick)
 	for _, pk := range []int64{1, 2, 3} {
 		assert.EqualValues(t, 10, idx.segmentOf(t, pk))
 	}
@@ -255,15 +255,15 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	assert.Equal(t, []bool{true, false}, idx.committer.appliedList())
 	assert.EqualValues(t, 1, idx.committer.manifest().Version)
 	assert.Nil(t, idx.pending.Load())
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.HandoverState().LastCommittedTimeTick)
 	assert.Empty(t, idx.eng.FrozenGenerations())
-	assert.True(t, idx.Dirty(), "the write after the rotate is not committed")
+	assert.True(t, idx.dirty(), "the write after the rotate is not committed")
 
 	require.True(t, idx.handover(t))
 	reqs = idx.committer.requestList()
 	require.Len(t, reqs, 3)
 	assert.EqualValues(t, 20, reqs[2].CheckpointTimeTick)
-	assert.EqualValues(t, 20, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 20, idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestHandoverRejectsAManifestThatWentBack checks the safety check after the
@@ -302,7 +302,7 @@ func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 			require.Error(t, err)
 			assert.True(t, errors.Is(err, manifest.ErrRejected))
 			assert.Equal(t, 0, idx.eng.Stats().CommittedTables, "nothing is installed")
-			assert.Zero(t, idx.LastCommittedTimeTick())
+			assert.Zero(t, idx.HandoverState().LastCommittedTimeTick)
 			assert.Equal(t, tc.installed, idx.currentInstalledVersion())
 			assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
 		})
@@ -326,7 +326,7 @@ func TestHandoverAcceptsTheSameVersion(t *testing.T) {
 
 	assert.Equal(t, int64(1), idx.currentInstalledVersion())
 	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations, "the generations of the handover retire")
-	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(50), idx.HandoverState().LastCommittedTimeTick)
 }
 
 func TestHandoverLastObservedDidNotMove(t *testing.T) {
@@ -340,7 +340,7 @@ func TestHandoverLastObservedDidNotMove(t *testing.T) {
 	assert.Nil(t, p)
 
 	assert.Equal(t, 0, idx.store.Len())
-	assert.Equal(t, uint64(30), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(30), idx.HandoverState().LastCommittedTimeTick)
 	stats := idx.eng.Stats()
 	assert.Equal(t, 0, stats.FrozenGenerations)
 	assert.Greater(t, stats.ActiveBytes, uint64(0))
@@ -374,7 +374,7 @@ func TestUploadFailuresKeepThePending(t *testing.T) {
 	reqs := idx.committer.requestList()
 	require.Len(t, reqs, 1)
 	assert.EqualValues(t, 10, reqs[0].CheckpointTimeTick)
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.HandoverState().LastCommittedTimeTick)
 	assert.Empty(t, idx.eng.FrozenGenerations(), "exactly one rotate happened")
 	assert.Equal(t, len(reqs[0].AddTables), idx.store.Len())
 	assert.EqualValues(t, 10, idx.segmentOf(t, 1))
@@ -398,7 +398,7 @@ func TestCommitReuploadFailureKeepsThePending(t *testing.T) {
 	assert.Equal(t, 1, idx.eng.Stats().FrozenGenerations)
 
 	require.NoError(t, idx.commit(ctx, p))
-	assert.Equal(t, uint64(50), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(50), idx.HandoverState().LastCommittedTimeTick)
 }
 
 func TestRetryReuploadsOldTables(t *testing.T) {
@@ -433,7 +433,7 @@ func TestRetryReuploadsOldTables(t *testing.T) {
 	reqs := idx.committer.requestList()
 	require.Len(t, reqs, 3)
 	assert.Equal(t, reqs[0], reqs[2])
-	assert.EqualValues(t, 10, idx.LastCommittedTimeTick())
+	assert.EqualValues(t, 10, idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestHandoverRetiresSeveralEmptyGenerationsInOneCall checks that a handover
@@ -456,7 +456,7 @@ func TestHandoverRetiresSeveralEmptyGenerationsInOneCall(t *testing.T) {
 
 	require.NoError(t, idx.commit(ctx, p))
 	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations)
-	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
+	assert.Equal(t, uint64(20), idx.HandoverState().LastCommittedTimeTick)
 }
 
 // TestRetireCoveredDropsSeveralGenerationsInOneCall checks that the

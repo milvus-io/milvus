@@ -66,7 +66,7 @@ func ErrorClass(err error) string {
 // or the Index closes; a fatal one (a missing or corrupted object) goes to
 // OnFatal.
 type installTask struct {
-	idx     *index.Index
+	idx     index.Index
 	params  func() Params
 	onFatal func(error)
 	logger  *mlog.Logger

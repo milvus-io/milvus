@@ -79,7 +79,7 @@ func (s *handoverSchedule) nextAttempt() time.Time {
 // signals a trigger or the backoff of a failed handover ends. There is no
 // ticker: the persisted TimeTicks of the WAL are the clock of the triggers,
 // and the WAL appends one at least every forced persist interval.
-func (c *PChannelIndexManager) startDriver() {
+func (c *pchannel) startDriver() {
 	c.driverDone = make(chan struct{})
 	go func() {
 		defer close(c.driverDone)
@@ -105,7 +105,7 @@ func (c *PChannelIndexManager) startDriver() {
 // step picks the indexes that hand over now and submits their handovers. It
 // returns when the driver must wake again for a handover in backoff, zero
 // when none is.
-func (c *PChannelIndexManager) step(now time.Time) time.Time {
+func (c *pchannel) step(now time.Time) time.Time {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return time.Time{}
 	}
@@ -127,7 +127,7 @@ func (c *PChannelIndexManager) step(now time.Time) time.Time {
 // at which a dirty Index in backoff may retry (zero when none is), and
 // whether the stall trigger picked. Only the driver step calls it: it reaps
 // the finished tasks first.
-func (c *PChannelIndexManager) pickHandovers(now time.Time) ([]*index.Index, time.Time, bool) {
+func (c *pchannel) pickHandovers(now time.Time) ([]index.Index, time.Time, bool) {
 	for _, idx := range c.dirtyIndexes() {
 		c.reapHandover(c.scheduleOf(idx))
 	}
@@ -136,7 +136,7 @@ func (c *PChannelIndexManager) pickHandovers(now time.Time) ([]*index.Index, tim
 
 // stalledFor returns how long, by observed time, the index has held the
 // checkpoint back: the physical time between stallSince and lastObserved.
-func (c *PChannelIndexManager) stalledFor() time.Duration {
+func (c *pchannel) stalledFor() time.Duration {
 	since := c.stallSince.Load()
 	if since == 0 {
 		return 0
@@ -148,7 +148,7 @@ func (c *PChannelIndexManager) stalledFor() time.Duration {
 // would hand an Index over now. It evaluates the same conditions as the
 // driver, so an Index in backoff does not wake the driver: the backoff timer
 // of the driver does. It only reads.
-func (c *PChannelIndexManager) wantsHandover() bool {
+func (c *pchannel) wantsHandover() bool {
 	picks, _, _ := c.evaluate(time.Now())
 	return len(picks) > 0
 }
@@ -156,7 +156,7 @@ func (c *PChannelIndexManager) wantsHandover() bool {
 // scheduleOf returns the handover schedule of idx. Add creates the schedule with the
 // Index, so that the first instant of its backoff is the open of the Index,
 // and detachLocked deletes it. A detached Index gets a schedule that no step sees.
-func (c *PChannelIndexManager) scheduleOf(idx *index.Index) *handoverSchedule {
+func (c *pchannel) scheduleOf(idx index.Index) *handoverSchedule {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if s, ok := c.schedules[idx]; ok {
@@ -167,7 +167,7 @@ func (c *PChannelIndexManager) scheduleOf(idx *index.Index) *handoverSchedule {
 
 // submitHandover submits one handover of idx to the node scheduler. Only the
 // driver step and the tests call it.
-func (c *PChannelIndexManager) submitHandover(idx *index.Index) {
+func (c *pchannel) submitHandover(idx index.Index) {
 	s := c.scheduleOf(idx)
 	s.running.Store(true)
 	s.handle = c.m.cfg.Sched.Submit(&handoverTask{c: c, idx: idx, schedule: s})
@@ -176,7 +176,7 @@ func (c *PChannelIndexManager) submitHandover(idx *index.Index) {
 // reapHandover clears running when the scheduler finished the task without
 // running it, for example after the scheduler closed. Only the driver step
 // calls it.
-func (c *PChannelIndexManager) reapHandover(s *handoverSchedule) {
+func (c *pchannel) reapHandover(s *handoverSchedule) {
 	if s.handle == nil || !s.running.Load() {
 		return
 	}
@@ -192,8 +192,8 @@ func (c *PChannelIndexManager) reapHandover(s *handoverSchedule) {
 
 // handoverTask runs one handover of an Index on the node scheduler.
 type handoverTask struct {
-	c        *PChannelIndexManager
-	idx      *index.Index
+	c        *pchannel
+	idx      index.Index
 	schedule *handoverSchedule
 }
 
@@ -207,7 +207,7 @@ func (t *handoverTask) Execute(ctx context.Context) error {
 // runHandover runs one handover step of idx and records its outcome in the
 // schedule: a success resets the backoff, a retryable failure advances it, a
 // fatal error stops the handovers of the Index and marks the WAL unavailable.
-func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index, s *handoverSchedule) {
+func (c *pchannel) runHandover(ctx context.Context, idx index.Index, s *handoverSchedule) {
 	retry := false
 	defer func() {
 		s.running.Store(false)
@@ -239,7 +239,7 @@ func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index
 		s.retryAt.Store(s.backoff.NextInstant().UnixNano())
 		retry = true
 		metrics.StreamingNodePKIndexHandoverFailuresTotal.WithLabelValues(paramtable.GetStringNodeID()).Inc()
-		fields := []mlog.Field{mlog.Int("failures", s.failures), mlog.Bool("pending", idx.HasPending()), mlog.Err(err)}
+		fields := []mlog.Field{mlog.Int("failures", s.failures), mlog.Bool("pending", idx.HandoverState().Pending), mlog.Err(err)}
 		if s.failures > warnFailures {
 			idx.Logger().Warn(ctx, "primary key index handover failed, retry later", fields...)
 		} else {
@@ -265,12 +265,13 @@ func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index
 //
 // The observe calls it from its goroutine and the driver step from its own,
 // so it only reads: the dirty set, the stats of the engines, and atomics.
-func (c *PChannelIndexManager) evaluate(now time.Time) (out []*index.Index, next time.Time, stalled bool) {
+func (c *pchannel) evaluate(now time.Time) (out []index.Index, next time.Time, stalled bool) {
 	params := c.m.cfg.Params()
 	tail := *c.tail.Load()
 	lo := c.lastObserved.Load()
-	var oldest *index.Index
+	var oldest index.Index
 	oldestRunnable := false
+	var oldestCommitted uint64
 	for _, idx := range c.dirtyIndexes() {
 		s := c.scheduleOf(idx)
 		runnable := !s.running.Load() && !s.stopped.Load() && idx.Ready()
@@ -280,26 +281,27 @@ func (c *PChannelIndexManager) evaluate(now time.Time) (out []*index.Index, next
 			}
 			runnable = false
 		}
-		dirty := idx.Dirty()
-		if dirty && (oldest == nil || idx.LastCommittedTimeTick() < oldest.LastCommittedTimeTick()) {
-			oldest, oldestRunnable = idx, runnable
+		state := idx.HandoverState()
+		dirty := state.Dirty
+		if dirty && (oldest == nil || state.LastCommittedTimeTick < oldestCommitted) {
+			oldest, oldestRunnable, oldestCommitted = idx, runnable, state.LastCommittedTimeTick
 		}
 		if !runnable {
 			continue
 		}
 		// a pending request is retried first, regardless of size or tail
-		if idx.HasPending() {
+		if state.Pending {
 			out = append(out, idx)
 			continue
 		}
 		// trigger 5: the observe saw a flush at want, and lastObserved
 		// reached want, so the handover covers it
-		if want := s.flushTT.Load(); dirty && idx.LastCommittedTimeTick() < want && lo >= want {
+		if want := s.flushTT.Load(); dirty && state.LastCommittedTimeTick < want && lo >= want {
 			out = append(out, idx)
 			continue
 		}
 		// trigger 1: the active generation is large
-		if dirty && idx.ActiveBytes() >= params.ActiveBytes {
+		if dirty && state.ActiveBytes >= params.ActiveBytes {
 			out = append(out, idx)
 		}
 	}
@@ -324,7 +326,7 @@ func (c *PChannelIndexManager) evaluate(now time.Time) (out []*index.Index, next
 
 // newBackoff returns the handover backoff of an Index with the current
 // params.
-func (c *PChannelIndexManager) newBackoff() *typeutil.BackoffWithInstant {
+func (c *pchannel) newBackoff() *typeutil.BackoffWithInstant {
 	params := c.m.cfg.Params()
 	return typeutil.NewBackoffWithInstant(typeutil.BackoffTimerConfig{
 		Backoff: typeutil.BackoffConfig{

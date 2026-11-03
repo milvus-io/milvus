@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
@@ -50,7 +49,7 @@ import (
 // close of the index of a dropped collection. The caller runs it after it
 // releases the lock of the recovery storage, before it observes the next
 // message.
-func (r *Recovery) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) (after func(context.Context)) {
+func (r *recovery) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) (after func(context.Context)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || r.stopped || r.err != nil {
@@ -71,16 +70,10 @@ func (r *Recovery) ObserveMessage(ctx context.Context, msg message.ImmutableMess
 // later handover covers a write it skipped. Every other error is fatal for
 // this WAL: the index missed a write it can not get back, so the WAL
 // becomes unavailable and reopens from the manifest and the WAL. A
-// corruption error also marks the vchannel for a cold start, see wipe.
-func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err error) {
+// corruption error in Apply or TruncateUntil makes Index.Close remove its
+// local directory before the next open.
+func (r *recovery) fail(ctx context.Context, msg message.ImmutableMessage, err error) {
 	class := indexmanager.ErrorClass(err)
-	if errors.Is(err, pkroot.ErrCorrupted) {
-		dir := index.VChannelDir(r.mgr.Root(), msg.VChannel())
-		if t, ok := r.targets[msg.VChannel()]; ok {
-			dir = index.Dir(r.mgr.Root(), msg.VChannel(), t.idx.IndexID())
-		}
-		r.wipe[msg.VChannel()] = dir
-	}
 	wrapped := errors.Wrapf(err, "apply %s of vchannel %s to the primary key index", msg.MessageType(), msg.VChannel())
 	if !r.finished {
 		r.err = wrapped
@@ -106,7 +99,7 @@ func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err e
 // The engine write of a message happens here, before the TimeTick after the
 // message moves the observed time tick of the pchannel. A handover reads
 // that tick before it rotates, so every write it covers is in the engine.
-func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (func(context.Context), error) {
+func (r *recovery) observe(ctx context.Context, msg message.ImmutableMessage) (func(context.Context), error) {
 	switch msg.MessageType() {
 	case message.MessageTypeTimeTick, message.MessageTypeRecoveryBarrier:
 		// Every write before the tick is in the engine by now, on this
@@ -194,7 +187,7 @@ func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (f
 // the index writes them in one batch with the deletes first: a transaction
 // that the index built for an insert holds the insert and then its
 // companion delete, at the same time tick, and the insert must survive.
-func (r *Recovery) observeTxn(ctx context.Context, txn message.ImmutableTxnMessage) error {
+func (r *recovery) observeTxn(ctx context.Context, txn message.ImmutableTxnMessage) error {
 	t, ok := r.targets[txn.VChannel()]
 	if !ok {
 		return nil
@@ -227,12 +220,12 @@ func (r *Recovery) observeTxn(ctx context.Context, txn message.ImmutableTxnMessa
 // enabled, the observe drops an Index of this index ID that the interceptor
 // opened at the append. The returned function closes a dropped Index, see
 // dropIndex.
-func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, header *message.CreateIndexMessageHeader, tt uint64) (func(context.Context), error) {
-	state, ok := r.m.VChannelState(vchannel)
+func (r *recovery) observeCreateIndex(ctx context.Context, vchannel string, header *message.CreateIndexMessageHeader, tt uint64) (func(context.Context), error) {
+	state, ok := r.stateOf(vchannel)
 	pk := state.PKIndex
 	enabled := ok && pk.GetIndexId() == header.GetIndexId() && pk.GetCheckpointTimeTick() == tt
 	if t, ok := r.targets[vchannel]; ok {
-		if t.idx.IndexID() == header.GetIndexId() || t.idx.CheckpointTimeTick() > tt {
+		if t.idx.IndexID() == header.GetIndexId() || t.checkpointTimeTick > tt {
 			// the index is open already, or a replay reached the CreateIndex
 			// of an index that a later index replaced
 			return nil, nil
@@ -250,7 +243,7 @@ func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, head
 	if err := r.openIndex(ctx, vchannel, header.GetCollectionId(), pk, state.Schema); err != nil {
 		return after, err
 	}
-	r.targets[vchannel].idx.MarkReady(ctx)
+	r.targets[vchannel].idx.SetCommitted(nil)
 	return after, nil
 }
 
@@ -259,9 +252,9 @@ func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, head
 // CreateIndex of the open Index is the replay of a drop of an earlier index
 // and does nothing. The returned function closes the dropped Index, see
 // dropIndex.
-func (r *Recovery) observeDropIndex(vchannel string, indexIDs []int64, tt uint64) func(context.Context) {
+func (r *recovery) observeDropIndex(vchannel string, indexIDs []int64, tt uint64) func(context.Context) {
 	t, ok := r.targets[vchannel]
-	if !ok || t.idx.CheckpointTimeTick() >= tt {
+	if !ok || t.checkpointTimeTick >= tt {
 		return nil
 	}
 	if len(indexIDs) > 0 && !slices.Contains(indexIDs, t.idx.IndexID()) {
@@ -279,15 +272,16 @@ func (r *Recovery) observeDropIndex(vchannel string, indexIDs []int64, tt uint64
 // storage runs the function after it releases its lock, and before it
 // observes the next message. A failed drop is logged: the index is gone
 // either way.
-func (r *Recovery) dropIndex(vchannel string, indexID int64) func(context.Context) {
+func (r *recovery) dropIndex(vchannel string, indexID int64) func(context.Context) {
 	if t, ok := r.targets[vchannel]; ok && (indexID == 0 || t.idx.IndexID() == indexID) {
 		delete(r.targets, vchannel)
 	}
-	if !r.m.DetachIndex(vchannel, indexID) {
+	drop := r.m.RemoveIndex(vchannel, indexID)
+	if drop == nil {
 		return nil
 	}
 	return func(ctx context.Context) {
-		if err := r.m.DropIndex(ctx, vchannel, indexID); err != nil {
+		if err := drop(ctx); err != nil {
 			r.logger.Warn(ctx, "failed to drop the primary key index", mlog.FieldVChannel(vchannel), mlog.Int64("indexID", indexID), mlog.Err(err))
 		}
 	}
@@ -295,7 +289,7 @@ func (r *Recovery) dropIndex(vchannel string, indexID int64) func(context.Contex
 
 // writeOf translates an insert or a delete into index terms. A message of
 // another type gives an empty write. The caller sets the time tick.
-func (r *Recovery) writeOf(ctx context.Context, t *target, msg message.ImmutableMessage) (index.Write, error) {
+func (r *recovery) writeOf(ctx context.Context, t *target, msg message.ImmutableMessage) (index.Write, error) {
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
 		insert := message.MustAsImmutableInsertMessageV1(msg)
@@ -348,7 +342,7 @@ func (r *Recovery) writeOf(ctx context.Context, t *target, msg message.Immutable
 // does not retry: a failed decode is not cached, and every call decodes
 // again. The retry runs on the observe goroutine of the recovery storage,
 // under its lock, so the whole pchannel waits with it.
-func readBody[B proto.Message](ctx context.Context, r *Recovery, what string, read func(context.Context) (B, error)) (B, error) {
+func readBody[B proto.Message](ctx context.Context, r *recovery, what string, read func(context.Context) (B, error)) (B, error) {
 	var body B
 	err := retry.Do(ctx, func() error {
 		b, err := read(ctx)

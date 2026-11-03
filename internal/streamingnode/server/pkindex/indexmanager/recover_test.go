@@ -49,7 +49,7 @@ func TestRecoverIndexesLooksManifestsUpInBatches(t *testing.T) {
 	ctx := context.Background()
 	env := NewFakeEnv(t, t.TempDir())
 	committer := &batchCommitter{Committer: env.Committer}
-	env.Manager.SetCommitterForTest(committer)
+	SetCommitterForTest(env.Manager, committer)
 	env.Committer.SetManifest("v5", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/5/v5"}})
 	old := manifestLookupBatch
 	manifestLookupBatch = 2
@@ -62,7 +62,7 @@ func TestRecoverIndexesLooksManifestsUpInBatches(t *testing.T) {
 		{VChannel: "v4", CollectionID: 4, IndexID: 1},
 		{VChannel: "v5", CollectionID: 5, IndexID: 1},
 	}
-	m := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}})
+	m := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}}).(*pchannel)
 	defer m.Close()
 	indexes, err := m.RecoverIndexes(ctx, specs)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestRecoverIndexesLooksManifestsUpInBatches(t *testing.T) {
 	sort.Sort(sort.Reverse(sort.IntSlice(batches)))
 	assert.Equal(t, []int{2, 2, 1}, batches)
 
-	var v5, v1 *index.Index
+	var v5, v1 index.Index
 	for _, idx := range indexes {
 		switch idx.VChannel() {
 		case "v5":
@@ -83,7 +83,7 @@ func TestRecoverIndexesLooksManifestsUpInBatches(t *testing.T) {
 			v1 = idx
 		}
 	}
-	assert.Equal(t, uint64(10), v5.LastCommittedTimeTick())
+	assert.Equal(t, uint64(10), v5.HandoverState().LastCommittedTimeTick)
 	assert.False(t, v5.Ready(), "v5 waits for the install")
 	assert.True(t, v1.Ready(), "v1 has no manifest and is ready at once")
 }

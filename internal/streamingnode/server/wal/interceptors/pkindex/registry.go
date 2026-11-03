@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
+	vchannel "github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,7 +46,8 @@ type target struct {
 // registry maps the vchannels whose primary key index is enabled to their
 // targets, and opens the Index of a vchannel at the enabling CreateIndex.
 type registry struct {
-	ch *indexmanager.PChannelIndexManager
+	ch           indexmanager.PChannel
+	pkIndexState func(string) (vchannel.PKIndexState, bool)
 
 	mu      sync.RWMutex
 	targets map[string]*target
@@ -59,8 +61,8 @@ type registry struct {
 	dropped map[string]int64
 }
 
-func newRegistry(ch *indexmanager.PChannelIndexManager) *registry {
-	return &registry{ch: ch, targets: make(map[string]*target), pending: make(map[string]uint64), dropped: make(map[string]int64)}
+func newRegistry(ch indexmanager.PChannel, state func(string) (vchannel.PKIndexState, bool)) *registry {
+	return &registry{ch: ch, pkIndexState: state, targets: make(map[string]*target), pending: make(map[string]uint64), dropped: make(map[string]int64)}
 }
 
 func (r *registry) get(vchannel string) *target {
@@ -123,7 +125,10 @@ func (r *registry) enable(ctx context.Context, spec indexmanager.IndexSpec, fiel
 // for the collections that exist: the WAL recovery opened the Index of every
 // vchannel with an enabled index. A vchannel without an Index gets no target.
 func (r *registry) adopt(ctx context.Context, vchannel string, collectionID int64, schema *schemapb.CollectionSchema) error {
-	idx := r.ch.IndexOf(vchannel)
+	idx, err := r.ch.IndexOf(vchannel)
+	if err != nil {
+		return err
+	}
 	if idx == nil {
 		return nil
 	}
@@ -184,7 +189,11 @@ func (r *registry) lookup(ctx context.Context, vchannel string) (*target, error)
 	if t != nil {
 		return t, nil
 	}
-	if idx := r.ch.IndexOf(vchannel); idx != nil && (!dropped || droppedID != idx.IndexID()) {
+	idx, err := r.ch.IndexOf(vchannel)
+	if err != nil {
+		return nil, err
+	}
+	if idx != nil && (!dropped || droppedID != idx.IndexID()) {
 		if t, ok := r.adoptOpened(ctx, vchannel, idx.CollectionID(), idx.IndexID()); ok {
 			return t, nil
 		}
@@ -207,7 +216,10 @@ func (r *registry) lookup(ctx context.Context, vchannel string) (*target, error)
 // of the WAL recovery opened. It reports false when the vchannel state does
 // not name that index, or does not name a usable primary key field.
 func (r *registry) adoptOpened(ctx context.Context, vchannel string, collectionID, indexID int64) (*target, bool) {
-	state, ok := r.ch.VChannelState(vchannel)
+	if r.pkIndexState == nil {
+		return nil, false
+	}
+	state, ok := r.pkIndexState(vchannel)
 	if !ok || state.PKIndex.GetIndexId() != indexID {
 		return nil, false
 	}
@@ -235,7 +247,7 @@ func (r *registry) adoptOpened(ctx context.Context, vchannel string, collectionI
 // observe of the WAL recovery closes it when it reaches the drop, after it
 // applied the writes before the drop, which must still find the engine open.
 func (r *registry) drop(vchannel string) {
-	idx := r.ch.IndexOf(vchannel)
+	idx, _ := r.ch.IndexOf(vchannel)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.targets, vchannel)

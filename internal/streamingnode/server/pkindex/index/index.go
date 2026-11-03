@@ -23,7 +23,8 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"time"
+
+	"github.com/cockroachdb/errors"
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
@@ -34,12 +35,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Index is the primary key index of one vchannel on a streaming node. It owns
-// the engine, the write path decider on top of it, and the handover state
-// of the vchannel. It reaches its pchannel only through the callbacks of its
-// Config.
-type Index struct {
-	cfg          Config
+var _ Index = (*indexImpl)(nil)
+
+// indexImpl is the primary key index of one vchannel on a streaming node.
+type indexImpl struct {
+	cfg          OpenConfig
 	vchannel     string
 	collectionID int64
 	indexID      int64
@@ -54,11 +54,10 @@ type Index struct {
 	lifetime *typeutil.Lifetime
 
 	// ready is closed when the committed table set of the vchannel is
-	// installed, see MarkReady. Before that the writes wait for it.
+	// installed. Before that the writes wait for it.
 	ready     chan struct{}
 	readyOnce sync.Once
-	// sstBasePath is the object key prefix of the tables of the vchannel.
-	sstBasePath string
+	closeOnce sync.Once
 
 	lastCommitted atomic.Uint64
 	// dirtyFlag is set by every successful engine write and cleared right
@@ -72,15 +71,19 @@ type Index struct {
 	installedPaths   map[sst.ID]string
 	// recovered is the manifest of the vchannel at the open, set by
 	// SetCommitted and installed by Install. Nil when the vchannel had none,
-	// or after a Reset.
+	// or after a TruncateUntil.
 	recovered *manifest.View
-	// resetEpoch counts the Resets. A handover prepared before a Reset does
-	// not install its result. installMu guards it.
+	// resetEpoch counts the truncates. A handover prepared before a truncate
+	// does not install its result. installMu guards it.
 	resetEpoch uint64
-	// resetTT is the time tick of the last Reset, 0 when none. Until a
+	// resetTT is the time tick of the last truncate, 0 when none. Until a
 	// handover commits a checkpoint at or above it, the next handover
 	// replaces the committed table set (see manifest.FlushArgs.ResetTimeTick).
 	resetTT atomic.Uint64
+	// corrupted is set by Apply or TruncateUntil after a corruption error.
+	// Close then removes the local directory, so the next open starts from
+	// the manifest.
+	corrupted atomic.Bool
 
 	// failWrites, when set, makes every engine write of Apply fail with it.
 	// Only the tests set it, see FailWritesForTest.
@@ -88,54 +91,6 @@ type Index struct {
 	// onWrite, when set, runs before every engine write of Apply with the
 	// batch. Only the tests set it, see OnWriteForTest.
 	onWrite atomic.Pointer[func([]engine.Mutation)]
-}
-
-// Params are the parameters of an Index. The Channel refreshes them.
-type Params struct {
-	// MemTableSize is the memtable size of the engine of one vchannel.
-	MemTableSize uint64
-	// ReuploadAfter is the age of an upload after which a retried commit
-	// uploads the tables again.
-	ReuploadAfter time.Duration
-}
-
-// Config is what an Index needs from its Channel. The callbacks are how the
-// Index reaches the pchannel: it does not know the Channel.
-type Config struct {
-	VChannel     string
-	CollectionID int64
-	// IndexID is the ID of the primary key index. It names the local
-	// directory and the object keys of the Index.
-	IndexID int64
-	// CheckpointTimeTick is the time tick of the CreateIndex that enabled the
-	// index on the vchannel. Apply skips the writes before it.
-	CheckpointTimeTick uint64
-	// Term is the term of the pchannel, sent with every flush.
-	Term int64
-	// Ctx ends when the Channel closes. The Index derives its own from it.
-	Ctx context.Context
-	// Logger carries the fields of the pchannel.
-	Logger *mlog.Logger
-
-	// Root is the local root directory of the indexes of the node.
-	Root string
-	// StorageRootPath is the root path of the object storage.
-	StorageRootPath string
-	Shared          *engine.SharedResources
-	AllocID         func(ctx context.Context) (int64, error)
-	Store           TableStore
-	Committer       manifest.Committer
-	Params          func() Params
-
-	// LastObserved returns the lastObserved of the pchannel: the time tick
-	// through which the observe of the WAL recovery wrote every change into
-	// the engines. A handover covers it.
-	LastObserved func() uint64
-	// OnRefresh runs when the dirty state or LastCommittedTimeTick of the
-	// Index may have changed: after a handover step and after MarkReady. The
-	// pchannel keeps its LastAcked heap with it. The first write after a
-	// rotate is reported by the return value of Apply instead.
-	OnRefresh func(*Index)
 }
 
 // Open opens the engine of a vchannel and builds the Index on top of it. The
@@ -148,12 +103,10 @@ type Config struct {
 // directory is kept: the install of the committed table set checks each file
 // against the manifest and downloads what is missing or differs, so a
 // restart does not download the tables it already has.
-func Open(ctx context.Context, cfg Config) (*Index, error) {
+func Open(ctx context.Context, cfg OpenConfig) (Index, error) {
 	params := cfg.Params()
-	dir := Dir(cfg.Root, cfg.VChannel, cfg.IndexID)
-	// engine.Destroy removes the engine dir, so the committed tables live outside it
-	engineDir := filepath.Join(dir, "engine")
-	committedDir := filepath.Join(dir, "committed")
+	engineDir := filepath.Join(cfg.Dir, "engine")
+	committedDir := filepath.Join(cfg.Dir, "committed")
 	leftover, err := hasLeftover(engineDir)
 	if err != nil {
 		return nil, err
@@ -168,15 +121,15 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 	eng, err := engine.Open(ctx, engine.Config{
 		Dir:          engineDir,
 		VChannel:     cfg.VChannel,
-		Shared:       cfg.Shared,
+		Shared:       cfg.Engine,
 		AllocID:      cfg.AllocID,
 		MemTableSize: params.MemTableSize,
 	})
 	if err != nil {
 		return nil, err
 	}
-	idxCtx, cancel := context.WithCancel(cfg.Ctx)
-	idx := &Index{
+	idxCtx, cancel := context.WithCancel(context.Background())
+	idx := &indexImpl{
 		cfg:          cfg,
 		vchannel:     cfg.VChannel,
 		collectionID: cfg.CollectionID,
@@ -188,7 +141,6 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
-		sstBasePath:  manifest.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.IndexID, cfg.VChannel),
 	}
 	// the decider only reads the engine: the observe of the WAL recovery
 	// writes it, through Apply
@@ -197,27 +149,16 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 }
 
 // VChannel returns the vchannel of the Index.
-func (idx *Index) VChannel() string { return idx.vchannel }
+func (idx *indexImpl) VChannel() string { return idx.vchannel }
 
 // CollectionID returns the collection of the Index.
-func (idx *Index) CollectionID() int64 { return idx.collectionID }
+func (idx *indexImpl) CollectionID() int64 { return idx.collectionID }
 
 // IndexID returns the ID of the primary key index of the Index.
-func (idx *Index) IndexID() int64 { return idx.indexID }
-
-// CheckpointTimeTick returns the time tick of the CreateIndex that enabled the
-// index on the vchannel.
-func (idx *Index) CheckpointTimeTick() uint64 { return idx.cfg.CheckpointTimeTick }
+func (idx *indexImpl) IndexID() int64 { return idx.indexID }
 
 // Logger returns the logger of the Index, with its vchannel and collection.
-func (idx *Index) Logger() *mlog.Logger { return idx.logger }
-
-// HasPending reports whether a prepared handover waits for its commit.
-func (idx *Index) HasPending() bool { return idx.pending.Load() != nil }
-
-// ActiveBytes returns the bytes that the active generation of the engine
-// holds, the size that triggers a handover.
-func (idx *Index) ActiveBytes() uint64 { return idx.eng.Stats().ActiveBytes }
+func (idx *indexImpl) Logger() *mlog.Logger { return idx.logger }
 
 // VChannelDir is the local directory of all Indexes of a vchannel under root.
 func VChannelDir(root, vchannel string) string {
@@ -260,46 +201,68 @@ func wipeLocal(dirs ...string) error {
 // markDirty sets the dirty flag and reports whether it was clear before: the
 // first write since the last rotate. The caller adds the Index to the
 // LastAcked heap.
-func (idx *Index) markDirty() bool {
+func (idx *indexImpl) markDirty() bool {
 	return idx.dirtyFlag.CompareAndSwap(false, true)
 }
 
 // dirty reports whether the Index has writes that are not committed: writes
 // since the last rotate, frozen generations, or a pending handover.
-func (idx *Index) Dirty() bool {
+func (idx *indexImpl) dirty() bool {
 	return idx.dirtyFlag.Load() || idx.pending.Load() != nil || len(idx.eng.FrozenGenerations()) > 0
+}
+
+// HandoverState implements Index.
+func (idx *indexImpl) HandoverState() HandoverState {
+	return HandoverState{
+		Dirty:                 idx.dirty(),
+		Pending:               idx.pending.Load() != nil,
+		ActiveBytes:           idx.eng.Stats().ActiveBytes,
+		LastCommittedTimeTick: idx.lastCommitted.Load(),
+	}
 }
 
 // Decider returns the write path decider of the vchannel. The WAL
 // interceptor decides every write through it.
-func (idx *Index) Decider() dedup.Decider {
+func (idx *indexImpl) Decider() dedup.Decider {
 	return idx.auth
 }
 
 // Close stops the Index: it waits for a running handover, then closes the
-// engine. A later Decide fails, and an open WriteIntent ends on its own. It
-// keeps the local files.
-func (idx *Index) Close(ctx context.Context) {
+// engine. It keeps the local files, except after an Apply or a TruncateUntil
+// saw a corruption error: then it removes the local directory, so the next
+// open starts from the manifest.
+func (idx *indexImpl) Close(ctx context.Context) {
+	idx.closeOnce.Do(func() { idx.close(ctx) })
+}
+
+func (idx *indexImpl) close(ctx context.Context) {
 	idx.lifetime.SetState(typeutil.LifetimeStateStopped)
 	idx.cancel()
 	idx.auth.Close()
 	idx.lifetime.Wait()
 	if err := idx.eng.Close(); err != nil {
 		idx.logger.Warn(ctx, "failed to close primary key index engine", mlog.Err(err))
-		return
+	}
+	if idx.corrupted.Load() {
+		if err := os.RemoveAll(idx.cfg.Dir); err != nil {
+			idx.logger.Warn(ctx, "failed to remove the local primary key index after a corruption error", mlog.Err(err))
+		} else {
+			idx.logger.Info(ctx, "removed the local primary key index after a corruption error, the next open starts from the manifest")
+		}
 	}
 	idx.logger.Info(ctx, "primary key index closed")
 }
 
-// lastCommittedTimeTick returns the checkpoint of the last successful
-// handover: all pkindex changes of messages with a time tick <= the returned
-// value are committed.
-func (idx *Index) LastCommittedTimeTick() uint64 { return idx.lastCommitted.Load() }
+// markCorrupted records a corruption error that Apply or TruncateUntil saw.
+// Close then removes the local directory.
+func (idx *indexImpl) markCorrupted(err error) {
+	if err != nil && errors.Is(err, pkroot.ErrCorrupted) {
+		idx.corrupted.Store(true)
+	}
+}
 
-// Ready reports whether the committed table set of the vchannel is installed
-// in the Index. Until then the writes of the vchannel wait for it (see
-// dedup.Config.Ready) and the Index does not hand over.
-func (idx *Index) Ready() bool {
+// Ready implements Index.
+func (idx *indexImpl) Ready() bool {
 	select {
 	case <-idx.ready:
 		return true
@@ -308,13 +271,9 @@ func (idx *Index) Ready() bool {
 	}
 }
 
-// MarkReady marks the Index ready, once: its committed table set is
-// installed. The recovery of the pchannel calls it for an Index of an
-// existing collection: right after the lookup when the vchannel has no
-// manifest, and after the install when it has one. The PChannelIndexManager
-// calls it for a collection created after the recovery, whose vchannel can
-// have no manifest. It does nothing after the Index closed.
-func (idx *Index) MarkReady(ctx context.Context) {
+// markReady marks the Index ready, once: its committed table set is
+// installed. It does nothing after the Index closed.
+func (idx *indexImpl) markReady(ctx context.Context) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return
 	}
@@ -337,7 +296,7 @@ func (idx *Index) MarkReady(ctx context.Context) {
 // the Index or taskCtx ends during the step, and the error of the step
 // otherwise; the caller classifies it with manifest.IsFatal. The handover driver is
 // the only caller, and it runs at most one step of an Index at a time.
-func (idx *Index) Handover(taskCtx context.Context) (committed bool, err error) {
+func (idx *indexImpl) Handover(taskCtx context.Context) (committed bool, err error) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return false, context.Canceled
 	}
@@ -358,7 +317,7 @@ func (idx *Index) Handover(taskCtx context.Context) (committed bool, err error) 
 
 // handover prepares a handover when none is pending, and commits the pending
 // one. It reports whether a commit succeeded.
-func (idx *Index) handover(ctx context.Context) (bool, error) {
+func (idx *indexImpl) handover(ctx context.Context) (bool, error) {
 	p := idx.pending.Load()
 	if p == nil {
 		// Clear the flag before the rotate. A write between the clear and

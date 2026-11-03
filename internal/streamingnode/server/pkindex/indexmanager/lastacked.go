@@ -44,7 +44,7 @@ import (
 // the heap already or is committed. An Index that joins the heap with a key
 // below ackedMax therefore has only writes above ackedMax, and ackedMax
 // stays a safe answer.
-func (c *PChannelIndexManager) LastAcked() uint64 {
+func (c *pchannel) LastAcked() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.hadIndex {
@@ -62,8 +62,8 @@ func (c *PChannelIndexManager) LastAcked() uint64 {
 }
 
 // lastAckedUnclamped returns LastAcked without the clamp to ackedMax, and
-// does not change ackedMax. The caller makes sure that the PChannelIndexManager has an index.
-func (c *PChannelIndexManager) lastAckedUnclamped() uint64 {
+// does not change ackedMax. The caller makes sure that the pchannel has an index.
+func (c *pchannel) lastAckedUnclamped() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastAckedLocked()
@@ -71,7 +71,7 @@ func (c *PChannelIndexManager) lastAckedUnclamped() uint64 {
 
 // lastAckedLocked computes LastAcked from the heap, without the clamp. The
 // caller holds mu.
-func (c *PChannelIndexManager) lastAckedLocked() uint64 {
+func (c *pchannel) lastAckedLocked() uint64 {
 	v := c.lastObserved.Load()
 	if k, ok := c.acked.min(); ok && k < v {
 		v = k
@@ -97,34 +97,35 @@ func (c *PChannelIndexManager) lastAckedLocked() uint64 {
 
 // trackDirty adds idx to the heap after its first write since the dirty flag
 // was cleared. Apply calls it when Index.Apply reports that write.
-func (c *PChannelIndexManager) trackDirty(idx *index.Index) {
+func (c *pchannel) trackDirty(idx index.Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.attachedLocked(idx) || c.acked.contains(idx) {
 		return
 	}
-	c.acked.update(idx, idx.LastCommittedTimeTick())
+	c.acked.update(idx, idx.HandoverState().LastCommittedTimeTick)
 }
 
 // refreshAcked removes idx from the heap when it is no longer dirty or not
 // fresh, and otherwise updates its key.
-func (c *PChannelIndexManager) refreshAcked(idx *index.Index) {
+func (c *pchannel) refreshAcked(idx index.Index) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.attachedLocked(idx) {
 		return
 	}
-	if !idx.Dirty() {
+	state := idx.HandoverState()
+	if !state.Dirty {
 		c.acked.remove(idx)
 		return
 	}
-	c.acked.update(idx, idx.LastCommittedTimeTick())
+	c.acked.update(idx, state.LastCommittedTimeTick)
 }
 
 // dirtyIndexes returns the members of the heap: the dirty and fresh Indexes
 // of the pchannel. The driver picks its handover candidates from them, so a
 // step costs the number of dirty Indexes, not the number of Indexes.
-func (c *PChannelIndexManager) dirtyIndexes() []*index.Index {
+func (c *pchannel) dirtyIndexes() []index.Index {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.acked.members()
@@ -132,25 +133,25 @@ func (c *PChannelIndexManager) dirtyIndexes() []*index.Index {
 
 // ackTracker is a min-heap of Indexes by their key, the LastCommittedTimeTick
 // at the last refresh. It keeps the position of every member itself, so an
-// Index carries nothing of the heap. The PChannelIndexManager guards it with mu.
+// Index carries nothing of the heap. The pchannel guards it with mu.
 type ackTracker struct {
 	items []ackItem
-	pos   map[*index.Index]int
+	pos   map[index.Index]int
 }
 
 type ackItem struct {
-	idx *index.Index
+	idx index.Index
 	key uint64
 }
 
 // contains reports whether idx is a member.
-func (t *ackTracker) contains(idx *index.Index) bool {
+func (t *ackTracker) contains(idx index.Index) bool {
 	_, ok := t.pos[idx]
 	return ok
 }
 
 // update sets the key of idx, and adds idx when it is not a member.
-func (t *ackTracker) update(idx *index.Index, key uint64) {
+func (t *ackTracker) update(idx index.Index, key uint64) {
 	if i, ok := t.pos[idx]; ok {
 		t.items[i].key = key
 		heap.Fix(t, i)
@@ -160,7 +161,7 @@ func (t *ackTracker) update(idx *index.Index, key uint64) {
 }
 
 // remove deletes idx if it is a member.
-func (t *ackTracker) remove(idx *index.Index) {
+func (t *ackTracker) remove(idx index.Index) {
 	if i, ok := t.pos[idx]; ok {
 		heap.Remove(t, i)
 	}
@@ -175,8 +176,8 @@ func (t *ackTracker) min() (uint64, bool) {
 }
 
 // members returns the Indexes in the heap, in no particular order.
-func (t *ackTracker) members() []*index.Index {
-	out := make([]*index.Index, len(t.items))
+func (t *ackTracker) members() []index.Index {
+	out := make([]index.Index, len(t.items))
 	for i, it := range t.items {
 		out[i] = it.idx
 	}
@@ -197,7 +198,7 @@ func (t *ackTracker) Swap(i, j int) {
 func (t *ackTracker) Push(x any) {
 	it := x.(ackItem)
 	if t.pos == nil {
-		t.pos = make(map[*index.Index]int)
+		t.pos = make(map[index.Index]int)
 	}
 	t.pos[it.idx] = len(t.items)
 	t.items = append(t.items, it)
