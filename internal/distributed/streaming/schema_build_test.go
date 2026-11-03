@@ -70,15 +70,15 @@ func TestSchemaClientBuildOutsideLock(t *testing.T) {
 			if action == "close" {
 				require.ErrorIs(t, got.err, ErrWALAccesserClosed)
 				require.Empty(t, c.shard(1).bodies.entries)
-				require.Empty(t, c.shard(1).writeVersions.entries)
+				require.Empty(t, c.shard(1).writeVersions)
 				return
 			}
 			require.NoError(t, got.err)
 			if action == "read" {
 				require.Same(t, concurrent, got.info, "concurrent fills share the published object")
 			} else {
-				require.NotSame(t, concurrent, got.info, "an older build cannot publish into a refreshed epoch")
-				_, ok := c.shard(1).writeVersions.load(1)
+				require.NotSame(t, concurrent, got.info, "an older build cannot publish into a refreshed version entry")
+				_, ok := c.shard(1).writeVersions[1]
 				require.False(t, ok)
 			}
 			hit, err = fetchTestSchema(t.Context(), c, "p_1v0", false, false)

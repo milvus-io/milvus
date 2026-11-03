@@ -57,7 +57,7 @@ func TestSchemaClientSharedBodyAndCachedWriteVersion(t *testing.T) {
 	require.EqualValues(t, 1, calls.Load(), "hot writes must not issue schema RPCs")
 	w := &walAccesserImpl{schemaClient: c}
 	w.onSchemaVersionMismatch("p_1v1")
-	_, ok := c.shard(1).writeVersions.load(1)
+	_, ok := c.shard(1).writeVersions[1]
 	require.False(t, ok)
 	next, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestSchemaClientSharedBodyAndCachedWriteVersion(t *testing.T) {
 }
 
 func TestSchemaClientWriteCacheExpiry(t *testing.T) {
-	for _, expired := range []string{"body", "selector", "epoch", "disabled"} {
+	for _, expired := range []string{"body", "disabled"} {
 		t.Run(expired, func(t *testing.T) {
 			ttl := time.Hour
 			if expired == "disabled" {
@@ -89,10 +89,6 @@ func TestSchemaClientWriteCacheExpiry(t *testing.T) {
 			switch expired {
 			case "body":
 				c.shard(1).bodies.expire(time.Now().Add(2 * time.Hour))
-			case "selector":
-				c.shard(1).writeVersions.expire(time.Now().Add(2 * time.Hour))
-			case "epoch":
-				c.shard(1).epochs.expire(time.Now().Add(2 * time.Hour))
 			}
 			c.shard(1).mu.Unlock()
 			fresh, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
@@ -103,20 +99,20 @@ func TestSchemaClientWriteCacheExpiry(t *testing.T) {
 	}
 }
 
-func TestSchemaCacheIdleExpiryAndIndependentSelectors(t *testing.T) {
+func TestSchemaCacheIdleExpiryRemovesMatchingSelector(t *testing.T) {
 	c := newSchemaClient(nil, 20*time.Millisecond)
 	defer c.close()
 	body := testSchema(0)
 	seedTestSchema(t, c, 1, body)
 	c.shard(1).mu.Lock()
-	c.shard(1).writeVersions.store(1, 0)
+	c.shard(1).writeVersions[1] = &cachedWriteVersion{version: 0}
 	c.shard(1).bodies.expire(time.Now().Add(time.Hour))
 	_, ok := c.shard(1).bodies.load(schemaIdentity{1, 0})
 	require.False(t, ok)
-	version, ok := c.shard(1).writeVersions.load(1)
+	version, ok := c.shard(1).writeVersions[1]
 	c.shard(1).mu.Unlock()
-	require.True(t, ok)
-	require.Zero(t, version)
+	require.False(t, ok)
+	require.Nil(t, version)
 	seedTestSchema(t, c, 1, body)
 	require.Eventually(t, func() bool {
 		c.shard(1).mu.Lock()
@@ -199,9 +195,9 @@ func TestSchemaClientInvalidationFencesInFlightWrite(t *testing.T) {
 	require.EqualValues(t, 2, fresh.Version)
 	close(release)
 	require.NoError(t, <-done)
-	version, ok := c.shard(1).writeVersions.load(1)
+	version, ok := c.shard(1).writeVersions[1]
 	require.True(t, ok)
-	require.EqualValues(t, 2, version)
+	require.EqualValues(t, 2, version.version)
 }
 
 func TestSchemaClientFailuresAndShutdown(t *testing.T) {
@@ -229,8 +225,12 @@ func TestSchemaClientFailureDoesNotPoisonCache(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	_, err = c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 0})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Empty(t, c.shard(1).bodies.entries)
-	require.Empty(t, c.shard(1).writeVersions.entries)
+	pending, ok := c.shard(1).bodies.load(schemaIdentity{1, 0})
+	require.True(t, ok)
+	require.Nil(t, pending.info)
+	write, ok := c.shard(1).writeVersions[1]
+	require.True(t, ok)
+	require.Equal(t, unknownWriteSchemaVersion, write.version)
 	p.UnPatch()
 	p = mockey.Mock((*schemaClient).getCollectionSchema).Return(testSchema(0), nil).Build()
 	defer p.UnPatch()
@@ -250,7 +250,9 @@ func TestSchemaClientFailureDoesNotPoisonCache(t *testing.T) {
 	defer p.UnPatch()
 	_, err = c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0", BypassCache: true})
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.Empty(t, c.shard(1).writeVersions.entries, "invalid schemas must not publish a write selector")
+	write, ok = c.shard(1).writeVersions[1]
+	require.True(t, ok)
+	require.Nil(t, c.shard(1).cachedWriteSchemaLocked(1, write), "invalid schemas must not publish a usable write selector")
 }
 
 func TestSchemaClientCloseFencesPendingFill(t *testing.T) {
@@ -268,7 +270,7 @@ func TestSchemaClientCloseFencesPendingFill(t *testing.T) {
 		}
 		require.ErrorIs(t, err, ErrWALAccesserClosed)
 		require.Empty(t, c.shard(1).bodies.entries)
-		require.Empty(t, c.shard(1).writeVersions.entries)
+		require.Empty(t, c.shard(1).writeVersions)
 		_, err = c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 		require.ErrorIs(t, err, ErrWALAccesserClosed)
 		p.UnPatch()
@@ -278,9 +280,71 @@ func TestSchemaClientCloseFencesPendingFill(t *testing.T) {
 func seedTestSchema(t *testing.T, c *schemaClient, id int64, raw *schemapb.CollectionSchema) *schemautil.SchemaInfo {
 	t.Helper()
 	c.shard(id).mu.Lock()
-	epoch := c.shard(id).schemaEpochLocked(id, false)
+	entry := c.shard(id).schemaEntryLocked(schemaIdentity{id, raw.Version}, false)
 	c.shard(id).mu.Unlock()
-	info, err := c.shard(id).cacheSchema(schemaIdentity{id, raw.Version}, raw, epoch)
+	info, err := c.shard(id).cacheSchema(schemaIdentity{id, raw.Version}, raw, entry)
 	require.NoError(t, err)
 	return info
+}
+
+func TestSchemaCacheExpiresIdlePrefixInBatches(t *testing.T) {
+	c := newSchemaCache[int, int](time.Hour)
+	now := time.Now()
+	for i := range schemaExpireBatchSize*2 + 1 {
+		c.store(i, i)
+		c.entries[i].accessed = now.Add(-2 * time.Hour)
+	}
+	// Renew the oldest entry by store, moving it behind the expired prefix.
+	c.store(0, 100)
+	require.True(t, c.expire(now))
+	require.Len(t, c.entries, schemaExpireBatchSize+1)
+	require.False(t, c.expire(now))
+	require.Len(t, c.entries, 1)
+	value, ok := c.load(0)
+	require.True(t, ok)
+	require.Equal(t, 100, value)
+	require.Equal(t, 1, c.idle.Len())
+	c.erase(0)
+	require.Zero(t, c.idle.Len())
+	require.False(t, c.expire(now))
+	c.store(1, 1)
+	c.clear()
+	require.Empty(t, c.entries)
+	require.Zero(t, c.idle.Len())
+}
+
+func TestSchemaCacheVersionExpiryRemovesOnlyMatchingWriteIndex(t *testing.T) {
+	c := newSchemaClient(nil, time.Hour)
+	defer c.close()
+	old := seedTestSchema(t, c, 1, testSchema(0))
+	current := seedTestSchema(t, c, 1, testSchema(1))
+	shard := c.shard(1)
+	shard.mu.Lock()
+	shard.writeVersions[1] = &cachedWriteVersion{version: 1}
+	shard.bodies.entries[schemaIdentity{1, 0}].accessed = time.Now().Add(-2 * time.Hour)
+	shard.mu.Unlock()
+	shard.expire(time.Now())
+	hit, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
+	require.NoError(t, err)
+	require.Same(t, current, hit)
+	shard.expire(time.Now().Add(2 * time.Hour))
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	require.Empty(t, shard.bodies.entries)
+	require.NotContains(t, shard.writeVersions, int64(1), "evicting the selected version also removes its write index")
+	require.Zero(t, old.Version, "eviction leaves previously returned immutable schemas usable")
+}
+
+func TestSchemaCacheLazyExpiryRemovesMatchingWriteIndex(t *testing.T) {
+	c := newSchemaClient(nil, time.Hour)
+	defer c.close()
+	seedTestSchema(t, c, 1, testSchema(0))
+	shard := c.shard(1)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	shard.writeVersions[1] = &cachedWriteVersion{version: 0}
+	shard.bodies.entries[schemaIdentity{1, 0}].accessed = time.Now().Add(-2 * time.Hour)
+	_, ok := shard.bodies.load(schemaIdentity{1, 0})
+	require.False(t, ok)
+	require.NotContains(t, shard.writeVersions, int64(1))
 }

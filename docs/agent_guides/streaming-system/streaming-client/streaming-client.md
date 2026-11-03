@@ -27,15 +27,24 @@ selector before the error reaches the caller; the next lookup refreshes from SN.
 The failed mutation is not automatically rebuilt or retried by SchemaClient.
 Exact-version reads, including zero, also use the cache directly.
 
-Both request types accept `BypassCache`. A refresh uses a new collection epoch,
-bypasses older flights and logically invalidates metadata in all cached versions
-of that collection without scanning other entries. Older RPC completions cannot
-publish over the new epoch. Refresh also clears the write selector: fetching an
-exact read version does not establish the current write version. Cache bodies,
-write selectors and epochs expire when idle. Collection IDs route these three
-maps to 32 cache shards, each with one mutex. Field-index construction runs
-outside that mutex and rechecks the epoch on publication. Idle cleanup visits
-one shard at a time, so a scan does not hold a process-wide schema lock.
+Both request types accept `BypassCache`. Schema entries are keyed by collection
+and SchemaVersion, with independent idle lifetimes and refresh tokens. Replacing
+an entry separates its singleflight key and fences older completions; no separate
+collection epoch map is needed. Refreshing one version leaves other versions
+cached. A read refresh clears a matching write selector, or an unresolved write
+flight that might select that version, without invalidating a different known
+write version. The write-version index is an ordinary map with no independent
+TTL. Evicting a schema removes a selector pointing to that version, including
+lazy expiry on access; other versions remain unaffected. Explicit invalidation
+and client close also clear selectors. The index does not retain SchemaInfo objects.
+
+Collection IDs route the schema cache and write index to 32 shards, each with one
+mutex. Field-index construction runs outside that mutex and checks the entry's
+identity again before publication. Schema entries form an idle queue: accesses
+move an entry to the tail, and expiry removes only the expired prefix, at most 64
+entries per lock acquisition. The shard releases its lock between batches. A
+sweep with no expired entries checks only the head, not every cached version.
+This bounds batch work, not wall-clock lock latency under arbitrary scheduling.
 
 On a miss, Proxy MetaCache fetches the published version from Coord, then obtains
 that exact version through SchemaClient with `BypassCache`. It shallow-copies the
@@ -50,8 +59,10 @@ is immediately available even before the recovery observer catches up. Other
 versions fall back to RecoveryStorage; a different write version is never used
 as a substitute.
 
-SN exact-version responses combine that version's fields/TTL with current
-non-versioned metadata; allocation-time WAL history remains unchanged.
+SN exact-version responses return that version's own snapshot, without metadata
+from other versions. For now, repeated snapshots with the same SchemaVersion
+resolve to the last retained NORMAL entry. TODO(#40451): give distinct schema
+snapshots unique versions; this change preserves existing WAL history.
 AlterCollection's consuming-side ACK precedes coordinator callback/invalidation,
 so the subsequent refresh observes metadata updates even without a schema-version
 change. MetaCache's fill lock orders the schema fetch and publication against

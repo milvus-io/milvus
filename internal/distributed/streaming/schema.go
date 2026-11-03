@@ -34,7 +34,7 @@ type SchemaClient interface {
 	// A schema mismatch on append invalidates the selector for the next lookup.
 	GetCurrentWriteSchema(context.Context, GetCurrentWriteSchemaRequest) (*schemautil.SchemaInfo, error)
 	// GetSchemaVersion resolves an exact retained version, including zero.
-	// BypassCache also invalidates other versions' non-versioned metadata.
+	// BypassCache refreshes only the requested version.
 	GetSchemaVersion(context.Context, GetSchemaVersionRequest) (*schemautil.SchemaInfo, error)
 }
 
@@ -42,16 +42,27 @@ type schemaIdentity struct {
 	collectionID int64
 	version      int32
 }
+
+// Entry identity is the refresh token: replacing or expiring an entry prevents
+// older flights from publishing into its replacement, without a separate epoch map.
+type cachedSchema struct {
+	info *schemautil.SchemaInfo
+}
+
+const unknownWriteSchemaVersion int32 = -1
+
+type cachedWriteVersion struct {
+	version int32
+}
+
 type writeFlightKey struct {
-	channel     string
-	generation  uint64
-	bypassCache bool
+	channel string
+	entry   *cachedWriteVersion
 }
 
 type readFlightKey struct {
 	schemaIdentity
-	generation  uint64
-	bypassCache bool
+	entry *cachedSchema
 }
 
 const schemaCacheShardCount = 32
@@ -66,16 +77,15 @@ type schemaClient struct {
 	done          chan struct{}
 }
 
-// Each collection's bodies, selector and epoch share one lock. Unrelated
-// collections can use different shards while a refresh or expiry is in progress.
+// Schema bodies expire and refresh independently by collection and version.
+// The current-write selector is removed on invalidation, matching body eviction
+// or close; it has no independent TTL.
+// Both maps share a shard lock for atomic publication.
 type schemaClientShard struct {
 	mu            sync.Mutex
-	bodies        *schemaCache[schemaIdentity, cachedSchema]
-	writeVersions *schemaCache[int64, int32]
-	epochs        *schemaCache[int64, uint64]
-	// Monotonic within a shard, including after idle epochs expire, to avoid ABA.
-	generation uint64
-	ctx        context.Context
+	bodies        *schemaCache[schemaIdentity, *cachedSchema]
+	writeVersions map[int64]*cachedWriteVersion
+	ctx           context.Context
 }
 
 func (c *schemaClient) shard(collectionID int64) *schemaClientShard {
@@ -83,23 +93,31 @@ func (c *schemaClient) shard(collectionID int64) *schemaClientShard {
 }
 
 func (s *schemaClientShard) expire(now time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.bodies.expire(now)
-	s.writeVersions.expire(now)
-	s.epochs.expire(now)
+	for {
+		s.mu.Lock()
+		more := s.bodies.expire(now)
+		s.mu.Unlock()
+		if !more {
+			return
+		}
+	}
 }
 
 func newSchemaClient(handlerClient handler.HandlerClient, ttl time.Duration) *schemaClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &schemaClient{handlerClient: handlerClient, ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	for i := range c.shards {
-		c.shards[i] = &schemaClientShard{
-			bodies:        newSchemaCache[schemaIdentity, cachedSchema](ttl),
-			writeVersions: newSchemaCache[int64, int32](ttl),
-			epochs:        newSchemaCache[int64, uint64](ttl),
+		shard := &schemaClientShard{
+			bodies:        newSchemaCache[schemaIdentity, *cachedSchema](ttl),
+			writeVersions: make(map[int64]*cachedWriteVersion),
 			ctx:           ctx,
 		}
+		shard.bodies.onEvict = func(key schemaIdentity, _ *cachedSchema) {
+			if write := shard.writeVersions[key.collectionID]; write != nil && write.version == key.version {
+				delete(shard.writeVersions, key.collectionID)
+			}
+		}
+		c.shards[i] = shard
 	}
 	go func() {
 		defer close(c.done)
@@ -129,8 +147,7 @@ func (c *schemaClient) close() {
 	for _, shard := range c.shards {
 		shard.mu.Lock()
 		shard.bodies.clear()
-		shard.writeVersions.clear()
-		shard.epochs.clear()
+		clear(shard.writeVersions)
 		shard.mu.Unlock()
 	}
 }
@@ -148,20 +165,26 @@ func (c *schemaClient) GetCurrentWriteSchema(ctx context.Context, req GetCurrent
 	}
 	shard := c.shard(id)
 	shard.mu.Lock()
-	key := writeFlightKey{req.VChannel, shard.schemaEpochLocked(id, req.BypassCache), req.BypassCache}
-	if !req.BypassCache {
-		if info := shard.cachedWriteSchemaLocked(id, key.generation); info != nil {
+	entry, ok := shard.writeVersions[id]
+	if ok && !req.BypassCache {
+		if info := shard.cachedWriteSchemaLocked(id, entry); info != nil {
 			shard.mu.Unlock()
 			return info, nil
 		}
+		if entry.version != unknownWriteSchemaVersion {
+			_, ok = shard.bodies.load(schemaIdentity{id, entry.version})
+		}
 	}
+	if !ok || req.BypassCache {
+		entry = &cachedWriteVersion{version: unknownWriteSchemaVersion}
+		shard.writeVersions[id] = entry
+	}
+	key := writeFlightKey{req.VChannel, entry}
 	shard.mu.Unlock()
-	// Concurrent misses share the RPC. Recheck after joining the flight in case
-	// an earlier flight populated the cache after the initial lookup.
 	return c.writes.Do(ctx, key, func(ctx context.Context) (*schemautil.SchemaInfo, error) {
 		if !req.BypassCache {
 			shard.mu.Lock()
-			info := shard.cachedWriteSchemaLocked(id, key.generation)
+			info := shard.cachedWriteSchemaLocked(id, entry)
 			shard.mu.Unlock()
 			if info != nil {
 				return info, nil
@@ -171,29 +194,25 @@ func (c *schemaClient) GetCurrentWriteSchema(ctx context.Context, req GetCurrent
 		if err != nil {
 			return nil, err
 		}
-		body, err := shard.cacheSchema(schemaIdentity{id, response.Version}, response, key.generation)
-		if err != nil {
-			return nil, err
-		}
+		identity := schemaIdentity{id, response.Version}
 		shard.mu.Lock()
-		defer shard.mu.Unlock()
-		if c.ctx.Err() != nil {
-			return nil, ErrWALAccesserClosed
+		var body *cachedSchema
+		if current, ok := shard.writeVersions[id]; ok && current == entry {
+			body = shard.schemaEntryLocked(identity, req.BypassCache)
+			entry.version = response.Version
 		}
-		if epoch, ok := shard.epochs.load(id); ok && epoch == key.generation {
-			shard.writeVersions.store(id, response.Version)
-		}
-		return body, err
+		shard.mu.Unlock()
+		return shard.cacheSchema(identity, response, body)
 	})
 }
 
-func (c *schemaClientShard) cachedWriteSchemaLocked(id int64, epoch uint64) *schemautil.SchemaInfo {
-	version, ok := c.writeVersions.load(id)
-	if !ok {
+func (c *schemaClientShard) cachedWriteSchemaLocked(id int64, entry *cachedWriteVersion) *schemautil.SchemaInfo {
+	current, ok := c.writeVersions[id]
+	if !ok || current != entry || entry.version == unknownWriteSchemaVersion {
 		return nil
 	}
-	if cached, ok := c.bodies.load(schemaIdentity{id, version}); ok && cached.epoch == epoch {
-		return cached.info
+	if body, ok := c.bodies.load(schemaIdentity{id, entry.version}); ok {
+		return body.info
 	}
 	return nil
 }
@@ -212,23 +231,29 @@ func (c *schemaClient) GetSchemaVersion(ctx context.Context, req GetSchemaVersio
 	identity := schemaIdentity{id, req.Version}
 	shard := c.shard(id)
 	shard.mu.Lock()
-	key := readFlightKey{identity, shard.schemaEpochLocked(id, req.BypassCache), req.BypassCache}
-	if !req.BypassCache {
-		if cached, ok := shard.bodies.load(identity); ok && cached.epoch == key.generation {
-			shard.mu.Unlock()
-			return cached.info, nil
+	entry := shard.schemaEntryLocked(identity, req.BypassCache)
+	if req.BypassCache {
+		// A historical refresh must not invalidate a different known write
+		// version. An unresolved write flight could still return this version.
+		if write, ok := shard.writeVersions[id]; ok && (write.version == unknownWriteSchemaVersion || write.version == req.Version) {
+			delete(shard.writeVersions, id)
 		}
 	}
+	if entry.info != nil {
+		shard.mu.Unlock()
+		return entry.info, nil
+	}
+	key := readFlightKey{identity, entry}
 	shard.mu.Unlock()
 	return c.reads.Do(ctx, key, func(ctx context.Context) (*schemautil.SchemaInfo, error) {
-		if !req.BypassCache {
-			shard.mu.Lock()
-			cached, ok := shard.bodies.load(identity)
+		shard.mu.Lock()
+		cached, ok := shard.bodies.load(identity)
+		if ok && cached == entry && cached.info != nil {
+			info := cached.info
 			shard.mu.Unlock()
-			if ok && cached.epoch == key.generation {
-				return cached.info, nil
-			}
+			return info, nil
 		}
+		shard.mu.Unlock()
 		response, err := c.getCollectionSchema(ctx, &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: req.VChannel, Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: req.Version}})
 		if err != nil {
 			return nil, err
@@ -236,62 +261,47 @@ func (c *schemaClient) GetSchemaVersion(ctx context.Context, req GetSchemaVersio
 		if response.Version != req.Version {
 			return nil, merr.WrapErrServiceInternalMsg("streaming returned a mismatched schema version")
 		}
-		return shard.cacheSchema(identity, response, key.generation)
+		return shard.cacheSchema(identity, response, entry)
 	})
 }
 
-// schemaEpochLocked separates a refresh from older read and write flights.
-// Refreshing one collection does not prevent another collection's cache fill.
-func (c *schemaClientShard) schemaEpochLocked(id int64, refresh bool) uint64 {
-	if epoch, ok := c.epochs.load(id); ok && !refresh {
-		return epoch
+func (c *schemaClientShard) schemaEntryLocked(key schemaIdentity, refresh bool) *cachedSchema {
+	if entry, ok := c.bodies.load(key); ok && !refresh {
+		return entry
 	}
-	c.generation++
-	c.epochs.store(id, c.generation)
-	// An exact-version refresh can populate a body without confirming that it
-	// is still writable. Never combine that body with an older write selector.
-	c.writeVersions.erase(id)
-	return c.generation
+	entry := &cachedSchema{}
+	c.bodies.store(key, entry)
+	return entry
 }
 
-// A refresh changes the collection epoch, invalidating all retained versions'
-// metadata without scanning the cache. Old entries expire unless fetched again.
-type cachedSchema struct {
-	epoch uint64
-	info  *schemautil.SchemaInfo
-}
-
-// cacheSchema builds field indices outside the client lock. Publication rechecks
-// the epoch and cache because another read, write or refresh can finish meanwhile.
-func (c *schemaClientShard) cacheSchema(key schemaIdentity, response *schemapb.CollectionSchema, epoch uint64) (*schemautil.SchemaInfo, error) {
+// cacheSchema builds field indices outside the lock. The entry token is checked
+// again on publication so expired or refreshed flights cannot overwrite a new one.
+func (c *schemaClientShard) cacheSchema(key schemaIdentity, response *schemapb.CollectionSchema, entry *cachedSchema) (*schemautil.SchemaInfo, error) {
 	c.mu.Lock()
 	if c.ctx.Err() != nil {
 		c.mu.Unlock()
 		return nil, ErrWALAccesserClosed
 	}
-	if current, ok := c.epochs.load(key.collectionID); ok && current == epoch {
-		if cached, ok := c.bodies.load(key); ok && cached.epoch == epoch {
-			c.mu.Unlock()
-			return cached.info, nil
-		}
+	if current, ok := c.bodies.load(key); ok && current == entry && current.info != nil {
+		info := current.info
+		c.mu.Unlock()
+		return info, nil
 	}
 	c.mu.Unlock()
-
 	info, err := schemautil.NewSchemaInfo(response)
 	if err != nil {
 		return nil, err
 	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ctx.Err() != nil {
 		return nil, ErrWALAccesserClosed
 	}
-	if current, ok := c.epochs.load(key.collectionID); ok && current == epoch {
-		if cached, ok := c.bodies.load(key); ok && cached.epoch == epoch {
-			return cached.info, nil
+	if current, ok := c.bodies.load(key); ok && current == entry {
+		if current.info != nil {
+			return current.info, nil
 		}
-		c.bodies.store(key, cachedSchema{epoch, info})
+		current.info = info
 	}
 	return info, nil
 }
@@ -322,7 +332,7 @@ func (c *schemaClient) invalidateWriteSchema(channel string) {
 	shard := c.shard(id)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
-	// Changing the flight generation prevents an RPC predating this error from
-	// publishing a stale write selector or being joined by a later request.
-	shard.schemaEpochLocked(id, true)
+	// Existing schema versions remain valid. Only the current-write selector
+	// and its pending flights become stale after an append mismatch.
+	delete(shard.writeVersions, id)
 }

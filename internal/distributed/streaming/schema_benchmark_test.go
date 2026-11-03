@@ -25,9 +25,9 @@ func BenchmarkSchemaClientCacheHit(b *testing.B) {
 					channels[i] = fmt.Sprintf("p_%dv0", id)
 					shard := c.shard(id)
 					shard.mu.Lock()
-					epoch := shard.schemaEpochLocked(id, false)
-					shard.bodies.store(schemaIdentity{id, 0}, cachedSchema{epoch, info})
-					shard.writeVersions.store(id, 0)
+					entry := &cachedSchema{info: info}
+					shard.bodies.store(schemaIdentity{id, 0}, entry)
+					shard.writeVersions[id] = &cachedWriteVersion{version: 0}
 					shard.mu.Unlock()
 				}
 				ctx := context.Background()

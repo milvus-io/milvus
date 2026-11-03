@@ -133,7 +133,7 @@ func TestSchemaClientRefreshCollectionIsolation(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestSchemaClientRefreshFailureAndExpiredEpoch(t *testing.T) {
+func TestSchemaClientRefreshFailureAndExpiredEntry(t *testing.T) {
 	c := newSchemaClient(nil, time.Hour)
 	defer c.close()
 	old := seedTestSchema(t, c, 1, testSchema(0))
@@ -143,23 +143,23 @@ func TestSchemaClientRefreshFailureAndExpiredEpoch(t *testing.T) {
 	p.UnPatch()
 	cached, ok := c.shard(1).bodies.load(schemaIdentity{1, 0})
 	require.True(t, ok)
-	require.Same(t, old, cached.info)
+	require.Nil(t, cached.info, "a failed refresh must not serve the old body")
 	p = mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, _ *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
 		c.shard(1).mu.Lock()
-		c.shard(1).epochs.expire(time.Now().Add(2 * time.Hour))
+		c.shard(1).bodies.expire(time.Now().Add(2 * time.Hour))
 		c.shard(1).mu.Unlock()
+		c.invalidateWriteSchema("p_1v0")
 		return testSchema(0), nil
 	}).Build()
 	defer p.UnPatch()
 	fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, true)
 	require.NoError(t, err)
 	require.NotSame(t, old, fresh)
-	cached, ok = c.shard(1).bodies.load(schemaIdentity{1, 0})
-	require.True(t, ok)
-	require.Same(t, old, cached.info, "expired epochs cannot publish late responses")
+	_, ok = c.shard(1).bodies.load(schemaIdentity{1, 0})
+	require.False(t, ok, "expired entries cannot be resurrected by late responses")
 }
 
-func TestSchemaClientRefreshInvalidatesOlderVersions(t *testing.T) {
+func TestSchemaClientRefreshPreservesOtherVersions(t *testing.T) {
 	c := newSchemaClient(nil, time.Hour)
 	defer c.close()
 	var calls int
@@ -183,15 +183,16 @@ func TestSchemaClientRefreshInvalidatesOlderVersions(t *testing.T) {
 	require.EqualValues(t, 2, write.Version)
 	read, err := fetchTestSchema(t.Context(), c, "p_1v0", false, false)
 	require.NoError(t, err)
-	require.Equal(t, 3, calls, "older versions must be refetched to obtain current non-versioned metadata")
+	require.Equal(t, 2, calls, "refreshing the write version must not invalidate historical versions")
+	require.Same(t, old, read)
 	require.Zero(t, read.Version)
-	require.Equal(t, "after alter", read.Description)
+	require.Equal(t, "before alter", read.Description)
 	require.Equal(t, "before alter", old.Description)
 	again, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
 	require.NoError(t, err)
 	require.Same(t, write, again, "write cache hits reuse the compiled SchemaInfo without RPCs")
 	require.Same(t, write.FieldMap, again.FieldMap)
-	require.Equal(t, 3, calls)
+	require.Equal(t, 2, calls)
 }
 
 func TestSchemaClientReadRefreshInvalidatesWriteSelector(t *testing.T) {
@@ -222,4 +223,91 @@ func TestSchemaClientReadRefreshInvalidatesWriteSelector(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, fresh, hit)
 	require.EqualValues(t, 3, calls.Load())
+}
+
+func TestSchemaClientVersionRefreshIsolation(t *testing.T) {
+	c := newSchemaClient(nil, time.Hour)
+	defer c.close()
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	var calls atomic.Int32
+	p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, ctx context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
+		calls.Add(1)
+		if req.GetCurrentWrite() {
+			return testSchema(2), nil
+		}
+		if req.GetSchemaVersion() == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return testSchema(req.GetSchemaVersion()), nil
+	}).Build()
+	defer p.UnPatch()
+	write, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
+	require.NoError(t, err)
+	done := make(chan *schemautil.SchemaInfo, 1)
+	go func() {
+		info, _ := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 1})
+		done <- info
+	}()
+	<-started
+	_, err = c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 0, BypassCache: true})
+	require.NoError(t, err)
+	again, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
+	require.NoError(t, err)
+	require.Same(t, write, again, "refreshing v0 preserves the known v2 write selector")
+	once.Do(func() { close(release) })
+	historical := <-done
+	require.NotNil(t, historical)
+	cached, err := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 1})
+	require.NoError(t, err)
+	require.Same(t, historical, cached, "refreshing v0 must not fence a pending v1 fill")
+	require.EqualValues(t, 3, calls.Load())
+}
+
+func TestSchemaClientExpiredReadCannotOverwriteReplacement(t *testing.T) {
+	c := newSchemaClient(nil, time.Hour)
+	defer c.close()
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	var calls atomic.Int32
+	p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, ctx context.Context, _ *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		body := testSchema(0)
+		body.Description = fmt.Sprint(call)
+		return body, nil
+	}).Build()
+	defer p.UnPatch()
+	done := make(chan error, 1)
+	go func() {
+		_, err := fetchTestSchema(t.Context(), c, "p_1v0", false, false)
+		done <- err
+	}()
+	<-started
+	c.shard(1).expire(time.Now().Add(2 * time.Hour))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	fresh, err := fetchTestSchema(ctx, c, "p_1v0", false, false)
+	require.NoError(t, err, "an expired entry must not join the old flight")
+	require.Equal(t, "2", fresh.Description)
+	once.Do(func() { close(release) })
+	require.NoError(t, <-done)
+	hit, err := fetchTestSchema(t.Context(), c, "p_1v0", false, false)
+	require.NoError(t, err)
+	require.Same(t, fresh, hit)
+	require.EqualValues(t, 2, calls.Load())
 }
