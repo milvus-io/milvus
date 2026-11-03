@@ -1316,6 +1316,19 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	}
 }
 
+func newBroadcastImportTestServer(t *testing.T, job bulkimport.ImportJob) *Server {
+	t.Helper()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	m.AddCollection(&meta.CollectionInfo{ID: job.GetCollectionID(), Schema: readinessVectorSchema()})
+	imports, err := bulkimport.NewImportMeta(t.Context(), m.Catalog, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, imports.AddJob(t.Context(), job))
+	server := &Server{meta: m, importMeta: imports}
+	server.ddl = newDDLCallbacks(server)
+	return server
+}
+
 func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, bulkimport.ImportJob) error) {
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
@@ -1338,20 +1351,22 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{broker: mockBroker}
-	server.ddl = newDDLCallbacks(server)
 	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        7,
 			CollectionID: 7,
 			Vchannels:    wantVchannels,
+			State:        internalpb.ImportJobState_Uncommitted,
 		},
 		Tr: timerecord.NewTimeRecorder("test"),
 	}
+	server := newBroadcastImportTestServer(t, job)
+	server.broker = mockBroker
+	server.ddl = newDDLCallbacks(server)
 
 	err := broadcastFn(server, ctx, job)
-	assert.NoError(t, err)
-	assert.NotNil(t, capture.Captured, "Broadcast must have been called")
+	require.NoError(t, err)
+	require.NotNil(t, capture.Captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.Captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 	assert.False(t, capture.Captured.BroadcastHeader().AckSyncUp)
@@ -1359,7 +1374,12 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 
 // CommitImport targets business channels and CChannel for the unified callback.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
-	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("segment_change_"+enabled, func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, enabled)
+			testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+		})
+	}
 }
 
 func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
@@ -1369,12 +1389,19 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 	capture := &meta.CaptureBroadcastAPI{}
 	patch := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(capture, nil).Build()
 	defer patch.UnPatch()
-	for _, coordinator := range []bool{false, true} {
-		job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
-		err := (&Server{}).broadcastCommitImportMessage(context.Background(), job)
-		assert.NoError(t, err)
-		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
-		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+	for _, enabled := range []string{"false", "true"} {
+		t.Run("segment_change_"+enabled, func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, enabled)
+			for _, coordinator := range []bool{false, true} {
+				job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: coordinator}}
+				server := newBroadcastImportTestServer(t, job)
+				capture.Captured = nil
+				require.NoError(t, server.broadcastCommitImportMessage(context.Background(), job))
+				require.NotNil(t, capture.Captured)
+				msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
+				assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+			}
+		})
 	}
 }
 
