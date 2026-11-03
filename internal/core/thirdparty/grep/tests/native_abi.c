@@ -7,8 +7,8 @@
 #if UINTPTR_MAX == UINT64_MAX
 _Static_assert(sizeof(MgGrepError) == 512, "error layout");
 _Static_assert(sizeof(MgGrepBytes) == 16 && offsetof(MgGrepBytes, len) == 8, "bytes layout");
-_Static_assert(sizeof(MgGrepMatchOptions) == 12 && offsetof(MgGrepMatchOptions, boundary) == 8, "options layout");
-_Static_assert(sizeof(MgGrepSpecView) == 32 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
+_Static_assert(sizeof(MgGrepMatchOptions) == 24 && offsetof(MgGrepMatchOptions, boundary) == 8 && offsetof(MgGrepMatchOptions, has_max_count) == 12 && offsetof(MgGrepMatchOptions, max_count) == 16, "options layout");
+_Static_assert(sizeof(MgGrepSpecView) == 40 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
 _Static_assert(sizeof(MgGrepCompileLimits) == 16 && offsetof(MgGrepCompileLimits, max_regex_bytes) == 0 && offsetof(MgGrepCompileLimits, max_dfa_cache_bytes) == 8, "compile limits layout");
 _Static_assert(sizeof(MgGrepSpan) == 16 && offsetof(MgGrepSpan, end) == 8, "span layout");
 _Static_assert(sizeof(MgGrepLine) == 48 && offsetof(MgGrepLine, spans) == 16 && offsetof(MgGrepLine, span_count) == 24 && offsetof(MgGrepLine, line_number) == 32 && offsetof(MgGrepLine, line_start_offset) == 40, "line layout");
@@ -25,7 +25,7 @@ int main(void) {
     MgGrepCompileLimits cl = {1048576, 1048576};
     uint64_t el = {200000000};
     MgGrepBytes p = bytes("error");
-    MgGrepSpecView spec = {&p, 1, {0, 0, 0}};
+    MgGrepSpecView spec = {&p, 1, {0}};
     MgGrepError error; /* Output storage does not need caller initialization. */
     MgGrepPlan *plan = NULL;
     MgGrepSession *session = NULL;
@@ -33,6 +33,13 @@ int main(void) {
 
     assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK);
     assert(error.message[0] == 0 && plan != NULL);
+    MgGrepBytes condition; /* Getter also accepts uninitialized output storage. */
+    MgGrepBytes condition_again;
+    assert(mg_grep_plan_condition(plan, &condition, &error) == MG_GREP_OK);
+    assert(condition.data != NULL && condition.len > 0 && error.message[0] == 0);
+    assert(mg_grep_plan_condition(plan, &condition_again, NULL) == MG_GREP_OK);
+    assert(condition.data == condition_again.data && condition.len == condition_again.len);
+    assert(mg_grep_plan_condition(plan, NULL, &error) == MG_GREP_INVALID_ARGUMENT);
     assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
     mg_grep_plan_free(plan);
     char *input = (char *)malloc(32);
@@ -54,10 +61,40 @@ int main(void) {
     assert(line->spans[1].start == 7 && line->spans[1].end == 12);
     mg_grep_result_free(result);
 
+    /* Presence distinguishes -m 0 from the zero-initialized unlimited default. */
+    spec.options.has_max_count = 1;
+    spec.options.max_count = 1;
+    assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+    mg_grep_plan_free(plan);
+    MgGrepBytes capped[] = {bytes("error error\nerror"), bytes("skip\nerror\nerror")};
+    assert(mg_grep_execute_batch(session, capped, 2, el, &result, &error) == MG_GREP_OK);
+    view = mg_grep_result_view(result);
+    assert(view->texts[0].line_count == 1 && view->texts[0].lines[0].span_count == 2);
+    assert(view->texts[1].line_count == 1 && view->texts[1].lines[0].line_number == 2);
+    mg_grep_result_free(result);
+    mg_grep_session_free(session);
+    spec.options.max_count = 0;
+    assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+    mg_grep_plan_free(plan);
+    assert(mg_grep_execute_batch(session, capped, 2, el, &result, &error) == MG_GREP_OK);
+    view = mg_grep_result_view(result);
+    assert(view->texts[0].line_count == 0 && view->texts[1].line_count == 0);
+    mg_grep_result_free(result);
+    mg_grep_session_free(session);
+    spec.options.has_max_count = 2;
+    assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_INVALID_ARGUMENT && plan == NULL);
+    spec.options.has_max_count = 0;
+
     /* All handle-producing failures must clear an otherwise valid output slot. */
     plan = (MgGrepPlan *)(uintptr_t)1;
     assert(mg_grep_compile(NULL, &cl, &plan, &error) == MG_GREP_INVALID_ARGUMENT);
     assert(plan == NULL && error.message[0] != 0);
+    condition.data = (const uint8_t *)(uintptr_t)1;
+    condition.len = 123;
+    assert(mg_grep_plan_condition(NULL, &condition, &error) == MG_GREP_INVALID_ARGUMENT);
+    assert(condition.data == NULL && condition.len == 0);
     assert(mg_grep_compile(&spec, &cl, NULL, &error) == MG_GREP_INVALID_ARGUMENT);
     session = (MgGrepSession *)(uintptr_t)1;
     assert(mg_grep_session_create(NULL, &session, &error) == MG_GREP_INVALID_ARGUMENT && session == NULL);
@@ -76,6 +113,8 @@ int main(void) {
     /* Empty-pattern matches, UTF-8 byte coordinates, and NULL empty content. */
     p.data = NULL; p.len = 0;
     assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK && error.message[0] == 0);
+    assert(mg_grep_plan_condition(plan, &condition, NULL) == MG_GREP_OK);
+    assert(condition.data != NULL && condition.len > 0); /* Explicit True, not empty. */
     assert(mg_grep_session_create(plan, &session, NULL) == MG_GREP_OK);
     mg_grep_plan_free(plan);
     MgGrepBytes unicode_batch[] = {bytes("\xc3\xa9"), bytes("\n"), {NULL, 0}};
@@ -127,6 +166,22 @@ int main(void) {
     mg_grep_session_cancel(session);
     assert(mg_grep_execute_batch(session, NULL, 0, el, &result, &error) == MG_GREP_CANCELLED && result == NULL);
     mg_grep_session_free(session);
+
+    /* Binary payloads are length-delimited, not C strings. */
+    p = bytes("a\\x00b");
+    assert(mg_grep_compile(&spec, &cl, &plan, &error) == MG_GREP_OK);
+    assert(mg_grep_plan_condition(plan, &condition, &error) == MG_GREP_OK);
+    const size_t payload_len = condition.len;
+    uint8_t *owned = (uint8_t *)malloc(payload_len);
+    assert(owned != NULL);
+    memcpy(owned, condition.data, payload_len);
+    mg_grep_plan_free(plan);
+    int found = 0;
+    for (size_t i = 0; i + 2 < payload_len; ++i) {
+        if (owned[i] == 'a' && owned[i + 1] == 0 && owned[i + 2] == 'b') found = 1;
+    }
+    assert(found);
+    free(owned);
 
     mg_grep_plan_free(NULL);
     mg_grep_session_cancel(NULL);

@@ -111,3 +111,53 @@ func TestParseArgumentBytes(t *testing.T) {
 		t.Fatalf("unexpected pattern count: %#v, %v", spec, err)
 	}
 }
+
+func TestParseMaxCount(t *testing.T) {
+	for _, input := range []string{`-m 2 -e a`, `-m2 -e a`, `--max-count 2 -e a`, `--max-count=2 -e a`, `-im2 -e a`, `-m0 -e a -m2`, `-m3 --max-count=2 -e a`} {
+		spec, err := Parse(input, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value, present := spec.MaxCount(); !present || value != 2 {
+			t.Fatalf("%q: max-count=%d, present=%v", input, value, present)
+		}
+	}
+	for _, input := range []string{`-m0 -e a`, `--max-count=0 -e a`, `-m2 -m0 -e a`} {
+		spec, err := Parse(input, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value, present := spec.MaxCount(); !present || value != 0 {
+			t.Fatalf("%q: max-count=%d, present=%v", input, value, present)
+		}
+	}
+	spec, err := Parse(`-e -m`, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := spec.MaxCount(); present || spec.Pattern(0) != "-m" {
+		t.Fatal("pattern value must not be interpreted as a flag")
+	}
+	spec, err = Parse(`-m18446744073709551615 -e a`, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, present := spec.MaxCount(); !present || value != ^uint64(0) {
+		t.Fatal("max-count must retain all uint64 bits")
+	}
+	for _, input := range []string{`-m`, `-e a --max-count`} {
+		_, err := Parse(input, 65536)
+		if !errors.Is(err, merr.ErrParameterMissing) {
+			t.Fatalf("%q: %v", input, err)
+		}
+	}
+	for _, input := range []string{`-m-1 -e a`, `-m +1 -e a`, `-m2i -e a`, `-m -e a`, `--max-count= -e a`, `-m 1.5 -e a`, `-m0x10 -e a`, `-m1_000 -e a`, `-m18446744073709551616 -e a`, `--max-c=1 -e a`} {
+		spec, err := Parse(input, 65536)
+		if spec != nil || !errors.Is(err, merr.ErrParameterInvalid) || merr.GetErrorType(err) != merr.InputError {
+			t.Fatalf("%q: got %#v, %v", input, spec, err)
+		}
+		if remote := merr.Error(merr.Status(err)); merr.IsRetryableErr(remote) {
+			t.Fatalf("invalid count must not be retried: %v", remote)
+		}
+	}
+}

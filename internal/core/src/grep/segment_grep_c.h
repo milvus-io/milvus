@@ -23,8 +23,11 @@ typedef struct {
     int64_t limit;
     int64_t batch_size;
     uint32_t pattern_kind, case_mode, boundary;
+    uint32_t has_max_count;
     uint64_t max_regex_bytes, max_dfa_cache_bytes;
     uint64_t max_result_bytes;
+    // Per-field matching-line cap, distinct from the Query document limit.
+    uint64_t max_count;
 } CGrepScanOptions;
 // Patterns are concatenated bytes with one length per pattern. Inputs and
 // segment are borrowed through return. Outputs own their Arrow buffers.

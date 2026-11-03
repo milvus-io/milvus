@@ -34,6 +34,7 @@ pub struct Session {
     // session clones the matcher to get its own regex engine cache pool.
     _plan: Plan,
     matcher: RegexMatcher,
+    max_count: Option<u64>,
     cancellation: CancellationToken,
     poisoned: bool,
 }
@@ -43,6 +44,7 @@ impl Session {
         Self {
             _plan: plan.clone(),
             matcher: plan.matcher(),
+            max_count: plan.max_count(),
             cancellation: CancellationToken::default(),
             poisoned: false,
         }
@@ -127,7 +129,8 @@ impl Session {
             let mut line_number = 1;
             // Empty text has no logical lines. A terminal LF does not create
             // another line. CR, NUL and BOM are never normalized away.
-            while start < text.len() {
+            while start < text.len() && self.max_count.is_none_or(|max| (lines.len() as u64) < max)
+            {
                 let end = line_end(text.as_bytes(), start, &control)?;
                 let content = &text[start..end];
                 let mut spans = Vec::new();
