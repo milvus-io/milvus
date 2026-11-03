@@ -28,7 +28,6 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/FileManager.h"
-#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -143,8 +142,7 @@ JsonStatsTranslator::get_cells(
         files.push_back(f);
     }
     config[milvus::index::INDEX_FILES] = files;
-    config[milvus::LOAD_PRIORITY] =
-        ResolveLoadPriority(ctx, info_proto_->load_priority());
+    config[milvus::LOAD_PRIORITY] = info_proto_->load_priority();
     config[milvus::index::ENABLE_MMAP] = info_proto_->enable_mmap();
     if (info_proto_->enable_mmap()) {
         config[milvus::index::MMAP_FILE_PATH] = info_proto_->mmap_dir_path();
@@ -168,7 +166,7 @@ JsonStatsTranslator::get_cells(
                     us / 1000.0);
             },
             milvus::ScopedTimer::LogLevel::Info);
-        stats->Load(milvus::tracer::TraceContext{}, config);
+        stats->Load(milvus::tracer::TraceContext{}, config, ctx);
     }
 
     CheckCancellation(
