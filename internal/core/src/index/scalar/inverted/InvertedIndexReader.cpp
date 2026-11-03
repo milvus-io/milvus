@@ -270,6 +270,10 @@ InvertedIndexStorage<T>::MemoryUsage() const {
     AddUsageBytes(total, sizeof(milvus::tantivy::TantivyIndexWrapper));
     AddUsageBytes(total, engine_path_bytes_);
     AddUsageBytes(total, valid_bitmap_.size_in_bytes());
+    if (json_exists) {
+        AddUsageBytes(total, sizeof(TargetBitmap));
+        AddUsageBytes(total, json_exists->size_in_bytes());
+    }
     if (directory_ != nullptr) {
         AddUsageBytes(total, directory_->HeapBytes());
     }

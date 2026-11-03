@@ -548,8 +548,14 @@ folly::coro::Task<std::unique_ptr<InvertedIndexStorage<T>>>
 FinishPackedStorage(IndexLoadPlan& plan,
                     const storage::LoadOptions& opts,
                     bool use_async) {
-    co_return MakeStorage<T>(co_await FinishPackedState(plan, opts, use_async),
-                             opts);
+    auto storage =
+        MakeStorage<T>(co_await FinishPackedState(plan, opts, use_async), opts);
+    const auto& state =
+        std::any_cast<const std::shared_ptr<PackedInvertedState>&>(
+            plan.load_context);
+    storage->json_exists =
+        FinishPackedJsonExists(std::move(state->projection), storage->count_);
+    co_return storage;
 }
 
 }  // namespace
@@ -580,7 +586,9 @@ InvertedIndexLoader::CreateCached(const IndexCacheConfig& cache,
         if (rows && *rows > 0)
             count = *rows;
     }
-    const IndexMetadata metadata{DeriveCaps(options_.params),
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{caps,
                                  runtime.nested ? Domain::Element : Domain::Row,
                                  runtime.value_type,
                                  count};
@@ -603,7 +611,11 @@ InvertedIndexLoader::CreateCached(const IndexCacheConfig& cache,
                     SingleCellIndexStorageTranslator<InvertedIndexStorage<T>>>(
                     cache, use_async, std::move(load)),
                 context);
-    return std::make_shared<InvertedIndex<T>>(std::move(slot), metadata);
+    auto index = std::make_shared<InvertedIndex<T>>(std::move(slot), metadata);
+    if (auto spec = JsonProjectedSpec(options_.params, count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
+    }
+    return index;
 }
 
 template <typename T>
@@ -622,10 +634,15 @@ InvertedIndexLoader::LoadStorage(OpenedIndexSource& source,
            const storage::LoadOptions& opts,
            bool use_async)
             -> folly::coro::Task<std::unique_ptr<InvertedIndexStorage<T>>> {
-            co_return MakeStorage<T>(
+            auto projection =
+                PrepareJsonProjectedOpen(families::kInverted, files, opts);
+            auto storage = MakeStorage<T>(
                 co_await LoadState(
                     use_async, files, opts, ParseRuntimeParams(opts.params)),
                 opts);
+            storage->json_exists = co_await LoadJsonExists(
+                use_async, std::move(projection), files, storage->count_);
+            co_return storage;
         },
         context);
 }
@@ -636,9 +653,6 @@ InvertedIndexLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached inverted construction consumed this loader");
     if (cache) {
-        AssertInfo(!DeriveCaps(options_.params).json_paths,
-                   "JSON projection cache migration is separate from inverted "
-                   "storage");
         co_return DispatchInvertedType<IndexPtr>(
             ParseRuntimeParams(options_.params).value_type,
             [&]<typename T>() { return CreateCached<T>(*cache, context); });

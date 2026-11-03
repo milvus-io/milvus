@@ -241,7 +241,9 @@ CheckCachedStringProjection(const char* backend_name, bool corrupt = false) {
                     options.params[INDEX_TYPE] =
                         backend.Family() == families::kMarisa
                             ? HYBRID_INDEX_TYPE
-                            : NGRAM_INDEX_TYPE;
+                        : backend.Family() == families::kNgram
+                            ? NGRAM_INDEX_TYPE
+                            : INVERTED_INDEX_TYPE;
                     options.params[JSON_PATH] = "/a";
                     options.params[JSON_CAST_TYPE] = "VARCHAR";
                     options.enable_mmap = mmap;
@@ -359,6 +361,100 @@ TEST(JsonPathIndexCacheTest, NgramStorageLoadsExistenceWithRequestContext) {
 TEST(JsonPathIndexCacheTest,
      NgramWarmupRejectsInvalidExistenceBeforePublication) {
     CheckCachedStringProjection("NgramVarcharMin2Max4Heap", true);
+}
+
+TEST(JsonPathIndexCacheTest, InvertedStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("InvertedVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     InvertedWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("InvertedVarchar", true);
+}
+
+TEST(JsonPathIndexCacheTest,
+     InvertedArrayUsesParentRowsForExistenceAndPredicates) {
+    const auto& backend = ScalarReaderBackends().Get<ArrayView>(
+        "JsonProjectedInvertedArrayVarchar");
+    auto data = ScalarDataSets()
+                    .Get<ArrayView>("JsonProjectedArrayVarchar")
+                    .make_data();
+    const ScalarTestInput<ArrayView> input(data);
+    const BackendCaseMetadata metadata{data.values.size(), data.metadata};
+    auto artifact = backend.Build(input.View(), metadata);
+    for (const bool packed : {false, true}) {
+        for (const bool known_count : {false, true}) {
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "json-array-cache-XXXXXX",
+                "JSON array cache test");
+            const auto persisted =
+                packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+            auto source = [&]() -> OpenedIndexSource {
+                if (!packed) {
+                    return LegacyIndexSource{
+                        std::make_shared<TestArtifactSource>(
+                            persisted, storage::Generation::V1V2),
+                        false};
+                }
+                auto stream = std::make_shared<storage::RemoteInputStream>(
+                    std::make_shared<arrow::io::BufferReader>(
+                        MakePackedArtifactBuffer(persisted)));
+                return PackedIndexSource{
+                    std::shared_ptr<storage::IndexEntryReader>(
+                        storage::IndexEntryReader::Open(stream,
+                                                        stream->Size()))};
+            }();
+            storage::LoadOptions options;
+            options.params = backend.LoadParams(metadata);
+            options.mmap_dir_path = staging->Path();
+            if (known_count)
+                options.params[INDEX_NUM_ROWS_KEY] = 7;
+            else
+                options.params.erase(INDEX_NUM_ROWS_KEY);
+            if (auto* legacy = std::get_if<LegacyIndexSource>(&source)) {
+                options.params = AnnotateJsonProjectionCompleteness(
+                    std::move(options.params), *legacy->source);
+            } else {
+                const auto& packed_source = std::get<PackedIndexSource>(source);
+                options.params = AnnotateJsonProjectionCompleteness(
+                    std::move(options.params),
+                    packed_source.Directory(),
+                    packed_source.Metadata());
+            }
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                                   true},
+                {1024 * 1024, 1024 * 1024},
+                {},
+                4096};
+            auto index = LoaderRegistry::Instance()
+                             .Lookup(backend.Family())
+                             .Load({std::move(source), options, cache});
+            EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+            EXPECT_FALSE(index->Metadata().caps.nested);
+            OpContext ctx;
+            auto reader = index->CreateReader(&ctx);
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+            EXPECT_EQ(reader->Count(), 7);
+            const auto* json =
+                dynamic_cast<const IJsonIndexReader*>(reader.get());
+            ASSERT_NE(json, nullptr);
+            ExpectBitmap(json->Exists("/a"), Hits(7, {0, 1, 2, 3}));
+            auto path =
+                json->Resolve("/a", JsonCastType::FromString("ARRAY_VARCHAR"));
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+                    path.get());
+            ASSERT_NE(predicate, nullptr);
+            const std::string_view key = "alpha";
+            ExpectBitmap(predicate->In(1, &key), Hits(7, {0, 3}));
+            ExpectBitmap(predicate->NotIn(1, &key), Hits(7, {1, 2}));
+        }
+    }
 }
 
 TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {

@@ -86,6 +86,7 @@ struct InvertedIndexStorage {
     // offsets are row offsets that only segment-level validity can apply.
     bool all_valid_{false};
     TargetBitmap valid_bitmap_;
+    std::shared_ptr<const TargetBitmap> json_exists;
     DataType value_type_{DataType::NONE};
     bool nested_{false};
     bool mmap_{false};
@@ -132,6 +133,7 @@ class InvertedIndex final
 
  private:
     friend class InvertedIndexReader<T>;
+    friend class JsonPathIndex;
     std::shared_ptr<const InvertedIndexStorage<T>>
     PinStorage(milvus::OpContext* op_ctx) const;
     struct CachedStorage {
