@@ -531,6 +531,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
 		params.Save(Params.SearchPlaceholderLogRateLimit.Key, "50")
 		assert.Equal(t, float64(50), Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		for _, value := range []string{"NaN", "inf", "+Inf", "-Inf", "Infinity", "invalid", "1e999"} {
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, value))
+			assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat(), value)
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, "0.5"))
+			assert.Equal(t, 0.5, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		}
 		params.Reset(Params.SearchPlaceholderLogRateLimit.Key)
 		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
 

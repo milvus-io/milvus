@@ -106,7 +106,9 @@ func (s searchPlaceholderStringer) String() string {
 	w := newPlaceholderLogWriter(s.maxBytes)
 	subReqs := s.request.GetSubReqs()
 	count := max(1, len(subReqs))
-	w.write(fmt.Sprintf("sub_requests=%d ", len(subReqs)))
+	w.write(fmt.Sprintf("sub_requests=%d summaries=", len(subReqs)))
+	// Write every sub-request's metadata before a large preview can exhaust the
+	// budget. The summaries themselves still obey the shared byte limit.
 	for i := 0; i < count && !w.truncated; i++ {
 		placeholder, nq := s.request.GetPlaceholderGroup(), s.request.GetNq()
 		if len(subReqs) > 0 {
@@ -116,8 +118,16 @@ func (s searchPlaceholderStringer) String() string {
 		if i < len(s.queryInfos) {
 			fieldID = s.queryInfos[i].GetQueryFieldId()
 		}
-		if !w.open(fmt.Sprintf("[index=%d anns_field_id=%d nq=%d bytes=%d ",
-			i, fieldID, nq, len(placeholder)), "] ") {
+		w.write(fmt.Sprintf("[index=%d anns_field_id=%d nq=%d bytes=%d] ",
+			i, fieldID, nq, len(placeholder)))
+	}
+	w.write("previews=")
+	for i := 0; i < count && !w.truncated; i++ {
+		placeholder := s.request.GetPlaceholderGroup()
+		if len(subReqs) > 0 {
+			placeholder = subReqs[i].GetPlaceholderGroup()
+		}
+		if !w.open(fmt.Sprintf("[index=%d ", i), "] ") {
 			break
 		}
 		writePlaceholderGroup(w, placeholder)
@@ -181,6 +191,18 @@ func writePlaceholderValue(w *placeholderLogWriter, value *commonpb.PlaceholderV
 }
 
 func writePlaceholderFirstQuery(w *placeholderLogWriter, phType commonpb.PlaceholderType, value []byte) {
+	// Embedding-list values concatenate the element vectors. Render the flat
+	// values with the same decoder; the placeholder does not carry the inner dim.
+	switch phType {
+	case commonpb.PlaceholderType_EmbListFloatVector:
+		phType = commonpb.PlaceholderType_FloatVector
+	case commonpb.PlaceholderType_EmbListFloat16Vector:
+		phType = commonpb.PlaceholderType_Float16Vector
+	case commonpb.PlaceholderType_EmbListBFloat16Vector:
+		phType = commonpb.PlaceholderType_BFloat16Vector
+	case commonpb.PlaceholderType_EmbListInt8Vector:
+		phType = commonpb.PlaceholderType_Int8Vector
+	}
 	if phType == commonpb.PlaceholderType_VarChar {
 		if !w.open(`"`, `"`) {
 			return
@@ -215,7 +237,7 @@ func writePlaceholderFirstQuery(w *placeholderLogWriter, phType commonpb.Placeho
 		width, prefix = 8, "map["
 	case commonpb.PlaceholderType_Int8Vector:
 	default:
-		// Binary vectors and opaque/embedding-list payloads use a byte preview.
+		// Binary vectors and opaque payloads use a byte preview.
 		prefix = "bytes=["
 	}
 	if !w.open(prefix, "]") {
