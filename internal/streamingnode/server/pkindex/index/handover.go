@@ -28,6 +28,7 @@ import (
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -41,7 +42,7 @@ type pendingHandover struct {
 	// local maps the tables of request to their committed local files.
 	local map[sst.ID]string
 	// request is nil when there is nothing to publish.
-	request *FlushArgs
+	request *manifest.FlushArgs
 	// covered is the checkpoint that the handover commits.
 	covered uint64
 	// uploadedAt is when the last complete upload of the tables started. It
@@ -95,7 +96,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	// newest first, with the generations that earlier failed handovers left
 	gens := idx.eng.FrozenGenerations()
 	local := make(map[sst.ID]string)
-	var refs []TableRef
+	var refs []manifest.TableRef
 	for _, g := range gens {
 		staged, err := idx.eng.StageFrozen(ctx, g)
 		if err != nil {
@@ -115,7 +116,7 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	// a reset that is not committed needs a request even without tables, so
 	// that the manifest forgets the tables before it
 	if len(refs) > 0 || reset {
-		p.request = &FlushArgs{
+		p.request = &manifest.FlushArgs{
 			CollectionID:       idx.collectionID,
 			IndexID:            idx.indexID,
 			VChannel:           idx.vchannel,
@@ -143,8 +144,8 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 // commit installs the returned manifest and retires the generations only when
 // the manifest has the request in effect: its version is not below the
 // version installed before the flush, and its checkpoint is not below
-// p.covered. Else it returns ErrRejected and keeps the generations. It also
-// returns ErrRejected when the manifest records another SST base path than
+// p.covered. Else it returns manifest.ErrRejected and keeps the generations. It also
+// returns manifest.ErrRejected when the manifest records another SST base path than
 // the one the tables are uploaded under. A manifest service that takes the
 // request as an applied retry by mistake can not make the generations retire
 // while their tables are not committed.
@@ -165,7 +166,7 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 	if p.request != nil && (p.uploadedAt.IsZero() || time.Since(p.uploadedAt) > cfg.Params().ReuploadAfter) {
 		start := time.Now()
 		for _, ref := range p.request.AddTables {
-			if err := cfg.Store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
+			if err := cfg.Store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]); err != nil {
 				return err
 			}
 		}
@@ -193,11 +194,11 @@ func (idx *Index) commit(ctx context.Context, p *pendingHandover) error {
 		return err
 	}
 	if m.Version < before || m.CheckpointTimeTick < p.covered {
-		return errors.Wrapf(ErrRejected, "vchannel %s: the manifest after the flush has version %d and checkpoint %d, want at least version %d and checkpoint %d",
+		return errors.Wrapf(manifest.ErrRejected, "vchannel %s: the manifest after the flush has version %d and checkpoint %d, want at least version %d and checkpoint %d",
 			idx.vchannel, m.Version, m.CheckpointTimeTick, before, p.covered)
 	}
 	if m.SSTBasePath != idx.sstBasePath {
-		return errors.Wrapf(ErrRejected, "vchannel %s: the manifest has the SST base path %s, the tables are uploaded under %s",
+		return errors.Wrapf(manifest.ErrRejected, "vchannel %s: the manifest has the SST base path %s, the tables are uploaded under %s",
 			idx.vchannel, m.SSTBasePath, idx.sstBasePath)
 	}
 	if idx.resetSince(p.epoch) {

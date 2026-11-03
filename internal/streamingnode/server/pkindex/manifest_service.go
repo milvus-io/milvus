@@ -20,12 +20,8 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"github.com/cockroachdb/pebble/sstable"
-	"google.golang.org/protobuf/proto"
 
-	pkroot "github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/sst"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -39,60 +35,49 @@ type ManifestService interface {
 	GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRecoveryManifestsRequest) ([]*pkindexpb.ManifestPointerEntry, error)
 }
 
-// ObjectReader reads a whole object from object storage. A missing object
-// returns an error marked pkroot.ErrCorrupted, any other failure one marked
-// pkroot.ErrUnavailable. internal/pkindex/objstore.Store implements it.
-type ObjectReader interface {
-	ReadObject(ctx context.Context, key string) ([]byte, error)
-}
-
 // manifestServiceCommitter is the Committer over the manifest service: it
 // translates the index types to the manifest proto and the merr codes of the
 // service to the sentinels of the Committer contract.
 type manifestServiceCommitter struct {
-	svc    ManifestService
-	reader ObjectReader
+	svc ManifestService
 }
 
-var _ Committer = (*manifestServiceCommitter)(nil)
+var _ manifest.Committer = (*manifestServiceCommitter)(nil)
 
-// NewManifestServiceCommitter returns the Committer over svc, which reads
-// manifest bodies with reader. It panics when either is nil: a Manager
-// without a working Committer must not start (see NewManager).
-func NewManifestServiceCommitter(svc ManifestService, reader ObjectReader) Committer {
+// NewManifestServiceCommitter returns the Committer over svc. It panics when
+// svc is nil: a Manager without a working Committer must not start (see
+// NewManager).
+func NewManifestServiceCommitter(svc ManifestService) manifest.Committer {
 	if svc == nil {
 		panic("the primary key index manifest committer needs a manifest service")
 	}
-	if reader == nil {
-		panic("the primary key index manifest committer needs an object reader")
-	}
-	return &manifestServiceCommitter{svc: svc, reader: reader}
+	return &manifestServiceCommitter{svc: svc}
 }
 
-// CommitFlush implements index.Committer.
-func (c *manifestServiceCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
+// CommitFlush implements manifest.Committer.
+func (c *manifestServiceCommitter) CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error) {
 	req := &pkindexpb.CommitFlushRequest{
 		CollectionId:       args.CollectionID,
 		Vchannel:           args.VChannel,
 		PchannelTerm:       args.PChannelTerm,
-		AddSsts:            sstRefsOf(args.AddTables),
+		AddSsts:            manifest.SSTRefsOf(args.AddTables),
 		CheckpointTimeTick: args.CheckpointTimeTick,
 		IndexId:            args.IndexID,
 		ResetTimeTick:      args.ResetTimeTick,
 	}
 	m, err := c.svc.CommitFlush(ctx, req)
 	if err != nil {
-		return index.ManifestView{}, fromServiceErr(err)
+		return manifest.View{}, fromServiceErr(err)
 	}
 	if m == nil {
 		// A retry gets the same answer: the service broke its contract.
-		return index.ManifestView{}, errors.Wrapf(index.ErrRejected, "vchannel %s: the commit returned no manifest", args.VChannel)
+		return manifest.View{}, errors.Wrapf(manifest.ErrRejected, "vchannel %s: the commit returned no manifest", args.VChannel)
 	}
-	return viewOf(m), nil
+	return manifest.ViewOf(m), nil
 }
 
-// GetRecoveryManifests implements ManifestReader.
-func (c *manifestServiceCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
+// GetRecoveryManifests implements manifest.Committer.
+func (c *manifestServiceCommitter) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
 	targets := make([]*pkindexpb.ManifestTarget, len(refs))
 	for i, ref := range refs {
 		targets[i] = &pkindexpb.ManifestTarget{CollectionId: ref.CollectionID, Vchannel: ref.VChannel, IndexId: ref.IndexID}
@@ -102,9 +87,9 @@ func (c *manifestServiceCommitter) GetRecoveryManifests(ctx context.Context, ref
 		return nil, fromServiceErr(err)
 	}
 	if len(entries) != len(refs) {
-		return nil, errors.Wrapf(index.ErrRejected, "the manifest service returned %d entries for %d refs", len(entries), len(refs))
+		return nil, errors.Wrapf(manifest.ErrRejected, "the manifest service returned %d entries for %d refs", len(entries), len(refs))
 	}
-	out := make([]RecoveryManifest, len(entries))
+	out := make([]manifest.RecoveryManifest, len(entries))
 	for i, e := range entries {
 		if err := merr.Error(e.GetStatus()); err != nil {
 			// A lookup carries no term, so the service never fences it: the
@@ -117,26 +102,13 @@ func (c *manifestServiceCommitter) GetRecoveryManifests(ctx context.Context, ref
 		}
 		p := e.GetPointer()
 		if p.GetVersion() <= 0 || p.GetBodyKey() == "" {
-			out[i].Err = errors.Wrapf(index.ErrRejected, "vchannel %s: a found manifest with version %d and body key %q",
+			out[i].Err = errors.Wrapf(manifest.ErrRejected, "vchannel %s: a found manifest with version %d and body key %q",
 				refs[i].VChannel, p.GetVersion(), p.GetBodyKey())
 			continue
 		}
-		out[i] = RecoveryManifest{Found: true, Version: p.GetVersion(), BodyKey: p.GetBodyKey()}
+		out[i] = manifest.RecoveryManifest{Found: true, Version: p.GetVersion(), BodyKey: p.GetBodyKey()}
 	}
 	return out, nil
-}
-
-// ReadManifest implements ManifestReader.
-func (c *manifestServiceCommitter) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
-	body, err := c.reader.ReadObject(ctx, bodyKey)
-	if err != nil {
-		return index.ManifestView{}, errors.Wrapf(err, "read manifest body %s", bodyKey)
-	}
-	var m pkindexpb.Manifest
-	if err := proto.Unmarshal(body, &m); err != nil {
-		return index.ManifestView{}, errors.Mark(errors.Wrapf(err, "decode manifest body %s", bodyKey), pkroot.ErrCorrupted)
-	}
-	return viewOf(&m), nil
 }
 
 // fromServiceErr translates an error of the manifest service into the errors
@@ -154,52 +126,14 @@ func fromServiceErr(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, merr.ErrChannelNotAvailable):
-		return errors.Mark(err, index.ErrFenced)
+		return errors.Mark(err, manifest.ErrFenced)
 	case merr.IsCanceledOrTimeout(err):
 		// A non-retryable merr error that wraps a context error is still a
 		// cancel or timeout of this call, not a rejection.
 		return err
 	case merr.IsMilvusError(err) && !merr.IsRetryableErr(err):
-		return errors.Mark(err, index.ErrRejected)
+		return errors.Mark(err, manifest.ErrRejected)
 	default:
 		return err
 	}
-}
-
-// viewOf converts a manifest to the view of the index. The tables keep the
-// order of the manifest, newest first.
-func viewOf(m *pkindexpb.Manifest) index.ManifestView {
-	tables := make([]index.TableRef, len(m.GetSsts()))
-	for i, ref := range m.GetSsts() {
-		tables[i] = sst.Info{
-			ID:          sst.ID(ref.GetId()),
-			MinKey:      ref.GetMinKey(),
-			MaxKey:      ref.GetMaxKey(),
-			NumEntries:  ref.GetNumEntries(),
-			Size:        ref.GetSize(),
-			TableFormat: sstable.TableFormat(ref.GetTableFormat()),
-		}
-	}
-	return index.ManifestView{
-		Version:            m.GetVersion(),
-		SSTBasePath:        m.GetSstBasePath(),
-		CheckpointTimeTick: m.GetCheckpointTimeTick(),
-		Tables:             tables,
-	}
-}
-
-// sstRefsOf converts the tables of a flush to the proto, in the same order.
-func sstRefsOf(tables []index.TableRef) []*pkindexpb.SSTRef {
-	refs := make([]*pkindexpb.SSTRef, len(tables))
-	for i, t := range tables {
-		refs[i] = &pkindexpb.SSTRef{
-			Id:          int64(t.ID),
-			TableFormat: uint32(t.TableFormat),
-			Size:        t.Size,
-			MinKey:      t.MinKey,
-			MaxKey:      t.MaxKey,
-			NumEntries:  t.NumEntries,
-		}
-	}
-	return refs
 }

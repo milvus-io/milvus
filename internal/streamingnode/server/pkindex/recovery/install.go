@@ -22,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -49,7 +50,7 @@ func (t *installTask) Execute(ctx context.Context) error {
 	attempts := 0
 	err := retry.Do(ctx, func() error {
 		err := t.idx.Install(ctx)
-		if err != nil && (index.IsFatal(err) || errors.Is(err, engine.ErrClosed)) {
+		if err != nil && (manifest.IsFatal(err) || errors.Is(err, engine.ErrClosed)) {
 			return retry.Unrecoverable(err)
 		}
 		if err != nil {

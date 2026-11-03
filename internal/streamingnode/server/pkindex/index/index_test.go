@@ -30,6 +30,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -72,7 +73,7 @@ func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
 	assert.FileExists(t, leftover, "the open keeps the committed directory")
 	assert.Empty(t, idx.eng.FrozenGenerations())
 	assert.Zero(t, idx.segmentOf(t, 1))
-	idx.SetCommitted(ManifestView{Version: 1})
+	idx.SetCommitted(manifest.View{Version: 1})
 	require.NoError(t, idx.Install(ctx))
 	assert.NoFileExists(t, leftover, "the install removes what the manifest does not list")
 }
@@ -219,12 +220,12 @@ func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	ref := p.request.AddTables[0]
-	require.NoError(t, idx.store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
 	// corrupt the local copy: wrong size
 	local := committedPath(idx.committedDir, ref.ID)
 	require.NoError(t, os.WriteFile(local, []byte("short"), 0o600))
 
-	view := ManifestView{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []TableRef{ref}}
+	view := manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
 	require.NoError(t, idx.installIfNewer(ctx, view, nil))
 	fi, err := os.Stat(local)
 	require.NoError(t, err)
@@ -240,10 +241,10 @@ func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	ref := p.request.AddTables[0]
-	require.NoError(t, idx.store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	require.NoError(t, idx.store.UploadFile(ctx, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
 	// a download would fail, so the install must use the local file
 	idx.store.FailDownloads(1)
 
-	view := ManifestView{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []TableRef{ref}}
+	view := manifest.View{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []manifest.TableRef{ref}}
 	require.NoError(t, idx.installIfNewer(ctx, view, nil))
 }

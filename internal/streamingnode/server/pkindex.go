@@ -24,6 +24,7 @@ import (
 
 	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/objstore"
 	"github.com/milvus-io/milvus/internal/storage"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
@@ -37,7 +38,7 @@ import (
 // the index package defines for them.
 var (
 	_ snpkindex.ManifestService = pkindexclient.Client(nil)
-	_ snpkindex.ObjectReader    = (*objstore.Store)(nil)
+	_ manifest.ObjectReader     = (*objstore.Store)(nil)
 )
 
 // openFileReserve is the number of file descriptors kept for everything other
@@ -88,7 +89,8 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager, newManif
 		},
 		Store:           store,
 		StorageRootPath: cm.RootPath(),
-		Committer:       snpkindex.NewManifestServiceCommitter(manifestClient, store),
+		Committer:       snpkindex.NewManifestServiceCommitter(manifestClient),
+		Reader:          store,
 		Sched:           nodescheduler.Get(),
 		Params:          snpkindex.ParamsFromConfig,
 	})

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package manifest
 
 import (
 	"testing"
@@ -58,7 +58,6 @@ func TestObjectKeysWithIndexID(t *testing.T) {
 	base := SSTBasePath("files", 449, 451, "dml_0_449v0")
 	assert.Equal(t, "files/pk_index/449/451/dml_0_449v0/sst", base)
 	assert.Equal(t, "files/pk_index/449/451/dml_0_449v0/manifest", ManifestDir("files", 449, 451, "dml_0_449v0"))
-	assert.Equal(t, "files/pk_index/449", CollectionDir("files", 449))
 	assert.Equal(t, "files/pk_index/449/451", IndexDir("files", 449, 451))
 
 	for _, key := range []string{"files/pk_index/449/451/", "files/pk_index/449/451"} {

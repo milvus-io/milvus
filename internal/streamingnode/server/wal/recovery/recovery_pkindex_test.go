@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -154,7 +154,7 @@ func TestRecoveryStoragePKIndexTailReadsTheMetrics(t *testing.T) {
 func TestRecoveryStoragePKIndexClampsTheCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	env := snpkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 80})
 	rec := pkTestRecover(t, env, rs)
 

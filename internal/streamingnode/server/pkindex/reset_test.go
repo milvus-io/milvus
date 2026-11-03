@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
 
@@ -36,7 +37,7 @@ func handoverIndex(t *testing.T) (*testEnv, *PChannelIndexManager, *index.Index)
 	return env, ch, env.add(ch, "v0")
 }
 
-func refIDs(refs []index.TableRef) []int64 {
+func refIDs(refs []manifest.TableRef) []int64 {
 	ids := make([]int64, 0, len(refs))
 	for _, r := range refs {
 		ids = append(ids, int64(r.ID))

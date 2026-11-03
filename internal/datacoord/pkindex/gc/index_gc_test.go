@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 )
 
 const (
@@ -66,7 +66,7 @@ func newIndexEnv(t *testing.T) *indexEnv {
 // objects returns the number of objects of collection 1, index 2.
 func (e *indexEnv) objects(t *testing.T) int {
 	n := 0
-	err := e.store.Walk(context.Background(), pkindex.IndexDir(testRoot, 1, 2)+"/", func(string, time.Time) bool {
+	err := e.store.Walk(context.Background(), pkmanifest.IndexDir(testRoot, 1, 2)+"/", func(string, time.Time) bool {
 		n++
 		return true
 	})
@@ -190,7 +190,7 @@ func TestIndexGCRemovesTheObjectsOfALateFlush(t *testing.T) {
 // first manifest commit never succeeded, are found by the walk.
 func TestIndexGCRemovesObjectsWithoutAPointer(t *testing.T) {
 	e := newIndexEnv(t)
-	other := pkindex.SSTKey(pkindex.SSTBasePath(testRoot, 1, 5, testVChannel), 1)
+	other := pkmanifest.SSTKey(pkmanifest.SSTBasePath(testRoot, 1, 5, testVChannel), 1)
 	require.NoError(t, e.store.Write(context.Background(), other, []byte("x")))
 	e.presence = IndexMissing
 	e.now = e.now.Add(100 * time.Hour)

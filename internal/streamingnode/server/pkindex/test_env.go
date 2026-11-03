@@ -30,6 +30,7 @@ import (
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -49,9 +50,9 @@ type FakeCommitter struct {
 	// coordinator, 0 when the pchannel is not assigned. The manifest service
 	// fences a flush of another term with it; the tests set it with assign.
 	assignedTerm int64
-	manifests    map[string]*index.FakeManifest
+	manifests    map[string]*manifest.FakeManifest
 	// history keeps every manifest version, by vchannel.
-	history map[string][]*index.FakeManifest
+	history map[string][]*manifest.FakeManifest
 
 	// lookupErr fails every lookup, if it is not nil.
 	lookupErr   error
@@ -60,7 +61,7 @@ type FakeCommitter struct {
 	// itemErrs are the per-item errors of the lookups, by vchannel.
 	itemErrs map[string][]error
 	// lookups are the refs of each GetRecoveryManifests call, in order.
-	lookups [][]VChannelRef
+	lookups [][]manifest.VChannelRef
 
 	commitErrs []error
 	loseNext   bool
@@ -69,12 +70,12 @@ type FakeCommitter struct {
 	// commitBlock blocks CommitFlush until it is closed, if it is not nil.
 	commitBlock chan struct{}
 
-	requests []index.FlushArgs
+	requests []manifest.FlushArgs
 	// applied records whether each flush that the fake manifest service
 	// accepted changed the manifest.
 	applied []bool
 	// rewrite changes the returned manifest, if it is not nil.
-	rewrite func(m index.ManifestView) index.ManifestView
+	rewrite func(m manifest.View) manifest.View
 	// applyErrs are the errors of the manifest edits, such as a duplicate table.
 	applyErrs []error
 }
@@ -82,8 +83,8 @@ type FakeCommitter struct {
 // NewFakeCommitter creates a FakeCommitter where no vchannel has a manifest.
 func NewFakeCommitter() *FakeCommitter {
 	return &FakeCommitter{
-		manifests: make(map[string]*index.FakeManifest),
-		history:   make(map[string][]*index.FakeManifest),
+		manifests: make(map[string]*manifest.FakeManifest),
+		history:   make(map[string][]*manifest.FakeManifest),
 	}
 }
 
@@ -96,7 +97,7 @@ func (c *FakeCommitter) assign(term int64) {
 }
 
 // SetManifest gives a vchannel a manifest, nil removes it.
-func (c *FakeCommitter) SetManifest(vchannel string, m *index.FakeManifest) {
+func (c *FakeCommitter) SetManifest(vchannel string, m *manifest.FakeManifest) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if m == nil {
@@ -126,10 +127,10 @@ func (c *FakeCommitter) SetLookupErr(err error) {
 	c.lookupErr = err
 }
 
-// GetRecoveryManifests implements Committer.
-func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
+// GetRecoveryManifests implements manifest.Committer.
+func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
 	c.mu.Lock()
-	c.lookups = append(c.lookups, append([]VChannelRef(nil), refs...))
+	c.lookups = append(c.lookups, append([]manifest.VChannelRef(nil), refs...))
 	block := c.lookupBlock
 	c.mu.Unlock()
 	if block != nil {
@@ -149,47 +150,48 @@ func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChanne
 		c.lookupErrs = c.lookupErrs[1:]
 		return nil, err
 	}
-	out := make([]RecoveryManifest, 0, len(refs))
+	out := make([]manifest.RecoveryManifest, 0, len(refs))
 	for _, ref := range refs {
 		if errs := c.itemErrs[ref.VChannel]; len(errs) > 0 {
 			c.itemErrs[ref.VChannel] = errs[1:]
-			out = append(out, RecoveryManifest{Err: errs[0]})
+			out = append(out, manifest.RecoveryManifest{Err: errs[0]})
 			continue
 		}
-		out = append(out, FakeRecoveryManifest(ref.VChannel, c.manifests[ref.VChannel]))
+		out = append(out, manifest.FakeRecoveryManifest(ref.VChannel, c.manifests[ref.VChannel]))
 	}
 	return out, nil
 }
 
-// ReadManifest implements Committer. The body key names the vchannel and the version.
-func (c *FakeCommitter) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
+// ReadObject implements manifest.ObjectReader for the manifest bodies that
+// the lookups point to. The body key names the vchannel and the version.
+func (c *FakeCommitter) ReadObject(ctx context.Context, bodyKey string) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for vchannel, m := range c.manifests {
-		if FakeRecoveryManifest(vchannel, m).BodyKey == bodyKey {
-			return m.View, nil
+		if manifest.FakeRecoveryManifest(vchannel, m).BodyKey == bodyKey {
+			return manifest.FakeBody(m.View), nil
 		}
 	}
-	return index.ManifestView{}, errors.Wrapf(pkroot.ErrCorrupted, "manifest body %s does not exist", bodyKey)
+	return nil, errors.Wrapf(pkroot.ErrCorrupted, "manifest body %s does not exist", bodyKey)
 }
 
 // lookupList returns the refs of each GetRecoveryManifests call.
-func (c *FakeCommitter) lookupList() [][]VChannelRef {
+func (c *FakeCommitter) lookupList() [][]manifest.VChannelRef {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([][]VChannelRef(nil), c.lookups...)
+	return append([][]manifest.VChannelRef(nil), c.lookups...)
 }
 
-func (c *FakeCommitter) store(vchannel string, m *index.FakeManifest, changed bool) {
+func (c *FakeCommitter) store(vchannel string, m *manifest.FakeManifest, changed bool) {
 	c.manifests[vchannel] = m
 	if changed {
 		c.history[vchannel] = append(c.history[vchannel], m)
 	}
 }
 
-// CommitFlush implements Committer.
-func (c *FakeCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
-	args.AddTables = append([]index.TableRef(nil), args.AddTables...)
+// CommitFlush implements manifest.Committer.
+func (c *FakeCommitter) CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error) {
+	args.AddTables = append([]manifest.TableRef(nil), args.AddTables...)
 	c.mu.Lock()
 	c.requests = append(c.requests, args)
 	entered, block := c.commitEntered, c.commitBlock
@@ -206,19 +208,19 @@ func (c *FakeCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (
 	if len(c.commitErrs) > 0 {
 		err := c.commitErrs[0]
 		c.commitErrs = c.commitErrs[1:]
-		return index.ManifestView{}, err
+		return manifest.View{}, err
 	}
-	basePath := pkroot.SSTBasePath(fakeStorageRoot, args.CollectionID, args.IndexID, args.VChannel)
-	next, changed, err := index.FakeFlush(c.manifests[args.VChannel], c.assignedTerm, args, basePath)
+	basePath := manifest.SSTBasePath(fakeStorageRoot, args.CollectionID, args.IndexID, args.VChannel)
+	next, changed, err := manifest.FakeFlush(c.manifests[args.VChannel], c.assignedTerm, args, basePath)
 	if err != nil {
 		c.applyErrs = append(c.applyErrs, err)
-		return index.ManifestView{}, err
+		return manifest.View{}, err
 	}
 	c.store(args.VChannel, next, changed)
 	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return index.ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
+		return manifest.View{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
 	}
 	if c.rewrite != nil {
 		return c.rewrite(next.View), nil
@@ -234,18 +236,18 @@ func (c *FakeCommitter) appliedList() []bool {
 
 // manifest returns the current manifest of vchannel, a zero value when it
 // does not exist.
-func (c *FakeCommitter) manifest(vchannel string) index.ManifestView {
+func (c *FakeCommitter) manifest(vchannel string) manifest.View {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if m := c.manifests[vchannel]; m != nil {
 		return m.View
 	}
-	return index.ManifestView{}
+	return manifest.View{}
 }
 
 // version returns version v of the manifest of vchannel, nil when it does
 // not exist.
-func (c *FakeCommitter) version(vchannel string, v int64) *index.ManifestView {
+func (c *FakeCommitter) version(vchannel string, v int64) *manifest.View {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, m := range c.history[vchannel] {
@@ -257,10 +259,10 @@ func (c *FakeCommitter) version(vchannel string, v int64) *index.ManifestView {
 	return nil
 }
 
-func (c *FakeCommitter) requestList() []index.FlushArgs {
+func (c *FakeCommitter) requestList() []manifest.FlushArgs {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]index.FlushArgs(nil), c.requests...)
+	return append([]manifest.FlushArgs(nil), c.requests...)
 }
 
 func (c *FakeCommitter) applyErrList() []error {
@@ -320,6 +322,7 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 		Store:           index.NewFakeStore(),
 		StorageRootPath: fakeStorageRoot,
 		Committer:       env.Committer,
+		Reader:          env.Committer,
 		Sched:           neverScheduler{},
 		Params:          func() Params { return params },
 	})
@@ -365,4 +368,7 @@ func (c *PChannelIndexManager) FlushTTForTest(vchannel string) uint64 {
 }
 
 // SetCommitterForTest replaces the Committer of the Manager.
-func (m *Manager) SetCommitterForTest(c Committer) { m.cfg.Committer = c }
+func (m *Manager) SetCommitterForTest(c manifest.Committer) { m.cfg.Committer = c }
+
+// SetReaderForTest replaces the manifest body reader of the Manager.
+func (m *Manager) SetReaderForTest(r manifest.ObjectReader) { m.cfg.Reader = r }

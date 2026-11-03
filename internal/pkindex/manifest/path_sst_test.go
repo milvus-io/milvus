@@ -14,23 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build test
-
-package pkindex
+package manifest_test
 
 import (
-	"strconv"
+	"strings"
+	"testing"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
+	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
-// FakeManifest is a manifest of one vchannel as a fake manifest service
-// keeps it. Tests use it to fake a Committer.
-// FakeRecoveryManifest returns the answer for the manifest cur (nil when
-// the vchannel has none). The body key names the vchannel and the version.
-func FakeRecoveryManifest(vchannel string, cur *index.FakeManifest) RecoveryManifest {
-	if cur == nil {
-		return RecoveryManifest{}
-	}
-	return RecoveryManifest{Found: true, Version: cur.View.Version, BodyKey: "manifest/" + vchannel + "/" + strconv.FormatInt(cur.View.Version, 10) + ".pb"}
+// TestSSTKeyExtension checks that manifest.SSTKey writes the extension of
+// sst.Extension.
+func TestSSTKeyExtension(t *testing.T) {
+	assert.True(t, strings.HasSuffix(manifest.SSTKey("base", 1), sst.Extension))
 }

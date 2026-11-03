@@ -35,6 +35,7 @@ import (
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -146,13 +147,13 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	s := chunkManagerStore{cm: cm}
 	root := cm.RootPath()
 
-	_, err := s.Read(ctx, pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 1, "n"))
+	_, err := s.Read(ctx, pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(root, 1, 2, "ch_v0"), 1, "n"))
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 
 	written := []string{
-		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 1, "n1"),
-		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 2, "n2"),
-		pkindex.SSTKey(pkindex.SSTBasePath(root, 1, 2, "ch_v0"), 7),
+		pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(root, 1, 2, "ch_v0"), 1, "n1"),
+		pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(root, 1, 2, "ch_v0"), 2, "n2"),
+		pkmanifest.SSTKey(pkmanifest.SSTBasePath(root, 1, 2, "ch_v0"), 7),
 	}
 	for _, key := range written {
 		require.NoError(t, s.Write(ctx, key, []byte(key)))
@@ -162,7 +163,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, []byte(written[0]), b)
 
 	var walked []string
-	require.NoError(t, s.Walk(ctx, pkindex.ManifestDir(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkmanifest.ManifestDir(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
@@ -170,7 +171,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, written[:2], walked)
 
 	walked = nil
-	require.NoError(t, s.Walk(ctx, pkindex.SSTBasePath(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkmanifest.SSTBasePath(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))

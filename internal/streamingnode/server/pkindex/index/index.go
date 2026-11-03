@@ -28,6 +28,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -72,13 +73,13 @@ type Index struct {
 	// recovered is the manifest of the vchannel at the open, set by
 	// SetCommitted and installed by Install. Nil when the vchannel had none,
 	// or after a Reset.
-	recovered *ManifestView
+	recovered *manifest.View
 	// resetEpoch counts the Resets. A handover prepared before a Reset does
 	// not install its result. installMu guards it.
 	resetEpoch uint64
 	// resetTT is the time tick of the last Reset, 0 when none. Until a
 	// handover commits a checkpoint at or above it, the next handover
-	// replaces the committed table set (see FlushArgs.ResetTimeTick).
+	// replaces the committed table set (see manifest.FlushArgs.ResetTimeTick).
 	resetTT atomic.Uint64
 
 	// failWrites, when set, makes every engine write of Apply fail with it.
@@ -123,7 +124,7 @@ type Config struct {
 	Shared          *engine.SharedResources
 	AllocID         func(ctx context.Context) (int64, error)
 	Store           TableStore
-	Committer       Committer
+	Committer       manifest.Committer
 	Params          func() Params
 
 	// LastObserved returns the lastObserved of the pchannel: the time tick
@@ -187,7 +188,7 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
-		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.IndexID, cfg.VChannel),
+		sstBasePath:  manifest.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.IndexID, cfg.VChannel),
 	}
 	// the decider only reads the engine: the observe of the WAL recovery
 	// writes it, through Apply
@@ -313,7 +314,7 @@ func (idx *Index) LastCommittedTimeTick() uint64 { return idx.lastCommitted.Load
 // tables that the Index installed before, the committed directory (the links
 // survive a restart), and last a download from the store. It downloads
 // outside installMu and checks the version again under it.
-func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[sst.ID]string, gens ...engine.Generation) error {
+func (idx *Index) installIfNewer(ctx context.Context, m manifest.View, local map[sst.ID]string, gens ...engine.Generation) error {
 	idx.installMu.Lock()
 	if m.CheckpointTimeTick < idx.resetTT.Load() {
 		idx.installMu.Unlock()
@@ -364,7 +365,7 @@ func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[
 }
 
 // retireCovered drops gens when a newer manifest than m is installed.
-func (idx *Index) retireCovered(ctx context.Context, m ManifestView, gens []engine.Generation) error {
+func (idx *Index) retireCovered(ctx context.Context, m manifest.View, gens []engine.Generation) error {
 	if len(gens) == 0 {
 		return nil
 	}
@@ -378,7 +379,7 @@ func (idx *Index) retireCovered(ctx context.Context, m ManifestView, gens []engi
 // so the installed tables hold the data of gens. Without the drop, gens stay
 // frozen, and the next handover sends their committed tables again. The
 // caller holds installMu.
-func (idx *Index) retireCoveredLocked(ctx context.Context, m ManifestView, gens []engine.Generation) error {
+func (idx *Index) retireCoveredLocked(ctx context.Context, m manifest.View, gens []engine.Generation) error {
 	if len(gens) == 0 {
 		return nil
 	}
@@ -396,7 +397,7 @@ func (idx *Index) retireCoveredLocked(ctx context.Context, m ManifestView, gens 
 // replaced by a download. The paths of local and known were installed by
 // this process under the same table ID, so they are reused without a size
 // check.
-func (idx *Index) resolveLocal(ctx context.Context, basePath string, ref TableRef, local, known map[sst.ID]string) (string, error) {
+func (idx *Index) resolveLocal(ctx context.Context, basePath string, ref manifest.TableRef, local, known map[sst.ID]string) (string, error) {
 	id := ref.ID
 	if p, ok := local[id]; ok {
 		return p, nil
@@ -421,7 +422,7 @@ func (idx *Index) resolveLocal(ctx context.Context, basePath string, ref TableRe
 	if err := os.MkdirAll(idx.committedDir, 0o755); err != nil {
 		return "", pkroot.MarkIO(err, "create committed dir %s", idx.committedDir)
 	}
-	if err := idx.cfg.Store.DownloadFile(ctx, pkroot.SSTKey(basePath, int64(id)), path); err != nil {
+	if err := idx.cfg.Store.DownloadFile(ctx, manifest.SSTKey(basePath, int64(id)), path); err != nil {
 		return "", err
 	}
 	idx.logger.Info(ctx, "downloaded a committed primary key index table", mlog.Int64("sstID", int64(id)))
@@ -467,7 +468,7 @@ func (idx *Index) MarkReady(ctx context.Context) {
 // prepares a handover when none is pending, else it commits the pending one.
 // It reports whether a commit succeeded. It returns context.Canceled when
 // the Index or taskCtx ends during the step, and the error of the step
-// otherwise; the caller classifies it with IsFatal. The handover driver is
+// otherwise; the caller classifies it with manifest.IsFatal. The handover driver is
 // the only caller, and it runs at most one step of an Index at a time.
 func (idx *Index) Handover(taskCtx context.Context) (committed bool, err error) {
 	if !idx.lifetime.Add(typeutil.LifetimeStateWorking) {

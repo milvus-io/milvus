@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -201,7 +201,7 @@ func (g *GC) dropIndex(ctx context.Context, ref indexRef, vchannels []string) er
 			return err
 		}
 	}
-	dir := pkindex.IndexDir(g.rootPath, ref.collectionID, ref.indexID) + "/"
+	dir := pkmanifest.IndexDir(g.rootPath, ref.collectionID, ref.indexID) + "/"
 	var keys []string
 	if err := g.store.Walk(ctx, dir, func(key string, _ time.Time) bool {
 		keys = append(keys, key)
@@ -232,6 +232,6 @@ func parseIndexOfObject(rootPath, root, key string) (indexRef, bool) {
 	if len(parts) < 3 {
 		return indexRef{}, false
 	}
-	collectionID, indexID, ok := pkindex.ParseIndexDir(rootPath, root+parts[0]+"/"+parts[1])
+	collectionID, indexID, ok := pkmanifest.ParseIndexDir(rootPath, root+parts[0]+"/"+parts[1])
 	return indexRef{collectionID, indexID}, ok
 }

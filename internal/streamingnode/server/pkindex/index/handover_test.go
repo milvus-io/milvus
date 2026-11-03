@@ -30,11 +30,12 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func refIDs(refs []TableRef) []int64 {
+func refIDs(refs []manifest.TableRef) []int64 {
 	ids := make([]int64, 0, len(refs))
 	for _, r := range refs {
 		ids = append(ids, int64(r.ID))
@@ -46,7 +47,7 @@ func refIDs(refs []TableRef) []int64 {
 func storeIDs(t *testing.T, store *countingStore, basePath string) []int64 {
 	var ids []int64
 	for _, k := range store.Keys() {
-		id, ok := pkroot.ParseSSTKey(basePath, k)
+		id, ok := manifest.ParseSSTKey(basePath, k)
 		require.True(t, ok, k)
 		ids = append(ids, id)
 	}
@@ -139,7 +140,7 @@ func TestFirstHandoverCreatesTheManifest(t *testing.T) {
 	assert.Equal(t, idx.sstBasePath, m.SSTBasePath)
 	keys := idx.store.Keys()
 	for _, ref := range m.Tables {
-		assert.Contains(t, keys, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)))
+		assert.Contains(t, keys, manifest.SSTKey(idx.sstBasePath, int64(ref.ID)))
 	}
 }
 
@@ -239,7 +240,7 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 	committed, err := idx.Handover(ctx)
 	require.Error(t, err)
 	assert.False(t, committed)
-	assert.False(t, IsFatal(err))
+	assert.False(t, manifest.IsFatal(err))
 	require.NotNil(t, idx.pending.Load())
 	assert.Len(t, idx.eng.FrozenGenerations(), 1)
 
@@ -273,14 +274,14 @@ func TestLostResponseRetriesTheSameRequest(t *testing.T) {
 func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 	cases := map[string]struct {
 		installed int64
-		rewrite   func(m ManifestView) ManifestView
+		rewrite   func(m manifest.View) manifest.View
 	}{
 		"version below the installed one": {installed: 100},
-		"checkpoint below the covered time tick": {rewrite: func(m ManifestView) ManifestView {
+		"checkpoint below the covered time tick": {rewrite: func(m manifest.View) manifest.View {
 			m.CheckpointTimeTick = 49
 			return m
 		}},
-		"another SST base path": {rewrite: func(m ManifestView) ManifestView {
+		"another SST base path": {rewrite: func(m manifest.View) manifest.View {
 			m.SSTBasePath = "other/sst"
 			return m
 		}},
@@ -299,7 +300,7 @@ func TestHandoverRejectsAManifestThatWentBack(t *testing.T) {
 			require.NotNil(t, p)
 			err = idx.commit(ctx, p)
 			require.Error(t, err)
-			assert.True(t, errors.Is(err, ErrRejected))
+			assert.True(t, errors.Is(err, manifest.ErrRejected))
 			assert.Equal(t, 0, idx.eng.Stats().CommittedTables, "nothing is installed")
 			assert.Zero(t, idx.LastCommittedTimeTick())
 			assert.Equal(t, tc.installed, idx.currentInstalledVersion())
@@ -473,6 +474,6 @@ func TestRetireCoveredDropsSeveralGenerationsInOneCall(t *testing.T) {
 	require.Len(t, gens, 2)
 
 	idx.installedVersion = 5
-	require.NoError(t, idx.installIfNewer(ctx, ManifestView{Version: 3}, nil, gens...))
+	require.NoError(t, idx.installIfNewer(ctx, manifest.View{Version: 3}, nil, gens...))
 	assert.Equal(t, 0, idx.eng.Stats().FrozenGenerations, "an older manifest retires the generations it covers")
 }

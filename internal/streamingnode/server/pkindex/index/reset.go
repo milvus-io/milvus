@@ -31,7 +31,7 @@ import (
 // It empties the engine (see engine.Lifecycle.Reset), forgets the recovered
 // manifest and the installed tables, and drops a prepared handover: its
 // tables are from before tt. The next handover commits the reset: its flush
-// replaces the committed table set (see FlushArgs.ResetTimeTick). A handover
+// replaces the committed table set (see manifest.FlushArgs.ResetTimeTick). A handover
 // that runs at the same time installs nothing, see commit.
 //
 // It does nothing when tt <= LastCommittedTimeTick: a committed manifest

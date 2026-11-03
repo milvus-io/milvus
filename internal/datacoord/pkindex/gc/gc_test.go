@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
+	pkmanifest "github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
@@ -74,7 +75,7 @@ func (e *env) create(t *testing.T, vchannel string) {
 }
 
 func sstKey(vchannel string, id int64) string {
-	return pkindex.SSTKey(pkindex.SSTBasePath(testRoot, 1, 2, vchannel), id)
+	return pkmanifest.SSTKey(pkmanifest.SSTBasePath(testRoot, 1, 2, vchannel), id)
 }
 
 func refs(ids ...int64) []*pkindexpb.SSTRef {
@@ -111,7 +112,7 @@ func (e *env) has(key string) bool {
 // bodies returns the manifest body keys of a vchannel.
 func (e *env) bodies(t *testing.T, vchannel string) []string {
 	keys := []string{}
-	err := e.store.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, 2, vchannel)+"/", func(k string, _ time.Time) bool {
+	err := e.store.Walk(context.Background(), pkmanifest.ManifestDir(testRoot, 1, 2, vchannel)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -205,7 +206,7 @@ func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 	require.NoError(t, e.gc.RunOnce(ctx))
 	got := map[int64]bool{}
 	for _, k := range e.bodies(t, "v") {
-		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k)
+		v, ok := pkmanifest.ParseManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), k)
 		require.True(t, ok)
 		got[v] = true
 	}
@@ -218,7 +219,7 @@ func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 	e.create(t, "v")
 	e.flush(t, "v", 10, 1)
 	e.upload(t, "v", 9)
-	loser := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "loser")
+	loser := pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), 2, "loser")
 	e.writeBody(t, loser, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -266,10 +267,10 @@ func TestOrphanBodyAfterGrace(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 9, 10)
 	// bodies of commits that never swapped the pointer
-	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "old")
+	oldOrphan := pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), 2, "old")
 	e.writeBody(t, oldOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(2 * time.Hour)
-	youngOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "young")
+	youngOrphan := pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), 2, "young")
 	e.writeBody(t, youngOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(10)})
 	e.now = e.now.Add(10 * time.Minute)
 
@@ -352,7 +353,7 @@ func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k); v {
+		switch v, _ := pkmanifest.ParseManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:
@@ -373,10 +374,10 @@ func TestForeignObjectsAreKept(t *testing.T) {
 	ctx := context.Background()
 	e.create(t, "v")
 	foreign := []string{
-		pkindex.SSTBasePath(testRoot, 1, 2, "v") + "/x.tmp",
-		pkindex.SSTBasePath(testRoot, 1, 2, "v") + "/sub/7.sst",
-		pkindex.ManifestDir(testRoot, 1, 2, "v") + "/x.tmp",
-		pkindex.ManifestDir(testRoot, 1, 2, "v") + "/1.pb",
+		pkmanifest.SSTBasePath(testRoot, 1, 2, "v") + "/x.tmp",
+		pkmanifest.SSTBasePath(testRoot, 1, 2, "v") + "/sub/7.sst",
+		pkmanifest.ManifestDir(testRoot, 1, 2, "v") + "/x.tmp",
+		pkmanifest.ManifestDir(testRoot, 1, 2, "v") + "/1.pb",
 	}
 	for _, k := range foreign {
 		require.NoError(t, e.store.Write(ctx, k, []byte("x")))
@@ -478,22 +479,22 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 	// or sst_base_path is not the layout's
 	cases := map[string]func(m *pkindexpb.Manifest) string{
 		"body key outside the manifest dir": func(m *pkindexpb.Manifest) string {
-			return pkindex.ManifestDir(testRoot, 1, 2, "other") + "/" + "9-x.pb"
+			return pkmanifest.ManifestDir(testRoot, 1, 2, "other") + "/" + "9-x.pb"
 		},
 		"sst base path differs": func(m *pkindexpb.Manifest) string {
-			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, 2, "other")
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
+			m.SstBasePath = pkmanifest.SSTBasePath(testRoot, 1, 2, "other")
+			return pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
 		},
 		"sst base path of another index": func(m *pkindexpb.Manifest) string {
-			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, 3, "bad")
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
+			m.SstBasePath = pkmanifest.SSTBasePath(testRoot, 1, 3, "bad")
+			return pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
 		},
 		"body key under another index": func(m *pkindexpb.Manifest) string {
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 3, "bad"), m.GetVersion(), "x")
+			return pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 3, "bad"), m.GetVersion(), "x")
 		},
 		"empty sst base path": func(m *pkindexpb.Manifest) string {
 			m.SstBasePath = ""
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
+			return pkmanifest.ManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
 		},
 	}
 	for name, change := range cases {
@@ -593,7 +594,7 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k); v {
+		switch v, _ := pkmanifest.ParseManifestBodyKey(pkmanifest.ManifestDir(testRoot, 1, 2, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:

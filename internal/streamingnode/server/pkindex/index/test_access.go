@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -100,9 +101,9 @@ func (idx *Index) LastObservedForTest() uint64 {
 
 // The fields of a PendingHandover, for the tests of the two phases.
 
-func (p *PendingHandover) Request() *FlushArgs      { return p.request }
-func (p *PendingHandover) Covered() uint64          { return p.covered }
-func (p *PendingHandover) Local() map[sst.ID]string { return p.local }
+func (p *PendingHandover) Request() *manifest.FlushArgs { return p.request }
+func (p *PendingHandover) Covered() uint64              { return p.covered }
+func (p *PendingHandover) Local() map[sst.ID]string     { return p.local }
 
 // CommittedPathForTest returns the local path of a committed table.
 func CommittedPathForTest(dir string, id sst.ID) string { return committedPath(dir, id) }

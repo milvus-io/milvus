@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package manifest
 
 import (
 	"fmt"
@@ -26,10 +26,10 @@ import (
 )
 
 // The functions below build and parse the object keys of the primary key
-// index. All keys are complete object keys under the root path of the chunk
+// index: the SSTs that a manifest references and the manifest bodies. All keys are complete object keys under the root path of the chunk
 // manager (rootPath):
 //
-//	<rootPath>/pk_index/<collectionID>/          CollectionDir
+//	<rootPath>/pk_index/<collectionID>/
 //	└── <indexID>/                               IndexDir, ParseIndexDir
 //	    └── <vchannel>/
 //	        ├── sst/                             SSTBasePath
@@ -42,14 +42,9 @@ import (
 // A streaming node handover and a data node compaction write SSTs. DataCoord
 // writes the manifest bodies. The DataCoord GC deletes both.
 
-// CollectionDir returns the complete object key prefix of all objects of a collection.
-func CollectionDir(rootPath string, collectionID int64) string {
-	return path.Join(rootPath, common.PKIndexPath, strconv.FormatInt(collectionID, 10))
-}
-
 // IndexDir returns the complete object key prefix of all objects of an index.
 func IndexDir(rootPath string, collectionID, indexID int64) string {
-	return CollectionDir(rootPath, collectionID) + "/" + strconv.FormatInt(indexID, 10)
+	return path.Join(rootPath, common.PKIndexPath, strconv.FormatInt(collectionID, 10), strconv.FormatInt(indexID, 10))
 }
 
 // ParseIndexDir returns the collection ID and the index ID of an index

@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -108,8 +109,10 @@ type ManagerConfig struct {
 	// StorageRootPath is the root path of the object storage
 	// (ChunkManager.RootPath()). The SST base path of a vchannel is under it.
 	StorageRootPath string
-	// Committer reads and changes the manifests. It must not be nil.
-	Committer Committer
+	// Committer changes and finds the manifests. It must not be nil.
+	Committer manifest.Committer
+	// Reader reads the manifest bodies that the lookups of Committer point to.
+	Reader manifest.ObjectReader
 	// Sched runs the handovers of all pchannels of the node.
 	Sched nodescheduler.Scheduler
 	// Params returns the current params. The primary key index calls it on every
@@ -204,8 +207,11 @@ func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 // Root returns the local root directory of the indexes of the node.
 func (m *Manager) Root() string { return m.cfg.Root }
 
-// Committer returns the Committer of the node, nil when it has none.
-func (m *Manager) Committer() Committer { return m.cfg.Committer }
+// Committer returns the Committer of the node.
+func (m *Manager) Committer() manifest.Committer { return m.cfg.Committer }
+
+// Reader returns the reader of the manifest bodies of the node.
+func (m *Manager) Reader() manifest.ObjectReader { return m.cfg.Reader }
 
 // Scheduler returns the node scheduler that runs the tasks of the indexes.
 func (m *Manager) Scheduler() nodescheduler.Scheduler { return m.cfg.Sched }
@@ -237,54 +243,6 @@ func (m *Manager) Close() {
 	for _, c := range channels {
 		c.Close()
 	}
-}
-
-// VChannelRef names the manifest of an index on a vchannel.
-type VChannelRef struct {
-	CollectionID int64
-	IndexID      int64
-	VChannel     string
-}
-
-// RecoveryManifest is the answer of GetRecoveryManifests for one vchannel.
-type RecoveryManifest struct {
-	// Found reports whether the vchannel has a manifest.
-	Found bool
-	// Version and BodyKey point to the manifest when Found is true. BodyKey
-	// is the object key of the manifest body.
-	Version int64
-	BodyKey string
-	// Err is the failure of this item. The other fields are not set when it
-	// is not nil.
-	Err error
-}
-
-// ManifestReader finds the manifests of the vchannels of a pchannel. The
-// PChannelIndexManager defines the part of the manifest service that it uses.
-//
-// The calls return an error that matches index.ErrRejected when a retry
-// cannot fix the error.
-type ManifestReader interface {
-	// GetRecoveryManifests returns one answer for each ref, in the order of
-	// refs. An item that fails has its own Err. The caller sends at most
-	// MaxRecoveryManifests refs in one call.
-	GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error)
-	// ReadManifest reads the manifest body at bodyKey, the BodyKey of a
-	// RecoveryManifest. A body that does not exist or does not decode returns
-	// an error marked pkroot.ErrCorrupted.
-	ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error)
-}
-
-// MaxRecoveryManifests is the largest number of refs in one
-// GetRecoveryManifests call.
-const MaxRecoveryManifests = 10000
-
-// Committer is what the primary key index of a streaming node needs from the
-// manifest service: the lookups of the PChannelIndexManager and the flush
-// commits of the Index.
-type Committer interface {
-	ManifestReader
-	index.Committer
 }
 
 // TableStore moves SST files between local disk and object storage. See

@@ -16,18 +16,22 @@
 
 //go:build test
 
-package index
+package manifest
 
 import (
+	"strconv"
+
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 )
 
 // FakeManifest is a manifest of one vchannel as a fake manifest service
 // keeps it. Tests use it to fake a Committer.
 type FakeManifest struct {
-	View ManifestView
+	View View
 	// LastFlushTerm is the term of the last flush that changed the manifest.
 	LastFlushTerm int64
 	// IndexID is the index ID of the first flush.
@@ -63,7 +67,7 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: term %d is not the assigned term", args.VChannel, args.PChannelTerm)
 	}
 	if cur == nil {
-		cur = &FakeManifest{View: ManifestView{SSTBasePath: basePath}, IndexID: args.IndexID}
+		cur = &FakeManifest{View: View{SSTBasePath: basePath}, IndexID: args.IndexID}
 	}
 	if args.IndexID != cur.IndexID {
 		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: index %d, flush %d", args.VChannel, cur.IndexID, args.IndexID)
@@ -95,4 +99,29 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 		next.View.Tables = append(next.View.Tables, cur.View.Tables...)
 	}
 	return next, true, nil
+}
+
+// FakeRecoveryManifest returns the lookup answer for cur, the manifest of
+// vchannel (nil when it has none). The body key names the vchannel and the
+// version.
+func FakeRecoveryManifest(vchannel string, cur *FakeManifest) RecoveryManifest {
+	if cur == nil {
+		return RecoveryManifest{}
+	}
+	return RecoveryManifest{Found: true, Version: cur.View.Version, BodyKey: "manifest/" + vchannel + "/" + strconv.FormatInt(cur.View.Version, 10) + ".pb"}
+}
+
+// FakeBody returns the encoded manifest body of v, which ReadBody decodes
+// back to v.
+func FakeBody(v View) []byte {
+	body, err := proto.Marshal(&pkindexpb.Manifest{
+		Version:            v.Version,
+		SstBasePath:        v.SSTBasePath,
+		CheckpointTimeTick: v.CheckpointTimeTick,
+		Ssts:               SSTRefsOf(v.Tables),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return body
 }

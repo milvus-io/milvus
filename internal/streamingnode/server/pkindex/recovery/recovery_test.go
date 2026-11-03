@@ -30,8 +30,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -64,7 +64,7 @@ func testMeta(vchannel string, collectionID int64, pk schemapb.DataType, autoID 
 func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	rec, err := Recover(ctx, env.Manager, Param{
 		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}, Seed: 80},
 		Metas: map[string]*streamingpb.VChannelMeta{
@@ -94,13 +94,13 @@ func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
 func TestRecoverFailsOnAFencedLookupAndLeavesNothingOpen(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetLookupErr(index.ErrFenced)
+	env.Committer.SetLookupErr(manifest.ErrFenced)
 	_, err := Recover(ctx, env.Manager, Param{
 		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
-	require.ErrorIs(t, err, index.ErrFenced)
+	require.ErrorIs(t, err, manifest.ErrFenced)
 	assert.Nil(t, env.Manager.GetForTest("p"))
 }
 
@@ -190,27 +190,32 @@ func TestRecoverRetriesATransientLookupFailure(t *testing.T) {
 	assert.True(t, env.Manager.GetForTest("p").IndexForTest("v1").Ready(), "the lookup went through after the retries")
 }
 
-// readCommitter is a Committer whose ReadManifest of some body keys is
-// replaced. The other calls go to the embedded Committer.
-type readCommitter struct {
-	pkindex.Committer
-	reads map[string]func(ctx context.Context) (index.ManifestView, error) // by body key
+// readOverride is an ObjectReader whose reads of some manifest body keys are
+// replaced. The other reads go to the embedded ObjectReader.
+type readOverride struct {
+	manifest.ObjectReader
+	reads map[string]func(ctx context.Context) (manifest.View, error) // by body key
 }
 
-func (c *readCommitter) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
-	if read, ok := c.reads[bodyKey]; ok {
-		return read(ctx)
+func (r *readOverride) ReadObject(ctx context.Context, key string) ([]byte, error) {
+	read, ok := r.reads[key]
+	if !ok {
+		return r.ObjectReader.ReadObject(ctx, key)
 	}
-	return c.Committer.ReadManifest(ctx, bodyKey)
+	v, err := read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return manifest.FakeBody(v), nil
 }
 
 func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	m := &index.FakeManifest{View: index.ManifestView{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
+	m := &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
 	env.Committer.SetManifest("v1", m)
-	env.Manager.SetCommitterForTest(&readCommitter{Committer: env.Committer, reads: map[string]func(context.Context) (index.ManifestView, error){
-		pkindex.FakeRecoveryManifest("v1", m).BodyKey: func(context.Context) (index.ManifestView, error) {
+	env.Manager.SetReaderForTest(&readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
+		manifest.FakeRecoveryManifest("v1", m).BodyKey: func(context.Context) (manifest.View, error) {
 			view := m.View
 			view.Version = 3
 			return view, nil
@@ -221,28 +226,28 @@ func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
-	require.ErrorIs(t, err, index.ErrRejected)
+	require.ErrorIs(t, err, manifest.ErrRejected)
 	assert.Nil(t, env.Manager.GetForTest("p"))
 }
 
 func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	m1 := &index.FakeManifest{View: index.ManifestView{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
-	m2 := &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 50, SSTBasePath: "root/2/v2"}}
+	m1 := &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
+	m2 := &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 50, SSTBasePath: "root/2/v2"}}
 	env.Committer.SetManifest("v1", m1)
 	env.Committer.SetManifest("v2", m2)
-	env.Manager.SetCommitterForTest(&readCommitter{Committer: env.Committer, reads: map[string]func(context.Context) (index.ManifestView, error){
+	env.Manager.SetReaderForTest(&readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
 		// v1: the body names another version, a fatal error
-		pkindex.FakeRecoveryManifest("v1", m1).BodyKey: func(context.Context) (index.ManifestView, error) {
+		manifest.FakeRecoveryManifest("v1", m1).BodyKey: func(context.Context) (manifest.View, error) {
 			view := m1.View
 			view.Version = 3
 			return view, nil
 		},
 		// v2: always a transient failure, retried until the read ctx ends
-		pkindex.FakeRecoveryManifest("v2", m2).BodyKey: func(context.Context) (index.ManifestView, error) {
+		manifest.FakeRecoveryManifest("v2", m2).BodyKey: func(context.Context) (manifest.View, error) {
 			time.Sleep(time.Millisecond)
-			return index.ManifestView{}, errors.New("injected transient failure")
+			return manifest.View{}, errors.New("injected transient failure")
 		},
 	}})
 	start := time.Now()
@@ -254,19 +259,19 @@ func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 		},
 		Sched: env.Manager.Scheduler(),
 	})
-	require.ErrorIs(t, err, index.ErrRejected)
+	require.ErrorIs(t, err, manifest.ErrRejected)
 	assert.Less(t, time.Since(start), 5*time.Second, "the transient retry of v2 ends with the fatal error of v1")
 	assert.Nil(t, env.Manager.GetForTest("p"))
 }
 
 // batchCommitter records the size of every GetRecoveryManifests batch.
 type batchCommitter struct {
-	pkindex.Committer
+	manifest.Committer
 	mu      sync.Mutex
 	batches []int
 }
 
-func (c *batchCommitter) GetRecoveryManifests(ctx context.Context, refs []pkindex.VChannelRef) ([]pkindex.RecoveryManifest, error) {
+func (c *batchCommitter) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
 	c.mu.Lock()
 	c.batches = append(c.batches, len(refs))
 	c.mu.Unlock()
@@ -278,7 +283,7 @@ func TestRecoverLooksManifestsUpInBatches(t *testing.T) {
 	env := pkindex.NewFakeEnv(t, t.TempDir())
 	committer := &batchCommitter{Committer: env.Committer}
 	env.Manager.SetCommitterForTest(committer)
-	env.Committer.SetManifest("v5", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/5/v5"}})
+	env.Committer.SetManifest("v5", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/5/v5"}})
 	old := manifestLookupBatch
 	manifestLookupBatch = 2
 	t.Cleanup(func() { manifestLookupBatch = old })
@@ -320,7 +325,7 @@ func (s *countingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHa
 func TestRunSkipsTheInstallOfADroppedIndex(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}
@@ -345,7 +350,7 @@ func TestRunSkipsTheInstallOfADroppedIndex(t *testing.T) {
 func TestRunRunsOnce(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}

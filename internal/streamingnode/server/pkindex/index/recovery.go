@@ -25,6 +25,7 @@ import (
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
@@ -35,7 +36,7 @@ import (
 // LastCommittedTimeTick until the next handover. It runs once, at the open,
 // before any Replay and before any write of the Index. The manifest version
 // is at least 1.
-func (idx *Index) SetCommitted(v ManifestView) {
+func (idx *Index) SetCommitted(v manifest.View) {
 	idx.installMu.Lock()
 	view := v
 	idx.recovered = &view
@@ -89,7 +90,7 @@ func (idx *Index) closedOr(err error) error {
 // reconcileCommittedDir removes the files of the committed dir that the
 // manifest does not list: tables that a compaction replaced, and the
 // temporary files of downloads that did not finish.
-func (idx *Index) reconcileCommittedDir(ctx context.Context, view *ManifestView) error {
+func (idx *Index) reconcileCommittedDir(ctx context.Context, view *manifest.View) error {
 	ents, err := os.ReadDir(idx.committedDir)
 	if os.IsNotExist(err) {
 		return nil

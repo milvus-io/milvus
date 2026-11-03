@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -33,8 +34,8 @@ func TestIsFatal(t *testing.T) {
 		err   error
 		fatal bool
 	}{
-		{"fenced", errors.Wrap(ErrFenced, "v0"), true},
-		{"rejected", errors.Wrap(ErrRejected, "v0"), true},
+		{"fenced", errors.Wrap(manifest.ErrFenced, "v0"), true},
+		{"rejected", errors.Wrap(manifest.ErrRejected, "v0"), true},
 		{"corrupted", errors.Mark(errors.New("bad block"), pkroot.ErrCorrupted), true},
 		{"unavailable", errors.Mark(errors.New("connection reset"), pkroot.ErrUnavailable), false},
 		{"io", errors.Mark(errors.New("disk full"), pkroot.ErrIO), false},
@@ -46,7 +47,7 @@ func TestIsFatal(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.fatal, IsFatal(c.err))
+			assert.Equal(t, c.fatal, manifest.IsFatal(c.err))
 		})
 	}
 }

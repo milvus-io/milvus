@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -55,7 +56,7 @@ func insert(t *testing.T, m *pkindex.PChannelIndexManager, idx *index.Index, seg
 // of the pchannel: it writes rows, prepares a handover, uploads the table
 // and returns the manifest view that lists it. The local committed copy is
 // removed when keepLocal is false, so an install must download the table.
-func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) index.ManifestView {
+func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) manifest.View {
 	ctx := context.Background()
 	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
 	idx, _, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
@@ -68,8 +69,8 @@ func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) index.Ma
 	require.NotNil(t, p)
 	ref := p.Request().AddTables[0]
 	store := env.Manager.StoreForTest().(*index.FakeStore)
-	require.NoError(t, store.UploadFile(ctx, pkroot.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
-	view := index.ManifestView{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 50, Tables: []index.TableRef{ref}}
+	require.NoError(t, store.UploadFile(ctx, manifest.SSTKey(idx.SSTBasePathForTest(), int64(ref.ID)), p.Local()[ref.ID]))
+	view := manifest.View{Version: 1, SSTBasePath: idx.SSTBasePathForTest(), CheckpointTimeTick: 50, Tables: []manifest.TableRef{ref}}
 	if !keepLocal {
 		require.NoError(t, os.Remove(index.CommittedPathForTest(idx.CommittedDirForTest(), ref.ID)))
 	}
@@ -83,7 +84,7 @@ func TestInstallTaskRetriesAndMarksReady(t *testing.T) {
 	env := pkindex.NewFakeEnv(t, t.TempDir())
 	view := committedTable(t, env, false)
 
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: view})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
 	store := env.Manager.StoreForTest().(*index.FakeStore)
 	store.FailDownloads(2)
 	sched := nodescheduler.New(2)
@@ -108,8 +109,8 @@ func TestInstallTaskRetriesAndMarksReady(t *testing.T) {
 func TestInstallTaskReportsAMissingObjectAsFatal(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	view := index.ManifestView{Version: 1, SSTBasePath: "root/1/v1", CheckpointTimeTick: 50, Tables: []index.TableRef{{ID: 77, Size: 10}}}
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: view})
+	view := manifest.View{Version: 1, SSTBasePath: "root/1/v1", CheckpointTimeTick: 50, Tables: []manifest.TableRef{{ID: 77, Size: 10}}}
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
 	sched := nodescheduler.New(2)
 	t.Cleanup(sched.Close)
 	counter := metrics.StreamingNodePKIndexFatalTotal.WithLabelValues(paramtable.GetStringNodeID(), errorClassCorrupted)
@@ -147,7 +148,7 @@ func TestInstallTaskStopsAtClose(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
 	view := committedTable(t, env, false)
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: view})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
 	store := env.Manager.StoreForTest().(*index.FakeStore)
 	store.FailDownloads(1 << 30) // every download fails: the install retries until it is canceled
 	sched := nodescheduler.New(2)

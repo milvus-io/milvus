@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -405,7 +406,7 @@ func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	states := newFakeStates()
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex.CheckpointTimeTick = 11 // the vchannel meta was persisted after the CreateIndex
@@ -936,7 +937,7 @@ func truncateMsg(vchannel string, collectionID int64, tt uint64) message.Immutab
 func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
 	rec := recoverV1(t, env, sched)
@@ -962,7 +963,7 @@ func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 func TestObserveReplayOfACommittedTruncateDoesNothing(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
 	rec := recoverV1(t, env, sched)

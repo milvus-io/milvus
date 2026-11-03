@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -286,7 +287,7 @@ func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
 	return e.SegmentID
 }
 
-func sstIDs(m index.ManifestView) []int64 {
+func sstIDs(m manifest.View) []int64 {
 	ids := make([]int64, 0, len(m.Tables))
 	for _, s := range m.Tables {
 		ids = append(ids, int64(s.ID))

@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -228,7 +229,7 @@ func (c *PChannelIndexManager) runHandover(ctx context.Context, idx *index.Index
 		}
 	case errors.Is(err, context.Canceled):
 		// the Index or the scheduler is closing, this is not a failure
-	case index.IsFatal(err):
+	case manifest.IsFatal(err):
 		s.stopped.Store(true)
 		idx.Logger().Error(ctx, "primary key index handover failed, the WAL becomes unavailable", mlog.Err(err))
 		c.fatal(err)

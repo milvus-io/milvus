@@ -23,75 +23,7 @@ package index
 
 import (
 	"context"
-
-	"github.com/cockroachdb/errors"
-
-	pkroot "github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
-
-// The errors of a Committer that a retry cannot fix. Every other error of a
-// Committer is retryable.
-var (
-	// ErrFenced reports that the pchannel is assigned to a higher term. The
-	// WAL instance of the old term must stop.
-	ErrFenced = errors.New("primary key index manifest is fenced by a newer term")
-	// ErrRejected reports that the manifest service rejected the request
-	// for good: a bug of the caller, an invalid request, or a corrupted
-	// stored manifest. The same request fails the same way again.
-	ErrRejected = errors.New("primary key index manifest rejected the request")
-)
-
-// IsFatal reports whether err ends the WAL instance: the term is fenced by a
-// newer owner, the manifest service rejected a request that a retry cannot
-// fix, or stored data is corrupted.
-func IsFatal(err error) bool {
-	return errors.Is(err, ErrFenced) || errors.Is(err, ErrRejected) || errors.Is(err, pkroot.ErrCorrupted)
-}
-
-// TableRef describes a committed table in a manifest.
-type TableRef = sst.Info
-
-// ManifestView is the part of a vchannel manifest that the handover uses.
-type ManifestView struct {
-	// Version goes up by one with each change of the manifest. The first
-	// flush of a vchannel creates the manifest at version 1.
-	Version int64
-	// SSTBasePath is the object key prefix of the tables. See pkindex.SSTKey.
-	SSTBasePath string
-	// CheckpointTimeTick is the time tick that the tables cover.
-	CheckpointTimeTick uint64
-	// Tables is the complete committed table set.
-	Tables []TableRef
-}
-
-// FlushArgs adds tables to the manifest of the index IndexID on a vchannel
-// and moves its checkpoint to CheckpointTimeTick. The first flush of the
-// index on the vchannel creates its manifest.
-type FlushArgs struct {
-	CollectionID       int64
-	IndexID            int64
-	VChannel           string
-	PChannelTerm       int64
-	AddTables          []TableRef
-	CheckpointTimeTick uint64
-	// ResetTimeTick is the time tick of a truncate of the collection that the
-	// flush commits, 0 when none. When set, AddTables replace the committed
-	// table set instead of going in front of it.
-	ResetTimeTick uint64
-}
-
-// Committer changes the manifest of a vchannel. The handover defines the
-// part of the manifest service that it uses.
-//
-// The call returns an error that matches ErrFenced when the pchannel is
-// assigned to a higher term, and ErrRejected when a retry cannot fix the error.
-type Committer interface {
-	// CommitFlush applies a flush and returns the complete manifest after
-	// it. A retry with the same arguments after a lost response returns the
-	// manifest that the first call committed.
-	CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error)
-}
 
 // TableStore moves SST files between local disk and object storage.
 type TableStore interface {

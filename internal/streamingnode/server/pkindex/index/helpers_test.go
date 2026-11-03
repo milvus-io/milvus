@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
@@ -42,37 +43,37 @@ const (
 )
 
 // fakeCommitter applies the flushes of one vchannel with the rules of the
-// manifest service, see FakeFlush. The pchannel is assigned to testTerm.
+// manifest service, see manifest.FakeFlush. The pchannel is assigned to testTerm.
 type fakeCommitter struct {
 	mu sync.Mutex
 	// cur is the current manifest, nil before the first flush.
-	cur *FakeManifest
+	cur *manifest.FakeManifest
 	// history keeps every manifest version.
-	history []*FakeManifest
+	history []*manifest.FakeManifest
 
 	commitErrs []error
 	loseNext   bool
-	requests   []FlushArgs
+	requests   []manifest.FlushArgs
 	// applied records whether each flush that the fake manifest service
 	// accepted changed the manifest.
 	applied []bool
 	// rewrite changes the returned manifest, if it is not nil.
-	rewrite func(m ManifestView) ManifestView
+	rewrite func(m manifest.View) manifest.View
 }
 
-func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (ManifestView, error) {
+func (c *fakeCommitter) CommitFlush(ctx context.Context, args manifest.FlushArgs) (manifest.View, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	args.AddTables = append([]TableRef(nil), args.AddTables...)
+	args.AddTables = append([]manifest.TableRef(nil), args.AddTables...)
 	c.requests = append(c.requests, args)
 	if len(c.commitErrs) > 0 {
 		err := c.commitErrs[0]
 		c.commitErrs = c.commitErrs[1:]
-		return ManifestView{}, err
+		return manifest.View{}, err
 	}
-	next, changed, err := FakeFlush(c.cur, testTerm, args, pkroot.SSTBasePath(testStorageRoot, args.CollectionID, args.IndexID, args.VChannel))
+	next, changed, err := manifest.FakeFlush(c.cur, testTerm, args, manifest.SSTBasePath(testStorageRoot, args.CollectionID, args.IndexID, args.VChannel))
 	if err != nil {
-		return ManifestView{}, err
+		return manifest.View{}, err
 	}
 	c.cur = next
 	if changed {
@@ -81,12 +82,18 @@ func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (Manife
 	c.applied = append(c.applied, changed)
 	if c.loseNext {
 		c.loseNext = false
-		return ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
+		return manifest.View{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
 	}
 	if c.rewrite != nil {
 		return c.rewrite(next.View), nil
 	}
 	return next.View, nil
+}
+
+// GetRecoveryManifests implements manifest.Committer. An Index never looks
+// up manifests.
+func (c *fakeCommitter) GetRecoveryManifests(ctx context.Context, refs []manifest.VChannelRef) ([]manifest.RecoveryManifest, error) {
+	panic("an Index does not look up manifests")
 }
 
 func (c *fakeCommitter) set(f func(c *fakeCommitter)) {
@@ -96,17 +103,17 @@ func (c *fakeCommitter) set(f func(c *fakeCommitter)) {
 }
 
 // manifest returns the current manifest, a zero value before the first flush.
-func (c *fakeCommitter) manifest() ManifestView {
+func (c *fakeCommitter) manifest() manifest.View {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cur == nil {
-		return ManifestView{}
+		return manifest.View{}
 	}
 	return c.cur.View
 }
 
 // version returns version v of the manifest, nil when it does not exist.
-func (c *fakeCommitter) version(v int64) *ManifestView {
+func (c *fakeCommitter) version(v int64) *manifest.View {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, m := range c.history {
@@ -118,10 +125,10 @@ func (c *fakeCommitter) version(v int64) *ManifestView {
 	return nil
 }
 
-func (c *fakeCommitter) requestList() []FlushArgs {
+func (c *fakeCommitter) requestList() []manifest.FlushArgs {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]FlushArgs(nil), c.requests...)
+	return append([]manifest.FlushArgs(nil), c.requests...)
 }
 
 func (c *fakeCommitter) appliedList() []bool {
@@ -255,7 +262,7 @@ func insertRequest(pks ...int64) dedup.DecideRequest {
 	return dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(pks...)}
 }
 
-func sstIDs(m ManifestView) []int64 {
+func sstIDs(m manifest.View) []int64 {
 	ids := make([]int64, 0, len(m.Tables))
 	for _, s := range m.Tables {
 		ids = append(ids, int64(s.ID))

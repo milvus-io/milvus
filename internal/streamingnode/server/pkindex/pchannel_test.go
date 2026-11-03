@@ -30,6 +30,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -167,13 +168,13 @@ func TestFencedCommitStopsTheHandovers(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *FakeCommitter) { c.commitErrs = []error{errors.Wrap(index.ErrFenced, "v0")} })
+	env.client.set(func(c *FakeCommitter) { c.commitErrs = []error{errors.Wrap(manifest.ErrFenced, "v0")} })
 	insert(t, ch, idx, 1, 1)
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, index.ErrFenced))
+	assert.True(t, errors.Is(err, manifest.ErrFenced))
 	assert.True(t, scheduleOf(ch, idx).stopped.Load())
 	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
 	// the Index keeps serving writes, but it does not hand over again
@@ -188,13 +189,13 @@ func TestRejectedCommitIsFatal(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	idx := env.add(ch, "v0")
-	env.client.set(func(c *FakeCommitter) { c.commitErrs = []error{errors.Wrap(index.ErrRejected, "duplicate table")} })
+	env.client.set(func(c *FakeCommitter) { c.commitErrs = []error{errors.Wrap(manifest.ErrRejected, "duplicate table")} })
 	insert(t, ch, idx, 1, 1)
 	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	ch.step(farFuture)
 
 	err := env.waitFatal()
-	assert.True(t, errors.Is(err, index.ErrRejected))
+	assert.True(t, errors.Is(err, manifest.ErrRejected))
 	assert.True(t, scheduleOf(ch, idx).stopped.Load())
 	assert.Zero(t, scheduleOf(ch, idx).failures, "no retry is scheduled")
 	assert.Len(t, idx.EngineForTest().FrozenGenerations(), 1, "the generations stay frozen")
@@ -291,7 +292,7 @@ func TestManagerApplyIgnoresADroppedIndex(t *testing.T) {
 }
 
 // refNames returns the vchannels of refs.
-func refNames(refs []VChannelRef) []string {
+func refNames(refs []manifest.VChannelRef) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		out = append(out, ref.VChannel)
