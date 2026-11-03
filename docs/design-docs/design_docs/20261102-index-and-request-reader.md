@@ -225,3 +225,5 @@ JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings �
 内存向量由 VectorIndex 保存常驻 engine 或 CacheSlot<KnowhereEngine>，两种状态使用 variant 表达。Reader 的单次查询、取向量或有效性检查持有对应 engine pin，返回的迭代器继续持有该 pin，直到迭代器释放。类型、metric 和索引名称来自固定配置，不触发加载；未知 Count 从实际 engine 读取，不能用 VECTOR_ARRAY 的父行数代替。原有加载器的数量、维度、validity 校验仍在缓存发布前执行，稀疏向量使用同一加载路径。
 
 磁盘向量的普通后端同样使用 KnowhereEngine cell，文件句柄、validity 和 embedding-list sidecar 随 engine 一起保留。声明 LAZY_LOAD 能力的后端直接由 VectorIndex 持有 engine，初始化仍走既有加载流程，数据加载和缓存由后端管理；不再创建外层整引擎 slot。Index 的延迟创建仍由 inventory factory 控制，CreateReader 只建立请求视图。
+
+临时向量构建也以 KnowhereEngine 为缓存 cell。InterimSealedIndexTranslator 从原始列构建 engine，segment 注册持有该 slot 的 VectorIndex；不再缓存请求 Reader。DataView 回调继续持有原始 chunk 的 pin，迭代器则通过 engine pin 保留整条生命周期。该路径保留不可淘汰策略与原有 warmup 行为。

@@ -103,9 +103,14 @@ VectorMemArtifact::VectorMemArtifact(KnowhereEngine engine,
                "empty embedding-list offsets must be monotonic");
 }
 
+KnowhereEngine
+VectorMemArtifact::IntoEngine() && {
+    return std::move(engine_);
+}
+
 IndexPtr
 VectorMemArtifact::IntoIndex() && {
-    return std::make_shared<VectorIndex>(std::move(engine_));
+    return std::make_shared<VectorIndex>(std::move(*this).IntoEngine());
 }
 
 void

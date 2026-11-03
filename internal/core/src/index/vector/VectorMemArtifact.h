@@ -45,6 +45,10 @@ class VectorMemArtifact final : public storage::Artifact,
     void
     Serialize(storage::FileSink& sink) const override;
 
+    /** @brief Transfer the completed engine into an owner or cache cell. */
+    KnowhereEngine
+    IntoEngine() &&;
+
     IndexPtr
         IntoIndex() &&
         override;

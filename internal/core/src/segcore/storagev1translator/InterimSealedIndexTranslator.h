@@ -18,7 +18,8 @@
 
 #include "common/Types.h"
 #include "knowhere/config.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "cachinglayer/Translator.h"
+#include "index/vector/KnowhereEngine.h"
 
 namespace milvus {
 class ChunkedColumnInterface;
@@ -26,7 +27,9 @@ class ChunkedColumnInterface;
 
 namespace milvus::segcore::storagev1translator {
 
-class InterimSealedIndexTranslator : public IndexReaderTranslator {
+/** @brief Build one interim engine cell; DataView engines retain their column pins. */
+class InterimSealedIndexTranslator
+    : public cachinglayer::Translator<index::KnowhereEngine> {
  public:
     InterimSealedIndexTranslator(
         std::shared_ptr<ChunkedColumnInterface> vec_data,
@@ -50,7 +53,7 @@ class InterimSealedIndexTranslator : public IndexReaderTranslator {
     const std::string&
     key() const override;
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
+                          std::unique_ptr<milvus::index::KnowhereEngine>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
     milvus::cachinglayer::Meta*

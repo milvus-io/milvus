@@ -143,6 +143,7 @@
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "index/vector/VectorIndexReader.h"
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
@@ -7668,14 +7669,17 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                     dim,
                     is_sparse,
                     field_meta.get_data_type());
-            auto family = translator->Family();
-            auto value_type = translator->ValueType();
-            auto caps = translator->Caps();
-
-            auto interim_index_cache_slot =
-                milvus::cachinglayer::Manager::GetInstance()
-                    .CreateCacheSlot<index::IIndexReaderBase>(
-                        std::move(translator));
+            index::IndexFamily family{index::families::kVectorMem};
+            const auto value_type = field_meta.get_data_type();
+            const index::ReaderCaps caps{};
+            auto engine_slot = milvus::cachinglayer::Manager::GetInstance()
+                                   .CreateCacheSlot<index::KnowhereEngine>(
+                                       std::move(translator));
+            auto interim_index =
+                std::make_shared<index::VectorIndex>(std::move(engine_slot),
+                                                     value_type,
+                                                     interim_index_type,
+                                                     index_metric);
             bool has_raw_data = false;
             if (is_sparse ||
                 field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -7693,8 +7697,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             if (committer != nullptr) {
                 committer->Commit(
                     [&,
-                     interim_index_cache_slot =
-                         std::move(interim_index_cache_slot),
+                     interim_index = std::move(interim_index),
                      field_binlog_config = std::move(field_binlog_config),
                      family = std::move(family),
                      value_type,
@@ -7709,8 +7712,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                         meta.caps = caps;
                         committer->StageInterimVectorIndexMutationLocked(
                             std::make_shared<IndexInventory::Entry>(
-                                std::move(meta),
-                                std::move(interim_index_cache_slot)),
+                                std::move(meta), std::move(interim_index)),
                             std::move(field_binlog_config));
                         clear_bit_if_present(
                             staged_state.published_index_ready_bitset,
@@ -7733,8 +7735,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
                 meta.caps = caps;
                 if (auto replaced = next_runtime->indexes.Register(
                         std::make_shared<IndexInventory::Entry>(
-                            std::move(meta),
-                            std::move(interim_index_cache_slot)));
+                            std::move(meta), std::move(interim_index)));
                     replaced != nullptr) {
                     retired.push_back(std::move(replaced));
                 }
