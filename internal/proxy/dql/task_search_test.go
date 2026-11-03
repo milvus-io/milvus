@@ -178,6 +178,92 @@ func TestSearchTaskPreExecuteUsesTimezoneForTimestamptzFilter(t *testing.T) {
 	})
 }
 
+// See TestQueryTaskPreExecuteEntityTTLUsesTaskTimestamp.
+func TestSearchTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
+	const (
+		collectionName = "entity_ttl_collection"
+		collectionID   = int64(100)
+	)
+	schedulerTime := time.Unix(1_700_000_000, 0)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
+	updateTS := tsoutil.ComposeTSByTime(schedulerTime.Add(-time.Hour))
+	newerUpdateTS := tsoutil.ComposeTSByTime(schedulerTime.Add(time.Second))
+	lastWriteTS := tsoutil.ComposeTSByTime(schedulerTime.Add(-30 * time.Minute))
+	gracefulTime := paramtable.Get().CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: testInt64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID:  101,
+				Name:     testFloatVecField,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: strconv.Itoa(testVecDim)},
+				},
+			},
+		},
+	})
+	collectionInfo := &collectionInfo{
+		CollID:          collectionID,
+		Schema:          schema,
+		UpdateTimestamp: updateTS,
+	}
+	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, collectionInfo, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
+	mockTest(t, isIgnoreGrowing, false, nil)
+	mockTest(t, (*SearchTask).checkNq, int64(1), nil)
+
+	for _, tc := range []struct {
+		name               string
+		useDefault         bool
+		defaultLevel       commonpb.ConsistencyLevel
+		updateTS           uint64
+		level              commonpb.ConsistencyLevel
+		requestGuaranteeTS uint64
+		guaranteeTS        uint64
+	}{
+		{name: "strong", level: commonpb.ConsistencyLevel_Strong, guaranteeTS: schedulerTS},
+		{name: "bounded", level: commonpb.ConsistencyLevel_Bounded, guaranteeTS: tsoutil.AddPhysicalDurationOnTs(schedulerTS, -gracefulTime)},
+		{name: "session", level: commonpb.ConsistencyLevel_Session, requestGuaranteeTS: lastWriteTS, guaranteeTS: lastWriteTS},
+		{name: "customized", level: commonpb.ConsistencyLevel_Customized, requestGuaranteeTS: lastWriteTS, guaranteeTS: lastWriteTS},
+		{name: "eventually", level: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
+		{name: "default eventually", useDefault: true, defaultLevel: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
+		{name: "strong, collection updated after the task", level: commonpb.ConsistencyLevel_Strong, updateTS: newerUpdateTS, guaranteeTS: newerUpdateTS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionInfo.ConsistencyLevel = tc.defaultLevel
+			collectionInfo.UpdateTimestamp = updateTS
+			if tc.updateTS != 0 {
+				collectionInfo.UpdateTimestamp = tc.updateTS
+			}
+			task := &SearchTask{
+				baseTask:      baseTask{MetaCache: newTestCache()},
+				Condition:     NewTaskCondition(context.Background()),
+				SearchRequest: &internalpb.SearchRequest{},
+				ctx:           context.Background(),
+				request: &milvuspb.SearchRequest{
+					CollectionName:        collectionName,
+					Nq:                    1,
+					SearchParams:          getValidSearchParams(),
+					ConsistencyLevel:      tc.level,
+					UseDefaultConsistency: tc.useDefault,
+					GuaranteeTimestamp:    tc.requestGuaranteeTS,
+				},
+				result: &milvuspb.SearchResults{Status: merr.Success()},
+			}
+			require.NoError(t, task.OnEnqueue())
+			task.SetTs(schedulerTS)
+
+			require.NoError(t, task.PreExecute(context.Background()))
+			require.Equal(t, tc.guaranteeTS, task.GetGuaranteeTimestamp())
+			require.Equal(t, uint64(schedulerTime.UnixMicro()), task.GetEntityTtlPhysicalTime())
+		})
+	}
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 	ctx := context.TODO()
@@ -1178,8 +1264,8 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 		// Verify EntityTtlPhysicalTime is set (issue #47413)
 		assert.NotZero(t, st.GetEntityTtlPhysicalTime(),
-			"EntityTtlPhysicalTime should be set from GuaranteeTimestamp")
-		expectedPhysicalMs, _ := tsoutil.ParseHybridTs(st.GetGuaranteeTimestamp())
+			"EntityTtlPhysicalTime should be set from the task timestamp")
+		expectedPhysicalMs, _ := tsoutil.ParseHybridTs(enqueueTs)
 		assert.Equal(t, uint64(expectedPhysicalMs*1000), st.GetEntityTtlPhysicalTime(),
 			"EntityTtlPhysicalTime should equal physical time in microseconds")
 	})

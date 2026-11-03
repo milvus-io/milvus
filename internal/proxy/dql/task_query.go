@@ -970,8 +970,11 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.GuaranteeTimestamp = guaranteeTs
-	// Extract physical time for entity-level TTL (issue #47413)
-	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
+	// Entity TTL compares the TTL field with the task timestamp, the clock
+	// collection TTL uses below. The guarantee timestamp can be much older: the
+	// collection's last DDL under Eventually, the client's last write under
+	// Session (issues #47413, #55069).
+	physicalTimeMs, _ := tsoutil.ParseHybridTs(t.GetBase().GetTimestamp())
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
