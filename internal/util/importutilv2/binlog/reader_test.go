@@ -3029,8 +3029,8 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 			require.NoError(t, baseline.Append(rows[i]))
 		}
 	}
-	// Three fields per row: the existing field-append counter reaches a multiple
-	// of 100 after 100 complete rows. Use the scan implementation as the baseline.
+	// With three fields per row, the first buffer check is after 100 complete rows.
+	// Compute the limit from untracked field sizes.
 	threshold := baseline.GetMemorySize()
 	for _, tc := range []struct {
 		name      string

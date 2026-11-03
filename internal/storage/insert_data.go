@@ -62,10 +62,9 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 	return newInsertDataWithCap(schema, cap, withFunctionOutput, false)
 }
 
-// NewInsertDataWithMemoryTracking creates an empty batch including function
-// output fields, with incremental memory accounting for variable-width fields.
-// Callers must use append methods rather than modify backing slices or payloads
-// directly.
+// NewInsertDataWithMemoryTracking creates an empty batch including function output fields.
+// Variable-width fields use incremental sizing; the batch total sums its current fields.
+// Use Append* methods to change tracked fields; appended payloads and getter views are read-only.
 func NewInsertDataWithMemoryTracking(schema *schemapb.CollectionSchema) (*InsertData, error) {
 	return newInsertDataWithCap(schema, 0, true, true)
 }
@@ -192,60 +191,58 @@ func (i *InsertData) GetRowSize(idx int) int {
 	return size
 }
 
-// FieldData represents the data of a field.
+// FieldData represents a field's rows and validity.
 //
-// Memory tracking is disabled by default. For variable-width fields, pass true as
-// the optional final constructor argument to enable it for an initially empty field.
-// All Append* methods then update the cached size, including data appended before an error,
-// and GetMemorySize returns that cache. With tracking disabled, GetMemorySize calculates the current size by scanning the data.
-// Fixed-width scalar and dense vector fields always calculate their sizes in constant time;
-// they do not store a tracking flag or maintain a size cache.
+// Memory tracking is disabled by default.
+// NewFieldDataWithMemoryTracking and NewInsertDataWithMemoryTracking enable it for variable-width fields.
+// Append* methods update the size cache, including changes retained after an error.
+// GetMemorySize returns the cache when enabled; otherwise, it scans variable-width data.
+// Fixed-width scalars and dense vectors always calculate their sizes in constant time.
 //
-// With tracking enabled, do not modify struct fields or backing data returned by getters directly,
-// as those changes bypass accounting. The mode is fixed at creation.
+// Tracking is fixed at construction.
+// With tracking enabled, only Append* methods may change the field's data and metadata.
+// Appended payloads and backing data returned by getters must remain unchanged.
 type FieldData interface {
 	RowNum() int
 
-	// get size
+	// Size accounting.
 	GetRowSize(i int) int
 	GetMemorySize() int
 
-	// get data/data type
+	// Data and field metadata.
 	GetRow(i int) any
 	GetDataRows() any
 	GetDataType() schemapb.DataType
 	GetNullable() bool
 	GetValidData() []bool
 
-	// append data
+	// Append rows, payloads, or validity.
 	AppendRow(row interface{}) error
 	AppendRows(dataRows interface{}, validDataRows interface{}) error
 	AppendDataRows(rows interface{}) error
 	AppendValidDataRows(rows interface{}) error
 }
 
-// NewFieldData creates an empty FieldData whose cap is expressed in rows;
-// vector columns scale it by their per-row element count, except nullable
-// columns, which reserve only cap: a nullable column missing from the source
-// only appends ValidData (see AppendNullableDefaultFieldsData), so a
-// dim-scaled Data reservation would stay invisible to GetMemorySize and never
-// trigger spill.
+// NewFieldData creates an empty FieldData with memory tracking disabled.
+// cap is a row-capacity hint.
+// Non-nullable dense vectors scale payload capacity by dimension.
+// Nullable dense vectors reserve only cap payload elements.
+// Sparse vector contents grow on append.
+// Unused slice capacity is not included in GetMemorySize.
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	return newFieldData(dataType, fieldSchema, cap, false)
 }
 
-// NewFieldDataWithMemoryTracking creates an empty FieldData with incremental
-// memory accounting for variable-width fields. Capacity is expressed in rows,
-// as in NewFieldData. Callers must use append methods rather than modify backing
-// slices or appended payloads directly.
+// NewFieldDataWithMemoryTracking creates an empty FieldData.
+// Variable-width fields use incremental sizing; capacity follows NewFieldData.
+// Use Append* methods to change tracked fields; appended payloads and getter views are read-only.
 func NewFieldDataWithMemoryTracking(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	return newFieldData(dataType, fieldSchema, cap, true)
 }
 
 func newFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int, trackMemory bool) (FieldData, error) {
 	typeParams := fieldSchema.GetTypeParams()
-	// nullableDataCap keeps the master row-count reservation for nullable
-	// vector columns; non-nullable columns keep the dim-scaled reservation.
+	// Nullable vectors reserve only cap payload elements, including validity-only columns.
 	nullableDataCap := func(scaled int) int {
 		if fieldSchema.GetNullable() {
 			return cap
@@ -473,7 +470,7 @@ func newStringFieldData(dataType schemapb.DataType, schema *schemapb.FieldSchema
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 1 // Nullable; same accounting as GetMemorySize.
+		data.memorySize = 1 // Nullable flag.
 	}
 	return data, nil
 }
@@ -501,7 +498,7 @@ func newArrayFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory b
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 2 // Nullable and ElementNullable.
+		data.memorySize = 2 // Nullable and ElementNullable flags.
 	}
 	return data, nil
 }
@@ -525,7 +522,7 @@ func newJSONFieldData(schema *schemapb.FieldSchema, capacity int, trackMemory bo
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 1
+		data.memorySize = 1 // Nullable flag.
 	}
 	return data, nil
 }
@@ -554,7 +551,7 @@ func newGeometryFieldData(schema *schemapb.FieldSchema, capacity int, trackMemor
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 1
+		data.memorySize = 1 // Nullable flag.
 	}
 	return data, nil
 }
@@ -668,7 +665,7 @@ func newSparseFloatVectorFieldData(schema *schemapb.FieldSchema, capacity int, t
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 9 // Nullable and empty L2PMapping.
+		data.memorySize = 9 // Nullable flag (1 byte) and empty L2PMapping (8 bytes).
 	}
 	return data, nil
 }
@@ -710,7 +707,7 @@ func newVectorArrayFieldData(schema *schemapb.FieldSchema, capacity int, trackMe
 	}
 	if trackMemory {
 		data.trackMemory = true
-		data.memorySize = 2 // Nullable and ElementNullable.
+		data.memorySize = 2 // Nullable and ElementNullable flags.
 	}
 	return data, nil
 }
@@ -1124,7 +1121,7 @@ func (data *TimestamptzFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
-// AppendRow appends a row and accounts for the data and validity added.
+// AppendRow updates the size cache when memory tracking is enabled.
 func (data *StringFieldData) AppendRow(row interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
@@ -1421,8 +1418,8 @@ func (data *TimestamptzFieldData) AppendRows(dataRows interface{}, validDataRows
 	return data.AppendValidDataRows(validDataRows)
 }
 
-// AppendRows preserves AppendRows' partial-success behavior: data remains
-// appended and counted if appending validity subsequently fails.
+// AppendRows retains appended data if validity appending fails.
+// Each append step updates its own part of the size cache when tracking is enabled.
 func (data *StringFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
 	if err := data.AppendDataRows(dataRows); err != nil {
 		return err
@@ -1658,7 +1655,7 @@ func (data *TimestamptzFieldData) AppendDataRows(rows interface{}) error {
 	return nil
 }
 
-// AppendDataRows accounts only for newly appended data, not validity.
+// AppendDataRows updates only the payload portion of the size cache when tracking is enabled.
 func (data *StringFieldData) AppendDataRows(rows interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
@@ -1906,7 +1903,7 @@ func (data *TimestamptzFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-// AppendValidDataRows accounts only for newly appended validity bytes.
+// AppendValidDataRows updates only the validity portion of the size cache when tracking is enabled.
 func (data *StringFieldData) AppendValidDataRows(rows interface{}) error {
 	if data.trackMemory {
 		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
@@ -2233,10 +2230,7 @@ func (data *VectorArrayFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_ArrayOfVector
 }
 
-// why not binary.Size(data) directly? binary.Size(data) return -1
-// binary.Size returns how many bytes Write would generate to encode the value v, which
-// must be a fixed-size value or a slice of fixed-size values, or a pointer to such data.
-// If v is neither of these, binary.Size returns -1.
+// GetMemorySize returns the cached size or calculates the size from current data.
 func (data *StringFieldData) GetMemorySize() int {
 	if data.trackMemory {
 		return data.memorySize
@@ -2467,7 +2461,7 @@ func (data *SparseFloatVectorFieldData) GetValidData() []bool { return data.Vali
 func (data *Int8VectorFieldData) GetValidData() []bool        { return data.ValidData }
 func (data *VectorArrayFieldData) GetValidData() []bool       { return data.ValidData }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *StringFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
@@ -2483,7 +2477,7 @@ func (data *StringFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *JSONFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
@@ -2499,10 +2493,9 @@ func (data *JSONFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *GeometryFieldData) getMemorySize() int {
 	var size int
-	// what's the meaning of 16?
 	for _, val := range data.Data {
 		size += len(val) + 16
 	}
@@ -2516,7 +2509,7 @@ func (data *GeometryFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *ArrayFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
@@ -2535,10 +2528,9 @@ func (data *ArrayFieldData) trackAppendedSize(oldRows, oldValid int) {
 	data.memorySize += len(data.ValidData) - oldValid
 }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *SparseFloatVectorFieldData) getMemorySize() int {
-	// TODO(SPARSE): should this be the memory size of serialzied size?
-	// SparseFloatArray + ValidData + Nullable(1) + L2PMapping
+	// Vector data uses protobuf size; validity, Nullable and L2P metadata are added separately.
 	return proto.Size(&data.SparseFloatArray) + binary.Size(data.ValidData) + 1 + data.L2PMapping.GetMemorySize()
 }
 
@@ -2547,6 +2539,7 @@ func (data *SparseFloatVectorFieldData) trackAppendedSize(oldRows, oldValid int,
 	// | tag 1 | length | row 0    | tag 1 | length | row 1    | ... | tag 2 | Dim   |
 	// +-------+--------+----------+-------+--------+----------+-----+-------+-------+
 	// |<----- Contents[0] ------->|<----- Contents[1] ------->| ... |<---- Dim ---->|
+	// SizeBytes includes both the length prefix and the payload.
 	for _, row := range data.Contents[oldRows:] {
 		data.memorySize += protowire.SizeTag(1) + protowire.SizeBytes(len(row))
 	}
@@ -2562,7 +2555,7 @@ func (data *SparseFloatVectorFieldData) trackAppendedSize(oldRows, oldValid int,
 	data.memorySize += data.L2PMapping.GetMemorySize() - oldMappingSize
 }
 
-// getMemorySize calculates the size independently of the incremental cache.
+// getMemorySize calculates the size without using the cache.
 func (data *VectorArrayFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {

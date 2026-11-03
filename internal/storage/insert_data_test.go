@@ -176,7 +176,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0+9)
 	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 2)
-	// +2 bytes: Nullable and ElementNullable flags (VectorArrayFieldData has no L2PMapping under Plan B)
+	// +2 bytes: Nullable and ElementNullable flags; VectorArrayFieldData has no L2PMapping.
 	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+2)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 9)
@@ -761,9 +761,8 @@ func TestNewFieldData_NullableVectorCap(t *testing.T) {
 	}
 }
 
-// These tests characterize the existing logical-size accounting, not Go heap
-// usage. Keep expectations independent of GetRowSize so a future incremental
-// implementation can be checked against both this baseline and GetMemorySize.
+// These tests check logical-size accounting, not Go heap usage.
+// Expected sizes are independent of GetRowSize and the incremental cache.
 func TestFieldMemorySizeNullableAppend(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -845,8 +844,7 @@ func TestFieldMemorySizeArrayValidity(t *testing.T) {
 	// Two flags + two row-validity bytes + 16 payload + two element-validity bytes.
 	require.Equal(t, 22, field.GetMemorySize())
 
-	// Preserve the current string-array quirk: each non-nil string leaf
-	// contributes an extra byte through StringFieldData.GetMemorySize.
+	// Each non-nil string-array leaf includes a one-byte Nullable flag.
 	strings := &ArrayFieldData{ElementType: schemapb.DataType_VarChar}
 	require.NoError(t, strings.AppendRow(&schemapb.ScalarField{
 		Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", ""}}},
@@ -881,8 +879,8 @@ func TestFieldMemorySizeSplitAppendAndFailure(t *testing.T) {
 	require.Equal(t, 73, field.GetMemorySize())
 }
 
-// Expected sizes are explicit compatibility baselines, independent of the
-// production sizing functions. shared is charged once after the first row.
+// Expected sizes are literal values, independent of production sizing functions.
+// shared is charged only by the first row in each fixture.
 type fieldMemoryCase struct {
 	dataType                       schemapb.DataType
 	row, batch                     any
@@ -1300,8 +1298,8 @@ func TestVectorArrayFieldDataTrackedAppend(t *testing.T) {
 	}
 }
 
-// batch contains one non-nil row and one nil pointer. A nil interface passed
-// to AppendRow can have a different cost: VectorArray creates a placeholder.
+// runTrackedArrayAppend uses a batch containing one row and one typed nil pointer.
+// AppendRow(nil) has a different cost for VectorArray because it creates a placeholder.
 func runTrackedArrayAppend(t *testing.T, newField func(bool, int) FieldData, row, batch, emptyBatch, nilRow any, rowSize, nullSize int) {
 	t.Helper()
 	for _, nullable := range []bool{false, true} {
@@ -1654,7 +1652,7 @@ func TestNewFieldDataTrackedSize(t *testing.T) {
 					require.Equal(t, nullable, field.GetNullable())
 					wantCapacity := capacity
 					if tc.dataType == schemapb.DataType_SparseFloatVector {
-						wantCapacity = 0 // Preserve the original sparse factory's reservation policy.
+						wantCapacity = 0 // Sparse contents do not reserve row capacity.
 					} else if !nullable {
 						switch tc.dataType {
 						case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
@@ -1698,9 +1696,9 @@ func TestNewFieldDataMissingDimension(t *testing.T) {
 	}
 }
 
-// BenchmarkFieldDataMemoryAccounting compares whole batches with and without
-// incremental accounting. Input decoding is excluded; each batch starts with
-// a controlled 1024-row reservation. An operation is one batch.
+// BenchmarkFieldDataMemoryAccounting measures append and size accounting for one batch per operation.
+// Input decoding is excluded; append-time slice growth and GC are included.
+// Each batch requests capacity for 1024 rows; sparse contents grow on append.
 func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 	indices, values := make([]uint32, 64), make([]float32, 64)
 	for i := range indices {
@@ -1743,9 +1741,9 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 		for _, nullable := range []bool{false, true} {
 			for _, rowCount := range rowCounts {
 				b.Run(fmt.Sprintf("%s/nullable=%t/rows=%d", tc.name, nullable, rowCount), func(b *testing.B) {
-					// Reuse immutable payloads: this measures append/accounting, not
-					// decoding or allocating the incoming row payload. Nullable inputs
-					// contain 10% nulls, including both validity and mapping updates.
+					// Payloads are reused; input decoding and payload allocation are not timed.
+					// Nullable inputs contain 10% nulls.
+					// Timed appends include validity and sparse L2P mapping updates.
 					rows := make([]any, rowCount)
 					for i := range rows {
 						if !nullable || i%10 != 0 {
@@ -1810,7 +1808,7 @@ func checkedMemorySize(t testing.TB, data interface{ GetMemorySize() int }) int 
 	return size
 }
 
-// Keep the scan independent of GetMemorySize when tracking is enabled.
+// scannedMemorySize bypasses variable-width size caches.
 func scannedMemorySize(data interface{ GetMemorySize() int }) int {
 	if field, ok := data.(interface{ getMemorySize() int }); ok {
 		return field.getMemorySize()
@@ -2049,8 +2047,7 @@ func TestInsertDataMemoryTrackingMixedFields(t *testing.T) {
 	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
 }
 
-// newFieldDataForTest exercises the common public constructors while preserving
-// the concrete type needed by field-specific assertions.
+// newFieldDataForTest uses the public constructors and returns the concrete field type.
 func newFieldDataForTest[T FieldData](schema *schemapb.FieldSchema, capacity int, trackMemory bool) T {
 	var field FieldData
 	var err error
@@ -2065,7 +2062,7 @@ func newFieldDataForTest[T FieldData](schema *schemapb.FieldSchema, capacity int
 	return field.(T)
 }
 
-// newFixedFieldDataForTest uses the existing generic constructor for fixed-width fixtures.
+// newFixedFieldDataForTest creates fixed-width fixtures through NewFieldData.
 func newFixedFieldDataForTest(dataType schemapb.DataType, nullable bool, capacity, dim int) FieldData {
 	schema := &schemapb.FieldSchema{DataType: dataType, Nullable: nullable}
 	if dim > 0 {
