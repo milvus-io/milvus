@@ -74,20 +74,8 @@ if ( NOT milvus-storage_POPULATED )
     # Enable S3 filesystem support on all platforms
     target_compile_definitions(milvus-storage PRIVATE MILVUS_S3_FS)
 
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
-       CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
-        # GNU ld 2.38 groups AArch64 input sections before adding veneers.
-        # Large Rust archives plus ASAN can exhaust its default 1 MiB margin,
-        # especially with 4 KiB stub padding for the Cortex-A53 843419 workaround.
-        # Use 64 MiB groups to keep veneers in range while retaining ASAN and
-        # the erratum workaround. Probe support for other linkers.
-        include(CheckLinkerFlag)
-        check_linker_flag(CXX "LINKER:--stub-group-size=67108864"
-                         MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
-        if(MILVUS_STORAGE_HAS_STUB_GROUP_SIZE)
-            target_link_options(milvus-storage PRIVATE "LINKER:--stub-group-size=67108864")
-        endif()
-    endif()
+    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/StorageLinker.cmake)
+    milvus_configure_storage_linker(milvus-storage)
 
     # milvus-storage uses Aws::S3::S3Client and Aws::S3::Model::* directly but only
     # links AWS::aws-sdk-cpp-identity-management in its own CMakeLists.txt. The S3
