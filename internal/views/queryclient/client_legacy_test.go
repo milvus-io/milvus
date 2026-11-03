@@ -314,7 +314,7 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 		require.Equal(t, 1, calls)
 		failure = viewerror.NewViewInvalidated("original view retired")
 		_, err = client.Query(t.Context(), request)
-		require.ErrorIs(t, err, failure)
+		require.ErrorIs(t, err, merr.ErrQueryViewNotReady)
 		require.Equal(t, 2, calls, "do not retry into another snapshot")
 		failure = merr.WrapErrFieldNotFound(102, "not available during requery")
 		_, err = client.Query(t.Context(), request)

@@ -433,22 +433,30 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		s.Require().NoError(merr.CheckRPCCall(status, err))
 		s.WaitForIndexBuilt(ctx, name, field)
 	}
-	for _, metricType := range []string{metric.L2, metric.MaxSim} {
-		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-			CollectionName: name, FieldName: nullName,
-			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
-		})
-		s.Require().NoError(err)
-		err = merr.Error(status)
-		s.Require().Error(err)
-		if metricType == metric.MaxSim {
-			s.Contains(err.Error(), "only support element-level metrics")
-		} else {
-			s.Contains(err.Error(), "indexing element-nullable vector array field "+nullName+" is not supported yet")
-		}
-	}
+	status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: name, FieldName: nullName,
+		ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.MaxSim),
+	})
+	s.Require().NoError(err)
+	err = merr.Error(status)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "only support element-level metrics")
 
-	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	// The element-nullable vector array must be indexed before it can be loaded.
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(err)
+	err = merr.Error(status)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "there is no vector index on field")
+
+	status, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: name, FieldName: nullName, IndexName: "idx_null",
+		ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+	})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForIndexBuilt(ctx, name, nullName)
+
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoad(ctx, name)
 	s.Require().NoError(s.insert(ctx, name, insertFields()))
@@ -473,14 +481,14 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 				integration.GetSearchParams(integration.IndexHNSW, metric.L2), 1, dim, 1, -1)
 		}
 		result, err := s.Cluster.MilvusClient.Search(ctx, request)
+		if !embeddingList {
+			s.Require().NoError(merr.CheckRPCCall(result, err))
+			continue
+		}
 		s.Require().NoError(err)
 		err = merr.Error(result.GetStatus())
 		s.Require().Error(err)
-		if embeddingList {
-			s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
-		} else {
-			s.Contains(err.Error(), "search on element-nullable vector array field "+nullName+" is not supported yet")
-		}
+		s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
 	}
 
 	for _, expr := range []string{
@@ -652,7 +660,9 @@ func (s *ElementNullableSuite) TestPartialUpsertKeepsOmittedStruct() {
 	name := "w7i_partial_" + funcutil.RandomString(8)
 	s.Require().NoError(merr.Error(s.create(ctx, collectionSchema(name))))
 	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
-	for _, field := range []string{"embedding", plainName} {
+	nullName := typeutil.ConcatStructFieldName(structName, nullVec)
+	// The element-nullable vector array must be indexed before it can be loaded.
+	for _, field := range []string{"embedding", plainName, nullName} {
 		metricType := metric.L2
 		if field == plainName {
 			metricType = metric.MaxSim

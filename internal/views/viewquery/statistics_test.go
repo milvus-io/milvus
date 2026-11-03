@@ -6,8 +6,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -34,7 +32,7 @@ func TestStatisticsRPCDelegatesAndPreservesErrors(t *testing.T) {
 		require.EqualValues(t, 7, result.GetRowCount())
 		providerErr = viewerror.NewViewInvalidated("retired")
 		_, err = server.StatisticsOnView(t.Context(), req)
-		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Same(t, providerErr, err)
 		providerErr = context.Canceled
 		_, err = server.StatisticsOnView(t.Context(), req)
 		require.ErrorIs(t, err, context.Canceled)

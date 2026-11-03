@@ -278,7 +278,7 @@ func legacySchemaNativeObserve(t *testing.T, module *vchannel.VChannelRecoveryMo
 
 type legacySchemaNativeScheduler struct{ tasks []nodescheduler.Task }
 
-func (s *legacySchemaNativeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *legacySchemaNativeScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.tasks = append(s.tasks, task)
 	return legacySchemaNativeTaskHandle{}
 }

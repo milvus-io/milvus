@@ -51,7 +51,7 @@ type recordingScheduler struct {
 	tasks   []nodescheduler.Task
 }
 
-func (s *recordingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *recordingScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
 	s.mu.Unlock()

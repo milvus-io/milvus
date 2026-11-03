@@ -58,6 +58,9 @@ func TestStatisticsUsesPinnedReadStateAndPartitionScope(t *testing.T) {
 		_, err = server.StatisticsOnView(t.Context(), &viewpb.StatisticsOnViewRequest{
 			ShardId: view.ShardID().IntoProto(), Version: &viewpb.QueryViewVersion{QueryVersion: 999, DataVersion: &viewpb.DataVersion{}}, Mvcc: &viewpb.QueryPlanMVCC{},
 		})
-		require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("StatisticsOnView", err)).IsRetryable())
+		require.True(t, viewerror.AsViewError(err).IsRetryable())
+		// The server interceptor projects the logic error before the client decodes it.
+		wireErr := viewerror.NewGRPCStatusFromError(err).Err()
+		require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("StatisticsOnView", wireErr)).IsRetryable())
 	})
 }

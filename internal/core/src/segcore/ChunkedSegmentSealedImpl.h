@@ -479,7 +479,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_primary_field(FieldId id) const override {
-        return CaptureFieldLayout()->get_primary_field_id() == id;
+        const auto primary = CaptureFieldLayout()->get_primary_field_id();
+        return primary.has_value() && primary->get() == id.get();
     }
 
     SchemaPtr
@@ -1157,6 +1158,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             if (pk >= min_val && pk <= max_val) {
                 // pk might be in this chunk
                 target_chunk_id = mid_chunk_id;
+                if (pk == min_val && mid_chunk_id > left_chunk_id) {
+                    // pk is the first value of this chunk, so rows with the
+                    // same pk may also occupy the tail of earlier chunks (a
+                    // duplicated pk straddling a chunk boundary). Keep
+                    // searching to the left for the earliest chunk holding it;
+                    // this chunk stays recorded as the fallback.
+                    right_chunk_id = mid_chunk_id - 1;
+                    continue;
+                }
                 break;
             } else if (pk < min_val) {
                 // pk is before this chunk, could be in an earlier chunk

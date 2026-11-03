@@ -1553,8 +1553,7 @@ func validateElementNullableVectorArraySearch(field *schemapb.FieldSchema, place
 	if isEmbeddingListPlaceholderType(placeholderType) {
 		return merr.WrapErrParameterInvalidMsg("embedding-list search is not supported for element-nullable vector array field %s", field.GetName())
 	}
-	// Temporary: element-level ANN on nullable vector arrays needs query-layer support.
-	return merr.WrapErrParameterInvalidMsg("search on element-nullable vector array field %s is not supported yet", field.GetName())
+	return nil
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {

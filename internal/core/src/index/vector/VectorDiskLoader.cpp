@@ -222,10 +222,17 @@ ReadValidity(bool use_async,
         CountValidDataBitmap(valid_data.count, valid_data.bitmap) == 0) {
         mmap_flags = {};
     }
-    co_return MakeNullableLoadInput(valid_data,
-                                    mmap_flags,
-                                    local_prefix,
-                                    params.elem_type != DataType::NONE);
+    // An element-level VECTOR_ARRAY build persists validity only for an
+    // element-nullable field, over its logical elements, and the IdMap uses
+    // it as is. Other VECTOR_ARRAY validity describes rows: under an
+    // embedding-list metric knowhere keeps it, and on an element-level index
+    // built with embedding offsets before, knowhere replaces it with element
+    // validity over the vector count (#54899).
+    co_return MakeNullableLoadInput(
+        valid_data,
+        mmap_flags,
+        local_prefix,
+        params.elem_type != DataType::NONE && !params.element_nullable);
 }
 
 using detail::EmptyEmbeddingListState;

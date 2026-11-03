@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -54,7 +52,7 @@ func TestServerSearchOnViewReturnsProviderErrorWithoutScheduling(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), validSearchRequest())
 
 	require.Error(t, err)
-	assert.Equal(t, codes.NotFound, status.Code(err))
+	assert.Same(t, provider.searchErr, err)
 	assert.Nil(t, scheduler.searchTasks)
 }
 
@@ -67,7 +65,7 @@ func TestServerSearchOnViewReleasesTasksOnSchedulerError(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), validSearchRequest())
 
 	require.Error(t, err)
-	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Same(t, scheduler.searchErr, err)
 	assert.Equal(t, 1, tasks.releaseCount)
 }
 
@@ -142,7 +140,7 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), &viewpb.SearchOnViewRequest{})
 
 	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Equal(t, viewpb.ViewCode_VIEW_CODE_UNKNOWN, viewerror.AsViewError(err).Code)
 }
 
 func validSearchRequest() *viewpb.SearchOnViewRequest {
