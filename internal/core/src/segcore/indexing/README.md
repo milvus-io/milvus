@@ -105,7 +105,7 @@ flowchart TB
     query["Expression"] --> caps["ResolveIndexCapability(op_ctx, field)"]
     caps --> select["Select one complete entry"]
     select --> sealed["CreateIndexReader(op_ctx, key)"]
-    vector["Vector search"] --> vectorreader["CreateVectorReader(runtime, op_ctx, field)"]
+    vector["Vector search"] --> vectorreader["GetVectorIndexKey(runtime, field)"]
     vectorreader --> sealed
     sealed --> reader["Index::CreateReader(op_ctx)"]
     reader --> execute["Reader::In / Range / Search"]

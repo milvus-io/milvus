@@ -836,7 +836,7 @@ TEST(SearchOnSealedIndexCachePinLifetime,
     EXPECT_TRUE(owner.expired());
 }
 
-TEST(SearchOnSealedIndexCancellation, CreateVectorReaderUsesCallerOpContext) {
+TEST(SearchOnSealedIndexCancellation, CreateIndexReaderUsesCallerOpContext) {
     constexpr int64_t total_count = 1000;
     constexpr int64_t topk = 10;
 

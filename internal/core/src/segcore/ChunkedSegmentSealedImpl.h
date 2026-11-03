@@ -1618,12 +1618,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<const RuntimeResourceState>& runtime,
         FieldId field_id);
 
-    IndexReaderHandle
-    CreateVectorReader(
-        const std::shared_ptr<const RuntimeResourceState>& runtime,
-        milvus::OpContext* op_ctx,
-        FieldId field_id) const;
-
     static std::vector<std::shared_ptr<IndexInventory::Entry>>
     EraseJsonIndexesAtPath(RuntimeResourceState& runtime,
                            FieldId field_id,

@@ -232,4 +232,4 @@ JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings �
 
 向量 Search、Iterators 和 CalcDistByIDs 与标量查询一样，只使用 CreateReader 时绑定的 OpContext。sealed 的 IndexInventory 和 growing 的 snapshot pin 均按请求创建 Reader；查询执行层不再为这些方法另传上下文。返回的迭代器仍要求请求上下文与查询输入存活至迭代结束。
 
-SealedIndexLoader 和 TextMatchIndexLoader 只负责准备加载元数据并创建 Index，不再实现 Reader Translator。IndexInventory 仅保存 Index 或尚未执行的 factory，不再接受 Reader CacheSlot。segment 的 CreateIndexReader / CreateVectorReader 返回持有请求 Reader 的 IndexReaderHandle；具体 Reader 负责 pin Storage 或 Engine。索引替换先发布新 runtime，再取消旧 entry 的 warmup；旧 snapshot 与已创建的 Reader 仍可继续使用原 Index。
+SealedIndexLoader 和 TextMatchIndexLoader 只负责准备加载元数据并创建 Index，不再实现 Reader Translator。IndexInventory 仅保存 Index 或尚未执行的 factory，不再接受 Reader CacheSlot。查询先选择完整的 IndexKey，再通过对应 runtime 快照中 IndexInventory 的 CreateIndexReader(op_ctx, key) 创建请求 Reader，由 IndexReaderHandle 持有；具体 Reader 负责 pin Storage 或 Engine。索引替换先发布新 runtime，再取消旧 entry 的 warmup；旧 snapshot 与已创建的 Reader 仍可继续使用原 Index。
