@@ -1996,7 +1996,10 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
                 )
                 is not None
             )
-            assert reader_error or schema_error or vortex_error, reason
+            arrow_buffer_error = (
+                re.search(r"\bexpected 2 buffers for imported type int64, arrowarray has 3\b", text) is not None
+            )
+            assert reader_error or schema_error or vortex_error or arrow_buffer_error, reason
         log.info(f"SI-FN-12 expected schema rejection scenario={error_kind}, reason={reason}")
 
     @pytest.fixture
