@@ -16,6 +16,7 @@
 
 #include "ConjunctExpr.h"
 
+#include <folly/ScopeGuard.h>
 #include <algorithm>
 
 #include "LikeConjunctExpr.h"
@@ -93,6 +94,11 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
         "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("is_and", is_and_);
+
+    auto inherited_bitmap = context.get_bitmap_input().clone();
+    auto restore_bitmap = folly::makeGuard([&context, &inherited_bitmap] {
+        context.set_bitmap_input(std::move(inherited_bitmap));
+    });
 
     if (input_order_.empty()) {
         input_order_.resize(inputs_.size());
@@ -207,14 +213,17 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // batch-level early exit, and the same bitmap becomes the row-level
         // input of the next expression.
         auto active_rows = BuildActiveBitmap(all_flat_result);
+        // Local results outside the parent's candidates are unspecified and
+        // must neither reactivate rows nor prevent a batch-level early exit.
+        if (!inherited_bitmap.empty()) {
+            active_rows.inplace_and(inherited_bitmap, active_rows.size());
+        }
         if (active_rows.none()) {
             SkipFollowingExprs(i + 1);
-            ClearBitmapInput(context);
             return;
         }
         context.set_bitmap_input(std::move(active_rows));
     }
-    ClearBitmapInput(context);
 }
 
 }  //namespace exec

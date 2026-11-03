@@ -163,6 +163,11 @@ PhyNullExpr::MoveCursor() {
         return;
     }
 
+    if (!expr_->column_.element_level_ && !expr_->column_.nullable_ &&
+        !has_offset_input_ && !execute_all_at_once_) {
+        // Constant scalar results use a separate cursor in PreCheckNullable.
+        precheck_pos_ += std::min(batch_size_, active_count_ - precheck_pos_);
+    }
     SegmentExpr::MoveCursor();
 }
 
