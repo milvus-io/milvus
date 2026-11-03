@@ -196,33 +196,39 @@ func TestSchemaClientRefreshPreservesOtherVersions(t *testing.T) {
 }
 
 func TestSchemaClientReadRefreshInvalidatesWriteSelector(t *testing.T) {
-	c := newSchemaClient(nil, time.Hour)
-	defer c.close()
-	var calls atomic.Int32
-	var current atomic.Int32
-	p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
-		calls.Add(1)
-		version := req.GetSchemaVersion()
-		if req.GetCurrentWrite() {
-			version = current.Load()
-		}
-		return testSchema(version), nil
-	}).Build()
-	defer p.UnPatch()
-	old, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
-	require.NoError(t, err)
-	current.Store(1)
-	read, err := fetchTestSchema(t.Context(), c, "p_1v0", false, true)
-	require.NoError(t, err)
-	require.Zero(t, read.Version, "Coord's published version can lag SN's write version")
-	require.NotSame(t, old, read)
-	fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, fresh.Version, "a refreshed read body must not resurrect an old write selector")
-	hit, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
-	require.NoError(t, err)
-	require.Same(t, fresh, hit)
-	require.EqualValues(t, 3, calls.Load())
+	for _, readVersion := range []int32{0, 1, 2} {
+		t.Run(fmt.Sprintf("readVersion=%d", readVersion), func(t *testing.T) {
+			c := newSchemaClient(nil, time.Hour)
+			defer c.close()
+			var calls atomic.Int32
+			var current atomic.Int32
+			current.Store(1)
+			p := mockey.Mock((*schemaClient).getCollectionSchema).To(func(_ *schemaClient, _ context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*schemapb.CollectionSchema, error) {
+				calls.Add(1)
+				version := req.GetSchemaVersion()
+				if req.GetCurrentWrite() {
+					version = current.Load()
+				}
+				return testSchema(version), nil
+			}).Build()
+			defer p.UnPatch()
+			old, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, old.Version)
+			current.Store(2)
+			read, err := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: readVersion, BypassCache: true})
+			require.NoError(t, err)
+			require.Equal(t, readVersion, read.Version, "the read refresh must retain its exact version")
+			require.NotSame(t, old, read)
+			fresh, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+			require.NoError(t, err)
+			require.EqualValues(t, 2, fresh.Version, "refreshing any read version must resolve the current write version from SN")
+			hit, err := fetchTestSchema(t.Context(), c, "p_1v0", true, false)
+			require.NoError(t, err)
+			require.Same(t, fresh, hit)
+			require.EqualValues(t, 3, calls.Load())
+		})
+	}
 }
 
 func TestSchemaClientVersionRefreshIsolation(t *testing.T) {
@@ -260,14 +266,14 @@ func TestSchemaClientVersionRefreshIsolation(t *testing.T) {
 	require.NoError(t, err)
 	again, err := c.GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 	require.NoError(t, err)
-	require.Same(t, write, again, "refreshing v0 preserves the known v2 write selector")
+	require.Same(t, write, again, "refreshing the write selector reuses the cached v2 body")
 	once.Do(func() { close(release) })
 	historical := <-done
 	require.NotNil(t, historical)
 	cached, err := c.GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 1})
 	require.NoError(t, err)
 	require.Same(t, historical, cached, "refreshing v0 must not fence a pending v1 fill")
-	require.EqualValues(t, 3, calls.Load())
+	require.EqualValues(t, 4, calls.Load(), "refreshing v0 must also refresh the v2 write selector")
 }
 
 func TestSchemaClientExpiredReadCannotOverwriteReplacement(t *testing.T) {

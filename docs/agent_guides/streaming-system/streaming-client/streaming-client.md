@@ -31,9 +31,10 @@ Both request types accept `BypassCache`. Schema entries are keyed by collection
 and SchemaVersion, with independent idle lifetimes and refresh tokens. Replacing
 an entry separates its singleflight key and fences older completions; no separate
 collection epoch map is needed. Refreshing one version leaves other versions
-cached. A read refresh clears a matching write selector, or an unresolved write
-flight that might select that version, without invalidating a different known
-write version. The write-version index is an ordinary map with no independent
+cached. Every bypass refresh clears the collection's write selector and fences
+its pending write flights, regardless of the requested version. The next write
+resolves the current version from SN, which may lead the published read version.
+The write-version index is an ordinary map with no independent
 TTL. Evicting a schema removes a selector pointing to that version, including
 lazy expiry on access; other versions remain unaffected. Explicit invalidation
 and client close also clear selectors. The index does not retain SchemaInfo objects.

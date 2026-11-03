@@ -233,11 +233,9 @@ func (c *schemaClient) GetSchemaVersion(ctx context.Context, req GetSchemaVersio
 	shard.mu.Lock()
 	entry := shard.schemaEntryLocked(identity, req.BypassCache)
 	if req.BypassCache {
-		// A historical refresh must not invalidate a different known write
-		// version. An unresolved write flight could still return this version.
-		if write, ok := shard.writeVersions[id]; ok && (write.version == unknownWriteSchemaVersion || write.version == req.Version) {
-			delete(shard.writeVersions, id)
-		}
+		// The next write must resolve its current version from SN, independently
+		// of which exact version this refresh requested.
+		delete(shard.writeVersions, id)
 	}
 	if entry.info != nil {
 		shard.mu.Unlock()
