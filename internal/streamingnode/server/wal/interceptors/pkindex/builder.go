@@ -23,7 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -108,7 +108,7 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 // recovery applies them with the commit. A body that does not unmarshal, or
 // whose keys can not be read, ends the process, like a persisted body does
 // everywhere in the recovery.
-func restorePending(ctx context.Context, reg *registry, ch *snpkindex.PChannelIndexManager, buf *utility.TxnBuffer) error {
+func restorePending(ctx context.Context, reg *registry, ch *indexmanager.PChannelIndexManager, buf *utility.TxnBuffer) error {
 	for txnID, builder := range buf.GetUncommittedMessageBuilder() {
 		_, bodies := builder.Messages()
 		for _, body := range bodies {
@@ -133,7 +133,7 @@ func restorePending(ctx context.Context, reg *registry, ch *snpkindex.PChannelIn
 				if err != nil {
 					panic(fmt.Sprintf("the primary keys of a persisted insert of transaction %d can not be read: %v", txnID, err))
 				}
-				a.RestorePending(int64(txnID), dedup.KindInsert, snpkindex.PKsOf(keys))
+				a.RestorePending(int64(txnID), dedup.KindInsert, dedup.PKsOf(keys))
 			case message.MessageTypeDelete:
 				b, err := message.MustAsImmutableDeleteMessageV1(body).Body(ctx)
 				if err != nil {
@@ -143,7 +143,7 @@ func restorePending(ctx context.Context, reg *registry, ch *snpkindex.PChannelIn
 				if err != nil {
 					panic(fmt.Sprintf("the primary keys of a persisted delete of transaction %d can not be read: %v", txnID, err))
 				}
-				a.RestorePending(int64(txnID), dedup.KindDelete, snpkindex.PKsOf(keys))
+				a.RestorePending(int64(txnID), dedup.KindDelete, dedup.PKsOf(keys))
 			}
 		}
 	}

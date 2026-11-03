@@ -26,7 +26,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
@@ -50,7 +50,7 @@ type txnSessions interface {
 // appendInterceptor translates WAL messages into primary key index requests and
 // appends what the Decider asks for. It holds no index logic of its own.
 type appendInterceptor struct {
-	ch       *snpkindex.PChannelIndexManager
+	ch       *indexmanager.PChannelIndexManager
 	registry *registry
 	sessions txnSessions
 	metrics  *pkindexMetrics
@@ -162,7 +162,7 @@ func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.M
 		i.registry.markPending(msg.VChannel(), msg.TimeTick())
 		return id, nil
 	}
-	spec := snpkindex.IndexSpec{
+	spec := indexmanager.IndexSpec{
 		VChannel:           msg.VChannel(),
 		CollectionID:       header.GetCollectionId(),
 		IndexID:            header.GetIndexId(),
@@ -227,7 +227,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 
 	intent, err := i.decide(ctx, t, msg.VChannel(), dedup.DecideRequest{
 		Kind:  dedup.KindInsert,
-		PKs:   snpkindex.PKsOf(keys),
+		PKs:   dedup.PKsOf(keys),
 		TxnID: txnIDOf(msg),
 	})
 	if err != nil {
@@ -297,7 +297,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	}
 	intent, err := i.decide(ctx, t, msg.VChannel(), dedup.DecideRequest{
 		Kind:  dedup.KindDelete,
-		PKs:   snpkindex.PKsOf(keys),
+		PKs:   dedup.PKsOf(keys),
 		TxnID: txnID,
 	})
 	if err != nil {

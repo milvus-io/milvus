@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -34,7 +34,7 @@ type RecoverySnapshot struct {
 	// PKIndex is the primary key index of the pchannel, nil when the node
 	// has no index. The WAL recovery owns it and closes it with the WAL; the
 	// interceptor only uses it.
-	PKIndex *snpkindex.PChannelIndexManager
+	PKIndex *indexmanager.PChannelIndexManager
 }
 
 type dirtyPersistSnapshot struct {

@@ -23,9 +23,11 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 )
 
 func TestInt64PKEncodingPreservesOrder(t *testing.T) {
@@ -75,4 +77,14 @@ func TestVarCharLockKeyIsFNV1a(t *testing.T) {
 func TestKeyUsesTheCodec(t *testing.T) {
 	require.Equal(t, codec.EncodeInt64PK(-5), Int64PK(-5).Encode())
 	require.Equal(t, codec.EncodeVarcharPK("a"), VarCharPK("a").Encode())
+}
+
+func TestPKsOfKeepsOrderAndType(t *testing.T) {
+	keys := primarykey.Keys{Int64Values: []int64{3, 1}}
+	assert.Equal(t, []PK{Int64PK(3), Int64PK(1)}, PKsOf(keys))
+	keys = primarykey.Keys{StringValues: []string{"b", "a"}}
+	assert.Equal(t, []PK{VarCharPK("b"), VarCharPK("a")}, PKsOf(keys))
+	keys = primarykey.Keys{Int64Values: []int64{1}, StringValues: []string{"a"}}
+	assert.Equal(t, []PK{Int64PK(1), VarCharPK("a")}, PKsOf(keys))
+	assert.Empty(t, PKsOf(primarykey.Keys{}))
 }

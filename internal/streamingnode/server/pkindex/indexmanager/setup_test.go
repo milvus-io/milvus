@@ -14,23 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package indexmanager
 
 import (
-	"github.com/milvus-io/milvus/internal/pkindex/dedup"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-// PKsOf converts the primary keys of a WAL message to the keys of the
-// decider, in the order of keys. The WAL interceptor and the recovery
-// share it, so a replay writes the same keys as the append path.
-func PKsOf(keys primarykey.Keys) []dedup.PK {
-	pks := make([]dedup.PK, 0, keys.Len())
-	for _, v := range keys.Int64Values {
-		pks = append(pks, dedup.Int64PK(v))
-	}
-	for _, v := range keys.StringValues {
-		pks = append(pks, dedup.VarCharPK(v))
-	}
-	return pks
+func TestOpenFileLimitShort(t *testing.T) {
+	need, short := openFileLimitShort(14095, 4096)
+	assert.Equal(t, uint64(14096), need)
+	assert.True(t, short)
+
+	_, short = openFileLimitShort(14096, 4096)
+	assert.False(t, short)
+
+	need, _ = openFileLimitShort(0, 0)
+	assert.Equal(t, uint64(engine.DefaultMaxOpenFiles+openFileReserve), need)
 }

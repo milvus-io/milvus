@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package pkindex is the primary key index of a streaming node, at the
+// Package indexmanager is the primary key index of a streaming node, at the
 // pchannel level and above. A Manager holds a PChannelIndexManager for each
 // pchannel. A PChannelIndexManager keeps the member table of its vchannels,
 // takes the writes and the TimeTicks of the observe of the WAL recovery,
@@ -22,7 +22,7 @@
 // index.Index (package index), which owns the engine of the vchannel and the
 // write path decider on top of it (package internal/pkindex/dedup),
 // and hands its tables over to object storage through a Committer.
-package pkindex
+package indexmanager
 
 import (
 	"context"

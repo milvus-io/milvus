@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
@@ -68,9 +68,9 @@ func openPKIndexWAL(t *testing.T, name string) wal.WAL {
 
 // openPKIndexWALWithManager is openPKIndexWAL that also returns the index
 // manager of the streaming node.
-func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *snpkindex.Manager) {
+func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *indexmanager.Manager) {
 	setPKIndexEnabled(t, "true")
-	mgr := snpkindex.NewManagerForTest(t, t.TempDir())
+	mgr := indexmanager.NewManagerForTest(t, t.TempDir())
 	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), mgr)
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
 	appendPKChainCreateIndex(t, w, pkChainCollectionID, pkChainIndexID)
@@ -82,7 +82,7 @@ func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *snpkindex.M
 // index indexID of testVChannel. The interceptor reads a write history that
 // the observe updates, so the observe decides a CreateIndex that follows the
 // CreateCollection at once.
-func waitPKChainIndex(t *testing.T, mgr *snpkindex.Manager, pchannel string, indexID int64) {
+func waitPKChainIndex(t *testing.T, mgr *indexmanager.Manager, pchannel string, indexID int64) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		ch := mgr.GetForTest(pchannel)

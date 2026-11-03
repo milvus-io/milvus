@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -104,15 +104,15 @@ func (testCipher) Decrypt(cipherText []byte) ([]byte, error) {
 
 // testEngine is a memory engine that a test can read back and that counts probes.
 type testIndexEnv struct {
-	mgr       *snpkindex.Manager
-	committer *snpkindex.FakeCommitter
+	mgr       *indexmanager.Manager
+	committer *indexmanager.FakeCommitter
 	root      string
 
 	mu     sync.Mutex
 	fatals []error
 	// states is the vchannel state that the vchannel module of the WAL
 	// recovery keeps, by vchannel.
-	states map[string]snpkindex.VChannelState
+	states map[string]indexmanager.VChannelState
 }
 
 func newTestIndexEnv(t *testing.T) *testIndexEnv {
@@ -121,18 +121,18 @@ func newTestIndexEnv(t *testing.T) *testIndexEnv {
 
 // newTestIndexEnvAt creates the env with root as the local root directory.
 func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
-	env := snpkindex.NewFakeEnv(t, root)
-	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root, states: make(map[string]snpkindex.VChannelState)}
+	env := indexmanager.NewFakeEnv(t, root)
+	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root, states: make(map[string]indexmanager.VChannelState)}
 }
 
 // setState sets the vchannel state of vchannel with the schema testSchema.
 func (env *testIndexEnv) setState(vchannel string, history streamingpb.VChannelWriteHistory, pk *streamingpb.PKIndexOfVChannel) {
 	env.mu.Lock()
 	defer env.mu.Unlock()
-	env.states[vchannel] = snpkindex.VChannelState{EverWritten: history, PKIndex: pk, Schema: testSchema(false)}
+	env.states[vchannel] = indexmanager.VChannelState{EverWritten: history, PKIndex: pk, Schema: testSchema(false)}
 }
 
-func (env *testIndexEnv) state(vchannel string) (snpkindex.VChannelState, bool) {
+func (env *testIndexEnv) state(vchannel string) (indexmanager.VChannelState, bool) {
 	env.mu.Lock()
 	defer env.mu.Unlock()
 	st, ok := env.states[vchannel]
@@ -140,8 +140,8 @@ func (env *testIndexEnv) state(vchannel string) (snpkindex.VChannelState, bool) 
 }
 
 // openChannel opens the index Channel of the test pchannel.
-func (env *testIndexEnv) openChannel(seed uint64) *snpkindex.PChannelIndexManager {
-	ch := env.mgr.New(snpkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: testPChannel, Term: 1}, Seed: seed, OnFatal: env.onFatal, VChannelState: env.state})
+func (env *testIndexEnv) openChannel(seed uint64) *indexmanager.PChannelIndexManager {
+	ch := env.mgr.New(indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: testPChannel, Term: 1}, Seed: seed, OnFatal: env.onFatal, VChannelState: env.state})
 	ch.Start()
 	return ch
 }
@@ -197,7 +197,7 @@ func (e *testEngine) segmentOfPK(t *testing.T, pk dedup.PK) (int64, bool) {
 
 // testEngines finds the Index of a vchannel in the Channel of an interceptor.
 type testEngines struct {
-	ch *snpkindex.PChannelIndexManager
+	ch *indexmanager.PChannelIndexManager
 }
 
 func (e *testEngines) of(t *testing.T, vchannel string) *testEngine {
@@ -473,8 +473,8 @@ func newTestInterceptorOfSchema(t *testing.T, sessions txnSessions, schema *sche
 }
 
 // testSpec is the index spec of the primary key index of testVChannel.
-func testSpec() snpkindex.IndexSpec {
-	return snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: 1}
+func testSpec() indexmanager.IndexSpec {
+	return indexmanager.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: 1}
 }
 
 // enableForTest enables the primary key index of testVChannel over schema.
@@ -1568,9 +1568,9 @@ func TestCreateIndexOfAWrittenVChannelWaitsForTheObserve(t *testing.T) {
 		env, i, engines, tt := appendCreateIndex(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_UNKNOWN)
 		env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
 			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
-		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
+		_, _, err := i.ch.OpenIndex(context.Background(), indexmanager.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 		require.NoError(t, err)
-		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
+		i.ch.ObserveTimeTick(tt+1, indexmanager.WALTailSnapshot{})
 
 		engines.of(t, testVChannel).put(t, 1, 100)
 		f := newFakeAppender()
@@ -1589,11 +1589,11 @@ func TestCreateIndexOfAWrittenVChannelWaitsForTheObserve(t *testing.T) {
 	// CreateIndex without an Index, so the writes pass through.
 	t.Run("written, the observe passes without an index", func(t *testing.T) {
 		_, i, _, tt := appendCreateIndex(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_WRITTEN)
-		i.ch.ObserveTimeTick(tt, snpkindex.WALTailSnapshot{})
+		i.ch.ObserveTimeTick(tt, indexmanager.WALTailSnapshot{})
 		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), newFakeAppender().append)
 		requireInner(t, err)
 
-		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
+		i.ch.ObserveTimeTick(tt+1, indexmanager.WALTailSnapshot{})
 		f := newFakeAppender()
 		_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 		require.NoError(t, err)
@@ -1616,7 +1616,7 @@ func TestWriteAdoptsTheIndexThatTheObserveOpened(t *testing.T) {
 	tt := f.appended[0].TimeTick()
 	env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
 		&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
-	_, _, err = i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
+	_, _, err = i.ch.OpenIndex(context.Background(), indexmanager.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 	require.NoError(t, err)
 
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -1717,7 +1717,7 @@ func TestCreateIndexAppendWithAnUnknownResult(t *testing.T) {
 		env, i, tt := failedCreateIndex(t)
 		env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
 			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, CheckpointTimeTick: tt})
-		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
+		_, _, err := i.ch.OpenIndex(context.Background(), indexmanager.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, CheckpointTimeTick: tt})
 		require.NoError(t, err)
 
 		f := newFakeAppender()
@@ -1729,11 +1729,11 @@ func TestCreateIndexAppendWithAnUnknownResult(t *testing.T) {
 
 	t.Run("the observe passes the time tick without an index", func(t *testing.T) {
 		_, i, tt := failedCreateIndex(t)
-		i.ch.ObserveTimeTick(tt, snpkindex.WALTailSnapshot{})
+		i.ch.ObserveTimeTick(tt, indexmanager.WALTailSnapshot{})
 		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), newFakeAppender().append)
 		requireInner(t, err)
 
-		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
+		i.ch.ObserveTimeTick(tt+1, indexmanager.WALTailSnapshot{})
 		f := newFakeAppender()
 		_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 		require.NoError(t, err)
@@ -1899,7 +1899,7 @@ func BenchmarkDecodeKeysOf1000Rows(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if len(snpkindex.PKsOf(keys)) != len(pks) {
+				if len(dedup.PKsOf(keys)) != len(pks) {
 					b.Fatal("wrong key count")
 				}
 			}

@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -63,10 +63,10 @@ func testMeta(vchannel string, collectionID int64, pk schemapb.DataType, autoID 
 
 func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}, Seed: 80},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}, Seed: 80},
 		Metas: map[string]*streamingpb.VChannelMeta{
 			"v1": testMeta("v1", 1, schemapb.DataType_Int64, false),
 			"v2": testMeta("v2", 2, schemapb.DataType_VarChar, false),
@@ -93,10 +93,10 @@ func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
 
 func TestRecoverFailsOnAFencedLookupAndLeavesNothingOpen(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetLookupErr(manifest.ErrFenced)
 	_, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -106,11 +106,11 @@ func TestRecoverFailsOnAFencedLookupAndLeavesNothingOpen(t *testing.T) {
 
 func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	dropped := testMeta("v2", 2, schemapb.DataType_Int64, false)
 	dropped.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas: map[string]*streamingpb.VChannelMeta{
 			"v1": testMeta("v1", 1, schemapb.DataType_Int64, false),
 			"v2": dropped,
@@ -126,7 +126,7 @@ func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testin
 	require.Nil(t, env.Manager.GetForTest("p"))
 
 	_, err = Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 4}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 4}},
 		Metas: map[string]*streamingpb.VChannelMeta{
 			"v1": testMeta("v1", 1, schemapb.DataType_Int64, false),
 			"v4": testMeta("v4", 4, schemapb.DataType_Float, false),
@@ -139,9 +139,9 @@ func TestRecoverSkipsDroppedVChannelsAndRejectsAnUnsupportedPrimaryKey(t *testin
 
 func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -150,7 +150,7 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 	require.NotNil(t, m)
 	require.NoError(t, rec.Run(ctx))
 
-	idx, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v2", CollectionID: 2, IndexID: testIndexIDOf(2)})
+	idx, created, err := m.OpenIndex(ctx, indexmanager.IndexSpec{VChannel: "v2", CollectionID: 2, IndexID: testIndexIDOf(2)})
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.True(t, idx.Ready(), "after Run a new collection is ready at once")
@@ -165,10 +165,10 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 
 func TestRecoverFailsOnAStoppedManager(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Manager.Close()
 	_, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.Error(t, err)
@@ -178,10 +178,10 @@ func TestRecoverFailsOnAStoppedManager(t *testing.T) {
 
 func TestRecoverRetriesATransientLookupFailure(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetLookupFailures(2)
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -211,7 +211,7 @@ func (r *readOverride) ReadObject(ctx context.Context, key string) ([]byte, erro
 
 func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	m := &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
 	env.Committer.SetManifest("v1", m)
 	env.Manager.SetReaderForTest(&readOverride{ObjectReader: env.Committer, reads: map[string]func(context.Context) (manifest.View, error){
@@ -222,7 +222,7 @@ func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 		},
 	}})
 	_, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -232,7 +232,7 @@ func TestRecoverRejectsAManifestBodyWithAnotherVersion(t *testing.T) {
 
 func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	m1 := &manifest.FakeManifest{View: manifest.View{Version: 2, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}}
 	m2 := &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 50, SSTBasePath: "root/2/v2"}}
 	env.Committer.SetManifest("v1", m1)
@@ -252,7 +252,7 @@ func TestRecoverAFatalManifestReadStopsTheOtherReads(t *testing.T) {
 	}})
 	start := time.Now()
 	_, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}},
 		Metas: map[string]*streamingpb.VChannelMeta{
 			"v1": testMeta("v1", 1, schemapb.DataType_Int64, false),
 			"v2": testMeta("v2", 2, schemapb.DataType_Int64, false),
@@ -280,7 +280,7 @@ func (c *batchCommitter) GetRecoveryManifests(ctx context.Context, refs []manife
 
 func TestRecoverLooksManifestsUpInBatches(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	committer := &batchCommitter{Committer: env.Committer}
 	env.Manager.SetCommitterForTest(committer)
 	env.Committer.SetManifest("v5", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/5/v5"}})
@@ -293,7 +293,7 @@ func TestRecoverLooksManifestsUpInBatches(t *testing.T) {
 		v := "v" + string(rune('0'+i))
 		metas[v] = testMeta(v, i, schemapb.DataType_Int64, false)
 	}
-	rec, err := Recover(ctx, env.Manager, Param{PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}}, Metas: metas, Sched: env.Manager.Scheduler()})
+	rec, err := Recover(ctx, env.Manager, Param{PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 3}}, Metas: metas, Sched: env.Manager.Scheduler()})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
 
@@ -324,13 +324,13 @@ func (s *countingScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHa
 
 func TestRunSkipsTheInstallOfADroppedIndex(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          sched,
 	})
@@ -349,13 +349,13 @@ func TestRunSkipsTheInstallOfADroppedIndex(t *testing.T) {
 
 func TestRunRunsOnce(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 10, SSTBasePath: "root/1/v1"}})
 	inner := nodescheduler.New(1)
 	t.Cleanup(inner.Close)
 	sched := &countingScheduler{Scheduler: inner}
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          sched,
 	})

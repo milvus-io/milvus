@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -43,7 +43,7 @@ import (
 // Param is what the WAL recovery gives the recovery of the primary key index.
 type Param struct {
 	// PChannelConfig goes to Manager.New as it is.
-	pkindex.PChannelConfig
+	indexmanager.PChannelConfig
 	// Metas are the vchannels of the pchannel from the catalog, by vchannel.
 	Metas map[string]*streamingpb.VChannelMeta
 	// Sched runs the install tasks. Nil means the scheduler of the Manager.
@@ -56,7 +56,7 @@ type Param struct {
 	// storage, and passes the snapshot to the index, which evaluates its
 	// handover triggers with it. Nil means an unknown tail, which never
 	// starts a handover by size.
-	Tail func() pkindex.WALTailSnapshot
+	Tail func() indexmanager.WALTailSnapshot
 }
 
 // target is one indexed vchannel during the recovery.
@@ -73,10 +73,10 @@ type target struct {
 // barrier, and Close in every case. One goroutine calls Run and Close, Close
 // last. Close is idempotent; Run after Close fails.
 type Recovery struct {
-	mgr     *pkindex.Manager
-	m       *pkindex.PChannelIndexManager
+	mgr     *indexmanager.Manager
+	m       *indexmanager.PChannelIndexManager
 	sched   nodescheduler.Scheduler
-	tail    func() pkindex.WALTailSnapshot
+	tail    func() indexmanager.WALTailSnapshot
 	onFatal func(error)
 	logger  *mlog.Logger
 
@@ -109,7 +109,7 @@ func errClosed(what string) error {
 // reads the manifests. The handover
 // driver does not run until Run. An error leaves
 // nothing open and makes the WAL open fail.
-func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, error) {
+func Recover(ctx context.Context, mgr *indexmanager.Manager, p Param) (*Recovery, error) {
 	m := mgr.New(p.PChannelConfig)
 	if m.Closed() {
 		// a stopped Manager returns a closed PChannelIndexManager
@@ -129,7 +129,7 @@ func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, err
 		r.sched = mgr.Scheduler()
 	}
 	if r.tail == nil {
-		r.tail = func() pkindex.WALTailSnapshot { return pkindex.WALTailSnapshot{} }
+		r.tail = func() indexmanager.WALTailSnapshot { return indexmanager.WALTailSnapshot{} }
 	}
 	if r.onFatal == nil {
 		r.onFatal = func(err error) {
@@ -170,7 +170,7 @@ func (r *Recovery) openIndex(ctx context.Context, vchannel string, collectionID 
 	if dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
 		return merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
 	}
-	idx, _, err := r.m.OpenIndex(ctx, pkindex.IndexSpec{
+	idx, _, err := r.m.OpenIndex(ctx, indexmanager.IndexSpec{
 		VChannel:           vchannel,
 		CollectionID:       collectionID,
 		IndexID:            pkIndex.GetIndexId(),
@@ -282,4 +282,4 @@ func (r *Recovery) LastAcked() uint64 { return r.m.LastAcked() }
 
 // Manager returns the index of the pchannel. The WAL recovery puts it in the
 // recovery snapshot for the interceptor, which uses it and does not own it.
-func (r *Recovery) Manager() *pkindex.PChannelIndexManager { return r.m }
+func (r *Recovery) Manager() *indexmanager.PChannelIndexManager { return r.m }

@@ -24,7 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,7 +45,7 @@ type target struct {
 // registry maps the vchannels whose primary key index is enabled to their
 // targets, and opens the Index of a vchannel at the enabling CreateIndex.
 type registry struct {
-	ch *snpkindex.PChannelIndexManager
+	ch *indexmanager.PChannelIndexManager
 
 	mu      sync.RWMutex
 	targets map[string]*target
@@ -59,7 +59,7 @@ type registry struct {
 	dropped map[string]int64
 }
 
-func newRegistry(ch *snpkindex.PChannelIndexManager) *registry {
+func newRegistry(ch *indexmanager.PChannelIndexManager) *registry {
 	return &registry{ch: ch, targets: make(map[string]*target), pending: make(map[string]uint64), dropped: make(map[string]int64)}
 }
 
@@ -99,7 +99,7 @@ func newTarget(collectionID, indexID, fieldID int64, schema *schemapb.Collection
 // of the enabling CreateIndex calls it after the append succeeded. The
 // CreateIndex holds the exclusive lock of its vchannel, so no write of the
 // vchannel runs at the same time.
-func (r *registry) enable(ctx context.Context, spec snpkindex.IndexSpec, fieldID int64, schema *schemapb.CollectionSchema) error {
+func (r *registry) enable(ctx context.Context, spec indexmanager.IndexSpec, fieldID int64, schema *schemapb.CollectionSchema) error {
 	t, err := newTarget(spec.CollectionID, spec.IndexID, fieldID, schema)
 	if err != nil {
 		return err

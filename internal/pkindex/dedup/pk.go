@@ -18,6 +18,8 @@ package dedup
 
 import (
 	"encoding/binary"
+
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 )
 
 func (p PK) IsVarChar() bool { return p.varchar }
@@ -56,4 +58,18 @@ func (p PK) lockKey() uint64 {
 		h *= prime64
 	}
 	return h
+}
+
+// PKsOf converts the primary keys of a WAL message to the keys of the
+// decider, in the order of keys. The WAL interceptor and the recovery
+// share it, so a replay writes the same keys as the append path.
+func PKsOf(keys primarykey.Keys) []PK {
+	pks := make([]PK, 0, keys.Len())
+	for _, v := range keys.Int64Values {
+		pks = append(pks, Int64PK(v))
+	}
+	for _, v := range keys.StringValues {
+		pks = append(pks, VarCharPK(v))
+	}
+	return pks
 }

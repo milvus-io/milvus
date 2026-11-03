@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
@@ -40,7 +41,10 @@ type Server struct {
 	walManager walmanager.Manager
 
 	// pkindex is nil when the primary key index is off.
-	pkindex *pkindexComponents
+	pkindex *indexmanager.Manager
+	// closePKIndex closes the pkindex manager, its committer and its shared
+	// caches. It is nil when the primary key index is off.
+	closePKIndex func()
 }
 
 // Init initializes the streamingnode server.
@@ -74,7 +78,9 @@ func (s *Server) Stop() {
 	s.walManager.Close()
 	// The WAL interceptors close their index channels when the WAL manager closes.
 	mlog.Info(context.TODO(), "close primary key index...")
-	s.pkindex.close()
+	if s.closePKIndex != nil {
+		s.closePKIndex()
+	}
 	fileresource.CloseAnalyzerResourceManager()
 	mlog.Info(context.TODO(), "release streamingnode resources...")
 	resource.Release()

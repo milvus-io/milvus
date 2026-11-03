@@ -14,23 +14,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pkindex
+package indexmanager
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/pkindex/dedup"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestPKsOfKeepsOrderAndType(t *testing.T) {
-	pks := PKsOf(primarykey.Keys{Int64Values: []int64{3, 1}})
-	assert.Equal(t, []dedup.PK{dedup.Int64PK(3), dedup.Int64PK(1)}, pks)
-	pks = PKsOf(primarykey.Keys{StringValues: []string{"b", "a"}})
-	assert.Equal(t, []dedup.PK{dedup.VarCharPK("b"), dedup.VarCharPK("a")}, pks)
-	pks = PKsOf(primarykey.Keys{Int64Values: []int64{1}, StringValues: []string{"a"}})
-	assert.Equal(t, []dedup.PK{dedup.Int64PK(1), dedup.VarCharPK("a")}, pks)
-	assert.Empty(t, PKsOf(primarykey.Keys{}))
+func TestParamsFromConfig(t *testing.T) {
+	paramtable.Init()
+	p := ParamsFromConfig()
+	assert.Equal(t, 12*time.Hour, p.ReuploadAfter, "half of the grace window of the garbage collection")
+	assert.Equal(t, time.Second, p.BackoffBase)
+	assert.Equal(t, 60*time.Second, p.MaxBackoff)
+	assert.EqualValues(t, 64<<20, p.ActiveBytes)
+	assert.EqualValues(t, 2<<30, p.TailBytes)
+	assert.EqualValues(t, 8<<30, p.SoftWatermark)
+	assert.EqualValues(t, 4<<20, p.MemTableSize)
+}
+
+// TestNewManagerWithoutACommitterPanics checks that a Manager needs a
+// Committer: an index that can not commit is never recovered.
+func TestNewManagerWithoutACommitterPanics(t *testing.T) {
+	assert.Panics(t, func() { NewManager(ManagerConfig{}) })
 }

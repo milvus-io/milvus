@@ -32,7 +32,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -44,7 +44,7 @@ import (
 
 // insert writes pks into segment segmentID of idx, as the observe of the
 // WAL recovery does.
-func insert(t *testing.T, m *pkindex.PChannelIndexManager, idx *index.Index, segmentID int64, pks ...int64) {
+func insert(t *testing.T, m *indexmanager.PChannelIndexManager, idx *index.Index, segmentID int64, pks ...int64) {
 	puts := make([]index.Put, 0, len(pks))
 	for _, pk := range pks {
 		puts = append(puts, index.Put{PK: dedup.Int64PK(pk), SegmentID: segmentID})
@@ -56,14 +56,14 @@ func insert(t *testing.T, m *pkindex.PChannelIndexManager, idx *index.Index, seg
 // of the pchannel: it writes rows, prepares a handover, uploads the table
 // and returns the manifest view that lists it. The local committed copy is
 // removed when keepLocal is false, so an install must download the table.
-func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) manifest.View {
+func committedTable(t *testing.T, env *indexmanager.FakeEnv, keepLocal bool) manifest.View {
 	ctx := context.Background()
-	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
-	idx, _, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
+	m := env.Manager.New(indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	idx, _, err := m.OpenIndex(ctx, indexmanager.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
 	require.NoError(t, err)
 	idx.MarkReady(ctx)
 	insert(t, m, idx, 1, 1, 2, 3)
-	m.ObserveTimeTick(50, pkindex.WALTailSnapshot{})
+	m.ObserveTimeTick(50, indexmanager.WALTailSnapshot{})
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, p)
@@ -81,7 +81,7 @@ func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) manifest
 
 func TestInstallTaskRetriesAndMarksReady(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	view := committedTable(t, env, false)
 
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
@@ -90,7 +90,7 @@ func TestInstallTaskRetriesAndMarksReady(t *testing.T) {
 	sched := nodescheduler.New(2)
 	t.Cleanup(sched.Close)
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          sched,
 	})
@@ -108,7 +108,7 @@ func TestInstallTaskRetriesAndMarksReady(t *testing.T) {
 
 func TestInstallTaskReportsAMissingObjectAsFatal(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	view := manifest.View{Version: 1, SSTBasePath: "root/1/v1", CheckpointTimeTick: 50, Tables: []manifest.TableRef{{ID: 77, Size: 10}}}
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
 	sched := nodescheduler.New(2)
@@ -119,7 +119,7 @@ func TestInstallTaskReportsAMissingObjectAsFatal(t *testing.T) {
 	var mu sync.Mutex
 	var fatals []error
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}, OnFatal: func(err error) {
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}, OnFatal: func(err error) {
 			mu.Lock()
 			defer mu.Unlock()
 			fatals = append(fatals, err)
@@ -146,7 +146,7 @@ func TestInstallTaskReportsAMissingObjectAsFatal(t *testing.T) {
 
 func TestInstallTaskStopsAtClose(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	view := committedTable(t, env, false)
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: view})
 	store := env.Manager.StoreForTest().(*index.FakeStore)
@@ -154,7 +154,7 @@ func TestInstallTaskStopsAtClose(t *testing.T) {
 	sched := nodescheduler.New(2)
 	t.Cleanup(sched.Close)
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          sched,
 	})
@@ -176,13 +176,13 @@ func TestInstallTaskStopsAtClose(t *testing.T) {
 
 func TestInstallTaskEndsWhenTheIndexCloses(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	view := committedTable(t, env, false)
 	store := env.Manager.StoreForTest().(*index.FakeStore)
 	store.FailDownloads(1 << 30) // every download fails: the install retries until the Index closes
-	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}})
+	m := env.Manager.New(indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}})
 	t.Cleanup(m.Close)
-	idx, _, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
+	idx, _, err := m.OpenIndex(ctx, indexmanager.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
 	require.NoError(t, err)
 	idx.SetCommitted(view)
 

@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -125,10 +125,10 @@ func pkTestBarrier(t *testing.T, tt uint64, lastConfirmed int64) message.Immutab
 
 // pkTestRecover recovers the primary key index of the storage over the
 // vchannel v1 from the checkpoint of the storage and attaches it.
-func pkTestRecover(t *testing.T, env *snpkindex.FakeEnv, rs *recoveryStorageImpl) *pkrecovery.Recovery {
+func pkTestRecover(t *testing.T, env *indexmanager.FakeEnv, rs *recoveryStorageImpl) *pkrecovery.Recovery {
 	t.Helper()
 	rec, err := pkrecovery.Recover(context.Background(), env.Manager, pkrecovery.Param{
-		PChannelConfig: snpkindex.PChannelConfig{PChannel: rs.channel, Seed: rs.checkpoint.TimeTick},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: rs.channel, Seed: rs.checkpoint.TimeTick},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": pkTestMeta("v1", 1)},
 		Sched:          rs.nodeScheduler,
 	})
@@ -148,12 +148,12 @@ func TestRecoveryStoragePKIndexTailReadsTheMetrics(t *testing.T) {
 	rs.mu.Lock()
 	tail := rs.pkindexTailLocked()
 	rs.mu.Unlock()
-	assert.Equal(t, snpkindex.WALTailSnapshot{Bytes: 1000, CompletedTimeTick: 10}, tail)
+	assert.Equal(t, indexmanager.WALTailSnapshot{Bytes: 1000, CompletedTimeTick: 10}, tail)
 }
 
 func TestRecoveryStoragePKIndexClampsTheCheckpoint(t *testing.T) {
 	ctx := context.Background()
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 80})
 	rec := pkTestRecover(t, env, rs)
@@ -178,7 +178,7 @@ func TestRecoveryStoragePKIndexClampsTheCheckpoint(t *testing.T) {
 
 func TestRecoveryStoragePKIndexIsClosedWhenTheOpenFails(t *testing.T) {
 	resource.InitForTest(t)
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	pkTestRecover(t, env, rs)
 	require.NotNil(t, env.Manager.GetForTest(rs.channel.Name))
@@ -195,7 +195,7 @@ func TestRecoveryStoragePKIndexIsClosedWhenTheOpenFails(t *testing.T) {
 func TestRecoveryStoragePKIndexIsInTheSnapshot(t *testing.T) {
 	ctx := context.Background()
 	resource.InitForTest(t)
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	rec := pkTestRecover(t, env, rs)
 
@@ -216,7 +216,7 @@ func TestRecoveryStoragePKIndexIsInTheSnapshot(t *testing.T) {
 func TestRecoveryStoragePKIndexAppliesTheLiveMessages(t *testing.T) {
 	ctx := context.Background()
 	resource.InitForTest(t)
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	rec := pkTestRecover(t, env, rs)
 
@@ -243,7 +243,7 @@ func TestRecoveryStoragePKIndexAppliesTheLiveMessages(t *testing.T) {
 func TestRecoveryStoragePKIndexFinishErrorFailsTheOpen(t *testing.T) {
 	ctx := context.Background()
 	resource.InitForTest(t)
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	pkTestRecover(t, env, rs)
 	// A closed engine makes the replay of the insert fail.
@@ -266,7 +266,7 @@ func TestRecoveryStoragePKIndexFinishErrorFailsTheOpen(t *testing.T) {
 // the storage is released, is done when observeMessage returns.
 func TestRecoveryStoragePKIndexClosesADroppedIndexInTheObserve(t *testing.T) {
 	ctx := context.Background()
-	env := snpkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 1})
 	rec := pkTestRecover(t, env, rs)
 	require.NoError(t, rec.Run(ctx))

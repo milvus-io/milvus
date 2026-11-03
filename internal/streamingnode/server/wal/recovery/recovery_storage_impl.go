@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
@@ -315,7 +315,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	}
 	if mgr := resource.Resource().PKIndexManager(); mgr != nil {
 		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.Param{
-			PChannelConfig: snpkindex.PChannelConfig{
+			PChannelConfig: indexmanager.PChannelConfig{
 				PChannel:      r.channel,
 				Seed:          r.checkpoint.TimeTick,
 				OnFatal:       r.fatalHandler("primary key index stopped"),
@@ -340,13 +340,13 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 // a vchannel, as the vchannel module of manager holds them now. The observe
 // of the primary key index reads it after the vchannel module observed the
 // same message, so it holds the state at that message.
-func pkindexVChannelState(manager *vchannel.PChannelRecoveryManager) func(string) (snpkindex.VChannelState, bool) {
-	return func(vchannel string) (snpkindex.VChannelState, bool) {
+func pkindexVChannelState(manager *vchannel.PChannelRecoveryManager) func(string) (indexmanager.VChannelState, bool) {
+	return func(vchannel string) (indexmanager.VChannelState, bool) {
 		state, ok := manager.PKIndexState(vchannel)
 		if !ok {
-			return snpkindex.VChannelState{}, false
+			return indexmanager.VChannelState{}, false
 		}
-		return snpkindex.VChannelState{EverWritten: state.EverWritten, PKIndex: state.PKIndex, Schema: state.Schema}, true
+		return indexmanager.VChannelState{EverWritten: state.EverWritten, PKIndex: state.PKIndex, Schema: state.Schema}, true
 	}
 }
 
@@ -354,8 +354,8 @@ func pkindexVChannelState(manager *vchannel.PChannelRecoveryManager) func(string
 // persisted TimeTick. The observe calls it while it holds r.mu, so it reads
 // the tail controller and the ack tracker, which have their own locks,
 // and never Metrics.
-func (r *recoveryStorageImpl) pkindexTailLocked() snpkindex.WALTailSnapshot {
-	tail := snpkindex.WALTailSnapshot{}
+func (r *recoveryStorageImpl) pkindexTailLocked() indexmanager.WALTailSnapshot {
+	tail := indexmanager.WALTailSnapshot{}
 	if r.tailController != nil {
 		tail.Bytes = r.tailController.Snapshot().RecoveryTail
 	}

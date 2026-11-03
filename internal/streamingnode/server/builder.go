@@ -2,13 +2,16 @@ package server
 
 import (
 	"context"
+	"fmt"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
 	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -72,20 +75,28 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 func (b *ServerBuilder) Build() *Server {
 	// The index manager uses the same chunk manager as the resource. It reads the ID allocator from the resource only when a WAL
 	// opens, which is after resource.Init. The manifest client needs only the etcd client, not the resource.
-	pkindex := newPKIndexComponents(context.TODO(), b.chunkManager, func() pkindexclient.Client {
-		return pkindexclient.NewClient(b.etcdClient)
+	mgr, closePKIndex, err := indexmanager.Setup(context.TODO(), b.chunkManager, func(ctx context.Context) (manifest.Committer, func(), error) {
+		cli := pkindexclient.NewClient(b.etcdClient)
+		return cli, cli.Close, nil
+	}, func(ctx context.Context) (int64, error) {
+		id, err := resource.Resource().IDAllocator().Allocate(ctx)
+		return int64(id), err
 	})
+	if err != nil {
+		panic(fmt.Sprintf("setup the primary key index manager failed: %v", err))
+	}
 	resource.Init(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
-		resource.OptPKIndexManager(pkindex.manager()),
+		resource.OptPKIndexManager(mgr),
 		resource.OptMixCoordClient(b.mixc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
 	s := &Server{
-		session:    b.session,
-		grpcServer: b.grpcServer,
-		pkindex:    pkindex,
+		session:      b.session,
+		grpcServer:   b.grpcServer,
+		pkindex:      mgr,
+		closePKIndex: closePKIndex,
 	}
 	s.init()
 	return s

@@ -23,7 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -37,7 +37,7 @@ import (
 // OnFatal.
 type installTask struct {
 	idx     *index.Index
-	params  func() pkindex.Params
+	params  func() indexmanager.Params
 	onFatal func(error)
 	logger  *mlog.Logger
 }

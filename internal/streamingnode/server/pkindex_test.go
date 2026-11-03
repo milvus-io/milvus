@@ -24,41 +24,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
-	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestOpenFileLimitShort(t *testing.T) {
-	need, short := openFileLimitShort(14095, 4096)
-	assert.Equal(t, uint64(14096), need)
-	assert.True(t, short)
-
-	_, short = openFileLimitShort(14096, 4096)
-	assert.False(t, short)
-
-	need, _ = openFileLimitShort(0, 0)
-	assert.Equal(t, uint64(engine.DefaultMaxOpenFiles+openFileReserve), need)
-}
-
-func TestPKIndexComponentsOff(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "false")
-	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-
-	c := newPKIndexComponents(context.Background(), nil, nil)
-	assert.Nil(t, c)
-	assert.Nil(t, c.manager())
-	c.close()
-}
-
 // fakeManifestClient is a manifest service client that is never called. The
-// test only checks that the components are built and closed.
+// test only checks that the manager is built and closed.
 type fakeManifestClient struct {
 	closed bool
 }
@@ -73,7 +48,25 @@ func (f *fakeManifestClient) GetRecoveryManifests(ctx context.Context, refs []ma
 
 func (f *fakeManifestClient) Close() { f.closed = true }
 
-func TestPKIndexComponentsOn(t *testing.T) {
+func newCommitter(cli *fakeManifestClient) func(context.Context) (manifest.Committer, func(), error) {
+	return func(context.Context) (manifest.Committer, func(), error) {
+		return cli, cli.Close, nil
+	}
+}
+
+func TestPKIndexSetupOff(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "false")
+	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
+
+	mgr, closePKIndex, err := indexmanager.Setup(context.Background(), nil, nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, mgr)
+	assert.Nil(t, closePKIndex)
+}
+
+func TestPKIndexSetupOn(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
@@ -86,12 +79,13 @@ func TestPKIndexComponentsOn(t *testing.T) {
 		defer params.Reset(params.StreamingCfg.PKIndexDataDir.Key)
 		cli := &fakeManifestClient{}
 
-		c := newPKIndexComponents(context.Background(), cm, func() pkindexclient.Client { return cli })
-		require.NotNil(t, c)
-		assert.Equal(t, dir, c.root)
-		assert.NotNil(t, c.manager())
-		assert.NotNil(t, c.manager().Committer())
-		c.close()
+		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil })
+		require.NoError(t, err)
+		require.NotNil(t, mgr)
+		require.NotNil(t, closePKIndex)
+		assert.Equal(t, dir, mgr.Root())
+		assert.NotNil(t, mgr.Committer())
+		closePKIndex()
 		assert.True(t, cli.closed)
 	})
 
@@ -103,24 +97,27 @@ func TestPKIndexComponentsOn(t *testing.T) {
 		defer params.Reset(params.LocalStorageCfg.Path.Key)
 		cli := &fakeManifestClient{}
 
-		c := newPKIndexComponents(context.Background(), cm, func() pkindexclient.Client { return cli })
-		require.NotNil(t, c)
-		assert.NotNil(t, c.manager().Committer())
-		assert.Equal(t, filepath.Join(local, "pkindex"), c.root)
-		c.close()
+		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil })
+		require.NoError(t, err)
+		require.NotNil(t, mgr)
+		assert.NotNil(t, mgr.Committer())
+		assert.Equal(t, filepath.Join(local, "pkindex"), mgr.Root())
+		closePKIndex()
 		assert.True(t, cli.closed)
 	})
 }
 
-func TestPKIndexComponentsOffDoesNotBuildTheClient(t *testing.T) {
+func TestPKIndexSetupOffDoesNotBuildTheCommitter(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "false")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
 
-	c := newPKIndexComponents(context.Background(), nil, func() pkindexclient.Client {
-		t.Fatal("the client must not be built when the index is off")
-		return nil
-	})
-	assert.Nil(t, c)
+	mgr, closePKIndex, err := indexmanager.Setup(context.Background(), nil, func(context.Context) (manifest.Committer, func(), error) {
+		t.Fatal("the committer must not be built when the index is off")
+		return nil, nil, nil
+	}, nil)
+	require.NoError(t, err)
+	assert.Nil(t, mgr)
+	assert.Nil(t, closePKIndex)
 }

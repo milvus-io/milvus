@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -314,7 +314,7 @@ func (r *Recovery) writeOf(ctx context.Context, t *target, msg message.Immutable
 			segmentID = partitions[0].GetSegmentAssignment().GetSegmentId()
 		}
 		puts := make([]index.Put, 0, len(keys.Int64Values)+len(keys.StringValues))
-		for _, pk := range pkindex.PKsOf(keys) {
+		for _, pk := range dedup.PKsOf(keys) {
 			puts = append(puts, index.Put{PK: pk, SegmentID: segmentID})
 		}
 		return index.Write{Puts: puts}, nil
@@ -331,7 +331,7 @@ func (r *Recovery) writeOf(ctx context.Context, t *target, msg message.Immutable
 		if err != nil {
 			panic(fmt.Sprintf("the primary keys of a persisted delete of vchannel %s can not be read in the primary key index observe: %v", msg.VChannel(), err))
 		}
-		return index.Write{Deletes: pkindex.PKsOf(keys)}, nil
+		return index.Write{Deletes: dedup.PKsOf(keys)}, nil
 	default:
 		return index.Write{}, nil
 	}

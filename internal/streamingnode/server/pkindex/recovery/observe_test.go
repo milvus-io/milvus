@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -239,14 +239,14 @@ func dropIndexMsg(vchannel string, collectionID int64, indexIDs []int64, tt uint
 // vchannel module observes the message before the index does.
 type fakeStates struct {
 	mu     sync.Mutex
-	states map[string]pkindex.VChannelState
+	states map[string]indexmanager.VChannelState
 }
 
 func newFakeStates() *fakeStates {
-	return &fakeStates{states: make(map[string]pkindex.VChannelState)}
+	return &fakeStates{states: make(map[string]indexmanager.VChannelState)}
 }
 
-func (s *fakeStates) get(vchannel string) (pkindex.VChannelState, bool) {
+func (s *fakeStates) get(vchannel string) (indexmanager.VChannelState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, ok := s.states[vchannel]
@@ -266,7 +266,7 @@ func (s *fakeStates) written(vchannel string) {
 func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHistory, pk *streamingpb.PKIndexOfVChannel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.states[vchannel] = pkindex.VChannelState{
+	s.states[vchannel] = indexmanager.VChannelState{
 		EverWritten: history,
 		PKIndex:     pk,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -277,10 +277,10 @@ func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHisto
 
 // recoverWithStates recovers the pchannel p over metas with the vchannel
 // states of states.
-func recoverWithStates(t *testing.T, env *pkindex.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) *Recovery {
+func recoverWithStates(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) *Recovery {
 	ctx := context.Background()
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, VChannelState: states.get},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, VChannelState: states.get},
 		Metas:          metas,
 		Sched:          sched,
 	})
@@ -349,10 +349,10 @@ func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
 	return e.SegmentID
 }
 
-func recoverV1(t *testing.T, env *pkindex.FakeEnv, sched nodescheduler.Scheduler) *Recovery {
+func recoverV1(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler) *Recovery {
 	ctx := context.Background()
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          sched,
 	})
@@ -363,7 +363,7 @@ func recoverV1(t *testing.T, env *pkindex.FakeEnv, sched nodescheduler.Scheduler
 
 func TestObserveReplaysLikeTheAppendPath(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1, 2, 3))
@@ -386,9 +386,9 @@ func TestObserveReplaysLikeTheAppendPath(t *testing.T) {
 
 func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_VarChar, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -405,7 +405,7 @@ func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 
 func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	states := newFakeStates()
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
@@ -428,7 +428,7 @@ func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 
 func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	control := "p_" + funcutil.ControlChannelSuffix
 
@@ -445,7 +445,7 @@ func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T)
 
 func TestObserveCreatesAndDropsCollections(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 	m := env.Manager.GetForTest("p")
@@ -479,10 +479,10 @@ func TestObserveCreatesAndDropsCollections(t *testing.T) {
 // the drop are skipped without stopping the observe.
 func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	var fatals []error
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: func(err error) { fatals = append(fatals, err) }},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: func(err error) { fatals = append(fatals, err) }},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
 	require.NoError(t, err)
@@ -511,7 +511,7 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 // batch holds every tombstone and every put of the transaction.
 func TestObserveAppliesATransactionInOneBatch(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	require.NoError(t, rec.Run(ctx))
 	idx := env.Manager.GetForTest("p").IndexForTest("v1")
@@ -546,7 +546,7 @@ func TestObserveAppliesATransactionInOneBatch(t *testing.T) {
 
 func TestObserveKeepsTheFirstErrorAndRunReturnsIt(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	require.NoError(t, env.Manager.GetForTest("p").IndexForTest("v1").EngineForTest().Close())
 
@@ -563,7 +563,7 @@ func TestObserveKeepsTheFirstErrorAndRunReturnsIt(t *testing.T) {
 // barrier and the live messages after it go through the same apply.
 func TestObserveAppliesBeforeAndAfterRun(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	require.NoError(t, rec.Run(ctx))
@@ -581,7 +581,7 @@ func TestObserveAppliesBeforeAndAfterRun(t *testing.T) {
 // order is the insert then its companion delete, and the insert must win.
 func TestObserveAppliesTheDeleteOfATransactionBeforeItsPut(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	rec.ObserveMessage(ctx, insertMsg("v1", 11, 7, 1))
 	rec.ObserveMessage(ctx, txnMsg(t, "v1", 12, 100, newInsert("v1", 8, 1), newDelete("v1", 1)))
@@ -599,7 +599,7 @@ func TestObserveAppliesTheDeleteOfATransactionBeforeItsPut(t *testing.T) {
 // and only the keys of writes at or below the observed time tick.
 func TestObserveRetiresTheInFlightEntriesOfTheWrite(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	require.NoError(t, rec.Run(ctx))
 	idx := env.Manager.GetForTest("p").IndexForTest("v1")
@@ -627,7 +627,7 @@ func TestObserveRetiresTheInFlightEntriesOfTheWrite(t *testing.T) {
 // after it moves the observed time tick, and a write alone does not move it.
 func TestObserveWritesTheEngineBeforeItMovesTheObservedTimeTick(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	require.NoError(t, rec.Run(ctx))
 	idx := env.Manager.GetForTest("p").IndexForTest("v1")
@@ -648,7 +648,7 @@ func TestObserveWritesTheEngineBeforeItMovesTheObservedTimeTick(t *testing.T) {
 // handover covers the flush.
 func TestObserveFlushRequestsACoveringHandover(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	states.enable("v2", 22, 11)
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)})
@@ -665,10 +665,10 @@ func TestObserveFlushRequestsACoveringHandover(t *testing.T) {
 }
 
 // recoverV1WithFatal is recoverV1 with an OnFatal handler.
-func recoverV1WithFatal(t *testing.T, env *pkindex.FakeEnv, onFatal func(error)) *Recovery {
+func recoverV1WithFatal(t *testing.T, env *indexmanager.FakeEnv, onFatal func(error)) *Recovery {
 	ctx := context.Background()
 	rec, err := Recover(ctx, env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: onFatal},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: onFatal},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -682,7 +682,7 @@ func recoverV1WithFatal(t *testing.T, env *pkindex.FakeEnv, onFatal func(error))
 // observed time tick does not move past the write it skipped.
 func TestObserveStopsOnAClosedIndexAndKeepsTheObservedTimeTick(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
@@ -700,7 +700,7 @@ func TestObserveStopsOnAClosedIndexAndKeepsTheObservedTimeTick(t *testing.T) {
 // observe.
 func TestObserveCallsOnFatalOnAnEngineError(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
@@ -728,7 +728,7 @@ func TestObserveCallsOnFatalOnAnEngineError(t *testing.T) {
 func TestCloseWipesTheVChannelAfterACorruptedWrite(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	env := pkindex.NewFakeEnv(t, root)
+	env := indexmanager.NewFakeEnv(t, root)
 	var fatals []error
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
@@ -750,7 +750,7 @@ func TestCloseWipesTheVChannelAfterACorruptedWrite(t *testing.T) {
 // not unmarshal ends the process, like MustBody in the other modules.
 func TestObservePanicsOnAMalformedBody(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	rec := recoverV1(t, env, env.Manager.Scheduler())
 	good := insertMsg("v1", 11, 7, 1)
 	bad := message.NewImmutableMesasge(good.MessageID(), []byte("not a protobuf"), good.Properties().ToRawMap())
@@ -761,7 +761,7 @@ func TestObservePanicsOnAMalformedBody(t *testing.T) {
 // TestRecoverOpensOnlyTheVChannelsWithAPKIndex checks that the recovery opens
 // an Index only for a vchannel whose meta has an enabled primary key index.
 func TestRecoverOpensOnlyTheVChannelsWithAPKIndex(t *testing.T) {
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	without := testMeta("b", 2, schemapb.DataType_Int64, false)
 	without.CollectionInfo.PkIndex = nil
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), newFakeStates(), map[string]*streamingpb.VChannelMeta{
@@ -778,11 +778,11 @@ func TestRecoverOpensOnlyTheVChannelsWithAPKIndex(t *testing.T) {
 // TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey checks the field
 // that the vchannel meta names.
 func TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey(t *testing.T) {
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	meta := testMeta("a", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex.FieldId = 101
 	_, err := Recover(context.Background(), env.Manager, Param{
-		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
+		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"a": meta},
 		Sched:          env.Manager.Scheduler(),
 	})
@@ -795,14 +795,14 @@ func TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey(t *testing.T) {
 // when the vchannel was not empty at the CreateIndex.
 func TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 	require.NoError(t, rec.Run(ctx))
 	m := rec.Manager()
 
 	// the interceptor read a stale write history and opened the index
-	_, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, CheckpointTimeTick: 20})
+	_, created, err := m.OpenIndex(ctx, indexmanager.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, CheckpointTimeTick: 20})
 	require.NoError(t, err)
 	require.True(t, created)
 	dir := index.Dir(env.Manager.Root(), "c", 8)
@@ -826,7 +826,7 @@ func TestObserveDropIndexClosesOnlyTheNamedIndex(t *testing.T) {
 	for name, ids := range map[string][]int64{"named": {8}, "all": nil} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			env := pkindex.NewFakeEnv(t, t.TempDir())
+			env := indexmanager.NewFakeEnv(t, t.TempDir())
 			states := newFakeStates()
 			rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 			require.NoError(t, rec.Run(ctx))
@@ -853,7 +853,7 @@ func TestObserveDropIndexClosesOnlyTheNamedIndex(t *testing.T) {
 // vchannel, which opens before the close runs.
 func TestObserveCreateIndexAfterADropBeforeTheDropCloses(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 	require.NoError(t, rec.Run(ctx))
@@ -882,7 +882,7 @@ func TestObserveCreateIndexAfterADropBeforeTheDropCloses(t *testing.T) {
 // Index that the recovery opened from the catalog meta.
 func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: 9, FieldId: testPKFieldID, CheckpointTimeTick: 30}
@@ -906,7 +906,7 @@ func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
 // checks the messages that do not enable the primary key index.
 func TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	states := newFakeStates()
 	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 	m := rec.Manager()
@@ -936,7 +936,7 @@ func truncateMsg(vchannel string, collectionID int64, tt uint64) message.Immutab
 // keys after the truncate, and the recovered manifest is not installed.
 func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
@@ -962,7 +962,7 @@ func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
 // truncate at or before the checkpoint of the manifest is committed already.
 func TestObserveReplayOfACommittedTruncateDoesNothing(t *testing.T) {
 	ctx := context.Background()
-	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &manifest.FakeManifest{View: manifest.View{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
 	sched := nodescheduler.New(1)
 	t.Cleanup(sched.Close)
