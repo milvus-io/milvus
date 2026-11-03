@@ -581,8 +581,18 @@ func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
 			suite.Nil(nullVec.GetVectors().GetData())
 		})
 
-		for _, pkType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
-			suite.Run(tc.name+"_no_rows_"+pkType.String(), func() {
+		for _, emptyCase := range []struct {
+			name            string
+			pkType          schemapb.DataType
+			firstFieldsData bool
+		}{
+			{"Int64", schemapb.DataType_Int64, true},
+			{"VarChar", schemapb.DataType_VarChar, true},
+			{"Int64_first_without_fields", schemapb.DataType_Int64, false},
+			{"VarChar_first_without_fields", schemapb.DataType_VarChar, false},
+		} {
+			suite.Run(tc.name+"_no_rows_"+emptyCase.name, func() {
+				pkType := emptyCase.pkType
 				reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(tc.groupSize)
 				if tc.groupSize > 1 {
 					reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
@@ -599,6 +609,10 @@ func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
 						}
 					}
 				}
+				if !emptyCase.firstFieldsData {
+					// The column template must come from the later shard result.
+					inputs[0].FieldsData = nil
+				}
 				res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(suite.T().Context(), inputs, reduceInfo)
 				suite.Require().NoError(err)
 
@@ -613,7 +627,7 @@ func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
 				suite.Zero(typeutil.GetSizeOfIDs(decoded.GetIds()))
 				suite.Require().Len(decoded.GetFieldsData(), 3)
 				for i, fd := range decoded.GetFieldsData() {
-					sample := inputs[0].GetFieldsData()[i]
+					sample := inputs[1].GetFieldsData()[i]
 					suite.Equal(sample.GetFieldId(), fd.GetFieldId())
 					suite.Equal(sample.GetFieldName(), fd.GetFieldName())
 					suite.Equal(sample.GetType(), fd.GetType())
