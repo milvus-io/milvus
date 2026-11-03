@@ -81,10 +81,12 @@ def test_proxy_full_schema_system_columns(schema_access_client, dynamic):
     assert len(rows) == 1
     if dynamic:
         assert rows[0]["RowID"] == 7 and rows[0]["Timestamp"] == 11
-        assert client.query(name, filter="RowID == 7 and Timestamp == 11", output_fields=["id"],
-                            consistency_level="Strong", timeout=60) == [{"id": 1}]
-        results = client.search(name, [[1.0, 0.0, 0.0, 0.0]], filter="RowID == 7", limit=1,
-                                consistency_level="Strong", timeout=60)
+        assert client.query(
+            name, filter="RowID == 7 and Timestamp == 11", output_fields=["id"], consistency_level="Strong", timeout=60
+        ) == [{"id": 1}]
+        results = client.search(
+            name, [[1.0, 0.0, 0.0, 0.0]], filter="RowID == 7", limit=1, consistency_level="Strong", timeout=60
+        )
         assert results[0][0]["id"] == 1
         client.delete(name, filter="Timestamp == 11", timeout=60)
         assert ids(client, name) == []

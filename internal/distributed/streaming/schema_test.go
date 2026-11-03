@@ -48,6 +48,7 @@ func TestWALSchemaClientUsesHandlerDiscovery(t *testing.T) {
 		}
 		response, err = w.SchemaClient().GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 		require.NoError(t, err)
+		require.EqualValues(t, 5, response.Version)
 		response, err = w.SchemaClient().GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 0})
 		require.NoError(t, err)
 		require.Zero(t, response.Version)

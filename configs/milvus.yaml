@@ -1740,7 +1740,7 @@ queryView:
 
 # Any configuration related to the streaming service.
 streaming:
-  schemaCacheTTL: 900 # SchemaClient idle retention in seconds; non-positive values disable caching.
+  schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies and write selectors. Non-positive values disable retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
