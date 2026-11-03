@@ -52,6 +52,8 @@ CreateTextIndexDirectory(const std::string& parent, std::string_view unique_id);
 size_t
 TextIndexDirectoryBytes(const storage::LocalDirectory& directory);
 
+struct TextIndexStorage;
+
 class TextIndexArtifact final : public storage::Artifact,
                                 public IIndexConvertible {
  public:
@@ -70,6 +72,10 @@ class TextIndexArtifact final : public storage::Artifact,
     Serialize(storage::FileSink& sink) const override;
     void
     Serialize(storage::IndexEntryWriter& writer) const override;
+
+    /** @brief Transfer the completed snapshot into a storage cache cell. */
+    std::unique_ptr<TextIndexStorage>
+    IntoStorage() &&;
 
     IndexPtr
         IntoIndex() &&

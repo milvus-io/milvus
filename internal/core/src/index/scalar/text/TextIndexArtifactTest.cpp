@@ -26,6 +26,7 @@
 #include "index/Meta.h"
 #include "index/SingleCellIndexStorageTranslator.h"
 #include "index/scalar/text/TextIndexReader.h"
+#include "index/scalar/text/TextIndexBuilder.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "index/scalar/text/TextIndexLoader.h"
 #include "index/contracts/query/INullReader.h"
@@ -328,6 +329,50 @@ TEST(TextIndexArtifactTest, LegacyV5DirectoryAndValidityRoundTrip) {
     EXPECT_FALSE(alpha[1]);
     EXPECT_TRUE(alpha[2]);
 
+    const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+    ASSERT_NE(nulls, nullptr);
+    const auto is_null = nulls->IsNull();
+    EXPECT_FALSE(is_null[0]);
+    EXPECT_TRUE(is_null[1]);
+    EXPECT_FALSE(is_null[2]);
+}
+
+TEST(TextIndexArtifactTest, LocalBuildStorageOutlivesArtifactAndInput) {
+    std::unique_ptr<TextIndexStorage> storage;
+    {
+        ScalarTestData<std::string_view> data(
+            {"alpha", "ignored", "alpha beta"});
+        data.validity.reset(1);
+        const ScalarTestInput<std::string_view> input(data);
+        const auto view = input.View();
+        TextIndexBuildSource source{.row_count = 3,
+                                    .produce = [&](const auto& consume) {
+                                        for (const auto& batch : view.batches) {
+                                            consume(batch);
+                                        }
+                                    }};
+        TextIndexBuildParams params{
+            .field_name = "text",
+            .tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+            .unique_id = "local-storage-test"};
+        auto artifact =
+            std::move(TextIndexBuilder(std::move(params))).Build(source);
+        storage = std::move(*artifact).IntoStorage();
+    }
+    ASSERT_NE(storage, nullptr);
+    EXPECT_EQ(storage->count_, 3);
+    EXPECT_GT(storage->CellByteSize().memory_bytes, 0);
+    EXPECT_EQ(storage->CellByteSize().file_bytes, 0);
+    auto index = std::make_shared<TextIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
+    index.reset();
+    const auto* text = dynamic_cast<const ITextMatchReader*>(reader.get());
+    ASSERT_NE(text, nullptr);
+    const auto matches = text->MatchQuery("alpha", 1);
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_FALSE(matches[1]);
+    EXPECT_TRUE(matches[2]);
     const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
     ASSERT_NE(nulls, nullptr);
     const auto is_null = nulls->IsNull();

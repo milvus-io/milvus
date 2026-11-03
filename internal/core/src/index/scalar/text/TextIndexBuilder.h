@@ -28,6 +28,7 @@
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "storage/artifact/Artifact.h"
+#include "index/scalar/text/TextIndexArtifact.h"
 
 namespace milvus::tantivy {
 struct TantivyIndexWrapper;
@@ -86,14 +87,14 @@ class TextIndexBuilder final
         Build(const ScalarBuildInput<std::string_view>& input) &&
         override;
 
-    storage::ArtifactPtr
+    std::unique_ptr<TextIndexArtifact>
     Build(const TextIndexBuildSource& source) &&;
 
  private:
     void
     AddBatch(const ScalarBuildBatch<std::string_view>& batch);
 
-    storage::ArtifactPtr
+    std::unique_ptr<TextIndexArtifact>
     FinishArtifact();
 
     TextIndexBuildParams params_;

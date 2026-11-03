@@ -227,3 +227,5 @@ JSON projection 的存在性 bitmap 属于具体标量 Storage，与 postings �
 磁盘向量的普通后端同样使用 KnowhereEngine cell，文件句柄、validity 和 embedding-list sidecar 随 engine 一起保留。声明 LAZY_LOAD 能力的后端直接由 VectorIndex 持有 engine，初始化仍走既有加载流程，数据加载和缓存由后端管理；不再创建外层整引擎 slot。Index 的延迟创建仍由 inventory factory 控制，CreateReader 只建立请求视图。
 
 临时向量构建也以 KnowhereEngine 为缓存 cell。InterimSealedIndexTranslator 从原始列构建 engine，segment 注册持有该 slot 的 VectorIndex；不再缓存请求 Reader。DataView 回调继续持有原始 chunk 的 pin，迭代器则通过 engine pin 保留整条生命周期。该路径保留不可淘汰策略与原有 warmup 行为。
+
+本地 Text 构建完成后直接把 TextIndexStorage 安装到缓存，并由 TextIndex 创建请求 Reader。Storage 持有 Tantivy snapshot、validity 和可选 mmap 目录；这条一次性构建路径保留同步 warmup 与不可淘汰策略，资源统计由 Storage 提供。

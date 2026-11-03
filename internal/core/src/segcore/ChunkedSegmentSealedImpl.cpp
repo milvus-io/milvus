@@ -96,11 +96,11 @@
 #include "index/LoadResource.h"
 #include "index/Meta.h"
 #include "index/skipindex_stats/SkipIndexStats.h"
-#include "index/contracts/build/IIndexConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarValueReader.h"
 #include "segcore/json_stats/JsonKeyStats.h"
 #include "index/scalar/text/TextIndexBuilder.h"
+#include "index/scalar/text/TextIndexReader.h"
 #include "index/Utils.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/VectorLoadResource.h"
@@ -724,22 +724,23 @@ make_persisted_index_entry(LoadIndexInfo& info) {
 }
 
 // Installs an already completed local artifact into the ordinary one-cell
-// cache without adding a second reader-owning wrapper. Eviction is disabled:
+// cache without adding a second storage-owning wrapper. Eviction is disabled:
 // the one-shot builder and its borrowed input are gone after construction, so
 // this translator cannot recreate the generation.
-class CompletedIndexTranslator final
-    : public cachinglayer::Translator<index::IIndexReaderBase> {
+class CompletedTextStorageTranslator final
+    : public cachinglayer::Translator<index::TextIndexStorage> {
  public:
-    CompletedIndexTranslator(index::IIndexReaderBasePtr reader,
-                             std::string key,
-                             int64_t segment_id,
-                             bool file_backed,
-                             const std::string& shard)
-        : reader_(std::move(reader)),
+    CompletedTextStorageTranslator(
+        std::unique_ptr<index::TextIndexStorage> storage,
+        std::string key,
+        int64_t segment_id,
+        bool file_backed,
+        const std::string& shard)
+        : storage_(std::move(storage)),
           key_(std::move(key)),
           segment_id_(segment_id),
-          usage_(reader_ != nullptr ? reader_->CellByteSize()
-                                    : cachinglayer::ResourceUsage{}),
+          usage_(storage_ != nullptr ? storage_->CellByteSize()
+                                     : cachinglayer::ResourceUsage{}),
           meta_(file_backed ? cachinglayer::StorageType::DISK
                             : cachinglayer::StorageType::MEMORY,
                 cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
@@ -748,8 +749,8 @@ class CompletedIndexTranslator final
                 /* support_eviction */ false,
                 std::nullopt,
                 MetricAttributionFromShard(shard)) {
-        AssertInfo(reader_ != nullptr,
-                   "completed index translator requires a reader");
+        AssertInfo(storage_ != nullptr,
+                   "completed index translator requires storage");
     }
 
     size_t
@@ -783,16 +784,16 @@ class CompletedIndexTranslator final
     }
 
     std::vector<std::pair<cachinglayer::cid_t,
-                          std::unique_ptr<index::IIndexReaderBase>>>
+                          std::unique_ptr<index::TextIndexStorage>>>
     get_cells(milvus::OpContext* ctx,
               const std::vector<cachinglayer::cid_t>&) override {
-        CheckCancellation(ctx, segment_id_, "CompletedIndexTranslator");
-        AssertInfo(reader_ != nullptr,
-                   "completed index reader was already transferred");
+        CheckCancellation(ctx, segment_id_, "CompletedTextStorageTranslator");
+        AssertInfo(storage_ != nullptr,
+                   "completed text storage was already transferred");
         std::vector<std::pair<cachinglayer::cid_t,
-                              std::unique_ptr<index::IIndexReaderBase>>>
+                              std::unique_ptr<index::TextIndexStorage>>>
             result;
-        result.emplace_back(0, std::move(reader_));
+        result.emplace_back(0, std::move(storage_));
         return result;
     }
 
@@ -802,7 +803,7 @@ class CompletedIndexTranslator final
     }
 
  private:
-    index::IIndexReaderBasePtr reader_;
+    std::unique_ptr<index::TextIndexStorage> storage_;
     std::string key_;
     int64_t segment_id_;
     cachinglayer::ResourceUsage usage_;
@@ -6154,22 +6155,22 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
             cfg.GetScalarIndexEnableMmap() ? cfg.GetMmapPath() : std::string{}};
     auto artifact =
         std::move(index::TextIndexBuilder(std::move(params))).Build(source);
-    auto reader = index::IIndexConvertible::FromArtifact(std::move(artifact))->CreateReader(nullptr);
-    auto caps = reader->Caps();
-    auto value_type = reader->ValueType();
-    AssertInfo(caps.text_match,
-               "local text build did not produce a text-match reader");
-
+    auto storage = std::move(*artifact).IntoStorage();
+    const index::IndexMetadata metadata{index::ReaderCaps{.text_match = true},
+                                        index::Domain::Row,
+                                        storage->value_type_,
+                                        storage->count_};
     auto load_info = CaptureLoadInfoSnapshot();
-    auto translator = std::make_unique<CompletedIndexTranslator>(
-        std::move(reader),
+    auto translator = std::make_unique<CompletedTextStorageTranslator>(
+        std::move(storage),
         fmt::format("seg_{}_local_text_{}", id_, field_id.get()),
         id_,
         cfg.GetScalarIndexEnableMmap(),
         load_info != nullptr ? load_info->GetInsertChannel() : std::string{});
     auto slot = cachinglayer::Manager::GetInstance()
-                    .CreateCacheSlot<index::IIndexReaderBase>(
+                    .CreateCacheSlot<index::TextIndexStorage>(
                         std::move(translator), op_ctx);
+    auto index = std::make_shared<index::TextIndex>(std::move(slot), metadata);
 
     CheckCancellation(op_ctx,
                       id_,
@@ -6177,11 +6178,11 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
     IndexCapabilityEntry meta{AllocateLocalIndexKey(*target_runtime, field_id)};
     meta.family = index::families::kText;
-    meta.value_type = value_type;
-    meta.caps = caps;
+    meta.value_type = metadata.value_type;
+    meta.caps = metadata.caps;
     auto replaced = target_runtime->indexes.Register(
         std::make_shared<IndexInventory::Entry>(std::move(meta),
-                                                std::move(slot)));
+                                                std::move(index)));
     AssertInfo(replaced == nullptr,
                "local text index unexpectedly replaced another generation");
     build_guard.Commit();

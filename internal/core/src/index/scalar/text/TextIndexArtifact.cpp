@@ -156,9 +156,9 @@ TextIndexArtifact::TextIndexArtifact(
 
 TextIndexArtifact::~TextIndexArtifact() = default;
 
-IndexPtr
-TextIndexArtifact::IntoIndex() && {
-    return std::make_shared<TextIndex>(
+std::unique_ptr<TextIndexStorage>
+TextIndexArtifact::IntoStorage() && {
+    return std::make_unique<TextIndexStorage>(
         std::move(directory_),
         std::move(engine_),
         std::make_shared<const std::vector<size_t>>(std::move(null_offsets_)),
@@ -166,6 +166,11 @@ TextIndexArtifact::IntoIndex() && {
         value_type_,
         reader_file_backed_,
         payload_bytes_);
+}
+
+IndexPtr
+TextIndexArtifact::IntoIndex() && {
+    return std::make_shared<TextIndex>(std::move(*this).IntoStorage());
 }
 
 void
