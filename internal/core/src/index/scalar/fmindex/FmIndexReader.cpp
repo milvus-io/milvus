@@ -384,22 +384,6 @@ FmIndexReader::ValueType() const {
     return index_->Metadata().value_type;
 }
 
-int64_t
-FmIndexReader::MemoryUsage() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    size_t total = sizeof(FmIndexReader);
-    SaturatingAdd(total, static_cast<size_t>(storage->MemoryUsage()));
-    return SaturatingSize(total);
-}
-
-cachinglayer::ResourceUsage
-FmIndexReader::CellByteSize() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    size_t total = sizeof(FmIndexReader);
-    SaturatingAdd(total, static_cast<size_t>(storage->MemoryUsage()));
-    return {SaturatingSize(total), storage->FileBytes()};
-}
-
 TargetBitmap
 FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
     const auto pin = index_->PinStorage(op_ctx_);

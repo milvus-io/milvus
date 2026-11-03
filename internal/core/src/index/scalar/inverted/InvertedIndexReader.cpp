@@ -319,22 +319,6 @@ InvertedIndexReader<T>::ValueType() const {
 }
 
 template <typename T>
-int64_t
-InvertedIndexReader<T>::MemoryUsage() const {
-    const auto pin = index_->PinStorage(op_ctx_);
-    const auto& storage = *pin;
-    return storage.MemoryUsage();
-}
-
-template <typename T>
-cachinglayer::ResourceUsage
-InvertedIndexReader<T>::CellByteSize() const {
-    const auto pin = index_->PinStorage(op_ctx_);
-    const auto& storage = *pin;
-    return storage.CellByteSize();
-}
-
-template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::In(size_t n, const T* values) const {
     const auto pin = index_->PinStorage(op_ctx_);

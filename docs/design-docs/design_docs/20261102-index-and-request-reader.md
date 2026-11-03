@@ -49,7 +49,8 @@ no-op; calling this method does not promise that all outstanding I/O has drained
 `CellByteSize` interface. In particular, an Index is neither a cache cell nor a
 CacheSlot. The cached storage object (or backend engine) implements `CellByteSize()` for the existing cache
 accounting contract. Cache-managed bytes are not charged again through each
-request reader.
+request reader. `IIndexReaderBase` likewise exposes no resource-accounting methods;
+resource tests inspect the concrete storage produced by the loading transaction.
 
 ## Ownership and calls
 

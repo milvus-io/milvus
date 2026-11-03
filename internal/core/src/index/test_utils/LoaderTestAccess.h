@@ -30,6 +30,17 @@ namespace milvus::index {
  * production callers use the complete source-open/create/load lifecycle.
  */
 struct LoaderTestAccess {
+    // Exercise the production storage finalizer without wrapping it in an Index.
+    template <typename Loader, typename... Types>
+    static auto
+    StorageFinisher() {
+        if constexpr (sizeof...(Types) == 0) {
+            return &Loader::FinishPackedStorage;
+        } else {
+            return &Loader::template FinishPackedStorage<Types...>;
+        }
+    }
+
     template <typename Loader>
     static IndexLoadPlan
     Plan(const storage::IndexEntryDirectory& directory,

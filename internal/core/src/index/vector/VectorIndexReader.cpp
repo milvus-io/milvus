@@ -294,13 +294,6 @@ VectorIndexReader::VectorIndexReader(std::shared_ptr<const VectorIndex> index,
     : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
-cachinglayer::ResourceUsage
-VectorIndexReader::CellByteSize() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
-    const auto& engine = *engine_pin;
-    return engine.CellByteSize();
-}
-
 ReaderCaps
 VectorIndexReader::Caps() const {
     // ReaderCaps is scalar-shaped and does not describe raw-vector or refine
@@ -327,12 +320,6 @@ VectorIndexReader::Count() const {
 DataType
 VectorIndexReader::ValueType() const {
     return index_->Metadata().value_type;
-}
-
-int64_t
-VectorIndexReader::MemoryUsage() const {
-    // Native resident accounting is unavailable; zero is not a measurement.
-    return 0;
 }
 
 void

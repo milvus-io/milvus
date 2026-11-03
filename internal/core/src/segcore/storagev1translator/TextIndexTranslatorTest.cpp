@@ -101,7 +101,6 @@ CheckTextReader(const index::IIndexReaderBase& reader) {
     const auto is_null = nulls->IsNull();
     EXPECT_EQ(is_null.count(), 1);
     EXPECT_TRUE(is_null[1]);
-    EXPECT_EQ(reader.CellByteSize().memory_bytes, reader.MemoryUsage());
 }
 
 class TextIndexTranslatorTest : public ::testing::Test {
@@ -200,10 +199,6 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
         auto cells = translator.CreateIndex(nullptr)->CreateReader(nullptr);
         ASSERT_NE(cells, nullptr);
         CheckTextReader(*cells);
-        // The fixed reservation covers the known reader and directory metadata;
-        // the legacy admission formula remains an estimate, not a heap census.
-        EXPECT_GE(cells->MemoryUsage(), bitmap_bytes);
-        EXPECT_EQ(cells->CellByteSize().file_bytes > 0, mmap);
     }
 }
 
@@ -229,10 +224,6 @@ TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
             // Sync legacy reads use ChunkManager rather than Arrow.
             EXPECT_EQ(fs->sync_opens.load(), 0);
-            EXPECT_GE(estimate.resident.memory_bytes,
-                      first->CellByteSize().memory_bytes);
-            EXPECT_GE(estimate.resident.file_bytes,
-                      first->CellByteSize().file_bytes);
             fs->ResetCounts();
             folly::CancellationSource cancel;
             cancel.requestCancellation();
@@ -428,12 +419,6 @@ TEST_F(TextIndexTranslatorTest,
                 EXPECT_EQ(estimate.resident, repeated.resident);
                 EXPECT_EQ(estimate.private_overhead, repeated.private_overhead);
                 EXPECT_EQ(estimate.shared_overhead, repeated.shared_overhead);
-                EXPECT_GE(estimate.resident.memory_bytes,
-                          cells->CellByteSize().memory_bytes);
-                EXPECT_GE(estimate.resident.file_bytes,
-                          cells->CellByteSize().file_bytes);
-                EXPECT_EQ(cells->CellByteSize().file_bytes > 0,
-                          mmap);
 
                 // Direct registry callers can pin a mode too; an unpinned
                 // context resolves the rollout setting for each complete load.

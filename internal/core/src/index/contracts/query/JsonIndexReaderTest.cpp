@@ -2320,16 +2320,6 @@ class TrackingReader final : public IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {0, 0};
-    }
-
  private:
     size_t* destroyed_;
 };

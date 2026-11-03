@@ -66,16 +66,6 @@ class InventoryTestReader final : public index::IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {};
-    }
-
  private:
     std::shared_ptr<const index::IIndex> owner_;
     index::ReaderCaps caps_;

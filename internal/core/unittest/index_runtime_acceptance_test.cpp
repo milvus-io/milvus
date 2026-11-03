@@ -405,16 +405,6 @@ class TrackingReader final : public index::IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {};
-    }
-
  private:
     int64_t count_;
     std::shared_ptr<int> lifetime_;

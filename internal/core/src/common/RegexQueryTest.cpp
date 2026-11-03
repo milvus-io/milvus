@@ -241,14 +241,6 @@ class StringValueOnlyReader final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     std::optional<std::string>
     Lookup(int64_t offset) const override {

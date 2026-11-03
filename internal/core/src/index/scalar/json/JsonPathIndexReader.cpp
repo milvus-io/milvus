@@ -102,44 +102,6 @@ ValueTypeMatchesCast(DataType value_type, JsonCastType cast_type) {
     }
 }
 
-size_t
-StringHeapBytes(const std::string& value) {
-    const auto inline_capacity = std::string{}.capacity();
-    if (value.capacity() <= inline_capacity) {
-        return 0;
-    }
-    if (value.capacity() == std::numeric_limits<size_t>::max()) {
-        ThrowInfo(DataFormatBroken,
-                  "typed JSON projection path memory size overflows");
-    }
-    return value.capacity() + 1;
-}
-
-void
-AddSize(size_t& total, size_t bytes, std::string_view object) {
-    if (bytes > std::numeric_limits<size_t>::max() - total) {
-        ThrowInfo(DataFormatBroken, "{} memory size overflows", object);
-    }
-    total += bytes;
-}
-
-int64_t
-ToUsageBytes(size_t bytes, std::string_view object) {
-    if (bytes > static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
-        ThrowInfo(
-            DataFormatBroken, "{} memory size exceeds int64 domain", object);
-    }
-    return static_cast<int64_t>(bytes);
-}
-
-int64_t
-AddUsageBytes(int64_t base, int64_t extra, std::string_view object) {
-    if (extra > std::numeric_limits<int64_t>::max() - base) {
-        ThrowInfo(DataFormatBroken, "{} memory usage overflows", object);
-    }
-    return base + extra;
-}
-
 }  // namespace
 
 DataType
@@ -266,15 +228,6 @@ JsonPathIndex::JsonPathIndex(IndexPtr inner,
     const auto& bitmap = std::get<std::shared_ptr<const TargetBitmap>>(exists_);
     AssertInfo(bitmap && bitmap->size() == spec_.RowCount(),
                "typed JSON existence bitmap count mismatch");
-    size_t own_heap = sizeof(JsonPathIndex);
-    AddSize(
-        own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
-    AddSize(own_heap, sizeof(TargetBitmap), "typed JSON projection");
-    AddSize(
-        own_heap,
-        std::get<std::shared_ptr<const TargetBitmap>>(exists_)->size_in_bytes(),
-        "typed JSON projection");
-    heap_bytes_ = ToUsageBytes(own_heap, "typed JSON projection");
 }
 
 std::shared_ptr<const TargetBitmap>
@@ -299,10 +252,6 @@ JsonPathIndex::JsonPathIndex(IndexPtr inner,
     AssertInfo(static_cast<bool>(std::get<PinExists>(exists_)),
                "typed JSON projection requires an existence accessor");
     spec_.ValidateInner(inner_->Metadata());
-    size_t own_heap = sizeof(JsonPathIndex);
-    AddSize(
-        own_heap, StringHeapBytes(spec_.JsonPath()), "typed JSON projection");
-    heap_bytes_ = ToUsageBytes(own_heap, "typed JSON projection");
 }
 
 IndexMetadata
@@ -349,24 +298,6 @@ JsonPathIndexReader::Count() const {
 DataType
 JsonPathIndexReader::ValueType() const {
     return inner_->ValueType();
-}
-
-int64_t
-JsonPathIndexReader::MemoryUsage() const {
-    const auto inner_heap = inner_->MemoryUsage();
-    AssertInfo(inner_heap >= 0,
-               "typed JSON projection inner reader reported negative resource usage");
-    return AddUsageBytes(inner_heap, index_->heap_bytes_, "typed JSON projection");
-}
-
-cachinglayer::ResourceUsage
-JsonPathIndexReader::CellByteSize() const {
-    const auto usage = inner_->CellByteSize();
-    AssertInfo(usage.memory_bytes >= 0 && usage.file_bytes >= 0,
-               "typed JSON projection inner reader reported negative resource usage");
-    return {AddUsageBytes(usage.memory_bytes, index_->heap_bytes_,
-                          "typed JSON projection"),
-            usage.file_bytes};
 }
 
 JsonResolvedReader

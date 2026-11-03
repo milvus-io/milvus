@@ -16,6 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/spatial/RTreeIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -299,10 +302,18 @@ ConcreteRTreeCases() {
                 Observe<std::string_view>{
                     .capability = &ReaderCaps::spatial,
                     .run =
-                        [](const ReaderBackend&,
-                           const ScalarTestData<std::string_view>&,
-                           IIndexReaderBasePtr& reader) {
-                            EXPECT_EQ(reader->CellByteSize().file_bytes, 0);
+                        [](const ReaderBackend& backend,
+                           const ScalarTestData<std::string_view>& data,
+                           IIndexReaderBasePtr&) {
+                            const ScalarTestInput<std::string_view> input(data);
+                            auto artifact = backend.Build(
+                                input.View(),
+                                {.row_count = data.values.size()});
+                            auto storage = OpenV3Storage<RTreeIndexLoader>(
+                                backend,
+                                SerializeV3(*artifact),
+                                {.row_count = data.values.size()});
+                            EXPECT_EQ(storage->CellByteSize().file_bytes, 0);
                         },
                 },
         });

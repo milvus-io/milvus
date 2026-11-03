@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "cachinglayer/Utils.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -172,12 +174,6 @@ class MarisaIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     TargetBitmap
     In(size_t n, const std::string_view* values) const override;

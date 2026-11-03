@@ -307,18 +307,6 @@ MarisaIndexStorage::CellByteSize() const {
     return {ToUsageBytes(bytes), ToUsageBytes(file_backed_bytes)};
 }
 
-int64_t
-MarisaIndexReader::MemoryUsage() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    return storage->CellByteSize().memory_bytes;
-}
-
-cachinglayer::ResourceUsage
-MarisaIndexReader::CellByteSize() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    return storage->CellByteSize();
-}
-
 TargetBitmap
 MarisaIndexReader::In(size_t n, const std::string_view* values) const {
     AssertInfo(n == 0 || values != nullptr,

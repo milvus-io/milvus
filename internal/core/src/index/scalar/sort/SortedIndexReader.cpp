@@ -883,20 +883,6 @@ SortedIndexStorage<T>::CellByteSize() const {
 }
 
 template <typename T>
-int64_t
-SortedIndexReader<T>::MemoryUsage() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    return storage->CellByteSize().memory_bytes;
-}
-
-template <typename T>
-cachinglayer::ResourceUsage
-SortedIndexReader<T>::CellByteSize() const {
-    const auto storage = index_->PinStorage(op_ctx_);
-    return storage->CellByteSize();
-}
-
-template <typename T>
 TargetBitmap
 SortedIndexReader<T>::In(size_t n, const T* values) const {
     const auto storage = index_->PinStorage(op_ctx_);

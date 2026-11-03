@@ -195,12 +195,6 @@ class FmIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     // ---- IPatternMatchReader -------------------------------------
 
     // PrefixMatch / PostfixMatch / InnerMatch are answered EXACTLY. General

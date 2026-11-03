@@ -312,16 +312,6 @@ TextIndexReader::ValueType() const {
     return index_->Metadata().value_type;
 }
 
-int64_t
-TextIndexReader::MemoryUsage() const {
-    return index_->PinStorage(op_ctx_)->MemoryUsage();
-}
-
-cachinglayer::ResourceUsage
-TextIndexReader::CellByteSize() const {
-    return index_->PinStorage(op_ctx_)->CellByteSize();
-}
-
 TargetBitmap
 TextIndexReader::MatchQuery(std::string_view query,
                             uint32_t min_should_match) const {

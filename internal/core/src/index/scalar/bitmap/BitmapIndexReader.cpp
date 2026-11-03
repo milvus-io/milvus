@@ -223,20 +223,6 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         return index_->Metadata().value_type;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        const auto pin = index_->PinStorage(op_ctx_);
-        const auto& storage = *pin;
-        return storage.CellByteSize().memory_bytes;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        const auto pin = index_->PinStorage(op_ctx_);
-        const auto& storage = *pin;
-        return storage.CellByteSize();
-    }
-
     TargetBitmap
     In(size_t n, const T* values) const override {
         const auto pin = index_->PinStorage(op_ctx_);

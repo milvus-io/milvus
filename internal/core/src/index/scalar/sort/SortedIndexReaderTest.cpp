@@ -16,6 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/sort/SortedIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include <array>
 #include <algorithm>
 #include <cstdint>
@@ -234,12 +237,14 @@ TEST(SortedIndexReaderTest, MmapAccountsValidityWordOnce) {
     data.validity.reset(0);
     const ScalarTestInput<int64_t> input(data);
     auto artifact = backend.Build(input.View(), {.row_count = rows});
-    auto reader = OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
-    ASSERT_NE(reader, nullptr);
-    const auto usage = reader->CellByteSize();
+    auto storage = OpenV3Storage<SortedIndexLoader, int64_t>(
+        backend, SerializeV3(*artifact), {.row_count = rows});
+    const auto usage = storage->CellByteSize();
     EXPECT_EQ(usage.memory_bytes,
               static_cast<int64_t>(TargetBitmap(rows).size_in_bytes()));
     EXPECT_GT(usage.file_bytes, 0);
+    auto index = std::make_shared<SortedIndex<int64_t>>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
     const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
     ASSERT_NE(nulls, nullptr);
     ExpectHits(nulls->IsNull(), rows, {0});

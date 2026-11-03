@@ -16,6 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/bitmap/BitmapIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -276,8 +279,12 @@ TEST(BitmapIndexReaderTest, NullablePackedWordBoundaryKeepsFinalAllocation) {
             data.validity.reset(0);
             const ScalarTestInput<int32_t> input(data);
             auto artifact = backend.Build(input.View(), {.row_count = rows});
-            auto reader =
-                OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
+            auto storage =
+                OpenV3Storage<BitmapIndexLoader, int32_t, TargetBitmap>(
+                    backend, SerializeV3(*artifact), {.row_count = rows});
+            resident[rows == 64 ? 0 : 1] = storage->CellByteSize().memory_bytes;
+            auto index = CreateBitmapIndex(std::move(storage));
+            auto reader = index->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
             const auto* predicate =
@@ -288,7 +295,6 @@ TEST(BitmapIndexReaderTest, NullablePackedWordBoundaryKeepsFinalAllocation) {
             ExpectHits(nulls->IsNull(), rows, {0});
             const int32_t key = 7;
             EXPECT_EQ(predicate->In(1, &key).count(), rows - 1);
-            resident[rows == 64 ? 0 : 1] = reader->CellByteSize().memory_bytes;
         }
         // The 65th row expands one validity word and one dense posting word.
         // Retaining a second validity staging buffer would add another word.

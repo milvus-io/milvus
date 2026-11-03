@@ -65,16 +65,6 @@ class CountingScalarReader final : public index::IIndexReaderBase,
         return reader_->ValueType();
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
-
     TargetBitmap
     In(size_t count, const T* values) const override {
         return predicates_.In(count, values);

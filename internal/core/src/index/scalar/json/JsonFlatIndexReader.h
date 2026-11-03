@@ -167,12 +167,6 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     // Field-level validity. Path-bound readers intentionally expose a
     // different INullReader view: comparable values at that path.
     TargetBitmap

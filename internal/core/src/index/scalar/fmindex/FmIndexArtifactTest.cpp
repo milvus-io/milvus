@@ -15,6 +15,10 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include "index/scalar/fmindex/FmIndexReader.h"
+
+#include "index/scalar/fmindex/FmIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -179,16 +183,19 @@ TEST_P(FmIndexV3OwnershipTest, ReaderOwnsPersistedState) {
     EXPECT_EQ(persisted.metadata.at(std::string(kTotalRowsMeta)), 9);
     EXPECT_EQ(persisted.metadata.at(std::string(kNullableMeta)), true);
 
-    auto reader = OpenV3(
-        backend, persisted, {.row_count = 9, .values = Config::object()});
+    auto storage =
+        OpenV3Storage<FmIndexLoader>(backend, persisted, {.row_count = 9});
+    const auto usage = storage->CellByteSize();
+    auto index = std::make_shared<FmIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
     artifact.reset();
     persisted.entries.clear();
     persisted.metadata.clear();
     ASSERT_NE(reader, nullptr);
     ExpectFmQueries(*reader, 2);
-    EXPECT_GE(reader->MemoryUsage(), 0);
+    EXPECT_GE(usage.memory_bytes, 0);
     if (backend.MmapRequested()) {
-        EXPECT_GT(reader->CellByteSize().file_bytes, 0);
+        EXPECT_GT(usage.file_bytes, 0);
     }
 }
 

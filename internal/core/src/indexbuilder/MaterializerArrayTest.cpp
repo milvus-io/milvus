@@ -191,7 +191,6 @@ TEST(MaterializerArrayTest,
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
         EXPECT_EQ(reader->Count(), 5);
-        EXPECT_GT(reader->MemoryUsage(), 0);
         ExpectNestedHits<int32_t>(*reader, 10, {0});
         ExpectNestedHits<int32_t>(*reader, 20, {1, 2});
         ExpectNestedHits<int32_t>(*reader, 30, {3, 4});

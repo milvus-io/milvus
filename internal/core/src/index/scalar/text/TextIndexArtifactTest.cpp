@@ -18,6 +18,9 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/text/TextIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include <string>
 #include <string_view>
 #include <utility>
@@ -310,6 +313,25 @@ BuildText(const ReaderBackend& backend, bool nullable) {
     data.batch_sizes = {1, 2};
     const ScalarTestInput<std::string_view> input(data);
     return backend.Build(input.View(), {.row_count = data.values.size()});
+}
+
+TEST(TextIndexArtifactTest, PackedStorageAccountsNullableHeapAndMmap) {
+    for (const auto name : {"TextVarcharV7Heap", "TextVarcharV7Mmap"}) {
+        const auto& backend =
+            ScalarReaderBackends().Get<std::string_view>(name);
+        auto artifact = BuildText(backend, true);
+        auto storage = OpenV3Storage<TextIndexLoader>(
+            backend, SerializeV3(*artifact), {.row_count = 3});
+        const auto usage = storage->CellByteSize();
+        EXPECT_EQ(usage.memory_bytes, storage->MemoryUsage());
+        EXPECT_GE(usage.memory_bytes, TargetBitmap(3).size_in_bytes());
+        EXPECT_EQ(usage.file_bytes > 0, backend.MmapRequested());
+        auto index = std::make_shared<TextIndex>(std::move(storage));
+        auto reader = index->CreateReader(nullptr);
+        const auto* text = dynamic_cast<const ITextMatchReader*>(reader.get());
+        ASSERT_NE(text, nullptr);
+        EXPECT_EQ(text->MatchQuery("alpha", 1).count(), 2);
+    }
 }
 
 TEST(TextIndexArtifactTest, LegacyV5DirectoryAndValidityRoundTrip) {

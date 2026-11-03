@@ -79,16 +79,6 @@ class LifetimeReader final : public IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {};
-    }
-
     milvus::OpContext*
     Context() const {
         return op_ctx_;

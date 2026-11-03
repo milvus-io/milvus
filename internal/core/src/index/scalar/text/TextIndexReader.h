@@ -178,13 +178,7 @@ class TextIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
     // ---- Resource accounting -----------------------------------------------
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     // ---- ITextMatchReader ----------------------------------------
 

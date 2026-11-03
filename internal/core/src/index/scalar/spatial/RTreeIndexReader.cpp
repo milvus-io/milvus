@@ -252,11 +252,6 @@ RTreeIndexReader::ValueType() const {
     return DataType::GEOMETRY;
 }
 
-int64_t
-RTreeIndexReader::MemoryUsage() const {
-    return index_->PinStorage(op_ctx_)->MemoryUsage();
-}
-
 cachinglayer::ResourceUsage
 RTreeIndexState::CellByteSize() const {
     // Every referenced Boost shard is resident. No mmap/file-backed bytes
@@ -265,10 +260,6 @@ RTreeIndexState::CellByteSize() const {
     // growing accounting must take the union of shared engine and validity-buffer
     // owners. The embedded validity snapshot is included in sizeof(state).
     return {MemoryUsage(), 0};
-}
-cachinglayer::ResourceUsage
-RTreeIndexReader::CellByteSize() const {
-    return index_->PinStorage(op_ctx_)->CellByteSize();
 }
 
 TargetBitmap

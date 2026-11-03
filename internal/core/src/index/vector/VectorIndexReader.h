@@ -110,9 +110,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     ~VectorIndexReader() override = default;
 
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     ReaderCaps
     Caps() const override;
 
@@ -124,9 +121,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
 
     void
     Search(const DatasetPtr& dataset,

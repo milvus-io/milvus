@@ -489,14 +489,6 @@ class ArrayEqualityCountingIndex final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     TargetBitmap
     In(size_t n, const int64_t* values) const override {
@@ -4192,7 +4184,7 @@ TEST(Expr, TestArrayContainsForStruct) {
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.num_rows = N;
-    load_index_info.index_size = indexing->MemoryUsage();
+    load_index_info.index_size = 0;  // Resident fixture has no persisted files.
     SetTestIndexMetadata(
         load_index_info, *indexing, index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());

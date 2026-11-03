@@ -166,12 +166,6 @@ class NgramIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     // ---- INgramReader --------------------------------------------
 
     // Per-literal eligibility, including min_gram and extractable regex fragments.

@@ -127,7 +127,6 @@ class JsonPathIndex final : public IIndex,
     IndexPtr inner_;
     JsonProjectedIndexSpec spec_;
     std::variant<std::shared_ptr<const TargetBitmap>, PinExists> exists_;
-    int64_t heap_bytes_{0};
 };
 
 // Path router for one ordinary typed reader. Predicate/pattern/ngram
@@ -150,12 +149,6 @@ class JsonPathIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     JsonResolvedReader
     Resolve(std::string_view path, JsonCastType cast_type) const override;

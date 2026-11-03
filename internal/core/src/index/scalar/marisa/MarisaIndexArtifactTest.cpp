@@ -15,6 +15,11 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include "index/scalar/marisa/MarisaIndexReader.h"
+
+#include "index/scalar/marisa/MarisaIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include "folly/ScopeGuard.h"
 
 #include <cstddef>
@@ -167,15 +172,18 @@ TEST(MarisaIndexArtifactTest, V3MmapReaderOwnsPersistedState) {
     EXPECT_GT(
         persisted.metadata.at(std::string(kCsrNumKeysMeta)).get<uint64_t>(), 0);
 
-    auto reader = OpenV3(
-        backend, persisted, {.row_count = 5, .values = Config::object()});
+    auto storage =
+        OpenV3Storage<MarisaIndexLoader>(backend, persisted, {.row_count = 5});
+    const auto usage = storage->CellByteSize();
+    auto index = std::make_shared<MarisaIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
     artifact.reset();
     persisted.entries.clear();
     persisted.metadata.clear();
     ASSERT_NE(reader, nullptr);
     ExpectBetaRows(*reader);
-    EXPECT_GE(reader->MemoryUsage(), 0);
-    EXPECT_GT(reader->CellByteSize().file_bytes, 0);
+    EXPECT_GE(usage.memory_bytes, 0);
+    EXPECT_GT(usage.file_bytes, 0);
 }
 
 TEST(MarisaIndexArtifactTest, AsyncHeapAndMmapRoundTrip) {

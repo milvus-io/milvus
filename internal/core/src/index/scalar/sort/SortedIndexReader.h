@@ -341,12 +341,6 @@ class SortedIndexReader final
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     TargetBitmap
     In(size_t n, const T* values) const override;
 

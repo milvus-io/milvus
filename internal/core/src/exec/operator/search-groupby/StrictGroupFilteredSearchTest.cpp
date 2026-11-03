@@ -129,14 +129,6 @@ class CountingScalarReader final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     TargetBitmap
     In(size_t n, const int64_t* values) const override {

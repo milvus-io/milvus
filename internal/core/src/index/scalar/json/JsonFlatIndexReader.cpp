@@ -304,20 +304,6 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
         return static_cast<int64_t>(state_->Count());
     }
 
-    int64_t
-    MemoryUsage() const override {
-        // Shared engine/directory bytes belong to the root cache cell. This
-        // view still reports its own object and bound-path allocation.
-        size_t bytes = ObjectBytes();
-        AddBytes(bytes, StringHeapBytes(tantivy_path_), "JSON path reader");
-        return ToUsageBytes(bytes, "JSON path reader");
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {MemoryUsage(), 0};
-    }
-
     TargetBitmap
     IsNull() const override {
         auto result = IsNotNull();
@@ -348,9 +334,6 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
     Path() const {
         return tantivy_path_;
     }
-
-    virtual size_t
-    ObjectBytes() const = 0;
 
  private:
     std::shared_ptr<const JsonFlatIndexStorage> state_;
@@ -384,11 +367,6 @@ class JsonBoolPathReader final : public JsonPathReaderBase,
     DataType
     ValueType() const override {
         return DataType::BOOL;
-    }
-
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonBoolPathReader);
     }
 
     TargetBitmap
@@ -699,11 +677,6 @@ class JsonNumericPathReader final : public JsonPathReaderBase,
         return DataType::DOUBLE;
     }
 
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonNumericPathReader);
-    }
-
     TargetBitmap
     In(size_t n, const int64_t* values) const override {
         return InNumeric(n, values);
@@ -953,11 +926,6 @@ class JsonStringPathReader final
     DataType
     ValueType() const override {
         return DataType::VARCHAR;
-    }
-
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonStringPathReader);
     }
 
     TargetBitmap
@@ -1212,16 +1180,6 @@ JsonFlatIndexReader::Count() const {
 DataType
 JsonFlatIndexReader::ValueType() const {
     return DataType::JSON;
-}
-
-int64_t
-JsonFlatIndexReader::MemoryUsage() const {
-    return index_->PinStorage(op_ctx_)->HeapBytes();
-}
-
-cachinglayer::ResourceUsage
-JsonFlatIndexReader::CellByteSize() const {
-    return index_->PinStorage(op_ctx_)->CellByteSize();
 }
 
 TargetBitmap

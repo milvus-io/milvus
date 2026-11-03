@@ -144,12 +144,6 @@ class RTreeIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     // ---- ISpatialReader ------------------------------------------
 
     // Return candidate bits in the reader's domain; execution iterates hits and

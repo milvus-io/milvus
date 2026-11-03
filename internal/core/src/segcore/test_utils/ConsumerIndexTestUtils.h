@@ -193,7 +193,6 @@ MakeLoadIndexInfo(OpenedIndex opened,
     // retain the logical parent-row count from the build input.
     info.num_rows =
         opened.params.value(INDEX_NUM_ROWS_KEY, opened.reader->Count());
-    info.index_size = opened.reader->MemoryUsage();
     if (const auto* vector =
             dynamic_cast<const index::IVectorReader*>(opened.reader.get())) {
         info.dim = vector->Dim();

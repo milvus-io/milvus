@@ -84,14 +84,6 @@ class InterceptedSpatialCandidates final : public index::IIndexReaderBase,
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
     TargetBitmap
     Candidates(index::SpatialOp op, const Geometry& query) const override {
         auto candidates =

@@ -338,20 +338,6 @@ NgramIndexReader::ValueType() const {
     return index_->Metadata().value_type;
 }
 
-int64_t
-NgramIndexReader::MemoryUsage() const {
-    const auto pin = index_->PinStorage(op_ctx_);
-    const auto& storage = *pin;
-    return storage.MemoryUsage();
-}
-
-cachinglayer::ResourceUsage
-NgramIndexReader::CellByteSize() const {
-    const auto pin = index_->PinStorage(op_ctx_);
-    const auto& storage = *pin;
-    return storage.CellByteSize();
-}
-
 bool
 NgramIndexReader::CanHandle(std::string_view literal, PatternOp op) const {
     const auto [min_gram, max_gram] = index_->GramBounds();
