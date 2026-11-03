@@ -2056,8 +2056,12 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats: use JSON statistics to skip segments when possible.
-    if (CanUseJsonStatsAtInit()) {
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        CanUseJsonStatsAtInit() &&
+        (JsonNumericBoundRequiresPreciseInt64Comparison(expr_->val_) ||
+         (expr_->val_.has_string_val() && !IsCompareOp(expr_->op_type_)))) {
+        // shortcut: flat-index patterns can panic and DOUBLE projections lose
+        // integer precision; keep stats until index execution is exact and safe.
         exec_path_ = ExprExecPath::JsonStats;
         return;
     }

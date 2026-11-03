@@ -499,6 +499,8 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     void
     DetermineExecPath() override {
         if (CanUseJsonStatsAtInit()) {
+            // shortcut: array projection validity is unavailable before pinning
+            // on this branch; keep stats until metadata can select a safe index.
             exec_path_ = ExprExecPath::JsonStats;
             return;
         }
