@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -580,20 +581,69 @@ func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
 			suite.Nil(nullVec.GetVectors().GetData())
 		})
 
-		suite.Run(tc.name+"_no_rows", func() {
-			reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(tc.groupSize)
-			if tc.groupSize > 1 {
-				reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
-			}
-			inputs := []*schemapb.SearchResultData{presizeReduceInput(nil, nil, nil)}
-			inputs[0].Topks = []int64{0}
-			res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(context.TODO(), inputs, reduceInfo)
-			suite.Require().NoError(err)
-			suite.Len(res.GetFieldsData(), 3)
-			for _, fd := range res.GetFieldsData() {
-				suite.Nil(fd)
-			}
-		})
+		for _, emptyCase := range []struct {
+			name            string
+			pkType          schemapb.DataType
+			firstFieldsData bool
+		}{
+			{"Int64", schemapb.DataType_Int64, true},
+			{"VarChar", schemapb.DataType_VarChar, true},
+			{"Int64_first_without_fields", schemapb.DataType_Int64, false},
+			{"VarChar_first_without_fields", schemapb.DataType_VarChar, false},
+		} {
+			suite.Run(tc.name+"_no_rows_"+emptyCase.name, func() {
+				pkType := emptyCase.pkType
+				reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(tc.groupSize)
+				if tc.groupSize > 1 {
+					reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
+				}
+				inputs := []*schemapb.SearchResultData{
+					presizeReduceInput(nil, nil, nil),
+					presizeReduceInput(nil, nil, nil),
+				}
+				for _, input := range inputs {
+					if pkType == schemapb.DataType_VarChar {
+						input.FieldsData[0].Type = pkType
+						input.FieldsData[0].GetScalars().Data = &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{},
+						}
+					}
+				}
+				if !emptyCase.firstFieldsData {
+					// The column template must come from the later shard result.
+					inputs[0].FieldsData = nil
+				}
+				res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(suite.T().Context(), inputs, reduceInfo)
+				suite.Require().NoError(err)
+
+				// Check the wire representation consumed by Proxy, where nil columns
+				// otherwise become FieldData messages without IDs, names or types.
+				blob, err := proto.Marshal(res)
+				suite.Require().NoError(err)
+				decoded := &schemapb.SearchResultData{}
+				suite.Require().NoError(proto.Unmarshal(blob, decoded))
+				suite.Equal([]int64{0}, decoded.GetTopks())
+				suite.Empty(decoded.GetScores())
+				suite.Zero(typeutil.GetSizeOfIDs(decoded.GetIds()))
+				suite.Require().Len(decoded.GetFieldsData(), 3)
+				for i, fd := range decoded.GetFieldsData() {
+					sample := inputs[1].GetFieldsData()[i]
+					suite.Equal(sample.GetFieldId(), fd.GetFieldId())
+					suite.Equal(sample.GetFieldName(), fd.GetFieldName())
+					suite.Equal(sample.GetType(), fd.GetType())
+				}
+				pk, err := typeutil.GetPrimaryFieldData(decoded.GetFieldsData(), &schemapb.FieldSchema{
+					FieldID: 100, Name: "pk", DataType: pkType, IsPrimaryKey: true,
+				})
+				suite.Require().NoError(err)
+				suite.Require().NotNil(pk.GetScalars().GetData())
+				suite.Zero(typeutil.GetPKSize(pk))
+				for _, fd := range decoded.GetFieldsData()[1:] {
+					suite.EqualValues(dim, fd.GetVectors().GetDim())
+					suite.Empty(fd.GetVectors().GetFloatVector().GetData())
+				}
+			})
+		}
 	}
 }
 
