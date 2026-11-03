@@ -357,12 +357,12 @@ func TestResetBeforeTheEnableDoesNothing(t *testing.T) {
 	_, err = idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 21})
 	require.NoError(t, err)
 
-	dirtied, err := idx.Reset(ctx, 19)
+	dirtied, err := idx.TruncateUntil(ctx, 19)
 	require.NoError(t, err)
 	assert.False(t, dirtied)
 	assert.True(t, presentIn(t, idx, 1), "a truncate before the enable keeps the keys")
 
-	dirtied, err = idx.Reset(ctx, 22)
+	dirtied, err = idx.TruncateUntil(ctx, 22)
 	require.NoError(t, err)
 	assert.False(t, dirtied, "the Index is dirty already from the write")
 	assert.False(t, presentIn(t, idx, 1), "a truncate after the enable forgets the keys")

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // Put is one key that a message inserts, with the segment of the row.
@@ -101,4 +102,46 @@ func (idx *Index) write(ctx context.Context, muts []engine.Mutation) error {
 		(*hook)(muts)
 	}
 	return idx.eng.Write(ctx, muts)
+}
+
+// TruncateUntil empties the Index at tt, the time tick of a
+// TruncateCollection of its vchannel. The observe of the WAL recovery calls
+// it in time tick order, so the writes before tt are in the engine before it,
+// and the writes after tt reach the engine after it. It keeps the Decider:
+// its in-flight set may hold writes after tt, which the append path decided
+// already.
+//
+// It empties the engine (see engine.Lifecycle.Reset), forgets the recovered
+// manifest and the installed tables, and drops a prepared handover: its
+// tables are from before tt. The next handover commits the truncate: its
+// flush replaces the committed table set (see manifest.FlushArgs.ResetTimeTick). A
+// handover that runs at the same time installs nothing, see commit.
+//
+// It does nothing when tt <= LastCommittedTimeTick: a committed manifest
+// covers tt, and the flush that committed it carried the reset or came after
+// the flush that did. This happens when the recovery replays the WAL from a
+// checkpoint before a truncate whose reset is committed. It also does nothing
+// for a truncate before CheckpointTimeTick: the Index holds no write before it.
+//
+// It reports whether the Index went from clean to dirty, so that the caller
+// adds it to the LastAcked heap of the pchannel.
+func (idx *Index) TruncateUntil(ctx context.Context, tt uint64) (dirtied bool, err error) {
+	idx.installMu.Lock()
+	defer idx.installMu.Unlock()
+	if tt <= idx.LastCommittedTimeTick() || tt < idx.cfg.CheckpointTimeTick {
+		return false, nil
+	}
+	if err := idx.closedOr(nil); err != nil {
+		return false, err
+	}
+	if err := idx.eng.Reset(ctx); err != nil {
+		return false, err
+	}
+	idx.resetTT.Store(tt)
+	idx.resetEpoch++
+	idx.recovered = nil
+	idx.installedPaths = nil
+	idx.pending.Store(nil)
+	idx.logger.Info(ctx, "primary key index truncated", mlog.Uint64("resetTimeTick", tt))
+	return idx.markDirty(), nil
 }

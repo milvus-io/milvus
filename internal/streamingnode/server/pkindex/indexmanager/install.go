@@ -14,16 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package recovery
+package indexmanager
 
 import (
 	"context"
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/manifest"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -31,13 +31,43 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
+// The classes of a fatal error, see ErrorClass and the pkindex_fatal_total metric.
+const (
+	ErrorClassCorrupted   = "corrupted"
+	ErrorClassIO          = "io"
+	ErrorClassClosed      = "closed"
+	ErrorClassCanceled    = "canceled"
+	ErrorClassUnavailable = "unavailable"
+	ErrorClassOther       = "other"
+)
+
+// ErrorClass classifies an error by the markers of the pkindex packages, the
+// most specific first. The recovery and the install task record it in the
+// fatal metric and use it to decide whether the WAL becomes unavailable.
+func ErrorClass(err error) string {
+	switch {
+	case errors.Is(err, pkroot.ErrCorrupted):
+		return ErrorClassCorrupted
+	case errors.Is(err, engine.ErrClosed):
+		return ErrorClassClosed
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return ErrorClassCanceled
+	case errors.Is(err, pkroot.ErrIO):
+		return ErrorClassIO
+	case errors.Is(err, pkroot.ErrUnavailable):
+		return ErrorClassUnavailable
+	default:
+		return ErrorClassOther
+	}
+}
+
 // installTask installs the committed table set of one Index and marks it
 // ready. A transient error retries with backoff until the task is canceled
 // or the Index closes; a fatal one (a missing or corrupted object) goes to
 // OnFatal.
 type installTask struct {
 	idx     *index.Index
-	params  func() indexmanager.Params
+	params  func() Params
 	onFatal func(error)
 	logger  *mlog.Logger
 }
@@ -67,7 +97,7 @@ func (t *installTask) Execute(ctx context.Context) error {
 	if err == nil || ctx.Err() != nil || errors.Is(err, engine.ErrClosed) {
 		return nil
 	}
-	class := errorClass(err)
+	class := ErrorClass(err)
 	t.logger.Error(ctx, "primary key index install failed, the WAL becomes unavailable", mlog.FieldVChannel(t.idx.VChannel()), mlog.String("class", class), mlog.Err(err))
 	metrics.StreamingNodePKIndexFatalTotal.WithLabelValues(paramtable.GetStringNodeID(), class).Inc()
 	t.onFatal(err)

@@ -314,7 +314,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		summaryManager.InitLastAcked(r.checkpoint.TimeTick)
 	}
 	if mgr := resource.Resource().PKIndexManager(); mgr != nil {
-		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.Param{
+		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.RecoverConfig{
 			PChannelConfig: indexmanager.PChannelConfig{
 				PChannel:      r.channel,
 				Seed:          r.checkpoint.TimeTick,
@@ -322,10 +322,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 				VChannelState: pkindexVChannelState(manager),
 			},
 			Metas: vchannels,
-			Sched: r.nodeScheduler,
 			Tail:  r.pkindexTailLocked,
-
-			ManifestReadConcurrency: paramtable.Get().StreamingCfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt(),
 		})
 		if err != nil {
 			return merr.Wrap(err, "recover the primary key index")

@@ -65,15 +65,16 @@ func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(conte
 		return nil, nil, err
 	}
 	mgr := NewManager(ManagerConfig{
-		Root:            root,
-		Shared:          shared,
-		AllocID:         allocID,
-		Store:           store,
-		StorageRootPath: cm.RootPath(),
-		Committer:       committer,
-		Reader:          store,
-		Sched:           nodescheduler.Get(),
-		Params:          ParamsFromConfig,
+		Root:                    root,
+		Shared:                  shared,
+		AllocID:                 allocID,
+		Store:                   store,
+		StorageRootPath:         cm.RootPath(),
+		Committer:               committer,
+		Reader:                  store,
+		Sched:                   nodescheduler.Get(),
+		ManifestReadConcurrency: cfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt(),
+		Params:                  ParamsFromConfig,
 	})
 	mlog.Info(ctx, "primary key index manager created", mlog.String("root", root),
 		mlog.Int64("blockCacheBytes", cfg.PKIndexBlockCacheSize.GetAsSize()), mlog.Int("maxOpenFiles", maxOpenFiles))

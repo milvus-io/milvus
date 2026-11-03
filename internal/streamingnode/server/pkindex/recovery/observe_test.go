@@ -279,10 +279,10 @@ func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHisto
 // states of states.
 func recoverWithStates(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) *Recovery {
 	ctx := context.Background()
-	rec, err := Recover(ctx, env.Manager, Param{
+	env.Manager.SetSchedForTest(sched)
+	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, VChannelState: states.get},
 		Metas:          metas,
-		Sched:          sched,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
@@ -351,10 +351,10 @@ func segmentOf(t *testing.T, idx *index.Index, pk int64) int64 {
 
 func recoverV1(t *testing.T, env *indexmanager.FakeEnv, sched nodescheduler.Scheduler) *Recovery {
 	ctx := context.Background()
-	rec, err := Recover(ctx, env.Manager, Param{
+	env.Manager.SetSchedForTest(sched)
+	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
-		Sched:          sched,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
@@ -387,10 +387,9 @@ func TestObserveReplaysLikeTheAppendPath(t *testing.T) {
 func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
-	rec, err := Recover(ctx, env.Manager, Param{
+	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_VarChar, false)},
-		Sched:          env.Manager.Scheduler(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
@@ -481,7 +480,7 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 	ctx := context.Background()
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	var fatals []error
-	rec, err := Recover(ctx, env.Manager, Param{
+	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: func(err error) { fatals = append(fatals, err) }},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
 	})
@@ -667,10 +666,9 @@ func TestObserveFlushRequestsACoveringHandover(t *testing.T) {
 // recoverV1WithFatal is recoverV1 with an OnFatal handler.
 func recoverV1WithFatal(t *testing.T, env *indexmanager.FakeEnv, onFatal func(error)) *Recovery {
 	ctx := context.Background()
-	rec, err := Recover(ctx, env.Manager, Param{
+	rec, err := Recover(ctx, env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, OnFatal: onFatal},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)},
-		Sched:          env.Manager.Scheduler(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { rec.Close(ctx) })
@@ -781,10 +779,9 @@ func TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey(t *testing.T) {
 	env := indexmanager.NewFakeEnv(t, t.TempDir())
 	meta := testMeta("a", 1, schemapb.DataType_Int64, false)
 	meta.CollectionInfo.PkIndex.FieldId = 101
-	_, err := Recover(context.Background(), env.Manager, Param{
+	_, err := Recover(context.Background(), env.Manager, RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
 		Metas:          map[string]*streamingpb.VChannelMeta{"a": meta},
-		Sched:          env.Manager.Scheduler(),
 	})
 	require.Error(t, err)
 	assert.Nil(t, env.Manager.GetForTest("p"))

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -74,8 +75,8 @@ type PChannelIndexManager struct {
 	// of an open happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, detached, the LastAcked heap, schedules, ackedMax,
-	// hadIndex, closed and started.
+	// mu guards indexes, detached, installPending, installHandles, the LastAcked heap,
+	// schedules, ackedMax, hadIndex, closed and started.
 	mu      sync.Mutex
 	indexes map[string]*index.Index
 	// detached are the indexes that DetachIndex removed from indexes and no
@@ -84,6 +85,11 @@ type PChannelIndexManager struct {
 	acked     ackTracker
 	schedules map[*index.Index]*handoverSchedule // the driver bookkeeping of each Index
 	ackedMax  uint64
+	// installPending are the Indexes that RecoverIndexes found a manifest for.
+	// Start submits their installs.
+	installPending []*index.Index
+	// installHandles are the install tasks that Start submitted and Close cancels.
+	installHandles []nodescheduler.TaskHandle
 	// hadIndex is set by the first OpenIndex. Before it, LastAcked
 	// has no index to report on.
 	hadIndex bool
@@ -130,8 +136,9 @@ func errClosed(what string) error {
 	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of %s is closed", what), pkroot.ErrUnavailable)
 }
 
-// Start ends the recovery of the pchannel: it starts the handover driver,
-// and every Index that OpenIndex opens from now on is ready at once.
+// Start ends the recovery of the pchannel: it submits the install of every
+// Index that RecoverIndexes found a manifest for and starts the handover
+// driver, and every Index that OpenIndex opens from now on is ready at once.
 // The recovery calls it once, after it installed and replayed the indexes of
 // the existing collections. No handover runs before it.
 func (c *PChannelIndexManager) Start() {
@@ -144,7 +151,18 @@ func (c *PChannelIndexManager) start(driver bool) {
 	c.mu.Lock()
 	already := c.started
 	c.started = true
+	pending := c.installPending
+	c.installPending = nil
 	c.mu.Unlock()
+	if !already {
+		for _, idx := range pending {
+			if !c.attached(idx) {
+				// the replay dropped the collection meanwhile
+				continue
+			}
+			c.submitInstall(idx)
+		}
+	}
 	if already || !driver {
 		return
 	}
@@ -400,18 +418,18 @@ func (c *PChannelIndexManager) apply(ctx context.Context, idx *index.Index, w in
 	return nil
 }
 
-// ResetIndex empties the Index of a vchannel at tt, the time tick of a
-// TruncateCollection, see index.Index.Reset. It adds the Index to the
-// LastAcked heap when the reset made it dirty, and asks for a handover that
-// covers tt, so the reset commits soon. A vchannel without an Index is
+// TruncateUntil empties the Index of a vchannel at tt, the time tick of a
+// TruncateCollection, see index.Index.TruncateUntil. It adds the Index to the
+// LastAcked heap when the truncate made it dirty, and asks for a handover that
+// covers tt, so the truncate commits soon. A vchannel without an Index is
 // ignored, and so is an Index that a drop detached meanwhile. The observe of
 // the WAL recovery is the only caller.
-func (c *PChannelIndexManager) ResetIndex(ctx context.Context, vchannel string, tt uint64) error {
+func (c *PChannelIndexManager) TruncateUntil(ctx context.Context, vchannel string, tt uint64) error {
 	idx := c.get(vchannel)
 	if idx == nil {
 		return nil
 	}
-	dirtied, err := idx.Reset(ctx, tt)
+	dirtied, err := idx.TruncateUntil(ctx, tt)
 	if err != nil {
 		if errors.Is(err, engine.ErrClosed) && !c.attached(idx) {
 			return nil
@@ -505,6 +523,14 @@ func (c *PChannelIndexManager) observeFlush(idx *index.Index, tt uint64) {
 	}
 }
 
+// submitInstall submits the install of the committed table set of idx to the
+// node scheduler. Start calls it for every Index with a manifest.
+func (c *PChannelIndexManager) submitInstall(idx *index.Index) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.installHandles = append(c.installHandles, c.m.cfg.Sched.Submit(&installTask{idx: idx, params: c.m.cfg.Params, onFatal: c.onFatal, logger: c.logger}))
+}
+
 // Close stops the driver and closes every Index. It keeps the local files.
 func (c *PChannelIndexManager) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)
@@ -516,6 +542,17 @@ func (c *PChannelIndexManager) Close() {
 
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
+	// cancel the install tasks of the pending committed sets
+	c.mu.Lock()
+	handles := c.installHandles
+	c.installHandles = nil
+	c.mu.Unlock()
+	for _, h := range handles {
+		h.Cancel()
+	}
+	for _, h := range handles {
+		_ = h.Wait(c.ctx)
+	}
 	c.mu.Lock()
 	// LastAcked keeps the value of this moment, also when nothing asked for
 	// it before: the heap is about to go

@@ -54,15 +54,15 @@ func presentIn(t *testing.T, idx *index.Index, pk int64) bool {
 	return present
 }
 
-// TestResetForgetsTheKeysBeforeTheTruncate checks that a reset at a truncate
+// TestTruncateUntilForgetsTheKeysBeforeTheTruncate checks that a reset at a truncate
 // empties the index, and that the writes after it count again.
-func TestResetForgetsTheKeysBeforeTheTruncate(t *testing.T) {
+func TestTruncateUntilForgetsTheKeysBeforeTheTruncate(t *testing.T) {
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	require.NoError(t, ch.Apply(ctx, "v0", index.Write{Puts: puts(7, 1), TimeTick: 3}))
 	require.True(t, presentIn(t, idx, 1))
 
-	require.NoError(t, ch.ResetIndex(ctx, "v0", 5))
+	require.NoError(t, ch.TruncateUntil(ctx, "v0", 5))
 	assert.False(t, presentIn(t, idx, 1), "the reset forgets the key before the truncate")
 	assert.Same(t, idx, ch.IndexOf("v0"), "the reset keeps the Index")
 
@@ -72,39 +72,39 @@ func TestResetForgetsTheKeysBeforeTheTruncate(t *testing.T) {
 	assert.Equal(t, uint64(5), scheduleOf(ch, idx).flushTT.Load(), "the reset asks for a handover")
 }
 
-// TestResetKeepsTheInFlightWritesAfterTheTruncate checks that a write that
+// TestTruncateUntilKeepsTheInFlightWritesAfterTheTruncate checks that a write that
 // the append path decided after the truncate stays present: the reset keeps
 // the Decider and its in-flight set.
-func TestResetKeepsTheInFlightWritesAfterTheTruncate(t *testing.T) {
+func TestTruncateUntilKeepsTheInFlightWritesAfterTheTruncate(t *testing.T) {
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	intent, err := idx.Decider().Decide(ctx, dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(9)})
 	require.NoError(t, err)
 	intent.Appended(6)
 
-	require.NoError(t, ch.ResetIndex(ctx, "v0", 5))
+	require.NoError(t, ch.TruncateUntil(ctx, "v0", 5))
 	assert.True(t, presentIn(t, idx, 9), "the in-flight write after the truncate stays")
 }
 
-// TestResetAtOrBeforeTheCommittedCheckpointDoesNothing checks the skip rule
+// TestTruncateUntilAtOrBeforeTheCommittedCheckpointDoesNothing checks the skip rule
 // of a replayed truncate whose reset is committed.
-func TestResetAtOrBeforeTheCommittedCheckpointDoesNothing(t *testing.T) {
+func TestTruncateUntilAtOrBeforeTheCommittedCheckpointDoesNothing(t *testing.T) {
 	ctx := context.Background()
 	_, ch, idx := handoverIndex(t)
 	require.NoError(t, ch.Apply(ctx, "v0", index.Write{Puts: puts(7, 1), TimeTick: 30}))
 	idx.SetLastCommittedForTest(20)
 
-	dirtied, err := idx.Reset(ctx, 20)
+	dirtied, err := idx.TruncateUntil(ctx, 20)
 	require.NoError(t, err)
 	assert.False(t, dirtied)
 	assert.True(t, presentIn(t, idx, 1))
 	assert.Nil(t, idx.PendingForTest())
 }
 
-// TestHandoverCommitsAResetWithoutNewWrites checks that a reset makes the
+// TestHandoverCommitsATruncateWithoutNewWrites checks that a reset makes the
 // next handover send a flush that replaces the table set, even with no
 // table.
-func TestHandoverCommitsAResetWithoutNewWrites(t *testing.T) {
+func TestHandoverCommitsATruncateWithoutNewWrites(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1, 2)
@@ -113,7 +113,7 @@ func TestHandoverCommitsAResetWithoutNewWrites(t *testing.T) {
 	require.NotEmpty(t, env.client.manifest("v0").Tables)
 	before := idx.LastCommittedTimeTick()
 
-	require.NoError(t, ch.ResetIndex(ctx, "v0", 15))
+	require.NoError(t, ch.TruncateUntil(ctx, "v0", 15))
 	assert.Equal(t, before, ch.LastAcked(), "the reset holds LastAcked until it commits")
 	p, err := idx.PrepareForTest(ctx)
 	require.NoError(t, err)
@@ -144,10 +144,10 @@ func TestHandoverCommitsAResetWithoutNewWrites(t *testing.T) {
 	assert.Equal(t, []int64{refIDs(reqs[2].AddTables)[0]}, sstIDs(env.client.manifest("v0")))
 }
 
-// TestResetDuringACommitDropsItsResult checks a handover whose flush is in
+// TestTruncateDuringACommitDropsItsResult checks a handover whose flush is in
 // flight when the reset runs: it installs nothing and does not move
 // LastCommittedTimeTick, and the next handover commits the reset.
-func TestResetDuringACommitDropsItsResult(t *testing.T) {
+func TestTruncateDuringACommitDropsItsResult(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1, 2)
@@ -162,7 +162,7 @@ func TestResetDuringACommitDropsItsResult(t *testing.T) {
 	case <-time.After(waitTimeout):
 		t.Fatal("the flush did not start")
 	}
-	require.NoError(t, ch.ResetIndex(ctx, "v0", 15))
+	require.NoError(t, ch.TruncateUntil(ctx, "v0", 15))
 	close(release)
 	<-done
 	env.client.set(func(c *FakeCommitter) { c.commitEntered, c.commitBlock = nil, nil })
@@ -181,9 +181,9 @@ func TestResetDuringACommitDropsItsResult(t *testing.T) {
 	assert.Equal(t, uint64(20), idx.LastCommittedTimeTick())
 }
 
-// TestResetBeforeTheCommitOfAPreparedHandoverSendsNothing checks a prepared
+// TestTruncateBeforeTheCommitOfAPreparedHandoverSendsNothing checks a prepared
 // handover that a reset makes stale before its flush.
-func TestResetBeforeTheCommitOfAPreparedHandoverSendsNothing(t *testing.T) {
+func TestTruncateBeforeTheCommitOfAPreparedHandoverSendsNothing(t *testing.T) {
 	ctx := context.Background()
 	env, ch, idx := handoverIndex(t)
 	insert(t, ch, idx, 10, 1)
@@ -192,7 +192,7 @@ func TestResetBeforeTheCommitOfAPreparedHandoverSendsNothing(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
-	require.NoError(t, ch.ResetIndex(ctx, "v0", 15))
+	require.NoError(t, ch.TruncateUntil(ctx, "v0", 15))
 	require.NoError(t, idx.CommitForTest(ctx, p))
 	assert.Empty(t, env.client.requestList())
 	assert.Zero(t, idx.LastCommittedTimeTick())

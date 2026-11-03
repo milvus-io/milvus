@@ -115,6 +115,9 @@ type ManagerConfig struct {
 	Reader manifest.ObjectReader
 	// Sched runs the handovers of all pchannels of the node.
 	Sched nodescheduler.Scheduler
+	// ManifestReadConcurrency bounds the parallel manifest body reads of a
+	// recovery. A value at or below 0 means 64.
+	ManifestReadConcurrency int
 	// Params returns the current params. The primary key index calls it on every
 	// use, because some params are refreshable.
 	Params func() Params

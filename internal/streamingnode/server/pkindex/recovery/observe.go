@@ -27,6 +27,7 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -72,7 +73,7 @@ func (r *Recovery) ObserveMessage(ctx context.Context, msg message.ImmutableMess
 // becomes unavailable and reopens from the manifest and the WAL. A
 // corruption error also marks the vchannel for a cold start, see wipe.
 func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err error) {
-	class := errorClass(err)
+	class := indexmanager.ErrorClass(err)
 	if errors.Is(err, pkroot.ErrCorrupted) {
 		dir := index.VChannelDir(r.mgr.Root(), msg.VChannel())
 		if t, ok := r.targets[msg.VChannel()]; ok {
@@ -87,7 +88,7 @@ func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err e
 		return
 	}
 	r.stopped = true
-	if class == errorClassClosed || class == errorClassCanceled {
+	if class == indexmanager.ErrorClassClosed || class == indexmanager.ErrorClassCanceled {
 		r.logger.Info(ctx, "primary key index observe stopped, the WAL is closing", mlog.FieldVChannel(msg.VChannel()), mlog.String("class", class), mlog.Err(err))
 		return
 	}
@@ -152,7 +153,7 @@ func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (f
 		// The rows before the truncate are gone, so the index forgets their
 		// keys. The Index stays: the writes after the truncate that the
 		// append path decided are in its in-flight set.
-		return nil, r.m.ResetIndex(ctx, msg.VChannel(), msg.TimeTick())
+		return nil, r.m.TruncateUntil(ctx, msg.VChannel(), msg.TimeTick())
 	case message.MessageTypeDropCollection:
 		if funcutil.IsControlChannel(msg.VChannel()) {
 			return nil, nil

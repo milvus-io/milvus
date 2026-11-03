@@ -31,26 +31,22 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/indexmanager"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Param is what the WAL recovery gives the recovery of the primary key index.
-type Param struct {
+// RecoverConfig is what the WAL recovery gives the recovery of the primary
+// key index.
+type RecoverConfig struct {
 	// PChannelConfig goes to Manager.New as it is.
 	indexmanager.PChannelConfig
 	// Metas are the vchannels of the pchannel from the catalog, by vchannel.
 	Metas map[string]*streamingpb.VChannelMeta
-	// Sched runs the install tasks. Nil means the scheduler of the Manager.
-	Sched nodescheduler.Scheduler
-	// ManifestReadConcurrency bounds the parallel manifest body reads. A
-	// value at or below 0 means 64.
-	ManifestReadConcurrency int
 	// Tail returns the WAL tail as the recovery storage sees it now. The
 	// observe calls it at every persisted TimeTick, under the lock of the
 	// storage, and passes the snapshot to the index, which evaluates its
@@ -66,6 +62,13 @@ type target struct {
 	pkDataType schemapb.DataType
 }
 
+// pkField is the primary key field of a target: the field of the collection
+// schema the index of its vchannel indexes.
+type pkField struct {
+	fieldID  int64
+	dataType schemapb.DataType
+}
+
 // Recovery is the primary key index module of the WAL recovery of one
 // pchannel. The recovery feeds it every persisted WAL message with
 // ObserveMessage, from the global checkpoint to the recovery barrier and
@@ -75,15 +78,15 @@ type target struct {
 type Recovery struct {
 	mgr     *indexmanager.Manager
 	m       *indexmanager.PChannelIndexManager
-	sched   nodescheduler.Scheduler
 	tail    func() indexmanager.WALTailSnapshot
 	onFatal func(error)
 	logger  *mlog.Logger
 
 	mu       sync.Mutex
 	targets  map[string]*target // by vchannel
-	pending  []*index.Index     // the indexes with a manifest, installed at Run
-	err      error              // the first error of the replay before Run
+	// pkFields are the primary key fields of the targets, by vchannel.
+	pkFields map[string]pkField
+	err      error // the first error of the replay before Run
 	finished bool
 	// stopped is set by an observe error after Run: the WAL is closing, or
 	// the error went to OnFatal. The observe applies nothing after it and
@@ -93,8 +96,7 @@ type Recovery struct {
 	// wipe holds the vchannels whose local data is not trusted after a
 	// corruption error. Close removes their local directories, so the next
 	// open starts from the manifest.
-	wipe    map[string]string // the local directory by vchannel
-	handles []nodescheduler.TaskHandle
+	wipe map[string]string // the local directory by vchannel
 }
 
 // errClosed reports a call on a closed Recovery or a stopped Manager. It
@@ -109,24 +111,21 @@ func errClosed(what string) error {
 // reads the manifests. The handover
 // driver does not run until Run. An error leaves
 // nothing open and makes the WAL open fail.
-func Recover(ctx context.Context, mgr *indexmanager.Manager, p Param) (*Recovery, error) {
-	m := mgr.New(p.PChannelConfig)
+func Recover(ctx context.Context, mgr *indexmanager.Manager, cfg RecoverConfig) (*Recovery, error) {
+	m := mgr.New(cfg.PChannelConfig)
 	if m.Closed() {
 		// a stopped Manager returns a closed PChannelIndexManager
-		return nil, errClosed("pchannel " + p.PChannel.Name)
+		return nil, errClosed("pchannel " + cfg.PChannel.Name)
 	}
 	r := &Recovery{
-		mgr:     mgr,
-		m:       m,
-		sched:   p.Sched,
-		tail:    p.Tail,
-		onFatal: p.OnFatal,
-		logger:  mlog.With(mlog.FieldModule("pkindex-recovery"), mlog.FieldPChannel(p.PChannel.Name), mlog.Int64("term", p.PChannel.Term)),
-		targets: make(map[string]*target),
-		wipe:    make(map[string]string),
-	}
-	if r.sched == nil {
-		r.sched = mgr.Scheduler()
+		mgr:      mgr,
+		m:        m,
+		tail:     cfg.Tail,
+		onFatal:  cfg.OnFatal,
+		logger:   mlog.With(mlog.FieldModule("pkindex-recovery"), mlog.FieldPChannel(cfg.PChannel.Name), mlog.Int64("term", cfg.PChannel.Term)),
+		targets:  make(map[string]*target),
+		pkFields: make(map[string]pkField),
+		wipe:     make(map[string]string),
 	}
 	if r.tail == nil {
 		r.tail = func() indexmanager.WALTailSnapshot { return indexmanager.WALTailSnapshot{} }
@@ -136,7 +135,8 @@ func Recover(ctx context.Context, mgr *indexmanager.Manager, p Param) (*Recovery
 			r.logger.Error(context.TODO(), "primary key index recovery failed, no handler marks the WAL unavailable", mlog.Err(err))
 		}
 	}
-	for vchannel, meta := range p.Metas {
+	var specs []indexmanager.IndexSpec
+	for vchannel, meta := range cfg.Metas {
 		info := meta.GetCollectionInfo()
 		if meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.GetPkIndex() == nil {
 			continue
@@ -145,16 +145,44 @@ func Recover(ctx context.Context, mgr *indexmanager.Manager, p Param) (*Recovery
 		if schemas := info.GetSchemas(); len(schemas) > 0 {
 			schema = schemas[len(schemas)-1].GetSchema()
 		}
-		if err := r.openIndex(ctx, vchannel, info.GetCollectionId(), info.GetPkIndex(), schema); err != nil {
+		f, err := pkFieldOf(vchannel, info.GetCollectionId(), info.GetPkIndex(), schema)
+		if err != nil {
 			r.Close(ctx)
 			return nil, err
 		}
+		specs = append(specs, indexmanager.IndexSpec{
+			VChannel:           vchannel,
+			CollectionID:       info.GetCollectionId(),
+			IndexID:            info.GetPkIndex().GetIndexId(),
+			CheckpointTimeTick: info.GetPkIndex().GetCheckpointTimeTick(),
+		})
+		r.pkFields[vchannel] = f
 	}
-	if err := r.lookupManifests(ctx, mgr.Committer(), p.ManifestReadConcurrency); err != nil {
+	indexes, err := m.RecoverIndexes(ctx, specs)
+	if err != nil {
 		r.Close(ctx)
 		return nil, err
 	}
+	for _, idx := range indexes {
+		f := r.pkFields[idx.VChannel()]
+		r.targets[idx.VChannel()] = &target{idx: idx, pkFieldID: f.fieldID, pkDataType: f.dataType}
+	}
 	return r, nil
+}
+
+// pkFieldOf returns the primary key field that pkIndex names in schema, the
+// latest schema of the collection, or an error when the field is missing, is
+// not the primary key, or has an unsupported data type.
+func pkFieldOf(vchannel string, collectionID int64, pkIndex *streamingpb.PKIndexOfVChannel, schema *schemapb.CollectionSchema) (pkField, error) {
+	field := typeutil.GetField(schema, pkIndex.GetFieldId())
+	if field == nil || !field.GetIsPrimaryKey() {
+		return pkField{}, merr.WrapErrServiceInternalMsg("primary key index %d of vchannel %s names field %d, which is not the primary key", pkIndex.GetIndexId(), vchannel, pkIndex.GetFieldId())
+	}
+	dt := field.GetDataType()
+	if dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
+		return pkField{}, merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
+	}
+	return pkField{fieldID: field.GetFieldID(), dataType: dt}, nil
 }
 
 // openIndex opens the index pkIndex of a vchannel and makes the vchannel a
@@ -162,13 +190,9 @@ func Recover(ctx context.Context, mgr *indexmanager.Manager, p Param) (*Recovery
 // latest schema of the collection. A field that is missing or of an
 // unsupported data type is an error.
 func (r *Recovery) openIndex(ctx context.Context, vchannel string, collectionID int64, pkIndex *streamingpb.PKIndexOfVChannel, schema *schemapb.CollectionSchema) error {
-	field := typeutil.GetField(schema, pkIndex.GetFieldId())
-	if field == nil || !field.GetIsPrimaryKey() {
-		return merr.WrapErrServiceInternalMsg("primary key index %d of vchannel %s names field %d, which is not the primary key", pkIndex.GetIndexId(), vchannel, pkIndex.GetFieldId())
-	}
-	dt := field.GetDataType()
-	if dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
-		return merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
+	f, err := pkFieldOf(vchannel, collectionID, pkIndex, schema)
+	if err != nil {
+		return err
 	}
 	idx, _, err := r.m.OpenIndex(ctx, indexmanager.IndexSpec{
 		VChannel:           vchannel,
@@ -179,12 +203,12 @@ func (r *Recovery) openIndex(ctx context.Context, vchannel string, collectionID 
 	if err != nil {
 		return errors.Wrapf(err, "open the primary key index of vchannel %s", vchannel)
 	}
-	r.targets[vchannel] = &target{idx: idx, pkFieldID: field.GetFieldID(), pkDataType: dt}
+	r.targets[vchannel] = &target{idx: idx, pkFieldID: f.fieldID, pkDataType: f.dataType}
 	return nil
 }
 
-// Run marks the recovery barrier. It submits the install of every open
-// index with a manifest and starts the handover driver; ObserveMessage keeps
+// Run marks the recovery barrier. It starts the handover driver, whose Start
+// submits the install of every open index with a manifest; ObserveMessage keeps
 // applying the messages after it. It returns the first error of the replay
 // before it, which makes the WAL open fail, and an error marked
 // pkroot.ErrUnavailable after Close. A second Run does nothing.
@@ -201,24 +225,15 @@ func (r *Recovery) Run(ctx context.Context) error {
 		return nil
 	}
 	r.finished = true
-	installs := 0
-	for _, idx := range r.pending {
-		if t, ok := r.targets[idx.VChannel()]; !ok || t.idx != idx {
-			// the replay dropped the collection
-			continue
-		}
-		installs++
-		r.handles = append(r.handles, r.sched.Submit(&installTask{idx: idx, params: r.mgr.Params, onFatal: r.onFatal, logger: r.logger}))
-	}
 	r.m.Start()
-	r.logger.Info(ctx, "primary key index recovery done", mlog.Int("indexes", len(r.targets)), mlog.Int("installs", installs))
+	r.logger.Info(ctx, "primary key index recovery done", mlog.Int("indexes", len(r.targets)))
 	return nil
 }
 
-// Close releases everything Recover opened: it cancels the install tasks,
-// waits for them, and closes the index of the pchannel. It then removes the
-// local directory of every vchannel that a corruption error marked, see
-// wipe. A second Close does nothing.
+// Close releases everything Recover opened: it closes the index of the
+// pchannel, which cancels the install tasks and waits for them. It then
+// removes the local directory of every vchannel that a corruption error
+// marked, see wipe. A second Close does nothing.
 func (r *Recovery) Close(ctx context.Context) {
 	r.mu.Lock()
 	if r.closed {
@@ -226,17 +241,9 @@ func (r *Recovery) Close(ctx context.Context) {
 		return
 	}
 	r.closed = true
-	handles := r.handles
-	r.handles = nil
 	wipe := r.wipe
 	r.wipe = nil
 	r.mu.Unlock()
-	for _, h := range handles {
-		h.Cancel()
-	}
-	for _, h := range handles {
-		_ = h.Wait(ctx)
-	}
 	r.m.Close()
 	for vchannel, dir := range wipe {
 		if err := os.RemoveAll(dir); err != nil {
@@ -247,35 +254,6 @@ func (r *Recovery) Close(ctx context.Context) {
 	}
 }
 
-// The classes of an observe error, see fail and the pkindex_fatal_total metric.
-const (
-	errorClassCorrupted   = "corrupted"
-	errorClassIO          = "io"
-	errorClassClosed      = "closed"
-	errorClassCanceled    = "canceled"
-	errorClassUnavailable = "unavailable"
-	errorClassOther       = "other"
-)
-
-// errorClass classifies an observe error by the markers of the pkindex
-// packages, the most specific first.
-func errorClass(err error) string {
-	switch {
-	case errors.Is(err, pkroot.ErrCorrupted):
-		return errorClassCorrupted
-	case errors.Is(err, engine.ErrClosed):
-		return errorClassClosed
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return errorClassCanceled
-	case errors.Is(err, pkroot.ErrIO):
-		return errorClassIO
-	case errors.Is(err, pkroot.ErrUnavailable):
-		return errorClassUnavailable
-	default:
-		return errorClassOther
-	}
-}
-
 // LastAcked returns the LastAcked of the index of the pchannel, see
 // PChannelIndexManager.LastAcked.
 func (r *Recovery) LastAcked() uint64 { return r.m.LastAcked() }
@@ -283,3 +261,10 @@ func (r *Recovery) LastAcked() uint64 { return r.m.LastAcked() }
 // Manager returns the index of the pchannel. The WAL recovery puts it in the
 // recovery snapshot for the interceptor, which uses it and does not own it.
 func (r *Recovery) Manager() *indexmanager.PChannelIndexManager { return r.m }
+
+// retryOptions returns the retry options of the recovery: no attempt limit,
+// a backoff from BackoffBase up to MaxBackoff.
+func (r *Recovery) retryOptions() []retry.Option {
+	p := r.mgr.Params()
+	return []retry.Option{retry.AttemptAlways(), retry.Sleep(p.BackoffBase), retry.MaxSleepTime(p.MaxBackoff)}
+}

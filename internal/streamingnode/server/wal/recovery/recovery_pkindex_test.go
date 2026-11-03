@@ -127,10 +127,10 @@ func pkTestBarrier(t *testing.T, tt uint64, lastConfirmed int64) message.Immutab
 // vchannel v1 from the checkpoint of the storage and attaches it.
 func pkTestRecover(t *testing.T, env *indexmanager.FakeEnv, rs *recoveryStorageImpl) *pkrecovery.Recovery {
 	t.Helper()
-	rec, err := pkrecovery.Recover(context.Background(), env.Manager, pkrecovery.Param{
+	env.Manager.SetSchedForTest(rs.nodeScheduler)
+	rec, err := pkrecovery.Recover(context.Background(), env.Manager, pkrecovery.RecoverConfig{
 		PChannelConfig: indexmanager.PChannelConfig{PChannel: rs.channel, Seed: rs.checkpoint.TimeTick},
 		Metas:          map[string]*streamingpb.VChannelMeta{"v1": pkTestMeta("v1", 1)},
-		Sched:          rs.nodeScheduler,
 	})
 	require.NoError(t, err)
 	rs.pkindex = rec

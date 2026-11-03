@@ -370,5 +370,9 @@ func (c *PChannelIndexManager) FlushTTForTest(vchannel string) uint64 {
 // SetCommitterForTest replaces the Committer of the Manager.
 func (m *Manager) SetCommitterForTest(c manifest.Committer) { m.cfg.Committer = c }
 
+// SetSchedForTest replaces the node scheduler of the Manager, which runs the
+// handovers and the installs.
+func (m *Manager) SetSchedForTest(s nodescheduler.Scheduler) { m.cfg.Sched = s }
+
 // SetReaderForTest replaces the manifest body reader of the Manager.
 func (m *Manager) SetReaderForTest(r manifest.ObjectReader) { m.cfg.Reader = r }
