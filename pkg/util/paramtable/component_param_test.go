@@ -544,6 +544,30 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := &params.ProxyCfg
 
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogMaxBytes.Version)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		params.Save(Params.SearchPlaceholderLogMaxBytes.Key, "32768")
+		assert.Equal(t, 32768, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		for _, value := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+			params.Save(Params.SearchPlaceholderLogMaxBytes.Key, value)
+			assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		}
+		params.Reset(Params.SearchPlaceholderLogMaxBytes.Key)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogRateLimit.Version)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		params.Save(Params.SearchPlaceholderLogRateLimit.Key, "50")
+		assert.Equal(t, float64(50), Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		for _, value := range []string{"NaN", "inf", "+Inf", "-Inf", "Infinity", "invalid", "1e999"} {
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, value))
+			assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat(), value)
+			require.NoError(t, params.Save(Params.SearchPlaceholderLogRateLimit.Key, "0.5"))
+			assert.Equal(t, 0.5, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		}
+		params.Reset(Params.SearchPlaceholderLogRateLimit.Key)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+
 		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)
 
 		t.Logf("healthCheckTimeout: %v", &Params.HealthCheckTimeout)
@@ -1542,4 +1566,13 @@ func TestSnapshotDescriptionLengthConfig(t *testing.T) {
 	field, ok := reflect.TypeOf(&params.ProxyCfg).Elem().FieldByName("MaxSnapshotDescriptionLength")
 	require.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
+}
+
+func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.Export)
+	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
+	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
 }

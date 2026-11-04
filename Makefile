@@ -27,6 +27,11 @@ PGO_PATH := $(PWD)/configs/pgo
 OS := $(shell uname -s)
 mode = Release
 
+# Optional persistent root for Cargo build artifacts. Individual Rust
+# workspaces select their own subdirectories below this root.
+MILVUS_CARGO_TARGET_ROOT ?=
+export MILVUS_CARGO_TARGET_ROOT
+
 # Set disk_index default based on OS
 # macOS (Darwin) does not support aio, so disable disk_index
 ifeq ($(OS),Darwin)
