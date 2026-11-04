@@ -206,3 +206,57 @@ func TestRetainedMVCCClusterBroadcast(t *testing.T) {
 		})
 	}
 }
+
+// newSplitShardTestReplicas builds the source and target replicas of one
+// SplitShard broadcast, each addressed to its own vchannel, at the given ticks.
+func newSplitShardTestReplicas(t *testing.T, sourceTick, targetTick uint64) (source, target message.MutableMessage) {
+	t.Helper()
+	broadcast := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    1,
+			SplitTaskId:     2,
+			SourceVchannel:  "p0_1v0",
+			TargetVchannels: []string{"p1_1v1", "p2_1v2"},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithBroadcast([]string{"p0_1v0", "p1_1v1", "p2_1v2"}, message.OptBuildBroadcastAppendFirst("p0_1v0")).
+		MustBuildBroadcast().
+		WithBroadcastID(1)
+	for _, replica := range broadcast.SplitIntoMutableMessage() {
+		switch replica.VChannel() {
+		case "p0_1v0":
+			source = replica.WithTimeTick(sourceTick)
+		case "p1_1v1":
+			target = replica.WithTimeTick(targetTick)
+		}
+	}
+	require.NotNil(t, source)
+	require.NotNil(t, target)
+	return source, target
+}
+
+// TestRetainedMVCCSplitShardTargetGenesis: the target replica of a SplitShard
+// is a brand-new vchannel's genesis and registers it live, exactly as
+// CreateCollection does, so a Strong read of a split target is answered at the
+// target's own progress rather than at the retired/recovery fence. The source
+// replica is an ordinary record of its live vchannel.
+func TestRetainedMVCCSplitShardTargetGenesis(t *testing.T) {
+	cm := NewMVCCManager(100)
+	cm.UpdateMVCC(createQueryTestMessage(t, 120, "p0_1v0", message.MessageTypeCreateCollection, false, true))
+	source, target := newSplitShardTestReplicas(t, 150, 160)
+
+	// Before the genesis the target is unknown: it reads as the recovery fence.
+	require.Equal(t, uint64(100), cm.GetMVCCOfVChannel("p1_1v1").Timetick)
+
+	cm.UpdateMVCC(source)
+	cm.UpdateMVCC(target)
+	require.Equal(t, uint64(150), cm.GetMVCCOfVChannel("p0_1v0").Timetick, "the source replica advances the live source")
+	require.Equal(t, uint64(160), cm.GetMVCCOfVChannel("p1_1v1").Timetick, "the target replica registers the target live")
+	require.Equal(t, uint64(100), cm.GetMVCCOfVChannel("p2_1v2").Timetick, "the other target's replica has not been appended here")
+
+	// From then on the target's own writes move it, as on any live vchannel.
+	cm.UpdateMVCC(createQueryTestMessage(t, 170, "p1_1v1", message.MessageTypeDelete, false, true))
+	require.Equal(t, uint64(170), cm.GetMVCCOfVChannel("p1_1v1").Timetick)
+	cm.UpdateMVCC(createQueryTestMessage(t, 180, "", message.MessageTypeTimeTick, false, true))
+	require.True(t, cm.GetMVCCOfVChannel("p1_1v1").Confirmed)
+}

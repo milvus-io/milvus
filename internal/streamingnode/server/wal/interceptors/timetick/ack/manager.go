@@ -65,6 +65,29 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		metricsGuard.Done(0, err)
 		return nil, err
 	}
+	return ta.newAckerLocked(ts, metricsGuard), nil
+}
+
+// AllocateFresh allocates a timestamp from a freshly fetched TSO batch. Used
+// for message types whose time tick must be greater than every tick any node
+// had received before this call (MessageType.IsFreshTimeTick).
+func (ta *AckManager) AllocateFresh(ctx context.Context) (*Acker, error) {
+	metricsGuard := ta.metrics.StartAllocateTimeTick()
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+
+	ts, err := resource.Resource().TSOAllocator().AllocateFresh(ctx)
+	if err != nil {
+		metricsGuard.Done(0, err)
+		return nil, err
+	}
+	return ta.newAckerLocked(ts, metricsGuard), nil
+}
+
+// newAckerLocked creates a new Acker for the given timestamp, pushes it onto
+// the not-yet-acknowledged heap, and finalizes the allocation metrics.
+// Callers must hold ta.mu.
+func (ta *AckManager) newAckerLocked(ts uint64, metricsGuard *metricsutil.AllocateTimeTickMetricsGuard) *Acker {
 	ta.lastAllocatedTimeTick = ts
 
 	// create new timestampAck for ack process.
@@ -75,8 +98,8 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 		manager:      ta,
 	}
 	ta.notAckHeap.Push(acker)
-	metricsGuard.Done(ts, err)
-	return acker, nil
+	metricsGuard.Done(ts, nil)
+	return acker
 }
 
 // AllocateForAppend retries allocation until success or WAL lifecycle cancellation.
@@ -84,6 +107,23 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 // Background TimeTick sync uses Allocate directly: its context belongs to the
 // process-wide inspector, so an infinite retry there could block a WAL's shutdown.
 func (ta *AckManager) AllocateForAppend(ctx context.Context, barrierTimeTick uint64) (*Acker, error) {
+	return ta.allocateWithRetry(ctx, func(ctx context.Context) (*Acker, error) {
+		if barrierTimeTick == 0 {
+			return ta.Allocate(ctx)
+		}
+		return ta.AllocateWithBarrier(ctx, barrierTimeTick)
+	})
+}
+
+// AllocateFreshForAppend is AllocateForAppend for the message types whose time
+// tick must come from a freshly fetched TSO batch (MessageType.IsFreshTimeTick),
+// with the same retry behavior.
+func (ta *AckManager) AllocateFreshForAppend(ctx context.Context) (*Acker, error) {
+	return ta.allocateWithRetry(ctx, ta.AllocateFresh)
+}
+
+// allocateWithRetry retries allocate until success or ctx cancellation.
+func (ta *AckManager) allocateWithRetry(ctx context.Context, allocate func(ctx context.Context) (*Acker, error)) (*Acker, error) {
 	b := backoff.NewExponentialBackOff()
 	b.InitialInterval = 10 * time.Millisecond
 	b.MaxInterval = 5 * time.Second
@@ -93,13 +133,7 @@ func (ta *AckManager) AllocateForAppend(ctx context.Context, barrierTimeTick uin
 		if ctx.Err() != nil {
 			return nil, context.Cause(ctx)
 		}
-		var acker *Acker
-		var err error
-		if barrierTimeTick == 0 {
-			acker, err = ta.Allocate(ctx)
-		} else {
-			acker, err = ta.AllocateWithBarrier(ctx, barrierTimeTick)
-		}
+		acker, err := allocate(ctx)
 		if err == nil {
 			return acker, nil
 		}

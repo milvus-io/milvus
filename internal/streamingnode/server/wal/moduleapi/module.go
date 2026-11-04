@@ -13,6 +13,12 @@ type CleanupContext struct {
 	// SummaryRetired proves the persisted manifest no longer needs this
 	// VChannel tombstone to recover its transform GC frontier.
 	SummaryRetired func(vchannel string, through uint64) bool
+	// CheckpointReported proves DataCoord has stored a channel checkpoint of
+	// this VChannel at or past through. A retired shard split source waits on
+	// it: DataCoord's drain predicate reads that checkpoint, and nothing reports
+	// it once the VChannel is cleaned up. Nil means there is no reporter, and
+	// nothing waits on it.
+	CheckpointReported func(vchannel string, through uint64) bool
 }
 
 type ModuleName string
@@ -36,6 +42,15 @@ type VChannelWritePathRecoveryState struct {
 	PartitionIDs   []int64
 	Schema         *schemapb.CollectionSchema
 	SchemaTimeTick uint64
+	// SplitFenceTimeTick is T_switch when this vchannel is a shard split source
+	// that has been fenced, and zero otherwise. A fenced source stays NORMAL --
+	// it keeps observing DDL and draining its own data until adoption drops it
+	// -- so this field, not the vchannel state, is what rebuilds the write
+	// path's DoAppend gate after a restart.
+	SplitFenceTimeTick uint64
+	// SplitFenceTaskID is the split task that placed the fence, carried beside
+	// it so a re-sent fence can be told from a concurrent task's.
+	SplitFenceTaskID int64
 }
 
 type SegmentWritePathRecoveryState struct {
