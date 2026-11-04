@@ -8,6 +8,11 @@ from base.client_base import Base
 from check.func_check import ResponseChecker
 from common import common_func as cf
 from common import common_type as ct
+from common.compaction_utils import (
+    get_compaction_state_info,
+    wait_for_compaction_completed,
+    wait_for_compaction_eligible_segments,
+)
 from utils.api_request import api_request
 from utils.util_log import test_log as log
 from utils.wrapper import trace
@@ -624,6 +629,18 @@ class TestMilvusClientV2Base(Base):
         ).run()
         return res, check_result
 
+    def wait_for_compaction_eligible_segments(
+        self, client, collection_name, minimum_segment_count, timeout=30, poll_interval=2
+    ):
+        return wait_for_compaction_eligible_segments(
+            client._get_connection(),
+            collection_name,
+            minimum_segment_count,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            context=client._generate_call_context(),
+        )
+
     @trace()
     def load_partitions(
         self, client, collection_name, partition_names, timeout=None, check_task=None, check_items=None, **kwargs
@@ -868,13 +885,22 @@ class TestMilvusClientV2Base(Base):
 
     def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-        start_time = time.time()
-        while start_time + timeout > time.time():
-            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
-            if res == "Completed":
-                return True
-            time.sleep(2)
-        return False
+        handler = client._get_connection()
+        context = client._generate_call_context(**kwargs)
+
+        def get_state(compaction_id, rpc_timeout):
+            return get_compaction_state_info(
+                handler,
+                compaction_id,
+                timeout=rpc_timeout,
+                context=context,
+            )
+
+        return wait_for_compaction_completed(
+            get_state=get_state,
+            compact_id=compact_id,
+            timeout=timeout,
+        )
 
     def wait_for_schema_version_consistency(self, client, collection_name, timeout=None):
         """Wait until every eligible sealed segment catches up with the latest collection
