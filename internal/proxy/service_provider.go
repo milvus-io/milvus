@@ -68,6 +68,12 @@ type InterceptorImpl[Req Request, Resp Response] struct {
 	onError func(err error) (Resp, error)
 }
 
+// Call runs a proxy service-layer method through the health check and
+// response finalization hooks. It deliberately does not record
+// milvus_proxy_req_count: the request is counted exactly once at the boundary
+// it entered through -- UnaryRequestStatsInterceptor for gRPC, wrapperPost for
+// REST v2 -- and a second count here would double-report every request. It
+// only owns the latency series, which no boundary covers for these methods.
 func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 ) (Resp, error) {
 	if err := merr.CheckHealthy(i.proxy.GetStateCode()); err != nil {
@@ -77,17 +83,16 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, fmt.Sprintf("Proxy-%s", i.method))
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(i.method)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method,
-		metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
+	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+	defer func() {
+		metrics.ProxyReqLatency.WithLabelValues(nodeID, i.method).
+			Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
 
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
 		return i.onError(err)
 	}
-
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method,
-		metrics.SuccessLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), i.method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return resp, err
 }
@@ -264,15 +269,12 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	method := "DescribeCollection"
 	log.Debug("DescribeCollection received")
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
 		log.Warn("DescribeCollection failed to enqueue",
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.AbandonLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName()).Inc()
 		return nil, err
 	}
 
@@ -285,10 +287,6 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 			zap.Error(err),
 			zap.Uint64("BeginTS", dct.BeginTs()),
 			zap.Uint64("EndTS", dct.EndTs()))
-
-		failStatus, failCause := failMetricLabel(err)
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			failStatus, failCause, request.GetDbName(), request.GetCollectionName()).Inc()
 
 		return nil, err
 	}
