@@ -63,12 +63,13 @@ namespace {
 // Exercise the native Serialize boundary without building a real ANN index.
 class SerializationTestNode final : public knowhere::IndexNode {
  public:
-    explicit SerializationTestNode(std::function<knowhere::Status()> serialize)
+    explicit SerializationTestNode(
+        std::function<knowhere::Status(knowhere::BinarySet&)> serialize)
         : serialize_(std::move(serialize)) {
     }
     knowhere::Status
-    Serialize(knowhere::BinarySet&) const override {
-        return serialize_();
+    Serialize(knowhere::BinarySet& entries) const override {
+        return serialize_(entries);
     }
     knowhere::Status
     Train(const knowhere::DataSetPtr,
@@ -134,7 +135,7 @@ class SerializationTestNode final : public knowhere::IndexNode {
     }
 
  private:
-    std::function<knowhere::Status()> serialize_;
+    std::function<knowhere::Status(knowhere::BinarySet&)> serialize_;
 };
 
 class SerializationTestSink final : public storage::FileSink {
@@ -144,8 +145,13 @@ class SerializationTestSink final : public storage::FileSink {
         return storage::Generation::V1V2;
     }
     void
-    WriteEntry(std::string_view, const void*, size_t) override {
-        throw std::logic_error("unexpected sliced entry");
+    WriteEntry(std::string_view name, const void* data, size_t size) override {
+        if (fail_write) {
+            throw std::runtime_error("sink write failed");
+        }
+        ++entries;
+        EXPECT_EQ(name, "metadata");
+        EXPECT_EQ(std::string(static_cast<const char*>(data), size), "payload");
     }
     void
     WriteEntryFromLocalFile(std::string_view, const std::string&) override {
@@ -175,6 +181,7 @@ class SerializationTestSink final : public storage::FileSink {
     }
     int files{0};
     int buffers{0};
+    int entries{0};
     bool fail_write{false};
 };
 
@@ -602,7 +609,7 @@ TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
 }
 
 TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
-    for (int outputs = 0; outputs < 4; ++outputs) {
+    for (int outputs = 0; outputs < 8; ++outputs) {
         SCOPED_TRACE(outputs);
         auto owner = storage::LocalDirectory::CreateOwned(
             "/tmp", "vector_serialize_XXXXXX", "serialization output test");
@@ -614,9 +621,14 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
             "L2",
             knowhere::Version::GetCurrentVersion().VersionNumber());
         int calls = 0;
-        engine->native_index =
-            knowhere::Index<SerializationTestNode>::Create([&] {
+        engine->native_index = knowhere::Index<SerializationTestNode>::Create(
+            [&](knowhere::BinarySet& entries) {
                 ++calls;
+                if (outputs & 4) {
+                    auto bytes = std::shared_ptr<uint8_t[]>(new uint8_t[7]);
+                    std::copy_n("payload", 7, bytes.get());
+                    entries.Append("metadata", std::move(bytes), 7);
+                }
                 for (bool memory : {false, true}) {
                     if ((outputs & (memory ? 1 : 2)) == 0) {
                         continue;
@@ -639,22 +651,24 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
                 EXPECT_NE(std::string(error.what()).find("no completed output"),
                           std::string::npos);
             }
-            EXPECT_EQ(sink.buffers + sink.files, 0);
+            EXPECT_EQ(sink.buffers + sink.files + sink.entries, 0);
         } else {
             ASSERT_NO_THROW(artifact.Serialize(sink));
             EXPECT_EQ(sink.buffers, outputs & 1 ? 1 : 0);
             EXPECT_EQ(sink.files, outputs & 2 ? 1 : 0);
+            EXPECT_EQ(sink.entries, outputs & 4 ? 1 : 0);
         }
         EXPECT_EQ(calls, 1);
         EXPECT_TRUE(manager->TakeOutput().empty());
-        if (outputs == 1) {
+        if (outputs == 1 || outputs == 4 || outputs == 5) {
             SerializationTestSink failed;
             failed.fail_write = true;
             EXPECT_THROW(artifact.Serialize(failed), std::runtime_error);
             EXPECT_TRUE(manager->TakeOutput().empty());
             SerializationTestSink retry;
             ASSERT_NO_THROW(artifact.Serialize(retry));
-            EXPECT_EQ(retry.buffers, 1);
+            EXPECT_EQ(retry.buffers, outputs & 1 ? 1 : 0);
+            EXPECT_EQ(retry.entries, outputs & 4 ? 1 : 0);
             EXPECT_EQ(calls, 3);
         }
     }
