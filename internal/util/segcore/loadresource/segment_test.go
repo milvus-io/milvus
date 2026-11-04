@@ -400,3 +400,37 @@ func TestEstimateSegmentLoadingResourceKeepsMilvusTableRealPKEager(t *testing.T)
 	require.Zero(t, usage.DiskBytes)
 	require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
 }
+
+func TestGpuIndexRequiresGpuLoadOverride(t *testing.T) {
+	params := paramtable.Get()
+	autoIndexKey := params.AutoIndexConfig.Enable.Key
+	oldAutoIndex := params.AutoIndexConfig.Enable.GetValue()
+	params.Save(autoIndexKey, "false")
+	t.Cleanup(func() { params.Save(autoIndexKey, oldAutoIndex) })
+	for _, indexType := range []string{"GPU_CAGRA", "GPU_CUVS_CAGRA"} {
+		t.Run(indexType, func(t *testing.T) {
+			loadKey := params.KnowhereConfig.IndexParam.KeyPrefix + indexType + ".load.adapt_for_cpu"
+			oldValue := params.GetWithDefault(loadKey, "")
+			t.Cleanup(func() {
+				if oldValue == "" {
+					params.Remove(loadKey)
+				} else {
+					params.Save(loadKey, oldValue)
+				}
+			})
+			for _, load := range []string{"true", "false"} {
+				params.Save(loadKey, load)
+				for _, stored := range []string{"true", "false"} {
+					t.Run("stored="+stored+"/load="+load, func(t *testing.T) {
+						indexParams := []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: indexType},
+							{Key: "adapt_for_cpu", Value: stored},
+						}
+						require.Equal(t, load == "false", gpuIndexRequiresGpu(indexParams))
+						require.Equal(t, stored, indexParams[1].Value)
+					})
+				}
+			}
+		})
+	}
+}
