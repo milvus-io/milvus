@@ -27,11 +27,17 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	view.lifecycle = &segmentLifecycleWriter{coord: &coordStub{}, serverID: 1}
 	view.packWriter = &growingBulkPackWriter{}
 	writes := 0
+	var writtenStorage *streamingpb.L1SegmentPersistedStorage
 	write := mockey.Mock((*growingBulkPackWriter).FlushInsertBuffer).To(func(_ *growingBulkPackWriter, _ context.Context, pack *flushPack) (*flushResult, error) {
 		writes++
-		return &flushResult{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
-			Binlogs: []*streamingpb.L1SegmentBinLogs{{FromTimeTick: pack.FromTimeTick, ToTimeTick: pack.ToTimeTick}},
-		}}, nil
+		writtenStorage = &streamingpb.L1SegmentPersistedStorage{
+			Binlogs: []*streamingpb.L1SegmentBinLogs{{
+				FromTimeTick: pack.FromTimeTick, ToTimeTick: pack.ToTimeTick,
+				FieldBinlog: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: "insert"}}}},
+			}},
+			Statistics: &datapb.Statistics{NullCounts: map[int64]int64{100: 1}},
+		}
+		return &flushResult{PersistedStorage: writtenStorage}, nil
 	}).Build()
 	t.Cleanup(func() { write.UnPatch() })
 	var requests []*datapb.SaveBinlogPathsRequest
@@ -39,6 +45,9 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	publication := mockey.Mock((*coordStub).SaveBinlogPaths).To(func(_ *coordStub, _ context.Context, req *datapb.SaveBinlogPathsRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
 		requests = append(requests, proto.Clone(req).(*datapb.SaveBinlogPathsRequest))
 		if fail {
+			// A failed RPC must not mutate the cached write result used on retry.
+			req.Field2BinlogPaths[0].Binlogs[0].LogPath = "changed by RPC"
+			req.Stats.NullCounts[100] = 99
 			return nil, merr.WrapErrServiceUnavailableMsg("coordinator unavailable")
 		}
 		if req.GetFlushed() {
@@ -66,10 +75,23 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	observe(20, &later)
 	require.Error(t, view.FlushInsertChunk(ctx, through))
 	require.False(t, first)
+	require.Empty(t, view.meta.GetPersistedStorage().GetBinlogs())
+	require.Empty(t, view.durableMeta.GetPersistedStorage().GetBinlogs())
+	require.Equal(t, uint64(5), view.durableMeta.GetCheckpointTimeTick())
 	require.Nil(t, view.ConsumeDirtyAndGetSnapshot(), "failed publication must not expose a durable checkpoint")
 	fail = false
 	require.NoError(t, view.FlushInsertChunk(ctx, through))
 	require.Equal(t, 1, writes, "RPC retry must reuse the written pack")
+	liveStorage, durableStorage := view.meta.PersistedStorage, view.durableMeta.PersistedStorage
+	require.NotSame(t, liveStorage, durableStorage)
+	require.Len(t, liveStorage.Binlogs, 1, "successful retry appends each batch once")
+	require.Len(t, durableStorage.Binlogs, 1)
+	require.Same(t, liveStorage.Binlogs[0], durableStorage.Binlogs[0])
+	require.Same(t, liveStorage.Statistics, durableStorage.Statistics)
+	writtenStorage.Binlogs[0].FieldBinlog[0].Binlogs[0].LogPath = "changed by writer"
+	writtenStorage.Statistics.NullCounts[100] = 99
+	require.Equal(t, "insert", liveStorage.Binlogs[0].FieldBinlog[0].Binlogs[0].GetLogPath())
+	require.Equal(t, int64(1), durableStorage.Statistics.GetNullCounts()[100])
 	require.True(t, first)
 	require.False(t, later)
 	require.Len(t, requests, 2)
@@ -114,6 +136,11 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	view.mu.Unlock()
 	require.NoError(t, view.FlushInsertChunk(ctx, through))
 	require.True(t, completed)
+	require.Len(t, recovered.meta.PersistedStorage.Binlogs, 2)
+	for i, binlog := range recovered.meta.PersistedStorage.Binlogs {
+		require.Same(t, binlog, recovered.durableMeta.PersistedStorage.Binlogs[i], "restored and newly flushed entries stay shared")
+	}
+	require.Same(t, recovered.meta.PersistedStorage.Statistics, recovered.durableMeta.PersistedStorage.Statistics)
 	require.Empty(t, requests[3].GetStartPositions())
 	require.Equal(t, uint64(20), requests[3].GetCheckPoints()[0].GetPosition().GetTimestamp())
 	require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(rmq.NewRmqID(20)).Serialize(), requests[3].GetCheckPoints()[0].GetPosition().GetMsgID())

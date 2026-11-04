@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 
@@ -52,10 +53,11 @@ func newSegmentView(
 	if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
 		closingTimeTick = meta.GetCheckpointTimeTick()
 	}
+	durableMeta := proto.CloneOf(meta)
 	return &SegmentView{
 		closingTimeTick:             closingTimeTick,
-		meta:                        proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
-		durableMeta:                 proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
+		meta:                        cloneSegmentMetaState(durableMeta),
+		durableMeta:                 durableMeta,
 		persistedCheckpointTimeTick: persistedCheckpointTimeTick,
 		dirty:                       dirty,
 		lifecycle:                   config.lifecycle,
@@ -70,6 +72,35 @@ func newSegmentView(
 		vchannel:                    meta.GetVchannel(),
 		owner:                       config.owner,
 	}
+}
+
+// cloneSegmentMetaState copies mutable state while sharing read-only binlog
+// entries and Statistics owned by the SegmentView, as on the flush path.
+func cloneSegmentMetaState(meta *streamingpb.SegmentAssignmentMeta) *streamingpb.SegmentAssignmentMeta {
+	cloned := &streamingpb.SegmentAssignmentMeta{
+		CollectionId:        meta.CollectionId,
+		PartitionId:         meta.PartitionId,
+		SegmentId:           meta.SegmentId,
+		Vchannel:            meta.Vchannel,
+		State:               meta.State,
+		Stat:                proto.CloneOf(meta.Stat),
+		StorageVersion:      meta.StorageVersion,
+		CheckpointTimeTick:  meta.CheckpointTimeTick,
+		SealedAtDataVersion: proto.CloneOf(meta.SealedAtDataVersion),
+		SchemaVersion:       meta.SchemaVersion,
+	}
+	cloned.ProtoReflect().SetUnknown(slices.Clone(meta.ProtoReflect().GetUnknown()))
+	if storage := meta.PersistedStorage; storage != nil {
+		cloned.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{
+			ManifestPath:      storage.ManifestPath,
+			Binlogs:           slices.Clone(storage.Binlogs),
+			MergedStatsBinlog: cloneFieldBinlog(storage.MergedStatsBinlog),
+			Statistics:        storage.Statistics,
+			DeltaBinlog:       cloneFieldBinlogs(storage.DeltaBinlog),
+		}
+		cloned.PersistedStorage.ProtoReflect().SetUnknown(slices.Clone(storage.ProtoReflect().GetUnknown()))
+	}
+	return cloned
 }
 
 func finalCommitDoneFromMeta(meta *streamingpb.SegmentAssignmentMeta) bool {
@@ -397,7 +428,7 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 	}
 	// TODO: Remove after enabling queryview. Publish exactly this stable pack
 	// before exposing its recovery snapshot or releasing the Insert handles.
-	appendPersistedStorage(pack.Meta, result.PersistedStorage)
+	appendPersistedStorage(result.PersistedStorage, pack.Meta)
 	var start *msgpb.MsgPosition
 	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {
 		// Only the first data pack publishes StartPosition. Once its recovery
@@ -415,8 +446,7 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		return err
 	}
 	chunk := s.pendingFlushChunkLocked(targetTimeTick)
-	appendPersistedStorage(s.meta, result.PersistedStorage)
-	appendPersistedStorage(s.durableMeta, result.PersistedStorage)
+	appendPersistedStorage(result.PersistedStorage, s.meta, s.durableMeta)
 	applyInsertStat(s.durableMeta, *chunk)
 	handles := s.markPendingDataDurableLocked(targetTimeTick)
 	s.mu.Unlock()
@@ -857,28 +887,37 @@ func firstPendingFlushChunkAfter(chunks []writeOnlyInsertBuffer, timetick uint64
 	})
 }
 
-func appendPersistedStorage(meta *streamingpb.SegmentAssignmentMeta, storage *streamingpb.L1SegmentPersistedStorage) {
-	if meta.PersistedStorage == nil {
-		meta.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{}
-	}
-	if storage.GetManifestPath() != "" {
-		meta.PersistedStorage.ManifestPath = storage.GetManifestPath()
-	}
-	meta.PersistedStorage.Binlogs = append(
-		meta.PersistedStorage.Binlogs,
-		cloneL1SegmentBinLogs(storage.GetBinlogs())...,
-	)
-	if storage.GetMergedStatsBinlog() != nil {
-		meta.PersistedStorage.MergedStatsBinlog = cloneFieldBinlog(storage.GetMergedStatsBinlog())
-	}
+// appendPersistedStorage gives each target an independent storage container and
+// list, sharing only the cloned, read-only binlog entries and Statistics. Later
+// updates append entries or replace Statistics; they must not mutate shared
+// objects. Callers own the targets or hold the segment lock. External snapshots
+// remain deep copies.
+func appendPersistedStorage(storage *streamingpb.L1SegmentPersistedStorage, metas ...*streamingpb.SegmentAssignmentMeta) {
+	binlogs := cloneL1SegmentBinLogs(storage.GetBinlogs())
+	var statistics *datapb.Statistics
 	if storage.GetStatistics() != nil {
-		meta.PersistedStorage.Statistics = proto.Clone(storage.GetStatistics()).(*datapb.Statistics)
+		statistics = proto.Clone(storage.GetStatistics()).(*datapb.Statistics)
 	}
-	if len(storage.GetDeltaBinlog()) > 0 {
-		meta.PersistedStorage.DeltaBinlog = append(
-			meta.PersistedStorage.DeltaBinlog,
-			cloneFieldBinlogs(storage.GetDeltaBinlog())...,
-		)
+	for _, meta := range metas {
+		if meta.PersistedStorage == nil {
+			meta.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{}
+		}
+		if storage.GetManifestPath() != "" {
+			meta.PersistedStorage.ManifestPath = storage.GetManifestPath()
+		}
+		meta.PersistedStorage.Binlogs = append(meta.PersistedStorage.Binlogs, binlogs...)
+		if storage.GetMergedStatsBinlog() != nil {
+			meta.PersistedStorage.MergedStatsBinlog = cloneFieldBinlog(storage.GetMergedStatsBinlog())
+		}
+		if statistics != nil {
+			meta.PersistedStorage.Statistics = statistics
+		}
+		if len(storage.GetDeltaBinlog()) > 0 {
+			meta.PersistedStorage.DeltaBinlog = append(
+				meta.PersistedStorage.DeltaBinlog,
+				cloneFieldBinlogs(storage.GetDeltaBinlog())...,
+			)
+		}
 	}
 }
 

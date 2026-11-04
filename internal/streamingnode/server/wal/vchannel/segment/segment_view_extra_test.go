@@ -9,9 +9,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -28,13 +30,44 @@ func TestSegmentViewMetaConstructors(t *testing.T) {
 		SegmentId:          3,
 		Vchannel:           "v1",
 		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		StorageVersion:     3,
+		SchemaVersion:      2,
 		CheckpointTimeTick: 10,
-		Stat:               &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 5},
+		Stat:               &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 5, ModifiedRows: 1},
+		PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
+			ManifestPath:      "manifest",
+			Binlogs:           []*streamingpb.L1SegmentBinLogs{{FromTimeTick: 5, ToTimeTick: 10}},
+			Statistics:        &datapb.Statistics{NullCounts: map[int64]int64{100: 1}},
+			MergedStatsBinlog: &datapb.FieldBinlog{FieldID: 100},
+			DeltaBinlog:       []*datapb.FieldBinlog{{FieldID: 100}},
+		},
 	}
+	meta.ProtoReflect().SetUnknown([]byte{0x98, 0x06, 0x01})
+	meta.PersistedStorage.ProtoReflect().SetUnknown([]byte{0x98, 0x06, 0x02})
 	schema := &schemapb.CollectionSchema{}
 
 	view := NewSegmentViewFromMetaWithConfig(meta, schema, ViewConfig{})
 	require.NotNil(t, view)
+	require.True(t, proto.Equal(meta, view.meta), "recovery preserves all fields and unknown fields")
+	require.True(t, proto.Equal(meta, view.durableMeta))
+	liveStorage, durableStorage := view.meta.PersistedStorage, view.durableMeta.PersistedStorage
+	require.NotSame(t, liveStorage, durableStorage)
+	require.NotSame(t, &liveStorage.Binlogs[0], &durableStorage.Binlogs[0], "binlog lists have independent backing arrays")
+	require.Same(t, liveStorage.Binlogs[0], durableStorage.Binlogs[0])
+	require.Same(t, liveStorage.Statistics, durableStorage.Statistics)
+	require.NotSame(t, liveStorage.MergedStatsBinlog, durableStorage.MergedStatsBinlog)
+	require.NotSame(t, liveStorage.DeltaBinlog[0], durableStorage.DeltaBinlog[0])
+	require.NotSame(t, view.meta.Stat, view.durableMeta.Stat)
+	meta.PersistedStorage.Binlogs[0].ToTimeTick = 99
+	meta.PersistedStorage.Statistics.NullCounts[100] = 99
+	require.Equal(t, uint64(10), liveStorage.Binlogs[0].GetToTimeTick(), "recovery owns the input payload")
+	require.Equal(t, int64(1), durableStorage.Statistics.GetNullCounts()[100])
+	view.meta.CheckpointTimeTick = 20
+	view.meta.Stat.ModifiedRows = 2
+	liveStorage.ManifestPath = "live manifest"
+	require.Equal(t, uint64(10), view.durableMeta.GetCheckpointTimeTick())
+	require.Equal(t, uint64(1), view.durableMeta.GetStat().GetModifiedRows())
+	require.Equal(t, "manifest", durableStorage.GetManifestPath())
 	assert.Equal(t, int64(3), view.AssignmentMeta().GetSegmentId())
 	assert.Equal(t, int64(1), view.CollectionID())
 	assert.Equal(t, int64(2), view.PartitionID())
