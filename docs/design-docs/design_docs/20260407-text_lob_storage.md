@@ -1,9 +1,9 @@
-# MEP: TEXT Storage with LOB and Growing-Segment Flush
+# MEP: TEXT Storage with LOB
 
 - **Created:** 2026-04-07
 - **Author(s):** @zhagnlu
 - **Status:** Draft
-- **Component:** Storage, QueryNode, DataCoord, DataNode
+- **Component:** Storage, StreamingNode, QueryNode, DataCoord, DataNode
 - **Related Issues:** milvus-io/milvus#48783
 - **Related PR:** milvus-io/milvus#47567
 - **Released:** 3.0.0
@@ -18,9 +18,9 @@ Introduce a new end-to-end storage path for the `TEXT` scalar type in Milvus
 2. **C++-native read and write.** All TEXT IO is done inside the C++
    `milvus-storage` library; the Go layer is a thin coordination wrapper. No
    per-row data crosses the CGO boundary.
-3. **Growing-segment direct flush.** TEXT collections do *not* use the
-   StreamingNode write-buffer flush path. The QueryNode's Growing Segment
-   persists its own data, avoiding storing TEXT in two places.
+3. **Ordinary WAL-driven persistence.** StreamingNode persists TEXT through
+   `SegmentView` and `BulkPackWriterV3`, independently of whether QueryNode has
+   loaded the collection. QueryNode growing segments serve queries only.
 4. **Vortex on-disk format for LOB payloads.** Large TEXT payloads are stored
    in Vortex files, replacing the Parquet path used by the previous LOB
    experiment. Vortex gives better compression for long strings and native,
@@ -41,20 +41,16 @@ documents) and causes:
 - **Memory pressure** in the growing segment from megabyte-class payloads.
 - **Compaction write amplification** — the entire TEXT column is rewritten
   whenever any row in a segment changes.
-- **Double storage** of TEXT payloads if the StreamingNode write buffer is
-  used: the QueryNode growing segment already holds the rows for query,
-  and the StreamingNode would hold them again purely for flush. For
-  document-sized payloads this doubles RAM and adds WAL bandwidth.
 - **Go/CGO overhead** in the previous LOB prototype, which kept the LOB
   manager and writer in Go and called into a Parquet writer through CGO
   per row. The boundary cost dominated for large payloads.
 - **Parquet's weaker random-access story** for opaque large strings, where
   Vortex's split index gives O(log N) row lookups natively.
 
-The design below addresses all four problems together. They are tightly
-coupled: moving TEXT IO into C++ is what makes growing-segment direct flush
-practical, and the partition-level Vortex layout is what makes compaction
-reuse possible without rewriting payloads.
+C++ batch IO and the partition-level Vortex layout support efficient reads
+and compaction reuse. TEXT payloads still pass through WAL and the ordinary
+StreamingNode persistence path; this design does not eliminate the memory
+needed by both persistence buffers and loaded query segments.
 
 ## Public Interfaces
 
@@ -67,7 +63,7 @@ surface is:
 |-----|---------|---------|-------------|
 | `dataNode.text.inlineThreshold` | `65536` B | dynamic | TEXT values strictly smaller than this are encoded inline in the reference binlog; larger values go to a LOB Vortex file. |
 | `dataNode.text.maxLobFileBytes` | `67108864` B (64 MiB) | dynamic | Maximum size of a single LOB Vortex file. |
-| `dataNode.text.flushThresholdBytes` | `16777216` B (16 MiB) | dynamic | Spillover flush trigger for the growing segment LOB writer. |
+| `dataNode.text.flushThresholdBytes` | `16777216` B (16 MiB) | dynamic | Flush trigger for the persistent TEXT LOB writer. |
 | `dataNode.compaction.lobHoleRatioThreshold` | `0.3` | dynamic | If overall hole ratio across source segments < threshold, compaction runs in REUSE_ALL mode; otherwise REWRITE_ALL. |
 | `dataCoord.gc.lob.enabled` | `true` | static | Enable the dedicated LOB GC. |
 | `dataCoord.gc.lob.safetyWindow` | `3600` s | dynamic | Minimum file age before LOB GC may delete an orphan. |
@@ -75,19 +71,12 @@ surface is:
 
 ### New milvus-storage FFI surface
 
-Two FFI surfaces are used. For **compaction and import**, the Go side
-configures TEXT columns via `TextColumnConfig { FieldID, LobBasePath,
-InlineThreshold, MaxLobFileBytes, FlushThresholdBytes, RewriteMode }` and
-passes them to the `loon_segment_writer_*` FFI (`loon_segment_writer_new`,
-`loon_segment_writer_write`, `loon_segment_writer_close`). For **growing-
-segment flush**, the Go side calls `FlushGrowingSegmentData` in segcore,
-which extracts unflushed rows and writes them through the milvus-storage
-writer entirely in C++ — no per-row data crosses the CGO boundary. Inside
-the C++ writer, each row is classified by `InlineThreshold`, LOB-sized
-values are appended to Vortex files via `VortexFileWriter`, and references
-are encoded into the reference binlog. The C struct exposed to segcore is
-`CFlushConfig`; the C struct exposed to the segment-writer FFI is
-`LoonLobColumnConfig`.
+Streaming persistence, compaction and import configure TEXT columns through
+`TextColumnConfig` and the `loon_segment_writer_*` FFI. The Go writer passes
+Arrow batches to C++; the storage writer classifies values by `InlineThreshold`,
+writes large values to Vortex, and encodes references into the column groups.
+The caller commits the resulting data and LOB metadata in the V3 manifest.
+There is no segcore growing-segment flush FFI.
 
 ### Reused interfaces (no change)
 
@@ -100,45 +89,17 @@ are encoded into the reference binlog. The C struct exposed to segcore is
 
 ### Architecture overview
 
-```
- ┌──────────────────────────────────────────────────────────────────────┐
- │ Control plane                                                        │
- │  ┌─────────────────────────┐    ┌────────────────────────────────┐   │
- │  │ DataCoord               │    │ DataCoord LOB GC               │   │
- │  │  - SegmentInfo          │◀──▶│  - scans reference binlogs     │   │
- │  │  - SaveBinlogPaths      │    │  - safety window               │   │
- │  └─────────────────────────┘    └────────────────────────────────┘   │
- └──────────────────────────────────────────────────────────────────────┘
- ┌──────────────────────────────────────────────────────────────────────┐
- │ Data plane                                                           │
- │                                                                      │
- │  ┌──────────────────────────────────────────────────────────────┐    │
- │  │ QueryNode                                                    │    │
- │  │  pipeline → delegator → growing segment (segcore, C++)       │    │
- │  │                                                              │    │
- │  │  GrowingFlushManager (Go, new)                               │    │
- │  │   reuses flushcommon SyncPolicy / SyncManager / MetaWriter   │    │
- │  │   uses CheckpointTracker (Go, new)                           │    │
- │  │   calls segcore FlushGrowingSegmentData (C FFI)              │    │
- │  └──────────────────────────────────────────────────────────────┘    │
- │                                                                      │
- │  ┌──────────────────────────┐  ┌────────────────────────────────┐    │
- │  │ DataNode compactor       │  │ DataNode importer              │    │
- │  │  text-aware:             │  │  csv / json / parquet          │    │
- │  │   REUSE_ALL  (file copy) │  │  routes large TEXT through     │    │
- │  │   REWRITE_ALL            │  │  loon_segment_writer_* FFI     │    │
- │  │   SKIP (L0 deletes)      │  │                                │    │
- │  └──────────────────────────┘  └────────────────────────────────┘    │
- │            │                                  │                      │
- │            ▼                                  ▼                      │
- │  ┌──────────────────────────────────────────────────────────────┐    │
- │  │ C++ milvus-storage                                           │    │
- │  │  Transaction<ColumnGroups>     (segment-level reference)     │    │
- │  │  PackedWriter / Reader         (Parquet, reference binlog)   │    │
- │  │  VortexFileWriter              (LOB payloads)                │    │
- │  │  UUID file naming              (partition-level LOB files)    │    │
- │  └──────────────────────────────────────────────────────────────┘    │
- └──────────────────────────────────────────────────────────────────────┘
+```text
+WAL → RecoveryStorage → SegmentView → BulkPackWriterV3
+                                      ↓
+                           milvus-storage SegmentWriter
+                                      ↓
+                           data + LOB files + V3 manifest
+                                      ↓
+                           DataCoord metadata publication
+
+QueryNode growing segments ← query consumption (independent of persistence)
+DataNode compaction/import → milvus-storage SegmentWriter
 ```
 
 ### On-disk model
@@ -220,79 +181,38 @@ re-encodes / recompresses splits.
 
 ### Components
 
-| Component | Layer | Responsibility |
-|-----------|-------|----------------|
-| `VortexFileWriter` | C++ milvus-storage | Native Vortex IO for LOB payloads. |
-| `loon_segment_writer_*` | FFI (C → Go) | Segment-writer FFI surface used by compaction and import. Accepts `LoonLobColumnConfig` for TEXT columns. |
-| `FlushGrowingSegmentData` | C FFI (segcore) | Extracts unflushed rows from a growing segment and writes them through the milvus-storage writer entirely in C++. Accepts `CFlushConfig`. |
-| `GrowingFlushManager` | Go (`querynodev2/segments`) | Per-channel scheduler that drives growing-segment flush for TEXT collections. |
-| `GrowingSegmentBuffer` | Go (`querynodev2/segments`) | Adapter that exposes a growing segment to the existing `SyncPolicy` interface (`IsFull`, `MinTimestamp`, `MemorySize`). |
-| `CheckpointTracker` | Go (`querynodev2/segments`) | Maps `(segmentID, row offset)` → `MsgPosition`, derived from the `StartPosition` already carried by `delegator.InsertData`. Drives checkpoint reporting. |
-
-### Why TEXT collections flush from the growing segment
-
-A normal collection writes through StreamingNode: WAL → write buffer →
-`SyncPolicy` → `SyncManager` → `MetaWriter`. The QueryNode then loads sealed
-segments from object storage.
-
-For TEXT collections that path would force the data to live in **two**
-nodes simultaneously: the QueryNode growing segment must hold it for queries,
-and the StreamingNode write buffer must also hold it for flush. For
-document-sized payloads this doubles RAM and adds WAL bandwidth that the
-data plane cannot afford.
-
-The growing segment already has the data in memory in segcore. By giving
-the QueryNode a flush manager that reuses the existing flushcommon
-infrastructure, we keep the same `SyncPolicy` semantics, the same
-`SaveBinlogPaths` contract, and the same checkpoint propagation, but
-without ever sending the TEXT bytes through the WAL or storing them in
-StreamingNode.
-
-This is the key architectural choice; everything in the write-path
-description below follows from it.
+| Component | Responsibility |
+|-----------|----------------|
+| `SegmentView` (`streamingnode/server/wal/vchannel/segment`) | Owns buffered WAL inserts, persistence tasks, durable segment state and message completion. |
+| `BulkPackWriterV3` (`flushcommon/syncmgr`) | Writes column groups, TEXT LOB data, PK/BM25 statistics and the V3 manifest. |
+| `loon_segment_writer_*` (`storagev2/packed`) | Batch FFI to the C++ storage writer, also used by compaction and import. |
+| QueryNode growing segment | Serves growing queries, including TEXT; does not supply persistence payloads or retain segments for flush handoff. |
 
 ### Write path
 
-1. **Pipeline → Delegator.** WAL consumer feeds `delegator.InsertData`
-   (which already carries `StartPosition`) to the growing segment.
-2. **Insert + record batch.** `ProcessInsert` writes rows into segcore as
-   today, and additionally calls
-   `CheckpointTracker.RecordBatch(segID, endOffset, position)` to remember
-   which `MsgPosition` covers which row range.
-3. **Background sync loop.** `GrowingFlushManager` ticks periodically. It
-   wraps each growing segment as a `GrowingSegmentBuffer` and runs the
-   existing flushcommon `SyncPolicy`s (`FullBuffer`, `StaleBuffer`,
-   `Sealed`, `FlushTs`). Selected segments are dispatched to a sync
-   worker.
-4. **C++ flush (single FFI call).** Go calls
-   `segment.FlushData(ctx, flushedOffset, currentOffset, flushConfig)`,
-   which invokes `FlushGrowingSegmentData` in segcore. The entire
-   extract → classify → write → commit sequence runs in C++:
-   - Segcore extracts unflushed rows from the growing segment's
-     `ConcurrentVector` for `[flushedOffset, currentOffset)`.
-   - Each TEXT row is classified by `InlineThreshold`.
-   - LOB-sized values are appended to the current Vortex file via
-     `VortexFileWriter`. The first time a LOB write happens in the writer
-     instance, a new UUID is generated as the `file_id` for the Vortex
-     file.
-   - The reference binlog is written via the existing `PackedWriter`,
-     with each row encoded as either `[0x00 | bytes]` or
-     `[0x01 | pad | file_id | row_offset]`.
-   - On completion, Vortex files are closed, the reference parquet is
-     closed, the column-group `Transaction` is committed, and the
-     manifest path + LOB `file_id`s are returned to Go.
-   No per-row data crosses the CGO boundary.
-5. **Metadata update.** Go updates the segment manifest via the existing
-   `MetaWriter` (`SaveBinlogPaths` with `Flushed=false`,
-   `WithFullBinlogs=false`). Periodic DataCoord channel-checkpoint reporting
-   has been removed; WAL recovery progress is published by RecoveryStorage.
-   After `SaveBinlogPaths` succeeds, the
-   `CheckpointTracker` updates the flushed offset and acknowledged
-   manifest version.
+1. WAL consumption supplies inserts to `SegmentView`.
+2. Flush policy or a WAL flush boundary schedules buffered inserts for
+   persistence. `growingBulkPackWriter.FlushInsertBuffer` constructs a `SyncPack`
+   and selects `BulkPackWriterV3` for StorageV3 segments.
+3. The writer emits column groups, TEXT LOB files and statistics, then commits
+   their manifest. TEXT collections continue to require StorageV3.
+4. `SegmentView.FlushInsertChunk` publishes the persisted result through its
+   lifecycle writer before updating durable state and releasing message handles.
+   A failed metadata publication retains the persisted result for retry; it does
+   not release the inserts as durable.
+5. RecoveryStorage publishes its checkpoint only when the required component
+   work is complete. QueryNode load/release is independent of persistence.
 
-Failure semantics: a crash before step 4 completes leaves an orphan
-Vortex file under `lobs/{field}/_data/`, never referenced from any
-`SegmentInfo`. The LOB GC sweeps it after the safety window.
+Legacy write-buffer consumers continue to use the ordinary `SyncTask` and
+`MetaWriter` path. They always own their buffered insert payloads; there is no
+alternative growing source, source-mode selection or source-availability retry.
+
+The former optional direct-flush path, its configuration switch, process-local
+registry and release handoff have been removed. Existing V3 files remain readable
+through the same manifest and LOB readers. No storage-layout migration is
+introduced by removing that writer path. See
+[Storage path contract](../../agent_guides/storage/path_contract.md) for path
+ownership, compatibility and GC limits.
 
 ### Read path
 
@@ -372,8 +292,8 @@ See *Public Interfaces*. All parameters are exported in
 
 **Impact on existing users.** None at the API level. SDK clients, the
 proto query language, and the rest of the schema system see no change.
-Behaviorally, large TEXT inserts that previously stressed memory or
-StreamingNode bandwidth now succeed cheaply.
+TEXT persistence uses the same WAL-driven lifecycle whether or not the
+collection is loaded for queries.
 
 **V2 segments.** Untouched. The new path is V3-only.
 
@@ -386,11 +306,10 @@ had been written by the prototype is migrated by reading through the old
 reader and re-flushing through `TextColumnWriter` during the next
 compaction; no separate offline migration is required.
 
-**StreamingNode behavior change for TEXT collections.** For collections
-that contain a TEXT field, StreamingNode no longer flushes those
-segments — Growing Segment does. This is internal and gated by the
-collection schema. For non-TEXT collections, StreamingNode behavior is
-unchanged.
+**StreamingNode persistence.** TEXT uses the ordinary StorageV3 writer.
+QueryNode release does not initiate a flush or retain query segments for a
+storage writer. Deploy this removal only where the retired optional direct-flush
+path is no longer required; persisted V3 data keeps its existing format.
 
 **Phasing out the older behavior.** The legacy "TEXT inline in the
 columnar file" behavior is not removed; it is the natural fallback when
@@ -411,7 +330,7 @@ the version boundary.
 
 System / integration:
 
-- End-to-end insert → growing-segment flush → query for mixed inline +
+- End-to-end insert → StreamingNode flush → query for mixed inline +
   LOB workloads on V3, with value sizes that straddle `inlineThreshold`.
 - Compaction REUSE_ALL: synthetic deletes that keep `hole_ratio < τ`;
   verify LOB Vortex files are not rewritten and the output segment's
@@ -422,23 +341,23 @@ System / integration:
 - Cross-segment LOB sharing: two segments referencing the same
   `file_id`; verify both can be queried independently and that GC does
   not delete the file while either is alive.
-- Orphan LOB file: kill QueryNode between Vortex close and metadata
+- Orphan LOB file: kill the persistence owner between Vortex close and metadata
   commit; verify GC reclaims the orphan after the safety window and
   not before.
-- Failure recovery: kill QueryNode mid-ingest; restart, replay WAL from
+- Failure recovery: kill StreamingNode mid-ingest; restart, replay WAL from
   the last reported `MsgPosition`, and verify the segment converges
   without data loss or duplication.
 - Import (CSV / JSON / Parquet) of large TEXT values; verify produced
   segments have the same on-disk shape as inserted ones.
-- Python E2E suite: `tests/python_client/testcases/test_text_lob.py`.
+- Python E2E suite: `tests/python_client/milvus_client/test_milvus_client_text_lob.py`.
 
 Lower-level coverage:
 
-- C++ unit: `VortexFileWriter`, `FlushGrowingSegmentData`,
-  LOB reference encoding / decoding.
-- Go unit: `growing_flush_manager`, `growing_segment_buffer`,
-  `checkpoint_tracker`, `garbage_collector_lob`, compaction REUSE/REWRITE
-  decision matrix.
+- C++ unit: storage writer/reader round trips and LOB reference decoding.
+- Go unit: `SegmentView`, `BulkPackWriterV3`, TEXT write-buffer checkpoint
+  behavior on writer/metadata failures, LOB GC and compaction decisions.
+- Loaded/unloaded inserts, concurrent release/flush/insert and WAL recovery
+  must remain covered independently of the removed writer path.
 
 The implementation is considered correct when:
 
@@ -477,12 +396,6 @@ The implementation is considered correct when:
   `file_id → path` is computable; an extra manifest adds another
   consistency surface and another concurrent-write hazard with no
   benefit.
-
-- **Flush TEXT collections through StreamingNode like everything
-  else.** Rejected: would require holding TEXT payloads in two
-  nodes simultaneously and would push document-sized payloads through
-  the WAL. Growing-segment direct flush is the whole point of the
-  feature.
 
 - **Drop the inline path entirely; everything is a LOB.** Rejected:
   short strings would pay an extra Vortex round-trip per row on read,

@@ -1315,11 +1315,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	if releaseErr != nil {
 		return releaseErr
 	}
-	if len(growing) > 0 && sd.growingSourceProvider != nil {
-		for _, entry := range growing {
-			sd.growingSourceProvider.ClearReleasePrepared(entry.SegmentID)
-		}
-	}
 	return nil
 }
 

@@ -35,8 +35,6 @@ SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
 void
 SegcoreSetStorageV3Enabled(const bool);
 
-void
-SegcoreSetEnableGrowingSourceFlush(const bool);
 
 void
 SegcoreSetEnableGeometryCache(const bool);

@@ -224,10 +224,6 @@ func (s *viewQueryGrowingSegment) RetrieveByOffsets(ctx context.Context, plan *s
 	return result.GetResult()
 }
 
-func (s *viewQueryGrowingSegment) FlushData(context.Context, int64, int64, *FlushConfig) (*FlushResult, error) {
-	return nil, merr.WrapErrServiceInternalMsg("view query growing segment does not support FlushData")
-}
-
 func (s *viewQueryGrowingSegment) IsLazyLoad() bool { return false }
 
 func (s *viewQueryGrowingSegment) ResetIndexesLazyLoad(bool) {}

@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	qn "github.com/milvus-io/milvus/internal/querynodev2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -42,13 +40,13 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -74,29 +72,6 @@ type Server struct {
 
 	etcdCli  *clientv3.Client
 	mixCoord *syncutil.Future[types.MixCoordClient]
-}
-
-// lazyBinlogSaver implements segments.BinlogSaver with lazy initialization.
-// It waits for MixCoordClient to be ready on first SaveBinlogPaths call.
-type lazyBinlogSaver struct {
-	mixCoordFuture *syncutil.Future[types.MixCoordClient]
-	mu             sync.Mutex
-	broker         broker.Broker
-}
-
-func (s *lazyBinlogSaver) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
-	s.mu.Lock()
-	if s.broker == nil {
-		client, err := s.mixCoordFuture.GetWithContext(ctx)
-		if err != nil {
-			s.mu.Unlock()
-			return errors.Wrap(err, "failed to get MixCoordClient for SaveBinlogPaths")
-		}
-		s.broker = broker.NewCoordBroker(client, paramtable.GetNodeID())
-	}
-	b := s.broker
-	s.mu.Unlock()
-	return b.SaveBinlogPaths(ctx, req)
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -180,11 +155,8 @@ func (s *Server) init() error {
 	}
 	s.serverID.Store(s.querynode.GetNodeID())
 
-	// initialize MixCoord client asynchronously and set BinlogSaver on QueryNode
+	// QueryView metadata loading still needs MixCoord independently of growing flush.
 	s.initMixCoord()
-	if qnImpl, ok := s.querynode.(*qn.QueryNode); ok {
-		qnImpl.SetBinlogSaver(&lazyBinlogSaver{mixCoordFuture: s.mixCoord})
-	}
 
 	return nil
 }
@@ -195,14 +167,14 @@ func (s *Server) initMixCoord() {
 			mlog.Info(s.ctx, "QueryNode connect to mixCoord...")
 			mixCoord, err := mix.NewClient(s.ctx)
 			if err != nil {
-				return errors.Wrap(err, "QueryNode try to new mixCoord client failed")
+				return merr.Wrap(err, "QueryNode try to new mixCoord client failed")
 			}
 
 			mlog.Info(s.ctx, "QueryNode try to wait for mixCoord ready")
-			err = componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200)
-			if err != nil {
-				return errors.Wrap(err, "QueryNode wait for mixCoord ready failed")
+			if err := componentutil.WaitForComponentHealthy(s.ctx, mixCoord, "mixCoord", 1000000, time.Millisecond*200); err != nil {
+				return merr.Wrap(err, "QueryNode wait for mixCoord ready failed")
 			}
+
 			mlog.Info(s.ctx, "QueryNode mixCoord client ready")
 			s.mixCoord.Set(mixCoord)
 			return nil

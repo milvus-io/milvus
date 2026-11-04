@@ -265,18 +265,6 @@ func UpdateManifestPath(manifestPath string) SegmentAction {
 	}
 }
 
-// SetFlushSourceMode records which subsystem owns the segment's payload at
-// flush time. The decision is sticky: once a non-Unknown mode is set, later
-// calls with a different mode are no-ops, so the source for a given segment
-// stays consistent across its lifetime.
-func SetFlushSourceMode(mode FlushSourceMode) SegmentAction {
-	return func(info *SegmentInfo) {
-		if info.flushSourceMode == FlushSourceUnknown {
-			info.flushSourceMode = mode
-		}
-	}
-}
-
 // MergeSegmentAction is the util function to merge multiple SegmentActions into one.
 func MergeSegmentAction(actions ...SegmentAction) SegmentAction {
 	return func(info *SegmentInfo) {
