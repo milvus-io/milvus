@@ -406,7 +406,7 @@ func TestBuildIDFConcurrentWithGrowingUpdates(t *testing.T) {
 
 	updates := make([]bm25Stats, 64)
 	expected := storage.NewBM25Stats()
-	expected.Merge(o.growing[1].bm25Stats[102])
+	expected.Merge(o.growing[1][102])
 	for i := range updates {
 		updates[i] = bm25Stats{102: randomSyncTestStats(r, 3)}
 		expected.Merge(updates[i][102])
