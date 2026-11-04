@@ -4161,8 +4161,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                    "The binlog params is not generate.");
         auto binlog_search_info = config_it->second->GetSearchConf(search_info);
 
-        auto index_reader =
-            CreateIndexReader(op_context, runtime, field_id);
+        auto index_reader = CreateIndexReader(op_context, runtime, field_id);
         AssertInfo(index_reader,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4190,8 +4189,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
             IsIndexRefineEnabledLocked(op_context, field_id, runtime)) {
             search_info.topk_ = GetEffectiveSearchTopk(search_info);
         }
-        auto index_reader =
-            CreateIndexReader(op_context, runtime, field_id);
+        auto index_reader = CreateIndexReader(op_context, runtime, field_id);
         AssertInfo(index_reader,
                    "vector indexes isn't ready for field " +
                        std::to_string(field_id.get()));
@@ -4315,8 +4313,7 @@ ChunkedSegmentSealedImpl::get_vector_from_state(
         return fill_with_empty(field_id, count);
     }
 
-    auto index_reader =
-        CreateIndexReader(op_ctx, snapshot.runtime, field_id);
+    auto index_reader = CreateIndexReader(op_ctx, snapshot.runtime, field_id);
     AssertInfo(index_reader, "vector index is not ready");
     auto* reader =
         dynamic_cast<const index::IVectorReader*>(index_reader.get());
@@ -4395,8 +4392,7 @@ ChunkedSegmentSealedImpl::get_emb_list_from_state(
         return fill_with_empty(field_id, count);
     }
 
-    auto index_reader =
-        CreateIndexReader(op_ctx, snapshot.runtime, field_id);
+    auto index_reader = CreateIndexReader(op_ctx, snapshot.runtime, field_id);
     AssertInfo(index_reader, "vector index is not ready");
     auto* reader =
         dynamic_cast<const index::IVectorReader*>(index_reader.get());
