@@ -19,7 +19,6 @@
 #include <aws/core/Aws.h>
 #include <aws/core/endpoint/AWSPartitions.h>
 #include <aws/crt/endpoints/RuleEngine.h>
-#include <aws/s3/S3EndpointRules.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,20 +40,37 @@ TEST_F(AwsRuntimeDeathTest, CrtRuleEngineUsesSdkInitialization) {
             setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
             Aws::SDKOptions options;
             Aws::InitAPI(options);
-            {
+            [] {
                 // SDK initialization must reach the CRT state used here. A
                 // private static CRT copy has an uninitialized JSON allocator.
+                // S3 now uses internal binary rules. Use a small JSON ruleset to
+                // keep exercising CRT's JSON allocator through its public API.
+                constexpr char rules[] = R"({
+                    "version": "1.0",
+                    "parameters": {},
+                    "rules": [{
+                        "type": "endpoint", "conditions": [],
+                        "endpoint": {
+                            "url": "https://s3.example.test",
+                            "properties": {}, "headers": {}
+                        }
+                    }]
+                })";
                 Aws::Crt::Endpoints::RuleEngine engine(
-                    Aws::Crt::ByteCursorFromArray(
-                        reinterpret_cast<const uint8_t*>(
-                            Aws::S3::S3EndpointRules::GetRulesBlob()),
-                        Aws::S3::S3EndpointRules::RulesBlobSize),
+                    Aws::Crt::ByteCursorFromCString(rules),
                     Aws::Crt::ByteCursorFromArray(
                         reinterpret_cast<const uint8_t*>(
                             Aws::Endpoint::AWSPartitions::GetPartitionsBlob()),
                         Aws::Endpoint::AWSPartitions::PartitionsBlobSize));
-                EXPECT_TRUE(engine);
-            }
+                ASSERT_TRUE(engine);
+                Aws::Crt::Endpoints::RequestContext context;
+                auto endpoint = engine.Resolve(context);
+                ASSERT_TRUE(endpoint);
+                ASSERT_TRUE(endpoint->IsEndpoint());
+                auto url = endpoint->GetUrl();
+                ASSERT_TRUE(url);
+                EXPECT_EQ(url->compare("https://s3.example.test"), 0);
+            }();
             // Destroy the engine before shutting down SDK-owned CRT resources.
             Aws::ShutdownAPI(options);
             const auto* result = ::testing::UnitTest::GetInstance()
