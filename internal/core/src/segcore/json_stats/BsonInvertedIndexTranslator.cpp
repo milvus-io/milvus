@@ -164,6 +164,18 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 BsonInvertedIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    return folly::coro::blockingWait(load_cells(ctx, cids));
+}
+
+folly::coro::Task<BsonInvertedIndexTranslator::CellResults>
+BsonInvertedIndexTranslator::get_cells_async(
+    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
+    return load_cells(ctx, cids);
+}
+
+folly::coro::Task<BsonInvertedIndexTranslator::CellResults>
+BsonInvertedIndexTranslator::load_cells(
+    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
     // Consume preparation even on cancellation; retries always bind a new source.
     auto source = std::move(prepared_source_);
     // Check for cancellation before loading BSON inverted index
@@ -231,10 +243,10 @@ BsonInvertedIndexTranslator::get_cells(
         // Load the index using the files from load_info_
         // Files are absolute remote paths (basePath already prepended by caller)
         if (use_async) {
-            index = folly::coro::blockingWait(folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor({}, priority), load()));
+            index = co_await folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor({}, priority), load());
         } else {
-            index = folly::coro::blockingWait(load());
+            index = co_await load();
         }
     }
 
@@ -246,7 +258,7 @@ BsonInvertedIndexTranslator::get_cells(
                           std::unique_ptr<milvus::index::BsonInvertedIndex>>>
         result;
     result.emplace_back(std::make_pair(0, std::move(index)));
-    return result;
+    co_return result;
 }
 
 milvus::cachinglayer::Meta*

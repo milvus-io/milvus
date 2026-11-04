@@ -41,6 +41,9 @@ struct BsonInvertedIndexLoadInfo {
 // layer with a stable key and resource usage.
 class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
                                         milvus::index::BsonInvertedIndex> {
+    using CellResults = std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<value_type>>>;
+
  public:
     BsonInvertedIndexTranslator(
         BsonInvertedIndexLoadInfo load_info,
@@ -71,10 +74,21 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
+    // Borrows ctx/cids and this translator until all issued loading work drains.
+    // Synchronous transport may still block; async transport suspends on I/O.
+    folly::coro::Task<CellResults>
+    get_cells_async(milvus::OpContext* ctx,
+                    const std::vector<cachinglayer::cid_t>& cids) override;
+
     milvus::cachinglayer::Meta*
     meta() override;
 
  private:
+    // Shared operation for synchronous callers and the asynchronous cache path.
+    folly::coro::Task<CellResults>
+    load_cells(milvus::OpContext* ctx,
+               const std::vector<cachinglayer::cid_t>& cids);
+
     BsonInvertedIndexLoadInfo load_info_;
     milvus::storage::FileManagerContext file_manager_context_;
     std::string key_;
