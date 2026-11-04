@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/test_utils/LoaderTestAccess.h"
+#include "folly/coro/BlockingWait.h"
 #include "index/PackedIndexLoad.h"
 #include <thread>
 
@@ -40,6 +41,7 @@
 #include "index/Meta.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/scalar/bitmap/BitmapIndexLoader.h"
+#include "index/scalar/bitmap/BitmapIndexReader.h"
 #include "index/scalar/inverted/InvertedIndexLoader.h"
 #include "index/scalar/marisa/MarisaIndexLoader.h"
 #include "index/scalar/ngram/NgramIndexLoader.h"
@@ -873,8 +875,11 @@ TEST(ScalarIndexV3LoadTest, FileTargetsDoNotMoveFamilyFinalizationToFilePool) {
                bool use_async) -> folly::coro::Task<IndexPtr> {
             EXPECT_EQ(std::hash<std::thread::id>{}(std::this_thread::get_id()),
                       opts.params.at("test_loading_thread").get<size_t>());
-            auto reader = co_await LoaderTestAccess::Finish<BitmapIndexLoader>(
-                plan, opts, use_async);
+            auto storage = co_await LoaderTestAccess::
+                StorageFinisher<BitmapIndexLoader, int64_t, TargetBitmap>()(
+                    plan, opts, use_async);
+            auto reader =
+                CreateBitmapIndex<int64_t, TargetBitmap>(std::move(storage));
             EXPECT_EQ(std::hash<std::thread::id>{}(std::this_thread::get_id()),
                       opts.params.at("test_loading_thread").get<size_t>());
             co_return reader;
@@ -936,8 +941,9 @@ TEST(ScalarIndexV3LoadTest, BitmapFrozenConversionYieldsBetweenBatches) {
                     file.staging->Finish();
                 }
             }
-            auto task = LoaderTestAccess::Finish<BitmapIndexLoader>(
-                plan, options, use_async);
+            auto task = LoaderTestAccess::
+                StorageFinisher<BitmapIndexLoader, int64_t, roaring::Roaring>()(
+                    plan, options, use_async);
             IIndexReaderBasePtr reader;
             if (use_async) {
                 folly::ManualExecutor executor;
@@ -962,10 +968,13 @@ TEST(ScalarIndexV3LoadTest, BitmapFrozenConversionYieldsBetweenBatches) {
                     }
                 }
                 EXPECT_TRUE(observed_batch);
-                reader = std::move(future).get()->CreateReader(nullptr);
+                reader = CreateBitmapIndex<int64_t, roaring::Roaring>(
+                             std::move(future).get())
+                             ->CreateReader(nullptr);
             } else {
                 // No executor: sync conversion must not acquire a scheduling dependency.
-                reader = folly::coro::blockingWait(std::move(task))
+                reader = CreateBitmapIndex<int64_t, roaring::Roaring>(
+                             folly::coro::blockingWait(std::move(task)))
                              ->CreateReader(nullptr);
             }
             ASSERT_NE(reader, nullptr);
@@ -1262,7 +1271,9 @@ TEST(ScalarIndexV3ErrorCodeTest, MmapFailureKeepsItsCodeAndCleansTargets) {
         ASSERT_TRUE(std::filesystem::remove(data.staging->path));
         std::filesystem::create_symlink("/dev/null", data.staging->path);
         ExpectPackedLoadError(MmapError, [&] {
-            LoaderTestAccess::Finish<SortedIndexLoader>(plan, opts);
+            folly::coro::blockingWait(
+                LoaderTestAccess::StorageFinisher<SortedIndexLoader, int64_t>()(
+                    plan, opts, false));
         });
     }
     for (const auto& path : paths) {

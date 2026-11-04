@@ -501,12 +501,8 @@ TextIndexLoader::Load(milvus::OpContext* context,
                     context);
         co_return std::make_shared<TextIndex>(std::move(slot), metadata);
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
-    }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+    co_return std::make_shared<TextIndex>(
+        co_await LoadStorage(*source_, options_, context));
 }
 
 folly::coro::Task<std::unique_ptr<TextIndexStorage>>
@@ -628,22 +624,6 @@ TextIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                ? file_bytes
                                : TextIndexRamPayloadBytes(*engine);
     co_return MakeStorage(loaded, opts);
-}
-
-folly::coro::Task<IndexPtr>
-TextIndexLoader::LoadLegacy(storage::FileSource& source,
-                            const storage::LoadOptions& opts,
-                            bool use_async) {
-    co_return std::make_shared<TextIndex>(
-        co_await LoadLegacyStorage(source, opts, use_async));
-}
-
-folly::coro::Task<IndexPtr>
-TextIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    co_return std::make_shared<TextIndex>(
-        co_await FinishPackedStorage(plan, opts, use_async));
 }
 
 namespace {

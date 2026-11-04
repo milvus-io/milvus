@@ -41,12 +41,16 @@ of string dictionary/postings are each encapsulated in a type-specific storage v
 keys use `owned_t<T>`, and string lookups use transparent comparison; `Lookup` returns owned values,
 and the `string_view` from `Gather` is valid only during the synchronous callback.
 
+Resident and cached loads use the same typed storage loader, including format validation and
+JSON existence data. The resident path constructs the Index immediately; the cached path invokes
+the storage loader when the slot loads its cell.
+
 ## V3 loading
 
 V3 Artifacts write directly to `IndexEntryWriter`. Reads use `IndexEntryReader` or
 `AsyncIndexEntryReader` directly; `FileSink` / `FileSource` handle only legacy files.
 Each Loader's `PlanPacked` validates the directory and metadata and assigns the final memory/file
-targets, and `FinishPacked` creates storage from the completed targets. The synchronous and
+targets, and `FinishPackedStorage` creates storage from the completed targets. The synchronous and
 asynchronous entry points share these two steps. `PackedIndexLoad` handles reads, CRC, draining
 after cancellation, target commit and failure cleanup; asynchronous file preparation and file-backed
 engine initialization run on LocalFileIOPool. Before file targets are committed, the plan is

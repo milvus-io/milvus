@@ -480,15 +480,6 @@ MakeStorage(const InvertedLoadState& state, const storage::LoadOptions& opts) {
     return storage;
 }
 
-IndexPtr
-MakeIndex(const InvertedLoadState& state, const storage::LoadOptions& opts) {
-    return DispatchInvertedType<IndexPtr>(
-        state.params.value_type, [&]<typename T>() {
-            return std::make_shared<InvertedIndex<T>>(
-                MakeStorage<T>(state, opts));
-        });
-}
-
 /**
  * @brief Per-load payload owners and decoding state, retained by IndexLoadPlan.
  */
@@ -657,12 +648,18 @@ InvertedIndexLoader::Load(milvus::OpContext* context,
             ParseRuntimeParams(options_.params).value_type,
             [&]<typename T>() { return CreateCached<T>(*cache, context); });
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
-    }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+    auto load = [&]<typename T>() -> folly::coro::Task<IndexPtr> {
+        auto index = std::make_shared<InvertedIndex<T>>(
+            co_await LoadStorage<T>(*source_, options_, context));
+        if (auto spec =
+                JsonProjectedSpec(options_.params, index->Metadata().count)) {
+            co_return JsonPathIndex::FromStorage(std::move(index),
+                                                 std::move(*spec));
+        }
+        co_return index;
+    };
+    co_return co_await DispatchInvertedType<folly::coro::Task<IndexPtr>>(
+        ParseRuntimeParams(options_.params).value_type, load);
 }
 
 ReaderCaps
@@ -677,19 +674,6 @@ InvertedIndexLoader::DeriveCaps(const Config& index_meta) {
             .nested = params.nested,
             .exact = !params.nested,
         });
-}
-
-folly::coro::Task<IndexPtr>
-InvertedIndexLoader::LoadLegacy(storage::FileSource& source,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
-    auto projection =
-        PrepareJsonProjectedOpen(families::kInverted, source, opts);
-    auto state = (co_await LoadState(
-        use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = MakeIndex(state, opts);
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(reader)));
 }
 
 IndexLoadPlan
@@ -715,18 +699,6 @@ InvertedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
                         state->targets,
                         plan);
     return plan;
-}
-
-folly::coro::Task<IndexPtr>
-InvertedIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                  const storage::LoadOptions& opts,
-                                  bool use_async) {
-    const auto& state =
-        std::any_cast<const std::shared_ptr<PackedInvertedState>&>(
-            plan.load_context);
-    const auto loaded = co_await FinishPackedState(plan, opts, use_async);
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            MakeIndex(loaded, opts));
 }
 
 namespace {

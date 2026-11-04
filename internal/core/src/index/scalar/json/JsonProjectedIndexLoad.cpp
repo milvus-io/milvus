@@ -14,8 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "folly/coro/BlockingWait.h"
-
 #include "index/scalar/json/JsonProjectedIndexLoad.h"
 
 #include <algorithm>
@@ -38,7 +36,6 @@
 #include "storage/artifact/LocalFileUtils.h"
 #include "index/Families.h"
 #include "index/Meta.h"
-#include "index/scalar/json/JsonPathIndexReader.h"
 #include "nlohmann/json.hpp"
 
 namespace milvus::index {
@@ -565,34 +562,6 @@ PrepareJsonProjectedOpen(std::string_view family,
     return result;
 }
 
-IndexPtr
-FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                        storage::FileSource& source,
-                        IndexPtr inner) {
-    return folly::coro::blockingWait(FinishJsonProjectedOpenAsync(
-        false, std::move(plan), source, std::move(inner)));
-}
-
-folly::coro::Task<IndexPtr>
-FinishJsonProjectedOpenAsync(bool use_async,
-                             JsonProjectedOpenPlan plan,
-                             storage::FileSource& source,
-                             IndexPtr inner) {
-    AssertInfo(inner != nullptr,
-               "typed JSON load requires a non-null inner reader");
-    if (plan.completeness != JsonProjectionCompleteness::Complete) {
-        co_return inner;
-    }
-    AssertInfo(plan.cast_type.has_value(),
-               "complete typed JSON load lacks a cast type");
-    const auto rows = inner->Metadata().count.value();
-    JsonProjectedIndexSpec spec(plan.json_path, *plan.cast_type, rows);
-    auto exists =
-        co_await LoadJsonExists(use_async, std::move(plan), source, rows);
-    co_return std::make_shared<JsonPathIndex>(
-        std::move(inner), std::move(spec), std::move(exists));
-}
-
 std::optional<JsonProjectedIndexSpec>
 JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count) {
     const auto projected = ParseProjectedParams({}, params);
@@ -743,22 +712,6 @@ FinishPackedJsonExists(JsonProjectedOpenPlan plan, int64_t rows) {
     return JsonProjectedIndexSpec(
                std::move(plan.json_path), *plan.cast_type, rows)
         .MakeExists(offsets);
-}
-
-IndexPtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan, IndexPtr inner) {
-    AssertInfo(inner != nullptr,
-               "typed JSON requires an initialized inner reader");
-    if (plan.completeness != JsonProjectionCompleteness::Complete) {
-        return inner;
-    }
-    AssertInfo(plan.cast_type.has_value(),
-               "complete typed JSON load lacks a cast type");
-    const auto rows = inner->Metadata().count.value();
-    JsonProjectedIndexSpec spec(plan.json_path, *plan.cast_type, rows);
-    auto exists = FinishPackedJsonExists(std::move(plan), rows);
-    return std::make_shared<JsonPathIndex>(
-        std::move(inner), std::move(spec), std::move(exists));
 }
 
 }  // namespace milvus::index

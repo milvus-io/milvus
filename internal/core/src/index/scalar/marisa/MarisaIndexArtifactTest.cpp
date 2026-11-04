@@ -43,6 +43,7 @@
 #include <utility>
 #include "index/scalar/marisa/MarisaIndexLoader.h"
 #include "index/test_utils/LoaderTestAccess.h"
+#include "folly/coro/BlockingWait.h"
 #include <cerrno>
 #include <fcntl.h>
 #include <fstream>
@@ -201,46 +202,48 @@ TEST(MarisaIndexArtifactTest, AsyncHeapAndMmapRoundTrip) {
     }
 }
 
-TEST(MarisaIndexArtifactTest,
-     LegacyWarmupRejectsCountMismatchBeforePublication) {
+TEST(MarisaIndexArtifactTest, LegacyLoadsRejectCountMismatchBeforePublication) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("MarisaVarchar");
     const auto artifact = BuildMarisa(backend);
     const auto data = SerializeV1V2(*artifact);
-    for (const bool mmap : {false, true}) {
-        for (const bool async : {false, true}) {
-            SCOPED_TRACE(::testing::Message() << mmap << async);
-            auto staging = storage::LocalDirectory::CreateOwned(
-                std::filesystem::temp_directory_path().string(),
-                "marisa-bad-count-XXXXXX",
-                "marisa count test");
-            storage::LoadOptions options;
-            options.params = backend.LoadParams({.row_count = 5});
-            options.params[INDEX_NUM_ROWS_KEY] = 4;
-            options.enable_mmap = mmap;
-            options.mmap_dir_path = staging->Path();
-            IndexCacheConfig cache{
-                staging->Path(),
-                cachinglayer::Meta{mmap ? cachinglayer::StorageType::DISK
-                                        : cachinglayer::StorageType::MEMORY,
-                                   cachinglayer::CellIdMappingMode::IDENTICAL,
-                                   cachinglayer::CellDataType::OTHER,
-                                   CacheWarmupPolicy::CacheWarmupPolicy_Sync,
-                                   true},
-                {1024 * 1024, 1024 * 1024},
-                {},
-                4096};
-            auto source = std::make_shared<TestArtifactSource>(
-                data, storage::Generation::V1V2);
-            ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
-                (void)LoaderRegistry::Instance()
-                    .Lookup(backend.Family())
-                    .Load({OpenedIndexSource{
-                               LegacyIndexSource{std::move(source), async}},
-                           options,
-                           cache});
-            });
-            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    for (const bool cached : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool async : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << cached << mmap << async);
+                auto staging = storage::LocalDirectory::CreateOwned(
+                    std::filesystem::temp_directory_path().string(),
+                    "marisa-bad-count-XXXXXX",
+                    "marisa count test");
+                storage::LoadOptions options;
+                options.params = backend.LoadParams({.row_count = 5});
+                options.params[INDEX_NUM_ROWS_KEY] = 4;
+                options.enable_mmap = mmap;
+                options.mmap_dir_path = staging->Path();
+                IndexCacheConfig cache{
+                    staging->Path(),
+                    cachinglayer::Meta{
+                        mmap ? cachinglayer::StorageType::DISK
+                             : cachinglayer::StorageType::MEMORY,
+                        cachinglayer::CellIdMappingMode::IDENTICAL,
+                        cachinglayer::CellDataType::OTHER,
+                        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                        true},
+                    {1024 * 1024, 1024 * 1024},
+                    {},
+                    4096};
+                auto source = std::make_shared<TestArtifactSource>(
+                    data, storage::Generation::V1V2);
+                ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                    (void)LoaderRegistry::Instance()
+                        .Lookup(backend.Family())
+                        .Load({OpenedIndexSource{
+                                   LegacyIndexSource{std::move(source), async}},
+                               options,
+                               cached ? std::optional{cache} : std::nullopt});
+                });
+                EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+            }
         }
     }
 }
@@ -616,8 +619,9 @@ TEST(MarisaIndexArtifactTest, TrieReadFailureReportsFileReadFailed) {
     // Opening succeeds; MARISA read then fails on the directory with EISDIR.
     ASSERT_TRUE(std::filesystem::create_directory(trie.staging->path));
     ExpectSegcoreError(ErrorCode::FileReadFailed, [&] {
-        static_cast<void>(
-            LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options));
+        static_cast<void>(folly::coro::blockingWait(
+            LoaderTestAccess::StorageFinisher<MarisaIndexLoader>()(
+                plan, options, false)));
     });
 }
 
@@ -819,7 +823,10 @@ ExpectUnvisitedMarisaMappings() {
     // posting region would SIGBUS. Keep the CSR index, including its terminal
     // entry, available for the loader's two endpoint checks and the reader's
     // constant-time pointer check. Middle entries and postings need no scan.
-    auto reader = LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options);
+    auto index = std::make_shared<MarisaIndex>(folly::coro::blockingWait(
+        LoaderTestAccess::StorageFinisher<MarisaIndexLoader>()(
+            plan, options, false)));
+    auto reader = index->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 5);
 }

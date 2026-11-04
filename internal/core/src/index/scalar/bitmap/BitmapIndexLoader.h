@@ -91,33 +91,10 @@ class BitmapIndexLoader final : public IndexLoader {
                 milvus::OpContext* context);
 
     template <typename T, typename Posting>
-    static folly::coro::Task<IndexPtr>
-    LoadLegacyIndex(storage::FileSource& source,
-                    const storage::LoadOptions& opts,
-                    const PreparedState& prepared,
-                    bool use_async);
-
-    template <typename T, typename Posting>
     static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
     FinishPackedStorage(IndexLoadPlan& plan,
                         const storage::LoadOptions& opts,
                         bool use_async);
-
-    template <typename T, typename Posting>
-    static folly::coro::Task<IndexPtr>
-    FinishPackedIndex(IndexLoadPlan& plan,
-                      const storage::LoadOptions& opts,
-                      bool use_async);
-
-    /**
-     * @brief Decode postings using retained metadata, then attach JSON
-     * projection state.
-     * @note Runs inside RunLegacyLoad; use_async controls source I/O and batch scheduling.
-     */
-    folly::coro::Task<IndexPtr>
-    LoadLegacy(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
 
     /**
      * @brief Validate packed metadata without allocating per-load destinations.
@@ -136,17 +113,6 @@ class BitmapIndexLoader final : public IndexLoader {
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts,
                const PreparedState* cached = nullptr);
-
-    /**
-     * @brief Initialize an index from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IndexPtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
 };
 
 }  // namespace milvus::index

@@ -1151,34 +1151,21 @@ BitmapIndexLoader::Load(milvus::OpContext* context,
                            : CreateCached<T, TargetBitmap>(*cache, context);
             });
     }
-    const auto operation_token =
-        context ? context->cancellation_token : folly::CancellationToken{};
-    const auto token = folly::cancellation_token_merge(
-        operation_token, co_await folly::coro::co_current_cancellation_token);
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed,
-            options_,
-            [this, token](const auto& directory,
-                          const auto& metadata,
-                          const auto& options) {
-                auto plan =
-                    PlanPacked(directory, metadata, options, state_.get());
-                std::any_cast<const std::shared_ptr<PackedBitmapState>&>(
-                    plan.load_context)
-                    ->cancellation_token = token;
-                return plan;
-            },
-            &FinishPacked,
-            context);
-    }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_),
-        options_,
-        [this](auto& source, const auto& options, bool use_async) {
-            return LoadLegacy(source, options, use_async);
-        },
-        context);
+    auto load =
+        [&]<typename T, typename Posting>() -> folly::coro::Task<IndexPtr> {
+        auto storage = co_await LoadStorage<T, Posting>(
+            *source_, options_, *state_, context);
+        auto projection =
+            JsonProjectedSpec(options_.params, storage->options.total_num_rows);
+        co_return CreateBitmapIndex<T, Posting>(std::move(storage),
+                                                std::move(projection));
+    };
+    co_return co_await DispatchBitmapType<folly::coro::Task<IndexPtr>>(
+        state_->params.value_type, [&]<typename T>() {
+            return state_->layout == BitmapLayout::Roaring
+                       ? load.template operator()<T, roaring::Roaring>()
+                       : load.template operator()<T, TargetBitmap>();
+        });
 }
 
 ReaderCaps
@@ -1194,34 +1181,6 @@ BitmapIndexLoader::DeriveCaps(const Config& index_meta) {
             .value_lookup = params.value_lookup,
             .cheap_value_lookup = params.value_lookup && params.offset_cache,
             .exact = !params.nested});
-}
-
-template <typename T, typename Posting>
-folly::coro::Task<IndexPtr>
-BitmapIndexLoader::LoadLegacyIndex(storage::FileSource& source,
-                                   const storage::LoadOptions& opts,
-                                   const PreparedState& prepared,
-                                   bool use_async) {
-    co_return CreateBitmapIndex<T, Posting>(
-        co_await LoadBitmapPayload<T, Posting>(
-            use_async, source, opts, prepared.params, prepared.meta));
-}
-
-folly::coro::Task<IndexPtr>
-BitmapIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kBitmap, source, opts);
-    auto inner = co_await DispatchBitmapType<folly::coro::Task<IndexPtr>>(
-        state_->params.value_type, [&]<typename T>() {
-            return state_->layout == BitmapLayout::Roaring
-                       ? LoadLegacyIndex<T, roaring::Roaring>(
-                             source, opts, *state_, use_async)
-                       : LoadLegacyIndex<T, TargetBitmap>(
-                             source, opts, *state_, use_async);
-        });
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(inner)));
 }
 
 IndexLoadPlan
@@ -1391,36 +1350,6 @@ BitmapIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     storage->json_exists = FinishPackedJsonExists(
         std::move(state->projection), storage->options.total_num_rows);
     co_return storage;
-}
-
-template <typename T, typename Posting>
-folly::coro::Task<IndexPtr>
-BitmapIndexLoader::FinishPackedIndex(IndexLoadPlan& plan,
-                                     const storage::LoadOptions& opts,
-                                     bool use_async) {
-    auto storage =
-        co_await FinishPackedStorage<T, Posting>(plan, opts, use_async);
-    auto projection =
-        JsonProjectedSpec(opts.params, storage->options.total_num_rows);
-    co_return CreateBitmapIndex<T, Posting>(std::move(storage),
-                                            std::move(projection));
-}
-
-folly::coro::Task<IndexPtr>
-BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
-    const auto state =
-        std::any_cast<std::shared_ptr<PackedBitmapState>>(plan.load_context);
-    auto inner = co_await DispatchBitmapType<folly::coro::Task<IndexPtr>>(
-        state->params.value_type, [&]<typename T>() {
-            return state->layout == BitmapLayout::Roaring
-                       ? FinishPackedIndex<T, roaring::Roaring>(
-                             plan, opts, use_async)
-                       : FinishPackedIndex<T, TargetBitmap>(
-                             plan, opts, use_async);
-        });
-    co_return inner;
 }
 
 namespace {

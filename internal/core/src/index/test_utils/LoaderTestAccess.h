@@ -15,10 +15,8 @@
 // limitations under the License.
 
 #pragma once
-#include "folly/coro/BlockingWait.h"
 
 #include "index/IndexLoadPlan.h"
-#include "index/contracts/query/IIndexReaderBase.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/artifact/LoadOptions.h"
 
@@ -47,22 +45,6 @@ struct LoaderTestAccess {
          const nlohmann::json& metadata,
          const storage::LoadOptions& options) {
         return Loader::PlanPacked(directory, metadata, options);
-    }
-
-    template <typename Loader>
-    static auto
-    Finish(IndexLoadPlan& plan,
-           const storage::LoadOptions& options,
-           bool use_async) {
-        return Loader::FinishPacked(plan, options, use_async);
-    }
-
-    template <typename Loader>
-    static IIndexReaderBasePtr
-    Finish(IndexLoadPlan& plan, const storage::LoadOptions& options) {
-        return folly::coro::blockingWait(
-                   Loader::FinishPacked(plan, options, false))
-            ->CreateReader(nullptr);
     }
 };
 

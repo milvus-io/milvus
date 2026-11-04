@@ -537,12 +537,14 @@ NgramIndexLoader::Load(milvus::OpContext* context,
         }
         co_return index;
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
+    auto index = std::make_shared<NgramIndex>(
+        co_await LoadStorage(*source_, options_, context));
+    if (auto spec =
+            JsonProjectedSpec(options_.params, index->Metadata().count)) {
+        co_return JsonPathIndex::FromStorage(std::move(index),
+                                             std::move(*spec));
     }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+    co_return index;
 }
 
 folly::coro::Task<std::unique_ptr<NgramIndexStorage>>
@@ -580,18 +582,6 @@ NgramIndexLoader::DeriveCaps(const Config& index_meta) {
         families::kNgram,
         index_meta,
         ReaderCaps{.ngram_candidates = true, .exact = false});
-}
-
-folly::coro::Task<IndexPtr>
-NgramIndexLoader::LoadLegacy(storage::FileSource& source,
-                             const storage::LoadOptions& opts,
-                             bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kNgram, source, opts);
-    auto state = (co_await LoadState(
-        use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = std::make_shared<NgramIndex>(MakeStorage(state, opts));
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(reader)));
 }
 
 IndexLoadPlan
@@ -675,19 +665,6 @@ NgramIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     storage->json_exists =
         FinishPackedJsonExists(std::move(state->projection), storage->count_);
     co_return storage;
-}
-
-folly::coro::Task<IndexPtr>
-NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                               const storage::LoadOptions& opts,
-                               bool use_async) {
-    auto storage = co_await FinishPackedStorage(plan, opts, use_async);
-    auto index = std::make_shared<NgramIndex>(std::move(storage));
-    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
-        co_return JsonPathIndex::FromStorage(std::move(index),
-                                             std::move(*spec));
-    }
-    co_return index;
 }
 
 namespace {

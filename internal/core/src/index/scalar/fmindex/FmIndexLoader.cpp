@@ -334,8 +334,10 @@ FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig* cache) {
             metadata.total_rows,
             segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
     }
-    co_return co_await RunPackedIndexLoad(
-        *source_, options_, &PlanPacked, &FinishPacked, context);
+    co_return std::make_shared<FmIndex>(
+        co_await RunPackedIndexLoad<std::unique_ptr<FmIndexStorage>>(
+            *source_, options_, &PlanPacked, &FinishPackedStorage, context),
+        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }
 
 ReaderCaps
@@ -382,16 +384,6 @@ FmIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
                  ExpectedNullBitmapBytes(state->total_rows)}});
     }
     return plan;
-}
-
-folly::coro::Task<IndexPtr>
-FmIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                            const storage::LoadOptions& opts,
-                            bool use_async) {
-    auto storage = co_await FinishPackedStorage(plan, opts, use_async);
-    co_return std::make_shared<FmIndex>(
-        std::move(storage),
-        segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }
 
 folly::coro::Task<std::unique_ptr<FmIndexStorage>>

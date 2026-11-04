@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/test_utils/LoaderTestAccess.h"
+#include "folly/coro/BlockingWait.h"
 
 #include <gtest/gtest.h>
 
@@ -494,7 +495,12 @@ TEST(TextIndexArtifactTest, PackedTargetsRetainMmapFilesAfterPlanRelease) {
                     std::memcpy(memory.data, bytes.data(), bytes.size());
                 }
             }
-            reader = LoaderTestAccess::Finish<TextIndexLoader>(plan, opts);
+            reader =
+                std::make_shared<TextIndex>(
+                    folly::coro::blockingWait(
+                        LoaderTestAccess::StorageFinisher<TextIndexLoader>()(
+                            plan, opts, false)))
+                    ->CreateReader(nullptr);
             plan.Commit();
         }
         ASSERT_NE(reader, nullptr);

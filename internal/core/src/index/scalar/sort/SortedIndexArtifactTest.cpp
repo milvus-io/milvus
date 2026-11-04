@@ -35,6 +35,7 @@
 #include <limits>
 #include "index/scalar/sort/SortedIndexLoader.h"
 #include "index/test_utils/LoaderTestAccess.h"
+#include "folly/coro/BlockingWait.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index::test {
@@ -446,7 +447,10 @@ ExpectUntouchedMmapFiles(const char* backend_name) {
     // Linux permits these file mappings, but any payload dereference raises
     // SIGBUS. The child must finish and destroy the reader without touching
     // numeric data/offsets or string offsets; string header pages remain valid.
-    auto reader = LoaderTestAccess::Finish<SortedIndexLoader>(plan, options);
+    auto index = std::make_shared<SortedIndex<T>>(folly::coro::blockingWait(
+        LoaderTestAccess::StorageFinisher<SortedIndexLoader, T>()(
+            plan, options, false)));
+    auto reader = index->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 3);
 }

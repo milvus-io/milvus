@@ -85,17 +85,6 @@ class FmIndexLoader final : public IndexLoader {
     FinishPackedStorage(IndexLoadPlan& plan,
                         const storage::LoadOptions& opts,
                         bool use_async);
-
-    /**
-     * @brief Initialize an index from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IndexPtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
 };
 
 }  // namespace milvus::index

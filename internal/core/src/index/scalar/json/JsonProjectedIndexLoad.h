@@ -25,7 +25,7 @@
 #include "common/JsonCastType.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
 #include "common/Types.h"
-#include "index/contracts/IIndex.h"
+#include "index/contracts/query/ReaderCaps.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/artifact/FileSource.h"
@@ -91,14 +91,6 @@ PreparePackedJsonProjectedOpen(std::string_view family,
                                IndexLoadPlan& targets,
                                std::optional<size_t> row_count = std::nullopt);
 
-/**
- * @brief Decorate the index using populated non-exist targets and its row
- * bound.
- * @pre Planned reads/writes are complete; this may read local staging files.
- */
-IndexPtr
-FinishPackedJsonProjectedOpen(JsonProjectedOpenPlan plan, IndexPtr inner);
-
 /** @brief Derive optional routing metadata without loading storage. */
 std::optional<JsonProjectedIndexSpec>
 JsonProjectedSpec(const Config& params, std::optional<int64_t> row_count);
@@ -140,28 +132,5 @@ JsonProjectedOpenPlan
 PrepareJsonProjectedOpen(std::string_view family,
                          storage::FileSource& source,
                          const storage::LoadOptions& opts);
-
-/**
- * @brief Blocking adapter that decorates a legacy index with JSON projection.
- * @note Incomplete legacy metadata leaves inner unchanged. Complete artifacts
- * stage any native-size_t sidecar locally, validate its size against the
- * index's row count, then read offsets and construct a JsonPathIndex.
- */
-IndexPtr
-FinishJsonProjectedOpen(JsonProjectedOpenPlan plan,
-                        storage::FileSource& source,
-                        IndexPtr inner);
-
-/**
- * @brief Complete legacy JSON decoration with selectable source transport.
- * @pre source outlives the task; the caller provides the local I/O executor.
- * @note Only source I/O suspends. Local sidecar reads and index construction
- * remain synchronous; use_async=false also keeps source reads synchronous.
- */
-folly::coro::Task<IndexPtr>
-FinishJsonProjectedOpenAsync(bool use_async,
-                             JsonProjectedOpenPlan plan,
-                             storage::FileSource& source,
-                             IndexPtr inner);
 
 }  // namespace milvus::index

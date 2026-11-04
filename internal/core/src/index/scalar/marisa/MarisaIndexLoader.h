@@ -83,15 +83,6 @@ class MarisaIndexLoader final : public IndexLoader {
                         bool use_async);
 
     /**
-     * @brief Load the trie and row mapping, then attach JSON projection state.
-     * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
-     */
-    static folly::coro::Task<IndexPtr>
-    LoadLegacy(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
-
-    /**
      * @brief Allocate payload destinations and state for one packed Load.
      * @note Does not read payloads. RunPackedIndexLoad owns cleanup until commit.
      */
@@ -99,17 +90,6 @@ class MarisaIndexLoader final : public IndexLoader {
     PlanPacked(const storage::IndexEntryDirectory& directory,
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts);
-
-    /**
-     * @brief Initialize an index from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IndexPtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
 };
 
 }  // namespace milvus::index

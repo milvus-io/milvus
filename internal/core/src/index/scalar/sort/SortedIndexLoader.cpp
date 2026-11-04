@@ -957,25 +957,20 @@ SortedIndexLoader::Load(milvus::OpContext* context,
             state_->params.value_type,
             [&]<typename T>() { return CreateCached<T>(*cache, context); });
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed,
-            options_,
-            [this](const auto& directory,
-                   const auto& metadata,
-                   const auto& options) {
-                return PlanPacked(directory, metadata, options, state_.get());
-            },
-            &FinishPacked,
-            context);
+    auto load = [&]<typename T>() -> folly::coro::Task<IndexPtr> {
+        auto index = std::make_shared<SortedIndex<T>>(
+            co_await LoadStorage<T>(*source_, options_, *state_, context));
+        if (auto spec =
+                JsonProjectedSpec(options_.params, index->Metadata().count)) {
+            co_return JsonPathIndex::FromStorage(std::move(index),
+                                                 std::move(*spec));
+        }
+        co_return index;
+    };
+    if (IsStringDataType(state_->params.value_type)) {
+        co_return co_await load.template operator()<std::string_view>();
     }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_),
-        options_,
-        [this](auto& source, const auto& options, bool use_async) {
-            return LoadLegacy(source, options, use_async);
-        },
-        context);
+    co_return co_await DispatchPackedNumeric(state_->params.value_type, load);
 }
 
 ReaderCaps
@@ -995,75 +990,6 @@ SortedIndexLoader::DeriveCaps(const Config& index_meta) {
                    .value_lookup = params.value_lookup,
                    .cheap_value_lookup = params.value_lookup,
                    .exact = !params.nested});
-}
-
-folly::coro::Task<IndexPtr>
-SortedIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kSort, source, opts);
-    const auto& params = state_->params;
-    if (params.value_type == DataType::NONE ||
-        params.value_type == DataType::ARRAY) {
-        ThrowInfo(DataTypeInvalid,
-                  "sorted loader requires value_type or array_element_type");
-    }
-    if (IsStringDataType(params.value_type)) {
-        const auto& meta = state_->meta;
-        auto state =
-            co_await LoadStringState(use_async, source, opts, meta, params);
-        auto inner =
-            std::make_shared<SortedIndex<std::string_view>>(std::move(state));
-        co_return co_await FinishJsonProjectedOpenAsync(
-            use_async, std::move(projection), source, std::move(inner));
-    }
-
-    const auto& meta = state_->meta;
-    IndexPtr inner;
-    switch (params.value_type) {
-        case DataType::BOOL:
-            inner = std::make_shared<SortedIndex<bool>>(
-                (co_await LoadNumericState<bool>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT8:
-            inner = std::make_shared<SortedIndex<int8_t>>(
-                (co_await LoadNumericState<int8_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT16:
-            inner = std::make_shared<SortedIndex<int16_t>>(
-                (co_await LoadNumericState<int16_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT32:
-            inner = std::make_shared<SortedIndex<int32_t>>(
-                (co_await LoadNumericState<int32_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            inner = std::make_shared<SortedIndex<int64_t>>(
-                (co_await LoadNumericState<int64_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::FLOAT:
-            inner = std::make_shared<SortedIndex<float>>(
-                (co_await LoadNumericState<float>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::DOUBLE:
-            inner = std::make_shared<SortedIndex<double>>(
-                (co_await LoadNumericState<double>(
-                    use_async, source, opts, meta, params)));
-            break;
-        default:
-            ThrowInfo(DataTypeInvalid,
-                      "unsupported sorted value type {}",
-                      static_cast<int>(params.value_type));
-    }
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(inner)));
 }
 
 IndexLoadPlan
@@ -1209,39 +1135,6 @@ SortedIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     storage->json_exists = FinishPackedJsonExists(
         std::move(state->projection), storage->state.total_num_rows);
     co_return storage;
-}
-
-template <typename T>
-folly::coro::Task<IndexPtr>
-SortedIndexLoader::FinishPackedIndex(IndexLoadPlan& plan,
-                                     const storage::LoadOptions& opts,
-                                     bool use_async) {
-    auto index = std::make_shared<SortedIndex<T>>(
-        co_await FinishPackedStorage<T>(plan, opts, use_async));
-    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
-        co_return JsonPathIndex::FromStorage(std::move(index),
-                                             std::move(*spec));
-    }
-    co_return index;
-}
-
-folly::coro::Task<IndexPtr>
-SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
-    const auto state =
-        std::any_cast<std::shared_ptr<PackedSortedState>>(plan.load_context);
-    IndexPtr inner;
-    if (IsStringDataType(state->params.value_type)) {
-        inner =
-            co_await FinishPackedIndex<std::string_view>(plan, opts, use_async);
-    } else {
-        inner = co_await DispatchPackedNumeric(
-            state->params.value_type, [&]<typename T>() {
-                return FinishPackedIndex<T>(plan, opts, use_async);
-            });
-    }
-    co_return inner;
 }
 
 namespace {

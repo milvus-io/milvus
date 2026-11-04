@@ -587,12 +587,14 @@ MarisaIndexLoader::Load(milvus::OpContext* context,
         }
         co_return index;
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
+    auto index = std::make_shared<MarisaIndex>(
+        co_await LoadStorage(*source_, options_, context));
+    if (auto spec =
+            JsonProjectedSpec(options_.params, index->Metadata().count)) {
+        co_return JsonPathIndex::FromStorage(std::move(index),
+                                             std::move(*spec));
     }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+    co_return index;
 }
 
 folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
@@ -644,17 +646,6 @@ MarisaIndexLoader::DeriveCaps(const Config& index_meta) {
                                               .pattern_match = true,
                                               .value_lookup = true,
                                               .cheap_value_lookup = true});
-}
-
-folly::coro::Task<IndexPtr>
-MarisaIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kMarisa, source, opts);
-    auto storage = (co_await LoadState(use_async, source, opts));
-    auto reader = std::make_shared<MarisaIndex>(std::move(storage));
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(reader)));
 }
 
 IndexLoadPlan
@@ -881,19 +872,6 @@ MarisaIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     result->json_exists = FinishPackedJsonExists(std::move(state->projection),
                                                  result->str_ids_size);
     co_return result;
-}
-
-folly::coro::Task<IndexPtr>
-MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
-    auto storage = co_await FinishPackedStorage(plan, opts, use_async);
-    auto index = std::make_shared<MarisaIndex>(std::move(storage));
-    if (auto spec = JsonProjectedSpec(opts.params, index->Metadata().count)) {
-        co_return JsonPathIndex::FromStorage(std::move(index),
-                                             std::move(*spec));
-    }
-    co_return index;
 }
 
 namespace {

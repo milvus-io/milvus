@@ -493,12 +493,8 @@ JsonFlatIndexLoader::Load(milvus::OpContext* context,
         co_return std::make_shared<JsonFlatIndex>(
             std::move(slot), count, runtime.nested_path);
     }
-    if (auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-        co_return co_await RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
-    }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(*source_), options_, &LoadLegacy, context);
+    co_return std::make_shared<JsonFlatIndex>(
+        co_await LoadStorage(*source_, options_, context));
 }
 
 folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>>
@@ -528,14 +524,6 @@ JsonFlatIndexLoader::LoadLegacyStorage(storage::FileSource& source,
                                        bool use_async) {
     co_return ValidateStorage(co_await LoadState(use_async, source, opts),
                               opts);
-}
-
-folly::coro::Task<IndexPtr>
-JsonFlatIndexLoader::LoadLegacy(storage::FileSource& source,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
-    co_return std::make_shared<JsonFlatIndex>(
-        co_await LoadLegacyStorage(source, opts, use_async));
 }
 
 IndexLoadPlan
@@ -605,14 +593,6 @@ JsonFlatIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                   bytes,
                                   directory->PathHeapBytes()),
                               opts);
-}
-
-folly::coro::Task<IndexPtr>
-JsonFlatIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                  const storage::LoadOptions& opts,
-                                  bool use_async) {
-    co_return std::make_shared<JsonFlatIndex>(
-        co_await FinishPackedStorage(plan, opts, use_async));
 }
 
 namespace {
