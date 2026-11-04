@@ -102,6 +102,7 @@ arrow	internal/core/src/common/init_c.cpp
 arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
 arrow	internal/core/src/common/Types.h
+arrow	internal/core/src/grep/SegmentGrep.cpp
 arrow	internal/core/src/indexbuilder/BuildSession.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
@@ -164,6 +165,7 @@ arrow	internal/core/src/storage/StatusToErrorCode.h
 arrow	internal/core/src/storage/Util.cpp
 arrow	internal/core/src/storage/Util.h
 milvus_storage	internal/core/src/common/Schema.cpp
+milvus_storage	internal/core/src/grep/SegmentGrep.cpp
 milvus_storage	internal/core/src/indexbuilder/BuildSession.cpp
 milvus_storage	internal/core/src/mmap/SparseVortexFileSystem.cpp
 milvus_storage	internal/core/src/mmap/VortexColumn.cpp
