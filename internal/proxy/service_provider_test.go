@@ -564,7 +564,13 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 	assert.False(t, cachedResp.GetStatus().GetRetriable())
 }
 
-func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) {
+// TestInterceptorImpl_DoesNotCountRequestAtServiceLayer guards against the
+// proxy counting the same request twice in milvus_proxy_req_count. The
+// boundary counters own that metric -- UnaryRequestStatsInterceptor for gRPC,
+// wrapperPost for REST v2 -- so the service layer must leave both the total
+// and the outcome series untouched while still recording its latency series
+// and preserving the onError/onResponse response mapping.
+func TestInterceptorImpl_DoesNotCountRequestAtServiceLayer(t *testing.T) {
 	paramtable.Init()
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -572,62 +578,56 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 	nodeID := paramtable.GetStringNodeID()
 
 	tests := []struct {
-		name         string
-		onCall       func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-		expectStatus string
-		expectCause  string
+		name       string
+		onCall     func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+		onResponse func(resp *milvuspb.DescribeCollectionResponse) error
 	}{
 		{
-			name: "response input error",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad request"))}, nil
-			},
-			expectStatus: metrics.FailLabel,
-			expectCause:  metrics.CauseUser,
-		},
-		{
-			name: "go system error",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return nil, merr.WrapErrServiceInternalMsg("internal failure")
-			},
-			expectStatus: metrics.FailLabel,
-			expectCause:  metrics.CauseSystem,
-		},
-		{
-			name: "provider abandon",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return nil, withServiceProviderMetric(
-					merr.WrapErrServiceInternalMsg("enqueue failed"), metrics.AbandonLabel, metrics.CauseNA)
-			},
-			expectStatus: metrics.AbandonLabel,
-			expectCause:  metrics.CauseNA,
-		},
-		{
-			name: "success",
+			name: "success response",
 			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 				return &milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil
 			},
-			expectStatus: metrics.SuccessLabel,
-			expectCause:  metrics.CauseNA,
+		},
+		{
+			name: "non-ok status response",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad request"))}, nil
+			},
+		},
+		{
+			name: "go error",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return nil, merr.WrapErrServiceInternalMsg("internal failure")
+			},
+		},
+		{
+			name: "onResponse failure",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil
+			},
+			onResponse: func(resp *milvuspb.DescribeCollectionResponse) error {
+				return merr.WrapErrServiceInternalMsg("finalize failed")
+			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			method := "DescribeCollectionMetric_" + tc.name
-			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, tc.expectStatus, tc.expectCause, request.GetDbName(), request.GetCollectionName())
 			totalCounter := metrics.ProxyFunctionCall.WithLabelValues(
 				nodeID, method, metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName())
+			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
+				nodeID, method, metrics.FailLabel, metrics.CauseSystem, request.GetDbName(), request.GetCollectionName())
 			latency := metrics.ProxyReqLatency.WithLabelValues(nodeID, method)
 			beforeOutcome := testutil.ToFloat64(outcomeCounter)
 			beforeTotal := testutil.ToFloat64(totalCounter)
 			beforeLatency := proxyHistogramSampleCount(t, latency)
 
 			interceptor := &InterceptorImpl[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse]{
-				proxy:  node,
-				method: method,
-				onCall: tc.onCall,
+				proxy:      node,
+				method:     method,
+				onCall:     tc.onCall,
+				onResponse: tc.onResponse,
 				onError: func(err error) (*milvuspb.DescribeCollectionResponse, error) {
 					return &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}, nil
 				},
@@ -635,8 +635,8 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 			resp, err := interceptor.Call(context.Background(), request)
 			assert.NoError(t, err)
 			assert.NotNil(t, resp)
-			assert.Equal(t, beforeOutcome+1, testutil.ToFloat64(outcomeCounter))
-			assert.Equal(t, beforeTotal+1, testutil.ToFloat64(totalCounter))
+			assert.Equal(t, beforeOutcome, testutil.ToFloat64(outcomeCounter))
+			assert.Equal(t, beforeTotal, testutil.ToFloat64(totalCounter))
 			assert.Equal(t, beforeLatency+1, proxyHistogramSampleCount(t, latency))
 		})
 	}
