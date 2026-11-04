@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document describes the first Proxy integration boundary for QueryView query
+This document describes the Proxy integration boundary for QueryView query
 execution.
 
 The current Proxy `SearchPipeline` and `QueryPipeline` already own result
@@ -16,8 +16,8 @@ processing semantics:
 - render and highlight;
 - output field shaping.
 
-The first QueryView integration should not move those responsibilities into
-`internal/views/queryclient`. Instead, `queryclient` adds a `Legacy()` domain
+QueryView keeps those responsibilities in Proxy. `queryclient` supplies a
+`Legacy()` domain
 that replaces shard execution and shard-local reduction currently implemented by
 `queryTask.Execute` and `searchTask.Execute`.
 
@@ -61,8 +61,8 @@ The first `Legacy()` implementation does not:
 - perform per-channel fast skip based on old `channelsMvcc`;
 - change `SearchPipeline` or `QueryPipeline` APIs.
 
-Those optimizations can be introduced after the primary Search/Query path is
-runnable through QueryView.
+These are separate optimizations, not prerequisites of the production
+QueryView Search/Query path.
 
 ## 4. Public Interfaces
 
@@ -250,27 +250,37 @@ Complex Delete uses its allocated query timestamp. TTL uses the same fixed time.
 These entries do not pin physical Views across pages or extend historical-data
 retention. Compaction/GC history guarantees remain a separate TODO.
 
-### Partial-update read certificates
+### Partial-update read snapshots
 
-Internal Partial Update keeps independent Growing and Transform execution
-frontiers. It requests `read_proof_after` at the new read task's timestamp.
-Primary WAL supplies the latest published complete prefix at or after that
-minimum, with the matching executor frontiers and `read_proof_timetick=R`.
-Proxy records R from each final successful shard plan, including empty shards,
-and passes it to existing WAL CAS checks. A missing certificate fails closed;
-Proxy never substitutes the maximum executor frontier or a later local TSO.
+Internal Partial Update uses ordinary Strong planning. The primary WAL returns
+Growing and Transform frontiers from one atomically published complete ACK
+prefix. Proxy records `ReadTs = max(G,T)` for every successful shard, including
+empty results, and binds each candidate write channel to that read timestamp.
+This is not a maximum assembled from independently sampled executor progress.
 
-A new CAS reread creates a new task and fresh minimum. Phase 2 retries keep the
-same plan; full replanning replaces both the read result and its certificate.
-Existing WAL owner-term, conflict-window and relative-operation retry guards
-remain in force. This mode is separate from Iterator's fixed BarrierMVCC and
-does not require either executor to advance to R.
+Let P be the complete published prefix and R=max(G,T). There is no query-visible
+channel mutation in (R,P]: any such mutation would have advanced G or T before
+publication. Thus the returned data snapshot is valid at R even when an idle
+channel's R is older than the query task's BeginTs. This argument relies on the
+paired-prefix publication invariant; arbitrary supplied pairs do not acquire a
+CAS proof merely by taking their maximum.
+
+The write path still checks the WAL owner term, recovery-history boundary,
+incomplete transactions, conflicting PK versions and collection/channel fences.
+PK-history expiry advances the validation floor only to actually forgotten or
+omitted writes, not wall-clock age. Equality with that floor is valid; an earlier
+read retries. A new CAS reread gets fresh shard results/frontiers. Phase 2 retries
+retain their plan; full replanning replaces the results and recorded timestamps.
+There is no separate read-certificate RPC or requirement that ReadTs reach a new
+local TSO. Iterator's fixed scalar BarrierMVCC remains a distinct contract. See
+[query MVCC](query_plan.md#three-distinct-timestamp-contracts).
 
 ## 8. Proxy Integration
 
 ### 8.1 Query Task
 
-`queryTask.Execute` currently does:
+Without a QueryViewClient, `QueryTask.Execute` retains the legacy/component-host
+fallback:
 
 ```text
 t.lb.Execute
@@ -279,7 +289,7 @@ t.lb.Execute
       -> t.resultBuf.Insert(result)
 ```
 
-With QueryView legacy execution:
+With the production QueryViewClient:
 
 ```text
 Legacy().Query
@@ -294,7 +304,8 @@ BarrierMVCC selected before execution as SessionTs.
 
 ### 8.2 Search Task
 
-`searchTask.Execute` currently does:
+Without a QueryViewClient, `SearchTask.Execute` retains the legacy/component-host
+fallback:
 
 ```text
 t.lb.Execute
@@ -304,7 +315,7 @@ t.lb.Execute
       -> t.queryChannelsNode[channel] = nodeID
 ```
 
-With QueryView legacy execution:
+With the production QueryViewClient:
 
 ```text
 Legacy().Search
@@ -325,12 +336,14 @@ information. Search requery executes Query against the retained Search plans.
 
 ## 9. Requery Behavior
 
-Before Phase 1, Proxy declares the union of all later-stage field dependencies
-through `required_field_ids`, using the same dependency collection as requery.
-This includes hidden ordering fields, rerank inputs and highlight fields; it
-does not add them to the user output projection or force eager field retrieval.
-SN expands these physical dependencies and validates them with the original
-request against schema history. Requery cannot add an undeclared field.
+Requery retains the parent's exact read Schema and QueryView plans. Additional
+rendering, ordering, rerank and highlight fields may be fetched if that retained
+View's Schema and required LoadScope support them. There is no Phase 1
+`required_field_ids` allowlist or separate field-access proof. An invalid field
+is rejected against the selected resources; requery cannot switch to a newer
+schema to obtain it. Field removal follows the read-Schema publication boundary
+in [schema evolution](../schema_evolution.md#62-dropped-field-validity); it does
+not apply a separate WAL ALTER TimeTick rejection to the retained View.
 
 SearchPipeline binds internal requery to the parent's schema and `ShardPlan`s.
 `Legacy().Query` with non-nil `Plans` dispatches directly to those exact work
@@ -345,7 +358,9 @@ slices.
 
 For every `SearchOnViewResponse` or `QueryOnViewResponse`:
 
-1. gRPC/queryclient errors are returned directly.
+1. Execution failures leave the raw-result path. The public QueryViewClient
+   boundary converts internal ViewError/StreamingError and RPC context details
+   into Milvus business errors; internal error dialects do not escape to Proxy.
 2. Missing legacy result is treated as an internal QueryView execution error.
 3. Non-success legacy result status is converted with `merr.Error(status)`.
 4. Retryable QueryView errors continue to be handled by the existing
@@ -377,14 +392,14 @@ already expected by Proxy pipelines, including:
 - top-k reduce flags;
 - recall-evaluation flags.
 
-## 12. First Implementation Steps
+## 12. Production wiring and validation
 
-1. Add `Legacy()` domain interfaces and result/request types under
-   `internal/views/queryclient`.
-2. Add thread-safe legacy collectors for Search and Query raw results.
-3. Implement `legacyClient.Search` and `legacyClient.Query` by reusing
-   `shardViewQueryClient`.
-4. Add a lightweight constructor for legacy-only QueryView clients.
-5. Wire `queryTask.Execute` and `searchTask.Execute` to call `Legacy()` behind
-   the QueryView feature gate.
-6. Keep `PostExecute`, `SearchPipeline`, and `QueryPipeline` unchanged.
+Proxy QueryTask and SearchTask use `Legacy()` when a QueryViewClient is installed;
+legacy/component hosts can still use their old execution fallback. The shared
+client owns shard planning, dispatch/retry and shard-local raw reduction. Proxy
+continues cross-shard processing through its QueryPipeline and SearchPipeline.
+
+Validate execution and cancellation, empty-shard MVCC reporting, schema-bound
+requery with additional fields, partial-update retries and Iterator continuation.
+Component adapters alone do not establish automatic placement/handoff coverage;
+cluster evidence must exercise Coordinator, SN, QN and Proxy together.

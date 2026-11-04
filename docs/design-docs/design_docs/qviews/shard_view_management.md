@@ -243,8 +243,10 @@ manager to scan its state.
 effects and handles its in-memory cross-view effects:
 
 - **Preparing/Ready**: Update `preparingView`.
-- **Up**: Clear `preparingView` when applicable, transition an older Up view to
-  Down, and update `upView`.
+- **Up**: Clear `preparingView` when applicable and retire only lower-version
+  Up views with the same SchemaVersion. Refresh the newest-Up pointer without
+  using that pointer as a substitute for exact-schema readiness. A different
+  schema's Up coverage remains until its read generation is durably superseded.
 - **Down**: Clear `upView` when applicable.
 - **Unrecoverable**: Clear the fast pointers and remain stable until
   `AddPreparing` or `RequestRelease` advances the view to Dropping.
@@ -498,8 +500,10 @@ Incremental statistics publication remains a separate optimization.
    effects independently.
 7. **Dirty-State Preservation**: Work created for an inflight shard is processed
    by a successor task after that shard lane is released.
-8. **Up-then-Down**: When a new view reaches Up, any older Up view immediately
-   enters Down.
+8. **Up-then-Down**: A new Up view replaces older Up views of the same schema.
+   Across schemas, `PublishSchema` retires earlier generations only after durable
+   read-schema publication. Delayed Up reports obey the published schema fence;
+   an older report cannot displace a greater same-schema Up version.
 9. **Deferred Dropping**: Unrecoverable remains stable until replacement or
    release logic advances it to Dropping.
 10. **Dropped Persistence**: A Dropped state machine is removed only after its

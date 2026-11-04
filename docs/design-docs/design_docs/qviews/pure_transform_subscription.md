@@ -140,7 +140,8 @@ checkpoint is not by itself a safe replay start for every Segment.
 
 The DataCoord producer persists W (SN's conditional final-publication proof)
 and A (minimum cursor of all selected Segment bases) with each DataVersion.
-It computes `F = min(W, A)` for QueryView; the DataView proto stores only W/A.
+It computes `F = min(W, A)` for QueryView. At shard scope DataView persists
+W/A instead of F; its partitions separately retain per-Segment base cursors.
 Recovery uses the same version's inputs without consulting checkpoints.
 Per-Segment cursors remain tied to their base revisions; the shared buffer
 retains the whole View's range, not merely its locally assigned Segments. See

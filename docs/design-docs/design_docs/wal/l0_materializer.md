@@ -42,7 +42,7 @@ and never substitutes for a Segment's last Delete. Transaction positions come
 from the outer Txn, never an individual child or the raw Commit message ID.
 Positions include the consumer VChannel and WAL name.
 Summary storage gains no MessageID fields. Its retained consumer still supplies
-only timestamps for future QueryView integration.
+only timestamps for future Summary-reader materialization.
 
 Within each partition, all Delete blocks at one TimeTick form an indivisible
 output unit. Row/byte limits are checked against the whole unit before admitting

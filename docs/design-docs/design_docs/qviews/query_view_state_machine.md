@@ -32,10 +32,11 @@ QueryView: the state machine generates a new QueryView at the latest
 DataVersion so the old Manifest revision can be released. The TransformLog
 start frontier is generated from the version-bound W/A inputs described in
 [Transform Start-After TimeTick](transform_start_after_timetick.md). It
-calculates `min(W, A)` for QueryView; DataView persists only W/A.
+calculates `min(W, A)` for QueryView; the shard persists W/A instead of F.
+Each partition also retains the selected bases' per-Segment cursors.
 Checkpoint reports cannot generate a DataView. A Manifest update need not advance
-the frontier. The scheduling policy is not implemented by the current
-DataView-only PR.
+the frontier. The production Balancer consumes DataView publications and prepares
+a replacement when DataVersion advances, even if membership is unchanged.
 
 ### 1.1 Preparing
 
@@ -108,7 +109,7 @@ DataView-only PR.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Higher-version view confirms Up / ReleaseCollection | Persist Down to ETCD; push Down to SN |
+| Down | Higher-version view of the same schema confirms Up / published read schema supersedes this generation / ReleaseCollection | Persist Down to ETCD; push Down to SN |
 | Unrecoverable | Any node reports Unrecoverable | Persist Unrecoverable to ETCD |
 
 **Possible Peer States (and Coord's reaction):**

@@ -5,9 +5,10 @@
 - Independent Approver: @congqixia
 - Design Review: 2026-07-29
 
-This document defines the DataView-only contract implemented by the current
-DataView PR. QueryView placement, SegmentMeta, Balancer, snapshot I/O, and
-physical Segment GC are deliberately outside this component.
+This document defines the DataView manager and its production integration
+contracts. QueryView placement, SegmentMeta, Balancer, snapshot I/O and physical
+Segment GC have separate owners; the publication and retention interfaces
+between those owners are described below.
 
 ## Model
 
@@ -20,11 +21,16 @@ updates preserve that identity; only schema publication advances it.
 consumer through `DataViewRef`:
 
 ```text
-Collection (SchemaVersion, DataVersion) -> VChannel -> Partition -> loadable (Segment ID, Manifest version)
+Collection (SchemaVersion, DataVersion) -> VChannel -> Partition -> loadable (Segment ID, Manifest version, Transform start)
 ```
 
-Each partition stores `segment_ids` and `segment_manifest_versions` as parallel
-packed arrays. The manager also stores the collection-level `DataVersion`
+Each partition stores `segment_ids`, `segment_manifest_versions` and
+`segment_transform_start_after_timeticks` as parallel packed arrays. The cursor
+belongs to the selected physical base, not a later mutable SegmentInfo. Keeping
+it with the immutable snapshot permits removal, replay and recovery to recalculate
+A without substituting another base's coverage. QN still obtains its actual
+loaded base cursor atomically through SegmentLoadInfo; this array is not a
+separate worker replay position. The manager also stores the collection-level `DataVersion`
 (`streaming_version`, `compact_version`). A caller must pass a `LoadableSegment`
 descriptor after its own loadability gate:
 
@@ -34,6 +40,8 @@ type LoadableSegment struct {
     VChannel        string
     PartitionID     int64
     ManifestVersion int64
+    TransformStartAfterTimetick uint64 // coverage of the selected physical base
+    PartitionStatsVersion int64 // immutable clustering statistics for this partition
     RowNum          int64 // in-memory published footprint, not persisted
 }
 ```
@@ -163,10 +171,15 @@ compact_version)`.
 |---|---|
 | Create | first snapshot `(1,0)` |
 | Bootstrap | first snapshot `(1,0)` for a Collection that predates DataView management (upgrade migration) |
-| Flush (PrepareFlush commit) | `(S,C) -> (S+1,C)` |
+| Flush (PrepareFlush commit) | `(S,C) -> (S+1,0)` |
 | Compaction, index Manifest publication, import, copy, external refresh, drop partition, truncate, L0 manifest advance (Recompute) | `(S,C) -> (S,C+1)` when the rebuilt snapshot differs |
 | No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
+
+CompactVersion counts changes within one StreamingVersion epoch. Final Flush
+starts the next epoch and resets CompactVersion: `(7,9) -> (8,0)` still advances
+the lexicographically ordered DataVersion. Non-streaming publication preserves S
+and increments C.
 
 `streaming_version` is the publication epoch used by StreamingNode to decide
 whether a flushed Segment must still participate in growing-side queries. Only
@@ -511,11 +524,18 @@ separate concern.
 `retainLatest` is normalized to at least one. The current DataCoord metadata GC
 invokes this operation for live Collections with `retainLatest = 1`.
 
-Holding a `DataViewRef` currently protects only the DataView snapshot. Future
-physical Segment GC integration must also treat every Segment in a live
-referenced DataView as protected. Until QueryView references have been
-recovered, that integration must fail closed. The current PR does not add this
-cross-component protection path.
+A DataViewRef directly protects its immutable snapshot. Dropped-segment GC also
+calls `ReferencedSegments` and protects every member of every retained
+non-tombstone snapshot, including an unreferenced version that remains
+acquirable. `dataViewCompactionProtection` extends this set along parent-to-child
+lineage to retain the successor metadata needed to relate current leaves to
+retained bases. Version GC removes eligible old snapshots before that sweep.
+
+Coordinator initialization restores DataCoord/DataViews, then QueryCoord/View
+references, before starting their background workers. The dropped-segment sweep
+must not run ahead of that recovery ordering. This integration protects segment
+membership and lineage; it is not a complete retention protocol for every
+historical index build, Manifest revision, schema or Summary object.
 
 Dropped-segment GC snapshots each relevant PChannel's durable checkpoint from
 StreamingNode catalog once at the start of each sweep. All segments and
@@ -525,8 +545,9 @@ retains that PChannel's segments. Historical DataCoord checkpoints and the
 potentially newer control checkpoint are not GC frontiers. Removed VChannels
 must also satisfy the physical checkpoint gate. Segment commit/DML time must
 be at or below this frontier, in addition to retention, compaction-index,
-loaded-segment, snapshot and collection-pause checks. View/reference protection
-described above remains TODO.
+loaded-segment, snapshot, collection-pause and retained-DataView/lineage checks.
+These gates are cumulative; satisfying the physical checkpoint alone does not
+permit deletion of a protected segment.
 
 Dropping a collection persists the CollectionMeta Dropping state before deleting
 all DataView snapshots. Existing Refs remain valid from their in-memory snapshot

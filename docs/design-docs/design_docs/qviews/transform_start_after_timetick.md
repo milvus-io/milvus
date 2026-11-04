@@ -247,7 +247,10 @@ Persist W and A with each immutable DataView version. Keep the per-Segment C
 bound to its selected base/Manifest revision. Restore F from that version's own
 W and A, and validate A against its selected members. Do not use today's
 checkpoint, today's Segment bases or a successor View's W to reconstruct an
-older View. The DataView proto and catalog store only W/A; F is calculated for QueryView.
+older View. The DataView proto and catalog store W/A at shard scope; F is calculated for
+QueryView. Partition snapshots additionally freeze each selected base's cursor
+for exact A reconstruction, membership changes and recovery. QN obtains the
+replay cursor for its actual loaded base through SegmentLoadInfo.
 
 A legacy snapshot without W/A requires conservative migration from trustworthy
 historical inputs before it is ready; zero is unknown, not an unconstrained
@@ -332,7 +335,8 @@ Related contracts: [DataView](data_view.md),
 This feature is unreleased. Remove the former derived
 `DataViewOfShard.transform_start_after_timetick` field and reuse tag 3 for
 `growing_transform_start_after_timetick`; tag 4 stores
-`compacted_transform_start_after_timetick`. DataView contains only W/A.
+`compacted_transform_start_after_timetick`. The shard contains W/A, without a persisted F. Partition snapshots also carry
+the version-bound Segment cursors used to reconstruct A.
 The coordinator calculates `min(W, A)` when projecting the immutable DataView
 into QueryView; `QueryViewMeta.transform_start_after_timetick` remains the
 consumer-facing exclusive replay start. There is no clear-on-serialization or

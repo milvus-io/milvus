@@ -871,10 +871,14 @@ WALSummary; the replay interval must remain available until safely summarized.
   not a supported reset procedure. A higher-term manifest causes rejection,
   rather than being adopted by a lower-term writer; that check alone cannot
   distinguish every reuse of a previous incarnation's names and terms.
-- Checkpoint CAS does not fence every component write in a large recovery
-  snapshot. The catalog's multi-batch fallback can write component metadata
-  before the guarded final commit; full cross-owner component fencing belongs
-  to the metastore/recovery integration.
+- RecoveryStorage supplies the owner's checkpoint with recovery snapshots.
+  `SaveRecoverySnapshot` wraps the transaction KV with a value-equality guard on
+  the checkpoint captured before publication. Every component batch and the
+  final commit use that guard, including the large-snapshot fallback. Initial
+  ownership is established with a checkpoint-only publication before component
+  writes. A component may precede the final checkpoint without escaping the
+  ownership check. This metadata fence does not authorize object-store deletion
+  or solve cross-owner Summary GC; see [checkpoint persistence](checkpoint-persistence.md).
 - Losing a guarded publication does not guarantee one uniform public
   superseded-owner error across backends. The catalog verifies the stored value;
   callers must handle a failed or ambiguous publication without advancing their

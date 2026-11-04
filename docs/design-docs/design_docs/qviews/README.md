@@ -355,10 +355,13 @@ Loaded → Release
 
 ## 10. Resources and View Dependencies
 
-The [versioned CollectionLoadConfig revision](collection_load_info.md) records the
-2026-10-29 target for unified partition/field/index references, index-DDL updates,
-View-reference GC and Release cleanup. It is pending implementation and
-supersedes the scope-only/current-index rules where explicitly identified.
+[Versioned CollectionLoadConfig](collection_load_info.md) supplies immutable
+partition/field/index requirements and replica constraints. Index DDL publishes
+new versions for loaded collections. QueryViews retain exact LoadInfo references
+through final cleanup; recovery rebuilds those references before history GC.
+Release withdraws placement intent, drains reconciliation and all Views, then
+deletes every LoadInfo version. Legacy metadata migration and physical-object
+GC remain separate concerns.
 
 - All resources are tied to view dependencies (except growing segments; see Section 8).
 - Resource lifecycle ≥ the union of lifecycles of all query views that hold it.
@@ -413,7 +416,7 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 |---|---|---|
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
-| Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
+| Coord | CollectionLoadManager / LoadConfigStore | Persisting versioned replica intent and resource-group constraints; the Balancer resolves node placement |
 | DataCoord (inside MixCoord) | DataView Manager | Maintaining immutable Collection snapshots and DataViewRefs |
 | Coord | Sealed Segment Balancer | Consuming immutable event-published cache entries, assigning disjoint replica node sets, and distributing QueryViews |
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
@@ -425,10 +428,12 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
 | Query Node | Pure Delete Stream Manager | Remote subscription client with a shared VChannel buffer applying Delete data to each Segment. |
 
-The extracted coordinator's background scheduling uses
+QueryCoord constructs and starts the production QueryView Balancer through
+`initQViewsRuntime`. Its background scheduling uses
 [Collection-batched Balancer Reconciliation](balancer_scanning.md): cache-owned
 scanners retain a directory slice across batches, and local work can run between
-collection checkpoints. Production activation remains separate integration work.
+collection checkpoints. DataView, LoadInfo and node publications feed the same
+runtime cache and shard state machines.
 
 ### 11.3 SyncQueryView RPC
 

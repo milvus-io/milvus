@@ -68,10 +68,11 @@ ID allocation uses the Coordinator allocator directly. QueryView load admission,
 configuration updates and management reads must not consult ReplicaManager.
 ResourceManager continues to own resource groups and node membership.
 
-TODO: legacy metadata migration and fault-recovery integration are deferred.
-Reading retained new-format versions remains supported; this change adds no
-legacy recovery converter, dual-write transaction, release tombstone or separate
-pending-release scan. Recovery claims require a later dedicated review/test.
+TODO: legacy metadata migration remains deferred. New-format LoadConfig recovery
+and View-reference reconstruction are wired before history GC is enabled.
+This does not add a legacy recovery converter, dual-write transaction, release
+tombstone or separate pending-release scan. Crash-point validation and retention
+of physical objects are distinct from recovering the new-format records.
 
 ## Index DDL updates
 
@@ -177,9 +178,10 @@ creates a fresh version from current partition/field/index metadata.
 
 ## Implementation and verification boundary
 
-Coordinate changes to LoadConfigStore/catalog, View references and recovery,
-CreateIndex/DropIndex DDL callbacks, exact LoadInfo lookup, QN/SN collection metadata,
-and physical preparation/reuse. Replacing a storage key alone is insufficient.
+The production path connects LoadConfigStore/catalog, View references and
+recovery, CreateIndex/DropIndex DDL callbacks, exact LoadInfo lookup, QN/SN
+collection metadata and physical preparation/reuse. Replacing a storage key
+alone is insufficient.
 Stopping planning is separate from final history deletion and does not add a
 tombstone version.
 
@@ -188,9 +190,10 @@ on one JSON field; response mutation isolation; CreateIndex before artifacts exi
 DropIndex with old Views/query handles; callback failure/replay between metadata
 and LoadInfo persistence; View creation versus GC; restart before reference
 reconstruction; Release/reload and crashes before/after final deletion. No
-production implementation or test result is claimed by this design revision.
+new test result is implied by this contract; verification must identify the
+implementation revision and the scenarios actually executed.
 
 Key source packages: `internal/views/coord/loadmgr/`,
 `internal/views/coord/coordview/`, `internal/metastore/kv/queryview/`, `internal/querycoordv2/ddl_callbacks_drop_load_info.go`,
-`internal/datacoord/ddl_callbacks_{create,alter,drop}_index.go`,
+`internal/datacoord/ddl/{create_index,alter_index,drop_index}.go`,
 `internal/querynodev2/qvresource/`, and the parent SN resource runtime.

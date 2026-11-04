@@ -2,10 +2,12 @@
 
 ## Purpose and scope
 
-The agreed [schema-handoff refactor](schema_evolution.md) adds a Coordinator
-publication obligation before retiring old-schema serving coverage. The local
-lease/reference protocol below remains the draining mechanism afterward;
-Phase 1 selection becomes exact-schema-aware. This change is not implemented yet.
+[Schema handoff](schema_evolution.md) is wired into the Coordinator publication
+path: prepare the target LoadInfo/DataView and serving Views, publish the read
+schema durably, then request retirement of prior read generations. Phase 1
+selects an exact-schema Up View. The local lease/reference protocol below drains
+the old serving resources after that publication decision; it does not replace
+the Coordinator's prepare/publish obligation.
 
 Keep an accessed SN QueryView in Up long enough for Phase 1 plans to reach
 Phase 2 during normal view replacement. This is an SN-local, renewable serving
@@ -108,5 +110,6 @@ active references across expiry, no resurrection after expiry, forced cleanup,
 and recovery without inherited deadlines. Unit tests must cover the Coord Down
 gate as well as SN lifetime behavior. A real SN RPC experiment must continue
 SearchOnView/QueryOnView while Down is pending, then stop renewal and observe
-Down followed by rejection. The current extraction uses explicit ViewSync;
-this does not claim end-to-end automatic Coord scheduling or Proxy integration.
+Down followed by rejection. Production QueryCoord scheduling and Proxy
+QueryViewClient routing use this protocol. Component tests exercise explicit
+ViewSync; claims about automatic handoff additionally require cluster evidence.

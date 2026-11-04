@@ -353,39 +353,28 @@ when it can no longer be served; this is not indefinite time-travel support.
 
 ### 6.2 Dropped-field validity
 
-For a removed FieldID with ALTER TimeTick `T_v` on VChannel `v`, and a query that
-references it with Transform MVCC `M_v`:
+The selected serving QueryView's exact read Schema and required-field scope
+define which fields a request may access. WAL ALTER establishes the write-schema
+boundary and flush fence; its TimeTick does not independently revoke fields in
+an already retained read generation. During target preparation, the public read
+schema remains the old one and matching Up Views keep serving it. After durable
+read-schema publication, new requests resolve the new schema, where the removed
+FieldID is absent. Coordinator requests Down for the old generation; existing
+bound requests follow the normal lease and resource-handle draining rules.
 
-```text
-M_v < T_v  -> may execute under a retained compatible old view
-M_v >= T_v -> reject use of the removed field
-```
+SN planning and SN/QN execution require the request SchemaVersion to match the
+acquired View. Expressions, outputs, grouping, ranking and rendering dependencies
+are checked against that schema and its LoadScope. MVCC controls visible data; it
+neither authorizes an unavailable View nor substitutes another schema. There is
+no additional per-field `ALTER_T_v` proof or Phase 1 field allowlist in the plan.
+Requery can request other fields supported by the same retained View at the same
+MVCC; it must retain that schema binding rather than reparse against the latest
+schema. It cannot regain fields absent from the selected View.
 
-Referenced fields include predicates, output, grouping, ranking, function inputs
-and rendering dependencies. The rule uses each business channel's own boundary,
-not the CChannel boundary or a maximum across channels. Removing an entire
-StructArray or Function includes its affected child/output dependencies.
-
-SN planning validates the field dependency set and fixed MVCC against ordered
-schema history observed through the requested boundary. Sampling write MVCC
-ahead of recovery's schema observation is not sufficient: wait for coverage or
-retry before issuing a plan. Acquire a consistent boundary snapshot or recheck
-its generation. The resulting plan binds the validated schema, MVCC and field
-scope; workers cannot change them or append unvalidated field accesses during
-execution. Phase 2 enforces these bindings, including supplied removal bounds.
-Requery/rendering that needs additional fields must have them included in the
-original validation scope or undergo schema-bound validation before execution.
-
-A plan created before a drop with an earlier MVCC does not become invalid merely
-because the drop is later observed. A stale plan cannot be reused with a newer
-MVCC. This contract can use schema history and validated plans; it does not
-assume that today's Delete-only TransformLog carries a schema payload.
-
-Strong queries never lower MVCC to evade a removal boundary. During a pending
-ALTER, the old public schema can therefore coexist with rejection of new Strong
-queries referencing a field already dropped in WAL. This is intentional and
-preserves the previously agreed drop semantics. Unaffected-field queries may
-continue when their old-schema projection and resources are valid.
+A stale-schema request whose View has become unavailable refreshes/replans or
+fails through existing View/schema errors. Strong consistency does not lower its
+MVCC to keep an unavailable schema alive. See the shared contracts in
+[query planning](query/query_plan.md) and [worker execution](query/query_execution.md).
 
 ## 7. Column resources and physical lifetime
 
