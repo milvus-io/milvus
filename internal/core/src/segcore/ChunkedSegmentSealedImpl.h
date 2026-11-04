@@ -1613,8 +1613,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RuntimeVectorIndexReady(const RuntimeResourceState* runtime,
                             FieldId field_id);
 
-    static std::optional<IndexKey>
-    GetVectorIndexKey(
+    // Opens the field's unique vector index from the caller's runtime snapshot.
+    // Returns null when no vector index is registered.
+    static index::IIndexReaderBasePtr
+    CreateIndexReader(
+        milvus::OpContext* op_ctx,
         const std::shared_ptr<const RuntimeResourceState>& runtime,
         FieldId field_id);
 
