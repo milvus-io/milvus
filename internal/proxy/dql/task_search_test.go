@@ -1036,6 +1036,59 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("group by field IDs", func(t *testing.T) {
+		collName := "search_group_by_metadata" + funcutil.GenRandomStr()
+		schema, fieldIDs := createCollWithFields(t, collName, nil)
+		registerColl(collName, schema)
+		for _, tc := range []struct {
+			name, key, value string
+			want             []int64
+		}{
+			{"none", "", "", nil},
+			{"legacy", GroupByFieldKey, testInt32Field, []int64{fieldIDs[testInt32Field]}},
+			{"composite", GroupByFieldsKey, testInt32Field + "," + testBoolField, []int64{fieldIDs[testInt32Field], fieldIDs[testBoolField]}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				task := getSearchTask(t, collName)
+				task.request.SearchParams = getValidSearchParams()
+				task.request.DslType = commonpb.DslType_BoolExprV1
+				if tc.key != "" {
+					task.request.SearchParams = append(task.request.SearchParams, &commonpb.KeyValuePair{Key: tc.key, Value: tc.value})
+				}
+				require.NoError(t, task.PreExecute(ctx))
+				plan := &planpb.PlanNode{}
+				require.NoError(t, proto.Unmarshal(task.GetSerializedExprPlan(), plan))
+				assert.Equal(t, tc.want, plan.GetVectorAnns().GetQueryInfo().GetGroupByFieldIds())
+				assert.Equal(t, tc.want, task.GetGroupByFieldIds())
+				assert.Equal(t, plan.GetVectorAnns().GetQueryInfo().GetGroupByFieldId(), task.GetGroupByFieldId())
+
+				t.Run("hybrid", func(t *testing.T) {
+					hybrid := getSearchTask(t, collName)
+					hybrid.request.SearchParams = []*commonpb.KeyValuePair{{Key: LimitKey, Value: "10"}}
+					if tc.key != "" {
+						hybrid.request.SearchParams = append(hybrid.request.SearchParams, &commonpb.KeyValuePair{Key: tc.key, Value: tc.value})
+					}
+					for range 2 {
+						hybrid.request.SubReqs = append(hybrid.request.SubReqs, &milvuspb.SubSearchRequest{
+							DslType:      commonpb.DslType_BoolExprV1,
+							Nq:           1,
+							SearchParams: getValidSearchParams(),
+						})
+					}
+					require.NoError(t, hybrid.PreExecute(ctx))
+					require.Len(t, hybrid.GetSubReqs(), 2)
+					assert.Equal(t, tc.want, hybrid.GetGroupByFieldIds())
+					assert.Equal(t, task.GetGroupByFieldId(), hybrid.GetGroupByFieldId())
+					for _, sub := range hybrid.GetSubReqs() {
+						require.NoError(t, proto.Unmarshal(sub.GetSerializedExprPlan(), plan))
+						assert.Equal(t, tc.want, plan.GetVectorAnns().GetQueryInfo().GetGroupByFieldIds())
+						assert.Equal(t, hybrid.GetGroupByFieldId(), sub.GetGroupByFieldId())
+					}
+				})
+			})
+		}
+	})
+
 	t.Run("search with timeout", func(t *testing.T) {
 		collName := "search_with_timeout" + funcutil.GenRandomStr()
 		registerColl(collName, createColl(t, collName, nil))
