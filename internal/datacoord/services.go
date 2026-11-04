@@ -856,7 +856,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					VChannel:                    seg.GetInsertChannel(),
 					PartitionID:                 seg.GetPartitionID(),
 					ManifestVersion:             manifestVersion,
-					TransformStartAfterTimetick: segmentTransformStart(seg),
+					TransformStartAfterTimetick: meta.SegmentTransformStart(seg),
 					RowNum:                      rowNum,
 					Size:                        req.GetStats().GetInsertBinlogSize(),
 				}},

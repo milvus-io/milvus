@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
@@ -75,10 +76,10 @@ func TestRefreshDataViewPublishesBeforeReturning(t *testing.T) {
 		require.NoError(t, err)
 		var projectionErr error
 		segments := []dataview.LoadableSegment{{SegmentID: 10, PartitionID: 2, VChannel: "v1", RowNum: 100}}
-		mockey.Mock((*meta).loadableProjection).To(func(_ *meta, _ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
+		mockey.Mock((*meta.Meta).LoadableProjection).To(func(_ *meta.Meta, _ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return segments, projectionErr
 		}).Build()
-		s := &Server{dataViewManager: manager, meta: &meta{}}
+		s := &Server{dataViewManager: manager, meta: &meta.Meta{}}
 		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		version, err := s.RefreshDataView(t.Context(), 1)
 		require.NoError(t, err)
@@ -120,14 +121,14 @@ func TestRefreshDataViewChecksCollectionMetaWithoutSnapshot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mockey.PatchConvey("absence of a snapshot is not proof of collection deletion", t, func() {
-				catalog := &catalogkv.Catalog{MetaKv: NewMetaMemoryKV()}
+				catalog := &catalogkv.Catalog{MetaKv: meta.NewMetaMemoryKV()}
 				manager, err := dataview.RecoverManager(t.Context(), catalog,
 					func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 					dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
 						return nil, nil
 					}))
 				require.NoError(t, err)
-				s := &Server{dataViewManager: manager, meta: &meta{}}
+				s := &Server{dataViewManager: manager, meta: &meta.Meta{}}
 				s.UpdateStateCode(commonpb.StateCode_Healthy)
 				lookups := 0
 				s.SetCollectionDroppedChecker(func(ctx context.Context, id int64) (bool, error) {

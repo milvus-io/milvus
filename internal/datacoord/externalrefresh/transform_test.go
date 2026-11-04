@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package externalrefresh
 
 import (
 	"context"
@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -58,10 +59,10 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 		return manager
 	}
 	store := newTestCollections(collectionID)
-	mt := &meta{metaStore: store, segments: NewSegmentsInfo(store), catalog: &stubCatalog{}, dataViewManager: recoverManager()}
+	mt := &meta.Meta{MetaStore: store, Segments: meta.NewSegmentsInfo(store), Catalog: &StubCatalog{}, DataViewManager: recoverManager()}
 	_, err := externalRefreshTransformStart(ctx, mt, collectionID, channel)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
-	_, err = mt.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+	_, err = mt.DataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
 		CollectionID: collectionID, VChannels: []string{channel}, TransformStarts: map[string]uint64{channel: origin},
 	})
 	require.NoError(t, err)
@@ -72,15 +73,15 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	first.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/10", 1)
 	first.TransformStartAfterTimetick = 999 // A worker cannot substitute its own cursor.
 	require.NoError(t, applyExternalCollectionSegmentUpdateForBaseline(ctx, mt, collectionID, nil, nil, []*datapb.SegmentInfo{first}))
-	require.Equal(t, origin, mt.segments.GetSegment(10).GetTransformStartAfterTimetick())
+	require.Equal(t, origin, mt.Segments.GetSegment(10).GetTransformStartAfterTimetick())
 	require.Equal(t, uint64(999), first.GetTransformStartAfterTimetick(), "worker result remains immutable")
-	require.Equal(t, origin, mt.catalog.(*stubCatalog).alteredSegments[0].GetTransformStartAfterTimetick())
-	version, err := mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	require.Equal(t, origin, mt.Catalog.(*StubCatalog).alteredSegments[0].GetTransformStartAfterTimetick())
+	version, err := mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), version.GetCompactVersion())
 
 	assertFrontier := func(ids []int64, versions []int64) {
-		ref, err := mt.dataViewManager.Latest(ctx, collectionID)
+		ref, err := mt.DataViewManager.Latest(ctx, collectionID)
 		require.NoError(t, err)
 		require.NotNil(t, ref)
 		defer ref.Deref()
@@ -97,23 +98,23 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	assertFrontier([]int64{10}, []int64{1})
 
 	// Same-ID manifest patch and new segment publication retain the origin.
-	patched := proto.Clone(mt.segments.GetSegment(10).SegmentInfo).(*datapb.SegmentInfo)
+	patched := proto.Clone(mt.Segments.GetSegment(10).SegmentInfo).(*datapb.SegmentInfo)
 	patched.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/10", 2)
 	patched.TransformStartAfterTimetick = 0
 	added := newTestExternalRefreshSegment(20, collectionID, 1000)
 	added.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/20", 1)
 	require.NoError(t, applyExternalCollectionSegmentUpdateForBaseline(ctx, mt, collectionID, []int64{10}, nil, []*datapb.SegmentInfo{patched, added}))
-	require.Equal(t, origin, mt.segments.GetSegment(10).GetTransformStartAfterTimetick())
-	require.Equal(t, origin, mt.segments.GetSegment(20).GetTransformStartAfterTimetick())
-	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	require.Equal(t, origin, mt.Segments.GetSegment(10).GetTransformStartAfterTimetick())
+	require.Equal(t, origin, mt.Segments.GetSegment(20).GetTransformStartAfterTimetick())
+	_, err = mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
 	assertFrontier([]int64{10, 20}, []int64{2, 1})
 
 	// Recover from a later persisted DataVersion, without the initial snapshot.
-	mt.dataViewManager = recoverManager()
+	mt.DataViewManager = recoverManager()
 	assertFrontier([]int64{10, 20}, []int64{2, 1})
 	require.NoError(t, applyExternalCollectionSegmentUpdateForBaseline(ctx, mt, collectionID, []int64{10}, nil, []*datapb.SegmentInfo{patched, added}))
-	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	_, err = mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
 	assertFrontier([]int64{10, 20}, []int64{2, 1})
 
@@ -121,21 +122,21 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	replacement := newTestExternalRefreshSegment(30, collectionID, 2000)
 	replacement.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/30", 1)
 	require.NoError(t, applyExternalCollectionSegmentUpdateForBaseline(ctx, mt, collectionID, []int64{10, 20}, []int64{10}, []*datapb.SegmentInfo{replacement}))
-	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	_, err = mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
 	assertFrontier([]int64{10, 30}, []int64{2, 1})
 	// A new broadcast supplies a target-shard fence; W remains the creation
 	// origin, while A follows the minimum visible segment cursor.
-	patched = proto.Clone(mt.segments.GetSegment(10).SegmentInfo).(*datapb.SegmentInfo)
+	patched = proto.Clone(mt.Segments.GetSegment(10).SegmentInfo).(*datapb.SegmentInfo)
 	patched.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/10", 3)
-	replacement = proto.Clone(mt.segments.GetSegment(30).SegmentInfo).(*datapb.SegmentInfo)
+	replacement = proto.Clone(mt.Segments.GetSegment(30).SegmentInfo).(*datapb.SegmentInfo)
 	replacement.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/30", 2)
 	starts := map[string]uint64{channel: 500}
 	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
-	_, err = mt.dataViewManager.RecomputeNow(ctx, collectionID, mt.loadableProjection)
+	_, err = mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
-	mt.dataViewManager = recoverManager()
-	ref, err := mt.dataViewManager.Latest(ctx, collectionID)
+	mt.DataViewManager = recoverManager()
+	ref, err := mt.DataViewManager.Latest(ctx, collectionID)
 	require.NoError(t, err)
 	shard := ref.DataView().GetShards()[0]
 	require.Equal(t, origin, shard.GetGrowingTransformStartAfterTimetick())
@@ -143,14 +144,14 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	require.Equal(t, []uint64{500, 500}, shard.GetPartitions()[0].GetSegmentTransformStartAfterTimeticks())
 	ref.Deref()
 	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
-	require.Equal(t, uint64(500), mt.segments.GetSegment(10).GetTransformStartAfterTimetick())
+	require.Equal(t, uint64(500), mt.Segments.GetSegment(10).GetTransformStartAfterTimetick())
 	require.Error(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, nil, nil, nil, map[string]uint64{"missing": 500}))
 	// Missing creation metadata must stay retriable rather than borrowing a checkpoint.
-	_, err = mt.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 200, VChannels: []string{channel}})
+	_, err = mt.DataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 200, VChannels: []string{channel}})
 	require.NoError(t, err)
 	_, err = externalRefreshTransformStart(ctx, mt, 200, channel)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
-	latestError := mockey.Mock(mockey.GetMethod(mt.dataViewManager, "Latest")).Return(nil, merr.ErrServiceNotReady).Build()
+	latestError := mockey.Mock(mockey.GetMethod(mt.DataViewManager, "Latest")).Return(nil, merr.ErrServiceNotReady).Build()
 	defer latestError.UnPatch()
 	_, err = externalRefreshTransformStart(ctx, mt, collectionID, channel)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
@@ -158,7 +159,7 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 
 func applyExternalCollectionSegmentUpdateForBaseline(
 	ctx context.Context,
-	mt *meta,
+	mt *meta.Meta,
 	collectionID int64,
 	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,

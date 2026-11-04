@@ -83,10 +83,10 @@ type Meta struct {
 
 	// metaStore is the shared MetaStore — the backbone for segments, collections,
 	// channel checkpoints, file resources, and catalog persistence.
-	metaStore metacache.MetaStore
+	MetaStore metacache.MetaStore
 	// Installed by Coordinator before background planning starts. Standalone
 	// metadata users can continue using their supplied collection snapshots.
-	preparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
+	PreparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
 
 	SegMu    lock.RWMutex
 	Segments *SegmentsInfo // segment id to segment info
@@ -100,7 +100,7 @@ type Meta struct {
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	DataViewManager        DataViewManager
-	StreamingNodeCatalog metastore.StreamingNodeCataLog
+	StreamingNodeCatalog   metastore.StreamingNodeCataLog
 
 	ChannelSync  *channelSync
 	ChunkManager storage.ChunkManager
@@ -2609,7 +2609,7 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 			Statslogs:                   seg.GetField2StatslogPaths(),
 			CreatedByCompaction:         true,
 			CompactionFrom:              compactFromSegIDs,
-			TransformStartAfterTimetick: minSegmentTransformStart(compactFromSegInfos),
+			TransformStartAfterTimetick: MinSegmentTransformStart(compactFromSegInfos),
 			LastExpireTime:              tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 			CreateTs:                    compactionTaskCreateTS(t),
 			Level:                       datapb.SegmentLevel_L2,
@@ -2717,7 +2717,7 @@ func (m *Meta) completeMixCompactionMutation(
 			TextStatsLogs:               compactToSegment.GetTextStatsLogs(),
 			CreatedByCompaction:         true,
 			CompactionFrom:              compactFromSegIDs,
-			TransformStartAfterTimetick: minSegmentTransformStart(compactFromSegInfos),
+			TransformStartAfterTimetick: MinSegmentTransformStart(compactFromSegInfos),
 			LastExpireTime:              tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
 			CreateTs:                    compactionTaskCreateTS(t),
 			Level:                       datapb.SegmentLevel_L1,
@@ -3251,7 +3251,7 @@ func (m *Meta) CompleteSortCompactionMutation(
 		Bm25Statslogs:               resultSegment.GetBm25Logs(),
 		Deltalogs:                   resultSegment.GetDeltalogs(),
 		CompactionFrom:              []int64{compactFromSegID},
-		TransformStartAfterTimetick: segmentTransformStart(oldSegment),
+		TransformStartAfterTimetick: SegmentTransformStart(oldSegment),
 		CreateTs:                    compactionTaskCreateTS(t),
 		IsSorted:                    resultSegment.GetIsSorted(),
 		ManifestPath:                resultSegment.GetManifest(),
@@ -3512,7 +3512,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		Bm25Statslogs:               resultSegment.GetBm25Logs(),
 		Deltalogs:                   resultSegment.GetDeltalogs(),
 		CompactionFrom:              []int64{oldSegment.GetID()},
-		TransformStartAfterTimetick: segmentTransformStart(oldSegment),
+		TransformStartAfterTimetick: SegmentTransformStart(oldSegment),
 		CreateTs:                    compactionTaskCreateTS(t),
 		IsSorted:                    oldSegment.GetIsSorted(),
 		ManifestPath:                resultSegment.GetManifest(),

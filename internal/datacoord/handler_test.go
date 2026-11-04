@@ -49,7 +49,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -68,7 +68,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -87,7 +87,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -105,7 +105,7 @@ func TestRetrieveSegment(t *testing.T) {
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -124,7 +124,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -143,7 +143,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 3, 4),
 			typeutil.NewUniqueSet(2),
@@ -162,7 +162,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 3),
 		}
-		flushed, _ := retrieveSegment(
+		flushed, _ := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -184,7 +184,7 @@ func TestRetrieveSegment(t *testing.T) {
 		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
 		// Recursive deduplication must remove 5 without selecting unready 3.
 		indexed := typeutil.NewUniqueSet(1, 2, 5)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 5),
 			typeutil.NewUniqueSet(1, 2, 3),
@@ -201,7 +201,7 @@ func TestRetrieveSegment(t *testing.T) {
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -223,7 +223,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -245,7 +245,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -2330,7 +2330,7 @@ func TestHasCommittedManifest(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual, err := hasCommittedManifest(test.segment)
+			actual, err := meta.HasCommittedManifest(test.segment)
 			if test.expectedErr != nil {
 				require.ErrorIs(t, err, test.expectedErr)
 				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")

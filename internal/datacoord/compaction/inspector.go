@@ -73,8 +73,8 @@ type CompactionInspector interface {
 var _ CompactionInspector = (*Inspector)(nil)
 
 type Inspector struct {
-	restoreJobs RestoreJobStateProvider
-	queueTasks *CompactionQueue
+	RestoreJobActive func(context.Context, int64) bool
+	queueTasks       *CompactionQueue
 
 	executingGuard lock.RWMutex
 	executingTasks map[int64]ctask.CompactionTask // planID -> task
@@ -443,9 +443,8 @@ func (c *Inspector) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
-				if task.GetRestoreJobId() != 0 && c.restoreJobs != nil {
-					job := c.restoreJobs.GetJob(context.TODO(), task.GetRestoreJobId())
-					if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
+				if task.GetRestoreJobId() != 0 && c.RestoreJobActive != nil {
+					if c.RestoreJobActive(context.TODO(), task.GetRestoreJobId()) {
 						continue // The restore owner still needs the durable completion proof.
 					}
 				}
@@ -829,3 +828,6 @@ func getOrCreateIOPool() *conc.Pool[any] {
 	ioPoolInitOnce.Do(initIOPool)
 	return ioPool
 }
+
+// HasCompactionTask reports whether an admitted restore plan still has an active attempt.
+func (c *Inspector) HasCompactionTask(planID int64) bool { return c.getCompactionTask(planID) != nil }

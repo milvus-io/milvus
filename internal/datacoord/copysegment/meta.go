@@ -40,7 +40,7 @@ import (
 //
 // ARCHITECTURE:
 // - CopySegmentMeta: Interface defining all metadata operations
-// - copySegmentMeta: Implementation with in-memory cache and persistent storage
+// - Meta: Implementation with in-memory cache and persistent storage
 // - copySegmentTasks: Helper struct for managing task collections
 //
 // DATA MODEL:
@@ -241,7 +241,7 @@ func (t *copySegmentTasks) getByCollectionID(collectionID int64) []CopySegmentTa
 // Metadata Implementation
 // ===========================================================================================
 
-// copySegmentMeta implements CopySegmentMeta with in-memory caching and persistent storage.
+// Meta implements CopySegmentMeta with in-memory caching and persistent storage.
 type Meta struct {
 	mu           lock.RWMutex // Protects jobs and tasks maps
 	ctx          context.Context
@@ -523,7 +523,7 @@ func (m *Meta) FailJobForDroppedCollection(ctx context.Context, jobID int64) err
 
 func (m *Meta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, targetDropped bool, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
-	current := m.jobs[jobID]
+	current := m.Jobs[jobID]
 	if current != nil {
 		state := current.GetState()
 		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
@@ -534,7 +534,7 @@ func (m *Meta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, tar
 		// every expected segment is copied, publication retries cannot fail the
 		// job or release its data, even after a crash between publishing the
 		// collection and persisting the job's Completed state.
-		if !targetDropped && current.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.tasks.getByJobID(jobID)) {
+		if !targetDropped && current.(*Job).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.Tasks.getByJobID(jobID)) {
 			next := current.Clone()
 			for _, action := range actions {
 				action(next)

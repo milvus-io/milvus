@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -111,13 +112,13 @@ func (c *Callbacks) DropSnapshotsByCollectionV2AckCallback(ctx context.Context, 
 // New messages create collection/index metadata and the asynchronous copy job.
 // Legacy messages restore data into an already-created collection.
 // NOTE: jobID is pre-allocated in RestoreSnapshot and passed via WAL message for idempotency.
-func (s *Callbacks) RestoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+func (c *Callbacks) RestoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
 	if result.Message.MustBody().GetCollection() != nil {
-		if err := s.SnapshotManager.(*snapshotManager).applyRestoreCollection(ctx, result); err != nil {
+		if err := c.SnapshotManager.(*snapshot.Manager).ApplyRestoreCollection(ctx, result); err != nil {
 			return err
 		}
 		select {
-		case s.NotifyIndexChan <- result.Message.Header().GetCollectionId():
+		case c.NotifyIndexChan <- result.Message.Header().GetCollectionId():
 		default:
 		}
 		return nil

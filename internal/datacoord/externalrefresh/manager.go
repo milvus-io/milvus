@@ -545,7 +545,7 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 
 // publishRefreshJob retries independently of segment application. A temporary
 // schema or handoff failure must not make committed data a terminal failed job.
-func (m *externalCollectionRefreshManager) publishRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+func (m *Manager) publishRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	m.handleJobFinished(ctx, job)

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package gc
 
 import (
 	"context"
@@ -30,9 +30,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
@@ -44,13 +44,6 @@ import (
 )
 
 // Unrelated GC tests assume the WAL has durably consumed their segments.
-func mockGCCheckpointCatalog(t *testing.T, tick uint64) metastore.StreamingNodeCataLog {
-	t.Helper()
-	catalog := kvstreamingnode.NewCataLog(nil)
-	patch := mockey.Mock(mockey.GetMethod(catalog, "GetConsumeCheckpoint")).Return(&streamingpb.WALCheckpoint{TimeTick: tick}, nil).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	return catalog
-}
 
 // Use real catalog reads, etcd metadata and local files, so a wrong watermark
 // source or a fail-open decision is observable as data deletion.
@@ -59,7 +52,7 @@ func TestGarbageCollector_PhysicalCheckpoint(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second})
 	require.NoError(t, err)
 	defer client.Close()
-	loaded := mockey.Mock((*ServerHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
+	loaded := mockey.Mock((*meta.MockHandler).ListLoadedSegments).Return([]int64{}, nil).Build()
 	defer loaded.UnPatch()
 	for _, tc := range []struct {
 		name                                 string
@@ -92,9 +85,9 @@ func TestGarbageCollector_PhysicalCheckpoint(t *testing.T) {
 			defer rootPatch.UnPatch()
 			catalog := kvdatacoord.NewCatalog(kv, objectRoot, root)
 			store := metacache.NewMetaStore(catalog)
-			m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(store), metaStore: store, channelSync: newChannelSync()}
-			gc := newGarbageCollector(m, &ServerHandler{s: &Server{ctx: ctx, meta: m}}, GcOption{cli: cli, streamingNodeCatalog: kvstreamingnode.NewCataLog(kv)})
-			defer gc.close()
+			m := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(store), MetaStore: store, ChannelSync: meta.NewChannelSync()}
+			gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{Cli: cli, StreamingNodeCatalog: kvstreamingnode.NewCataLog(kv)})
+			defer gc.Close()
 			const pchannel = "gc-physical"
 			const checkpointKey = "streamingnode-meta/wal/" + pchannel + "/consume-checkpoint"
 			const healthyCheckpointKey = "streamingnode-meta/wal/healthy/consume-checkpoint"
@@ -125,7 +118,7 @@ func TestGarbageCollector_PhysicalCheckpoint(t *testing.T) {
 				// A stale or even dropped historical checkpoint must have no influence.
 				store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{channel: {Timestamp: ^uint64(0)}})
 				id := int64(i + 1)
-				seg := NewSegmentInfo(&datapb.SegmentInfo{
+				seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 					ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: channel,
 					State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L1,
 					DroppedAt: uint64(time.Now().Add(-time.Hour).UnixNano()), CommitTimestamp: tc.commitTick,
@@ -149,7 +142,7 @@ func TestGarbageCollector_PhysicalCheckpoint(t *testing.T) {
 				return key == checkpointKey && tc.readError
 			}).Return("", merr.ErrServiceUnavailable).Build()
 			defer readPatch.UnPatch()
-			gc.recycleDroppedSegments(ctx, nil)
+			gc.RecycleDroppedSegments(ctx, nil)
 			require.Equal(t, map[string]int{checkpointKey: 1, healthyCheckpointKey: 1}, reads, "one read per PChannel, even on failure")
 			for i, file := range paths {
 				wantRetained := tc.wantRetained && i < 3
@@ -162,7 +155,7 @@ func TestGarbageCollector_PhysicalCheckpoint(t *testing.T) {
 				// A failed/old snapshot is never reused by the next sweep.
 				tc.readError = false
 				saveCheckpoint(130)
-				gc.recycleDroppedSegments(ctx, nil)
+				gc.RecycleDroppedSegments(ctx, nil)
 				require.Equal(t, map[string]int{checkpointKey: 2, healthyCheckpointKey: 1}, reads)
 				for i, file := range paths {
 					require.Nil(t, m.GetSegment(ctx, int64(i+1)))

@@ -41,7 +41,7 @@ import (
 // plan that was committed despite the client observing an error.
 var errExternalRefreshTaskPlanNotPublishable = errors.New("external refresh task plan is not publishable")
 
-// externalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
+// ExternalCollectionRefreshMeta manages both Job and Task metadata for external collection refresh.
 // Job represents user-initiated refresh operations (API level), while Task represents
 // execution units dispatched to workers (scheduler level).
 //
@@ -108,7 +108,7 @@ func NewExternalCollectionRefreshMeta(
 }
 
 func (m *ExternalCollectionRefreshMeta) reloadFromKV() error {
-	record := timerecord.NewTimeRecorder("externalCollectionRefreshMeta-reloadFromKV")
+	record := timerecord.NewTimeRecorder("ExternalCollectionRefreshMeta-reloadFromKV")
 
 	// Load jobs
 	jobs, err := m.catalog.ListExternalCollectionRefreshJobs(m.ctx)
@@ -132,7 +132,7 @@ func (m *ExternalCollectionRefreshMeta) reloadFromKV() error {
 		m.addToJobTasks(task)
 	}
 
-	mlog.Info(m.ctx, "externalCollectionRefreshMeta reloadFromKV done",
+	mlog.Info(m.ctx, "ExternalCollectionRefreshMeta reloadFromKV done",
 		mlog.Int("jobCount", len(jobs)),
 		mlog.Int("taskCount", len(tasks)),
 		mlog.Duration("duration", record.ElapseSpan()))
@@ -405,7 +405,7 @@ func (m *ExternalCollectionRefreshMeta) UpdateJobStateWithPreApply(
 // BeginPublication commits results once and keeps the job active until serving
 // views catch up. The marker follows the segment write; replay after a crash
 // between those writes is protected by segment manifest versions.
-func (m *externalCollectionRefreshMeta) BeginPublication(jobID int64, preApply func(*datapb.ExternalCollectionRefreshJob) error) (bool, error) {
+func (m *ExternalCollectionRefreshMeta) BeginPublication(jobID int64, preApply func(*datapb.ExternalCollectionRefreshJob) error) (bool, error) {
 	return m.updateJobStateWithPreApply(jobID, indexpb.JobState_JobStateInProgress, "", preApply, jobStateWriteOpts{
 		skip: func(job *datapb.ExternalCollectionRefreshJob) bool { return job.GetSegmentsApplied() },
 		mutate: func(job *datapb.ExternalCollectionRefreshJob) {

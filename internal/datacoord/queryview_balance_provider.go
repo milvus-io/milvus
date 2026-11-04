@@ -19,7 +19,7 @@ func (s *Server) RefreshDataView(ctx context.Context, collectionID int64) (*view
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return nil, err
 	}
-	version, err := s.dataViewManager.RecomputeNow(ctx, collectionID, s.meta.loadableProjection)
+	version, err := s.dataViewManager.RecomputeNow(ctx, collectionID, s.meta.LoadableProjection)
 	if err != nil {
 		return nil, err
 	}

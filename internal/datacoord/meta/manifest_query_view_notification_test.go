@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package meta
 
 import (
 	"context"
@@ -42,20 +42,20 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		apply func(context.Context, *meta) error
+		apply func(context.Context, *Meta) error
 	}{
-		{"single", func(ctx context.Context, m *meta) error { return m.CommitSegmentManifest(ctx, commit) }},
-		{"batch", func(ctx context.Context, m *meta) error {
+		{"single", func(ctx context.Context, m *Meta) error { return m.CommitSegmentManifest(ctx, commit) }},
+		{"batch", func(ctx context.Context, m *Meta) error {
 			return m.CommitSegmentManifests(ctx, []SegmentManifestCommit{commit})
 		}},
-		{"backfill", func(ctx context.Context, m *meta) error {
+		{"backfill", func(ctx context.Context, m *Meta) error {
 			return m.UpdateSegmentsInfo(ctx, UpdateManifestVersion(10, 2))
 		}},
-		{"flush", func(ctx context.Context, m *meta) error {
+		{"flush", func(ctx context.Context, m *Meta) error {
 			_, err := m.UpdateSegmentsInfoAndDataView(ctx, nil, UpdateManifestVersion(10, 2))
 			return err
 		}},
-		{"schema-bump", func(ctx context.Context, m *meta) error {
+		{"schema-bump", func(ctx context.Context, m *Meta) error {
 			_, err := m.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
 				CollectionID: 1, InputSegments: []int64{10}, Type: datapb.CompactionType_BumpSchemaVersionCompaction,
 				Schema: &schemapb.CollectionSchema{Version: 2},
@@ -67,22 +67,22 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := metacache.NewMetaStore(nil)
-			m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store), manifestCommitExecutor: newManifestCommitExecutor(1)}
-			t.Cleanup(m.manifestCommitExecutor.close)
+			m := &Meta{MetaStore: store, Ctx: context.Background(), Catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), Segments: NewSegmentsInfo(store), ManifestCommitExecutor: NewManifestCommitExecutor(1)}
+			t.Cleanup(m.ManifestCommitExecutor.Close)
 			segment := NewSegmentInfo(&datapb.SegmentInfo{
 				ID: 10, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed,
 				Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3, ManifestPath: oldManifest,
 				NumOfRows: 5, SchemaVersion: 1,
 			})
-			m.segments.SetSegment(10, segment)
+			m.Segments.SetSegment(10, segment)
 			recomputes := 0
-			recompute := mockey.Mock((*meta).recomputeDataView).To(func(got *meta, ctx context.Context, collectionID int64) {
+			recompute := mockey.Mock((*Meta).RecomputeDataView).To(func(got *Meta, ctx context.Context, collectionID int64) {
 				require.Same(t, m, got)
 				require.EqualValues(t, 1, collectionID)
-				require.True(t, m.segMu.TryLock(), "recompute must run after publication outside segMu")
-				m.segMu.Unlock()
-				require.True(t, m.getSegmentManifestLocks().TryLock(10), "recompute must run outside manifest lock")
-				m.getSegmentManifestLocks().Unlock(10)
+				require.True(t, m.SegMu.TryLock(), "recompute must run after publication outside segMu")
+				m.SegMu.Unlock()
+				require.True(t, m.GetSegmentManifestLocks().TryLock(10), "recompute must run outside manifest lock")
+				m.GetSegmentManifestLocks().Unlock(10)
 				require.Equal(t, newManifest, m.GetSegment(ctx, 10).GetManifestPath())
 				recomputes++
 			}).Build()
@@ -114,16 +114,16 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 
 func TestManifestPublicationGroupsNotifications(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
-	m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store), manifestCommitExecutor: newManifestCommitExecutor(1)}
-	t.Cleanup(m.manifestCommitExecutor.close)
+	m := &Meta{MetaStore: store, Ctx: context.Background(), Catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), Segments: NewSegmentsInfo(store), ManifestCommitExecutor: NewManifestCommitExecutor(1)}
+	t.Cleanup(m.ManifestCommitExecutor.Close)
 	for _, id := range []int64{10, 11, 20} {
-		m.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{
+		m.Segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{
 			ID: id, CollectionID: id / 10, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segment", 1),
 		}))
 	}
 	observed := make(map[int64]int)
-	notifier := mockey.Mock((*meta).recomputeDataView).To(func(got *meta, _ context.Context, collectionID int64) {
+	notifier := mockey.Mock((*Meta).RecomputeDataView).To(func(got *Meta, _ context.Context, collectionID int64) {
 		require.Same(t, m, got)
 		observed[collectionID]++
 	}).Build()

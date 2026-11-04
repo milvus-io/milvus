@@ -423,7 +423,7 @@ func ValidateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) erro
 func (c *Callbacks) RegisterImportCallbacks() {
 	registry.RegisterImportV1AckCallback(c.ImportV1AckCallback)
 	registry.RegisterCommitImportV2AckCallback(c.CommitImportV2AckCallback)
-	registry.RegisterCommitImportV2AckOnceCallback(c.commitImportV2AckOnceCallback)
+	registry.RegisterCommitImportV2AckOnceCallback(c.CommitImportV2AckOnceCallback)
 	registry.RegisterRollbackImportV2AckCallback(c.RollbackImportV2AckCallback)
 	registry.RegisterUpdateImportV2AckCallback(c.UpdateImportAckCallback)
 }
@@ -548,7 +548,7 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 	return nil
 }
 
-func (c *DDLCallbacks) publishImportDataView(ctx context.Context, collectionID int64) error {
+func (c *Callbacks) publishImportDataView(ctx context.Context, collectionID int64) error {
 	_, err := c.RefreshDataView(ctx, collectionID)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		// RootCoord confirmed the collection is gone. Finish the durable commit
@@ -721,22 +721,22 @@ func (c *Callbacks) UpdateImportAckCallback(ctx context.Context, result message.
 	return nil
 }
 
-// commitImportV2AckOnceCallback durably installs each channel's commit fence
+// CommitImportV2AckOnceCallback durably installs each channel's commit fence
 // before FastAck/consumer Ack allows the full publication callback to run.
 // Before this fence is known, pendingTransformBounds freezes the accepted W.
 // This also covers replicated commits arriving before local tasks finish.
-func (c *DDLCallbacks) commitImportV2AckOnceCallback(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
+func (c *Callbacks) CommitImportV2AckOnceCallback(ctx context.Context, result message.AckResultCommitImportMessageV2) error {
 	msg := result.Message
 	if funcutil.IsControlChannel(msg.VChannel()) {
 		return nil
 	}
 	jobID := msg.Header().GetJobId()
-	job := c.importMeta.GetJob(ctx, jobID)
+	job := c.ImportMeta.GetJob(ctx, jobID)
 	if job == nil {
 		return merr.WrapErrServiceNotReadyMsg("import job %d is not registered", jobID)
 	}
-	return c.importMeta.UpdateJob(ctx, jobID, func(job ImportJob) {
-		stored := job.(*importJob)
+	return c.ImportMeta.UpdateJob(ctx, jobID, func(job bulkimport.ImportJob) {
+		stored := job.(*bulkimport.Job)
 		if stored.TransformCommitTimeticks == nil {
 			stored.TransformCommitTimeticks = make(map[string]uint64)
 		}

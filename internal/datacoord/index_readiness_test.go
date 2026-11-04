@@ -84,7 +84,7 @@ func newIndexReadinessTestServer(segments []*datapb.SegmentInfo, states map[int6
 }
 
 // Exercise the metadata collector as well as the state calculation: import
-// visibility and data timestamps must survive the SegmentInfo -> indexStats
+// visibility and data timestamps must survive the meta.SegmentInfo -> indexStats
 // boundary, independently of allocation expiry.
 func TestIndexReadinessDataTimestamp(t *testing.T) {
 	for _, test := range []struct {

@@ -77,7 +77,7 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	require.Equal(t, "existing/path/43", logs[0].Binlogs[1].LogPath)
 	// A V3 base resolves stats from its manifest, even when legacy descriptors
 	// remain in metadata. Do not expand or transmit those unused paths.
-	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segments", 9), Bm25Statslogs: logs}))
+	s.meta.Segments.SetSegment(3, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segments", 9), Bm25Statslogs: logs}))
 	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))

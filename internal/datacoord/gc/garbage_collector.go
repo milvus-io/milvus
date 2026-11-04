@@ -67,9 +67,9 @@ type GcOption struct {
 	ScanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
 	StreamingNodeCatalog metastore.StreamingNodeCataLog
-	Broker           broker.Broker
-	RemoveObjectPool *conc.Pool[struct{}]
-	DataViewGC       DataViewGarbageCollector
+	Broker               broker.Broker
+	RemoveObjectPool     *conc.Pool[struct{}]
+	DataViewGC           DataViewGarbageCollector
 
 	// importJobAlive reports whether an ImportJob still exists for jobID. It is
 	// wired by the server from ImportMeta so the orphan scan never deletes an
@@ -86,7 +86,7 @@ type DataViewGarbageCollector interface {
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
-// garbageCollector handles garbage files in object storage
+// GarbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type GarbageCollector struct {
 	ctx    context.Context
@@ -445,7 +445,7 @@ func (gc *GarbageCollector) ackSignal(signal <-chan gcCmd) {
 	}
 }
 
-// startControlLoop start a control loop for garbageCollector.
+// startControlLoop start a control loop for GarbageCollector.
 func (gc *GarbageCollector) startControlLoop(_ context.Context) {
 	hardware.RegisterSystemMetricsListener(gc.systemMetricsListener)
 	defer hardware.UnregisterSystemMetricsListener(gc.systemMetricsListener)
@@ -1084,7 +1084,7 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 	// sort/merge before replacing that frontier. Snapshot once per sweep.
 	protected := gc.dataViewCompactionProtection(all)
 
-	droppedCompactTo := make(map[int64]*meta.Meta.SegmentInfo)
+	droppedCompactTo := make(map[int64]*meta.SegmentInfo)
 	for id := range drops {
 		if to, ok := compactTo[id]; ok {
 			droppedCompactTo[to.GetID()] = to
@@ -1107,7 +1107,7 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		if ctx.Err() != nil {
 			return
 		}
-		checkpoint, err := gc.option.StreamingNodeCatalog.GetConsumeCheckpoint(ctx, channel)
+		checkpoint, err := gc.Option.StreamingNodeCatalog.GetConsumeCheckpoint(ctx, channel)
 		if err != nil {
 			log.Warn(ctx, "failed to read physical checkpoint, skip channel GC",
 				mlog.String("pchannel", channel), mlog.Err(err))
@@ -1185,11 +1185,11 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 // intermediate metadata needed to relate current leaves to those bases. Once
 // the latest and all retained Views move past a base, its old ancestry is no
 // longer protected. This is O(segments + lineage edges), once per GC sweep.
-func (gc *garbageCollector) dataViewCompactionProtection(segments []*SegmentInfo) map[int64]struct{} {
-	if gc.meta.dataViewManager == nil {
+func (gc *GarbageCollector) dataViewCompactionProtection(segments []*meta.SegmentInfo) map[int64]struct{} {
+	if gc.Meta.DataViewManager == nil {
 		return nil
 	}
-	protected := gc.meta.dataViewManager.ReferencedSegments()
+	protected := gc.Meta.DataViewManager.ReferencedSegments()
 	children := make(map[int64][]int64)
 	for _, segment := range segments {
 		for _, parent := range segment.GetCompactionFrom() {

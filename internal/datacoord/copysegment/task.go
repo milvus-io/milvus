@@ -194,7 +194,7 @@ type CopySegmentTask interface {
 	Clone() CopySegmentTask
 }
 
-// copySegmentTask implements CopySegmentTask with atomic state updates.
+// Task implements CopySegmentTask with atomic state updates.
 type Task struct {
 	Task atomic.Pointer[datapb.CopySegmentTask] // Atomic pointer for concurrent access
 	// Keep a failed task in the scheduler until completed-output cleanup is durable.
@@ -1800,15 +1800,15 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	return nil
 }
 
-func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots *snapshotMeta) (*snapshotstorage.SnapshotData, error) {
-	concreteJob, ok := job.(*copySegmentJob)
-	if !ok || concreteJob.snapshotCache == nil {
+func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots SnapshotSource) (*snapshotstorage.SnapshotData, error) {
+	concreteJob, ok := job.(*Job)
+	if !ok || concreteJob.SnapshotCache == nil {
 		return nil, merr.WrapErrServiceInternalMsg(
 			"copy segment job %d has no snapshot cache",
 			job.GetJobId(),
 		)
 	}
-	return concreteJob.snapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
+	return concreteJob.SnapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
 		var loaded *snapshotstorage.SnapshotData
 		var err error
 		if job.GetExternal() {

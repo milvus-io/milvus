@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -35,48 +37,48 @@ import (
 
 func TestTransformBoundsCoverUnpublishedPartitions(t *testing.T) {
 	ctx := context.Background()
-	metadata := newEmptyTestMeta()
-	metadata.ctx = ctx
-	metadata.metaStore.PutCollection(&collectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}})
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 200}})
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": {Timestamp: 20}})
+	metadata := meta.NewEmptyTestMeta()
+	metadata.Ctx = ctx
+	metadata.MetaStore.PutCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 200}})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": {Timestamp: 20}})
 	for _, segment := range []*datapb.SegmentInfo{
 		{ID: 1, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 150},
 		{ID: 2, CollectionID: 100, PartitionID: 2, InsertChannel: "v1", State: commonpb.SegmentState_Sealed, TransformStartAfterTimetick: 100},
 		{ID: 3, CollectionID: 100, PartitionID: 3, InsertChannel: "v1", State: commonpb.SegmentState_Growing, TransformStartAfterTimetick: 60},
 		{ID: 4, CollectionID: 100, PartitionID: 4, InsertChannel: "v1", State: commonpb.SegmentState_Dropped, TransformStartAfterTimetick: 10},
 	} {
-		metadata.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
+		metadata.Segments.SetSegment(segment.ID, meta.NewSegmentInfo(segment))
 	}
 	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 60, "v2": 20}, bounds)
 	// Durable but unpublished output still constrains the next DataView.
-	metadata.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 100, PartitionID: 3, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 60}))
+	metadata.Segments.SetSegment(3, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 100, PartitionID: 3, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 60}))
 	bounds, err = transformFrontierBounds(ctx, metadata, nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(60), bounds["v1"])
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": nil})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": nil})
 	_, err = transformFrontierBounds(ctx, metadata, nil, 100)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
 
 func TestSegmentTransformCoverageDoesNotUseCompactedRowMinimum(t *testing.T) {
-	ordinary := NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 10}})
-	imported := NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 1}, CommitTimestamp: 30})
-	compacted := NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 25}, CreatedByCompaction: true})
-	require.Equal(t, uint64(10), segmentTransformStart(ordinary))
-	require.Equal(t, uint64(30), segmentTransformStart(imported))
-	require.Zero(t, segmentTransformStart(compacted), "surviving rows do not prove parent coverage")
-	require.Equal(t, uint64(10), minSegmentTransformStart([]*SegmentInfo{ordinary, imported}))
-	require.Zero(t, minSegmentTransformStart([]*SegmentInfo{ordinary, compacted}), "unknown parent must not be skipped")
+	ordinary := meta.NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 10}})
+	imported := meta.NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 1}, CommitTimestamp: 30})
+	compacted := meta.NewSegmentInfo(&datapb.SegmentInfo{StartPosition: &msgpb.MsgPosition{Timestamp: 25}, CreatedByCompaction: true})
+	require.Equal(t, uint64(10), meta.SegmentTransformStart(ordinary))
+	require.Equal(t, uint64(30), meta.SegmentTransformStart(imported))
+	require.Zero(t, meta.SegmentTransformStart(compacted), "surviving rows do not prove parent coverage")
+	require.Equal(t, uint64(10), meta.MinSegmentTransformStart([]*meta.SegmentInfo{ordinary, imported}))
+	require.Zero(t, meta.MinSegmentTransformStart([]*meta.SegmentInfo{ordinary, compacted}), "unknown parent must not be skipped")
 	compacted.TransformStartAfterTimetick = 10
-	require.Equal(t, uint64(10), segmentTransformStart(compacted))
+	require.Equal(t, uint64(10), meta.SegmentTransformStart(compacted))
 }
 
 func TestLoadableProjectionKeepsPublishedSortInputs(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
-	metadata := &meta{metaStore: store, segments: NewSegmentsInfo(store)}
+	metadata := &meta.Meta{MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
 	for _, id := range []int64{1, 2} {
 		info := &datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
@@ -86,9 +88,9 @@ func TestLoadableProjectionKeepsPublishedSortInputs(t *testing.T) {
 		if id == 1 {
 			info.SealedAtDataVersion = &viewpb.DataVersion{StreamingVersion: 2}
 		}
-		metadata.segments.SetSegment(id, NewSegmentInfo(info))
+		metadata.Segments.SetSegment(id, meta.NewSegmentInfo(info))
 	}
-	projection, err := metadata.loadableProjection(context.Background(), 100, nil)
+	projection, err := metadata.LoadableProjection(context.Background(), 100, nil)
 	require.NoError(t, err)
 	require.Len(t, projection, 1)
 	require.Equal(t, int64(1), projection[0].SegmentID, "published Flush input stays queryable until its replacement retires it")
@@ -96,16 +98,16 @@ func TestLoadableProjectionKeepsPublishedSortInputs(t *testing.T) {
 
 func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
 	ctx := context.Background()
-	metadata := newEmptyTestMeta()
-	metadata.ctx = ctx
-	metadata.metaStore.PutCollection(&collectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}})
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 300}})
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": {Timestamp: 400}})
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	metadata := meta.NewEmptyTestMeta()
+	metadata.Ctx = ctx
+	metadata.MetaStore.PutCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 300}})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v2": {Timestamp: 400}})
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Committing,
 		TransformCommitTimeticks: map[string]uint64{"v1": 100},
 	}}
-	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
+	imports := &bulkimport.Meta{Jobs: map[int64]bulkimport.ImportJob{1: job}}
 	_, err := transformFrontierBounds(ctx, metadata, imports, 100)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady, "one shard's ack cannot establish another shard's coverage")
 	job.TransformCommitTimeticks["v2"] = 200
@@ -115,7 +117,7 @@ func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
 
 	// Commit publication transfers the pin to Segment metadata before the
 	// completed job is excluded. The first shard must never jump to K=300.
-	metadata.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+	metadata.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
 		TransformStartAfterTimetick: 100,
 	}))
@@ -127,15 +129,15 @@ func TestTransformBoundsRequireEveryImportCommitFence(t *testing.T) {
 
 func TestTransformBoundsRejectUnknownDataButAllowEmptyAllocation(t *testing.T) {
 	ctx := context.Background()
-	metadata := newEmptyTestMeta()
-	metadata.ctx = ctx
-	metadata.metaStore.PutCollection(&collectionInfo{ID: 100, VChannelNames: []string{"v1"}})
-	metadata.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 300}})
+	metadata := meta.NewEmptyTestMeta()
+	metadata.Ctx = ctx
+	metadata.MetaStore.PutCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1"}})
+	metadata.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"v1": {Timestamp: 300}})
 	segment := &datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Growing,
 		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath("segment-10", packed.ManifestEarliest),
 	}
-	metadata.segments.SetSegment(10, NewSegmentInfo(segment))
+	metadata.Segments.SetSegment(10, meta.NewSegmentInfo(segment))
 	bounds, err := transformFrontierBounds(ctx, metadata, nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, uint64(300), bounds["v1"])
@@ -156,26 +158,26 @@ func TestTransformBoundsRejectUnknownDataButAllowEmptyAllocation(t *testing.T) {
 }
 
 func TestSegmentTransformCursorKeepsFirstInsertAndImportCommit(t *testing.T) {
-	ordinary := NewSegmentInfo(&datapb.SegmentInfo{ID: 1})
-	imported := NewSegmentInfo(&datapb.SegmentInfo{ID: 2, IsImporting: true})
-	pack := &updateSegmentPack{segments: map[int64]*SegmentInfo{1: ordinary, 2: imported}}
+	ordinary := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1})
+	imported := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 2, IsImporting: true})
+	pack := &meta.UpdateSegmentPack{Segments: map[int64]*meta.SegmentInfo{1: ordinary, 2: imported}}
 	for _, tick := range []uint64{20, 30} {
-		require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{
+		require.True(t, meta.UpdateStartPosition([]*datapb.SegmentStartPosition{
 			{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: tick}},
 			{SegmentID: 2, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: tick}},
 		})(pack))
 		require.Equal(t, uint64(20), ordinary.GetTransformStartAfterTimetick())
 		require.Zero(t, imported.GetTransformStartAfterTimetick(), "imported row timestamps cannot establish commit visibility")
 	}
-	require.True(t, UpdateCommitTimestamp(2, 100)(pack))
+	require.True(t, meta.UpdateCommitTimestamp(2, 100)(pack))
 	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick())
-	require.True(t, UpdateCommitTimestamp(2, 0)(pack))
+	require.True(t, meta.UpdateCommitTimestamp(2, 0)(pack))
 	require.Equal(t, uint64(100), imported.GetTransformStartAfterTimetick(), "removing the MVCC override cannot erase base coverage")
 }
 
 func TestPendingTransformBoundsWithoutCollectionCacheOrCheckpoint(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
-	metadata := &meta{metaStore: store, ctx: t.Context(), segments: NewSegmentsInfo(store)}
+	metadata := &meta.Meta{MetaStore: store, Ctx: t.Context(), Segments: meta.NewSegmentsInfo(store)}
 	view := &viewpb.DataViewOfCollection{CollectionId: 100, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{SegmentIds: []int64{1}}}}}}
 	for _, segment := range []*datapb.SegmentInfo{
 		{ID: 1, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, TransformStartAfterTimetick: 10},
@@ -184,20 +186,20 @@ func TestPendingTransformBoundsWithoutCollectionCacheOrCheckpoint(t *testing.T) 
 		{ID: 4, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Dropped, TransformStartAfterTimetick: 5},
 		{ID: 5, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0},
 	} {
-		metadata.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
+		metadata.Segments.SetSegment(segment.ID, meta.NewSegmentInfo(segment))
 	}
 	bounds, err := pendingTransformBounds(t.Context(), metadata, nil, view)
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 50}, bounds)
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Committing, TransformCommitTimeticks: map[string]uint64{"v1": 40}}}
-	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Committing, TransformCommitTimeticks: map[string]uint64{"v1": 40}}}
+	imports := &bulkimport.Meta{Jobs: map[int64]bulkimport.ImportJob{1: job}}
 	_, err = pendingTransformBounds(t.Context(), metadata, imports, view)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	job.TransformCommitTimeticks["v2"] = 60
 	bounds, err = pendingTransformBounds(t.Context(), metadata, imports, view)
 	require.NoError(t, err)
 	require.Equal(t, map[string]uint64{"v1": 40, "v2": 60}, bounds)
-	metadata.segments.SetSegment(6, NewSegmentInfo(&datapb.SegmentInfo{ID: 6, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, CreatedByCompaction: true}))
+	metadata.Segments.SetSegment(6, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 6, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, CreatedByCompaction: true}))
 	_, err = pendingTransformBounds(t.Context(), metadata, nil, view)
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 }
@@ -205,16 +207,16 @@ func TestPendingTransformBoundsWithoutCollectionCacheOrCheckpoint(t *testing.T) 
 func TestPendingImportFreezesWWithoutBlockingPublication(t *testing.T) {
 	ctx := t.Context()
 	store := metacache.NewMetaStore(nil)
-	metadata := &meta{metaStore: store, ctx: ctx, segments: NewSegmentsInfo(store)}
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	metadata := &meta.Meta{MetaStore: store, Ctx: ctx, Segments: meta.NewSegmentsInfo(store)}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Importing,
 	}}
-	imports := &importMeta{jobs: map[int64]ImportJob{1: job}}
+	imports := &bulkimport.Meta{Jobs: map[int64]bulkimport.ImportJob{1: job}}
 	view := &viewpb.DataViewOfCollection{CollectionId: 100, Shards: []*viewpb.DataViewOfShard{
 		{Vchannel: "v1", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 50},
 		{Vchannel: "v2", GrowingTransformStartAfterTimetick: 200, CompactedTransformStartAfterTimetick: 200},
 	}}
-	metadata.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+	metadata.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, IsImporting: true,
 	}))
 	bounds, err := pendingTransformBounds(ctx, metadata, imports, view)

@@ -657,7 +657,7 @@ func (s *Server) queryServingSegments(ctx context.Context, segments map[int64]*i
 					// An ancestor must reference committed data before it
 					// can establish index coverage, even if query admission
 					// permits its growing placeholder with positions/binlogs.
-					committed, err := hasCommittedManifest(info)
+					committed, err := meta.HasCommittedManifest(info)
 					segment.isRecoverable = err == nil && committed
 				}
 			}

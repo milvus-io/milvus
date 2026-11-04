@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package copysegment
 
 import (
 	"math"
@@ -23,14 +23,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // registerRestoreSegments resumes registration from the durable Job, before
 // dispatching any copy tasks. AddSegment preserves already-registered records.
-func (c *copySegmentChecker) registerRestoreSegments(job CopySegmentJob) error {
-	snapshot, err := loadCopySnapshot(c.ctx, job, c.meta.snapshotMeta)
+func (c *Checker) registerRestoreSegments(job CopySegmentJob) error {
+	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource)
 	if err != nil {
 		return err
 	}
@@ -38,7 +39,7 @@ func (c *copySegmentChecker) registerRestoreSegments(job CopySegmentJob) error {
 	for _, segment := range snapshot.Segments {
 		sources[segment.GetSegmentId()] = segment
 	}
-	recipe := job.(*copySegmentJob)
+	recipe := job.(*Job)
 	for _, mapping := range job.GetIdMappings() {
 		source := sources[mapping.GetSourceSegmentId()]
 		if source == nil {
@@ -48,15 +49,15 @@ func (c *copySegmentChecker) registerRestoreSegments(job CopySegmentJob) error {
 		if !ok {
 			return merr.WrapErrDataIntegrityMsg("restore job has no mapping for source channel %s", source.GetChannelName())
 		}
-		segment := restoredSegmentInfo(source, job.GetCollectionId(), mapping.GetPartitionId(), mapping.GetTargetSegmentId(), channel, recipe.GetTransformStartAfterTimeticks()[channel])
-		if err := c.meta.AddSegment(c.ctx, segment); err != nil {
+		segment := RestoredSegmentInfo(source, job.GetCollectionId(), mapping.GetPartitionId(), mapping.GetTargetSegmentId(), channel, recipe.GetTransformStartAfterTimeticks()[channel])
+		if err := c.Meta.AddSegment(c.Ctx, segment); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func restoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partitionID, segmentID int64, channel string, start uint64) *SegmentInfo {
+func RestoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partitionID, segmentID int64, channel string, start uint64) *meta.SegmentInfo {
 	startPos := proto.Clone(source.GetStartPosition()).(*msgpb.MsgPosition)
 	dmlPos := proto.Clone(source.GetDmlPosition()).(*msgpb.MsgPosition)
 	if startPos != nil {
@@ -65,7 +66,7 @@ func restoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partit
 	if dmlPos != nil {
 		dmlPos.ChannelName = channel
 	}
-	return NewSegmentInfo(&datapb.SegmentInfo{
+	return meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: segmentID, CollectionID: collectionID, PartitionID: partitionID,
 		InsertChannel: channel, NumOfRows: source.GetNumOfRows(),
 		State: commonpb.SegmentState_Importing, IsImporting: true,

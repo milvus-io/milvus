@@ -378,7 +378,7 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
-	// The DataView stats RowNum must match the SegmentInfo row count this txn
+	// The DataView stats RowNum must match the meta.SegmentInfo row count this txn
 	// commits: the meta value was 50 (stale growing-side count), the
 	// checkpoint commits 100, so Stats must surface 100 - not the stale
 	// pre-txn meta value.
@@ -542,7 +542,7 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	})
 
 	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
-		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.meta.SegmentInfo{
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			TransformStartAfterTimetick: 10,
 			ID:                          segmentID,
 			CollectionID:                0,
@@ -1026,7 +1026,7 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 	})
 
 	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
-	seg := meta.NewSegmentInfo(&datapb.meta.SegmentInfo{
+	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		TransformStartAfterTimetick: 10,
 		ID:                          10,
 		CollectionID:                100,
@@ -7030,7 +7030,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		// Two operators dispatched: one V3 UpdateManifestVersion, one V2
+		// Two operators dispatched: one V3 meta.UpdateManifestVersion, one V2
 		// UpdateSegmentColumnGroupsOperator. Both flow through the single
 		// UpdateSegmentsInfo batch call.
 		assert.Equal(t, 2, capturedOps)

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package meta
 
 import (
 	"context"
@@ -28,20 +28,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// loadableProjection resolves the recovery frontier before publishing it. The
+// LoadableProjection resolves the recovery frontier before publishing it. The
 // previous immutable snapshot is borrowed under the DataView collection lock;
 // it establishes admission, so later index DDL cannot roll a published segment
 // back to its ancestors. Neither this function nor its predicates reenter the
 // DataView manager. SegmentMeta is snapshotted under segMu before index reads.
-func (m *meta) loadableProjection(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
+func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 	admitted := typeutil.NewUniqueSet()
 	for _, shard := range previous.GetShards() {
 		for _, partition := range shard.GetPartitions() {
 			admitted.Insert(partition.GetSegmentIds()...)
 		}
 	}
-	m.segMu.RLock()
-	segments := m.segments.GetSegmentsBySelector(WithCollection(collectionID))
+	m.SegMu.RLock()
+	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
 	valid := make(map[int64]*SegmentInfo, len(segments))
 	flushed, dropped := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
 	for _, segment := range segments {
@@ -52,7 +52,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64, previ
 			(len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "") {
 			continue
 		}
-		if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
+		if !IsFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
 			continue
 		}
 		// A flush may publish an awaiting-sort input with IsInvisible set. It is
@@ -72,14 +72,14 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64, previ
 			flushed.Insert(segment.GetID())
 		}
 	}
-	m.segMu.RUnlock()
+	m.SegMu.RUnlock()
 
 	var indexes []*model.Index
-	if m.indexMeta != nil {
-		indexes = m.indexMeta.GetIndexesForCollection(collectionID, "")
+	if m.IndexCatalog != nil {
+		indexes = m.IndexCatalog.GetIndexesForCollection(collectionID, "")
 	}
 	collection := m.GetCollection(collectionID)
-	requireSorted := enableSortCompaction() && (collection == nil || !collection.IsExternal())
+	requireSorted := EnableSortCompaction() && (collection == nil || !collection.IsExternal())
 	ready := make(map[int64]bool)
 	isReady := func(id int64) bool {
 		if complete, ok := ready[id]; ok {
@@ -100,7 +100,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64, previ
 		for _, index := range indexes {
 			// Check IDs, not just fields: scalar and multiple JSON-path indexes all
 			// participate. Small/no-training builds are Finished by the scheduler.
-			if m.indexMeta.GetSegmentIndexState(collectionID, id, index.IndexID).GetState() != commonpb.IndexState_Finished {
+			if m.IndexCatalog.GetSegmentIndexState(collectionID, id, index.IndexID).GetState() != commonpb.IndexState_Finished {
 				ready[id] = false
 				return false
 			}
@@ -140,7 +140,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64, previ
 		fallback[id] = complete
 		return complete
 	}
-	selected, _ := retrieveSegment(valid, flushed, dropped, isReady, canFallback)
+	selected, _ := RetrieveSegment(valid, flushed, dropped, isReady, canFallback)
 	result := make([]dataview.LoadableSegment, 0, len(selected))
 	for id := range selected {
 		if !isReady(id) {

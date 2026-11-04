@@ -1164,8 +1164,8 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
 
-	meta := newSegmentIndexMeta(catalog)
-	meta.indexes[collectionID] = map[UniqueID]*model.Index{
+	meta := NewSegmentIndexMeta(catalog)
+	meta.Indexes[collectionID] = map[UniqueID]*model.Index{
 		indexID: {
 			CollectionID: collectionID,
 			IndexID:      indexID,
@@ -1188,9 +1188,9 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 
 	firstSegmentRead := make(chan struct{})
 	continueSnapshot := make(chan struct{})
-	var getSegmentIndexesOrigin func(*indexMeta, UniqueID, UniqueID) map[UniqueID]*model.SegmentIndex
-	getSegmentIndexesMock := mockey.Mock((*indexMeta).getSegmentIndexes).To(
-		func(meta *indexMeta, collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
+	var getSegmentIndexesOrigin func(*IndexMeta, UniqueID, UniqueID) map[UniqueID]*model.SegmentIndex
+	getSegmentIndexesMock := mockey.Mock((*IndexMeta).GetSegmentIndexesUnsafe).To(
+		func(meta *IndexMeta, collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
 			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID)
 			if segmentID == segment1ID {
 				close(firstSegmentRead)
@@ -1203,7 +1203,7 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 
 	snapshotDone := make(chan map[int64]map[UniqueID]*model.SegmentIndex, 1)
 	go func() {
-		_, segmentIndexes := meta.getQueryViewIndexSnapshot(collectionID, []UniqueID{segment1ID, segment2ID})
+		_, segmentIndexes := meta.GetQueryViewIndexSnapshot(collectionID, []UniqueID{segment1ID, segment2ID})
 		snapshotDone <- segmentIndexes
 	}()
 	<-firstSegmentRead

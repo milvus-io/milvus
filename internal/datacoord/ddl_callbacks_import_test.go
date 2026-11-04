@@ -972,8 +972,8 @@ func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAs
 }
 
 func newTestImportMeta(t *testing.T) (bulkimport.ImportMeta, *mocks.DataCoordCatalog) {
-	publication := mockey.Mock((*ddl.Callbacks).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
-	t.Cleanup(publication.UnPatch)
+	publication := mockey.Mock((*Server).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+	t.Cleanup(func() { publication.UnPatch() })
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()

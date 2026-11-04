@@ -20,6 +20,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -27,39 +29,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// segmentTransformStart resolves legacy ordinary and committed-import metadata
-// conservatively. A compacted base needs its own cursor: its first surviving
-// row is not evidence of the Transform prefix covered by its parent revisions.
-func segmentTransformStart(segment *SegmentInfo) uint64 {
-	if start := segment.GetTransformStartAfterTimetick(); start != 0 {
-		return start
-	}
-	if commit := segment.GetCommitTimestamp(); commit != 0 {
-		return commit
-	}
-	if segment.GetIsImporting() || segment.GetCreatedByCompaction() || len(segment.GetCompactionFrom()) != 0 {
-		return 0
-	}
-	return segment.GetStartPosition().GetTimestamp()
-}
-
-func minSegmentTransformStart(segments []*SegmentInfo) uint64 {
-	var start uint64
-	for i, segment := range segments {
-		cursor := segmentTransformStart(segment)
-		if i == 0 || cursor < start {
-			start = cursor
-		}
-	}
-	return start
-}
-
 // transformFrontierBounds is only used to migrate legacy snapshots without W/A.
 // It captures K before any metadata projection. Including
 // every healthy Segment (even already-published ones) is conservative and closes
 // the window between durable output creation and DataView publication. No
 // partition filter may be applied here.
-func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64) (map[string]uint64, error) {
+func transformFrontierBounds(ctx context.Context, metadata *meta.Meta, imports bulkimport.ImportMeta, collectionID int64) (map[string]uint64, error) {
 	collection := metadata.GetCollection(collectionID)
 	if collection == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("collection %d metadata is not ready", collectionID)
@@ -75,8 +50,8 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 	// Read task pins before Segment metadata. A completed task has already
 	// persisted all Segment cursors, so its removal cannot create a gap.
 	if imports != nil {
-		for _, job := range imports.GetJobBy(ctx, WithCollectionID(collectionID), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
-			stored := job.(*importJob)
+		for _, job := range imports.GetJobBy(ctx, bulkimport.WithCollectionID(collectionID), bulkimport.WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+			stored := job.(*bulkimport.Job)
 			for _, channel := range job.GetVchannels() {
 				start := stored.GetTransformCommitTimeticks()[channel]
 				if start == 0 {
@@ -86,11 +61,11 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 			}
 		}
 	}
-	for _, segment := range metadata.SelectSegments(ctx, WithCollection(collectionID)) {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
+	for _, segment := range metadata.SelectSegments(ctx, meta.WithCollection(collectionID)) {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
 			continue
 		}
-		start := segmentTransformStart(segment)
+		start := meta.SegmentTransformStart(segment)
 		if start == 0 {
 			// Before first-pack registration, K cannot pass the first Insert.
 			// A V3 version-zero manifest is only an allocation placeholder;
@@ -98,7 +73,7 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 			if !segment.GetIsImporting() &&
 				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) &&
 				segment.GetStartPosition() == nil && len(segment.GetBinlogs()) == 0 {
-				committed, err := hasCommittedManifest(segment)
+				committed, err := meta.HasCommittedManifest(segment)
 				if err != nil {
 					return nil, err
 				}
@@ -117,7 +92,7 @@ func transformFrontierBounds(ctx context.Context, metadata *meta, imports Import
 // pendingTransformBounds protects asynchronous publications not yet represented
 // by the candidate View. Ordinary WAL completeness comes from the SN's W proof;
 // this projection neither reads checkpoints nor requires the collection cache.
-func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportMeta, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+func pendingTransformBounds(ctx context.Context, metadata *meta.Meta, imports bulkimport.ImportMeta, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 	// These are the previous snapshot's W values: the manager calls this
 	// projector before applying the new Flush certificate or recalculating A.
 	// An import without a CommitImport fence freezes W rather than blocking
@@ -135,9 +110,9 @@ func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportM
 		}
 	}
 	if imports != nil {
-		for _, job := range imports.GetJobBy(ctx, WithCollectionID(view.GetCollectionId()), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+		for _, job := range imports.GetJobBy(ctx, bulkimport.WithCollectionID(view.GetCollectionId()), bulkimport.WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
 			for _, channel := range job.GetVchannels() {
-				start := job.(*importJob).GetTransformCommitTimeticks()[channel]
+				start := job.(*bulkimport.Job).GetTransformCommitTimeticks()[channel]
 				if start == 0 {
 					start = previousW[channel]
 					if start == 0 {
@@ -158,8 +133,8 @@ func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportM
 	}
 	// Read task pins before Segment metadata: completion first installs the
 	// Segment coverage, so a completed task cannot disappear from both sets.
-	for _, segment := range metadata.SelectSegments(ctx, WithCollection(view.GetCollectionId())) {
-		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
+	for _, segment := range metadata.SelectSegments(ctx, meta.WithCollection(view.GetCollectionId())) {
+		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !meta.IsSegmentHealthy(segment) {
 			continue
 		}
 		if segment.GetIsImporting() {
@@ -168,7 +143,7 @@ func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportM
 			// become visible; they must not block other commits either.
 			continue
 		}
-		start := segmentTransformStart(segment)
+		start := meta.SegmentTransformStart(segment)
 		if start == 0 {
 			if !segment.GetCreatedByCompaction() &&
 				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) {

@@ -134,7 +134,7 @@ type Server struct {
 	metaStore                           metacache.MetaStore
 	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
-	collectionDropped func(context.Context, int64) (bool, error)
+	collectionDropped                   func(context.Context, int64) (bool, error)
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -155,9 +155,9 @@ type Server struct {
 
 	domainMetas
 
-	copySegmentMeta      copysegment.CopySegmentMeta
-	copySegmentInspector copysegment.CopySegmentInspector
-	copySegmentChecker   copysegment.CopySegmentChecker
+	copySegmentMeta          copysegment.CopySegmentMeta
+	copySegmentInspector     copysegment.CopySegmentInspector
+	copySegmentChecker       copysegment.CopySegmentChecker
 	restoreCollectionManager snapshot.RestoreCollectionManager
 
 	snapshotManager       snapshot.SnapshotManager
@@ -474,10 +474,16 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
-	snapshotManager.collectionRestorer = s.restoreCollectionManager
-	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
-	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
-	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
+	snapshotManager.CollectionRestorer = s.restoreCollectionManager
+	snapshotManager.IndexMeta = s.indexMeta
+	s.copySegmentChecker.(*copysegment.Checker).CollectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copysegment.Checker).Compactions = s.compactionInspector.(*compaction.Inspector)
+	s.copySegmentChecker.(*copysegment.Checker).CompactionTasks = s.compactionTaskMeta
+	s.copySegmentChecker.(*copysegment.Checker).SnapshotSource = s.snapshotMeta
+	s.compactionInspector.(*compaction.Inspector).RestoreJobActive = func(ctx context.Context, id int64) bool {
+		job := s.copySegmentMeta.GetJob(ctx, id)
+		return job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed
+	}
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := snapshot.NewSnapshotExportMeta(s.ctx, s.meta.Catalog)
 	if err != nil {
@@ -602,17 +608,17 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = gc.NewGarbageCollector(s.meta, s.handler, gc.GcOption{
 		StreamingNodeCatalog: kvstreamingnode.NewCataLog(s.kv),
-		Cli:              cli,
-		Broker:           s.broker,
-		Enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
-		CheckInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
-		ScanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
-		MissingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
-		DropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-		DataViewGC:       s.dataViewManager,
-		IndexMeta:        s.indexMeta,
-		AnalyzeMeta:      s.analyzeMeta,
-		SnapshotMeta:     s.snapshotMeta,
+		Cli:                  cli,
+		Broker:               s.broker,
+		Enabled:              Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
+		CheckInterval:        Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
+		ScanInterval:         Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
+		MissingTolerance:     Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
+		DropTolerance:        Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		DataViewGC:           s.dataViewManager,
+		IndexMeta:            s.indexMeta,
+		AnalyzeMeta:          s.analyzeMeta,
+		SnapshotMeta:         s.snapshotMeta,
 		ImportJobAlive: func(ctx context.Context, jobID int64) bool {
 			return s.importMeta.GetJob(ctx, jobID) != nil
 		},
@@ -866,7 +872,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		)
 		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
 		recoveredDomainMetas = dm
-		if err == nil { recoveredMeta.PreparationSchema = coordinatorPreparationSchema; recoveredMeta.StreamingNodeCatalog = kvstreamingnode.NewCataLog(s.kv) }
+		if err == nil {
+			recoveredMeta.PreparationSchema = coordinatorPreparationSchema
+			recoveredMeta.StreamingNodeCatalog = kvstreamingnode.NewCataLog(s.kv)
+		}
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -885,10 +894,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
-	var recoveredImports ImportMeta
+	var recoveredImports bulkimport.ImportMeta
 	if err := retry.Do(s.ctx, func() error {
 		var err error
-		recoveredImports, err = NewImportMeta(s.ctx, s.catalog, s.allocator, recoveredMeta)
+		recoveredImports, err = bulkimport.NewImportMeta(s.ctx, s.catalog, s.allocator, recoveredMeta)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
@@ -1347,7 +1356,7 @@ func (s *Server) Stop() error {
 	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		if s.garbageCollector != nil {
-			s.garbageCollector.close()
+			s.garbageCollector.Close()
 		}
 		if s.snapshotExportManager != nil {
 			s.snapshotExportManager.Close()

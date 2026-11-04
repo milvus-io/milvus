@@ -646,8 +646,8 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			CommitTimestamp:             99,
 			TransformStartAfterTimetick: 17,
 		}
-		require.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment)))
-		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		require.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segment)))
+		require.NoError(t, svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: collectionID,
 			FieldID:      fieldID,
 			IndexID:      indexID,
@@ -657,7 +657,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 				{Key: common.MmapEnabledKey, Value: "true"},
 			},
 		}))
-		require.NoError(t, svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		require.NoError(t, svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID:             segmentID,
 			CollectionID:          collectionID,
 			PartitionID:           partitionID,
@@ -724,7 +724,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			oldFieldID   = int64(101)
 			newFieldID   = int64(102)
 		)
-		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, svr.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:                          segmentID,
 			CollectionID:                collectionID,
 			PartitionID:                 partitionID,
@@ -732,7 +732,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			State:                       commonpb.SegmentState_Flushed,
 			TransformStartAfterTimetick: 17,
 		})))
-		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.Background(), &model.Index{
+		require.NoError(t, svr.indexMeta.CreateIndex(context.Background(), &model.Index{
 			CollectionID: collectionID,
 			FieldID:      oldFieldID,
 			IndexID:      indexID,
@@ -741,7 +741,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 				Key: common.IndexTypeKey, Value: "IVF_FLAT",
 			}},
 		}))
-		require.NoError(t, svr.meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+		require.NoError(t, svr.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
 			SegmentID:    segmentID,
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
@@ -750,17 +750,16 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		}))
 
-		getSegmentIndexesMock := mockey.Mock((*indexMeta).GetSegmentsIndexes).To(
-			func(meta *indexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
-				meta.fieldIndexLock.RLock()
+		getSegmentIndexesMock := mockey.Mock((*index.IndexMeta).GetSegmentsIndexes).To(
+			func(im *index.IndexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+				im.RLockFieldIndexes()
 				indexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
 				for _, segmentID := range segmentIDs {
-					indexes[segmentID] = meta.getSegmentIndexes(collectionID, segmentID)
+					indexes[segmentID] = im.GetSegmentIndexesUnsafe(collectionID, segmentID)
 				}
-				meta.fieldIndexLock.RUnlock()
+				im.RUnlockFieldIndexes()
 
-				meta.fieldIndexLock.Lock()
-				meta.indexes[collectionID][indexID] = &model.Index{
+				replacement := &model.Index{
 					CollectionID: collectionID,
 					FieldID:      newFieldID,
 					IndexID:      indexID,
@@ -769,7 +768,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 						Key: common.IndexTypeKey, Value: "HNSW",
 					}},
 				}
-				meta.fieldIndexLock.Unlock()
+				require.NoError(t, im.AlterIndex(context.Background(), replacement))
 				return indexes
 			},
 		).Build()
@@ -816,7 +815,7 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			BuildID:                200,
 			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 		}
-		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, svr.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:                          segmentID,
 			CollectionID:                collectionID,
 			PartitionID:                 partitionID,
@@ -2894,7 +2893,9 @@ func WithMeta(mt *meta.Meta, dm *domainMetas) Option {
 		svr.domainMetas = *dm
 		var err error
 		svr.importMeta, err = bulkimport.NewImportMeta(svr.ctx, mt.Catalog, svr.allocator, mt)
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
@@ -2949,7 +2950,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	// This fixture runs DataCoord without a Broadcaster lifecycle. Its jobs
 	// use the collection snapshots installed by each test; schema-target tests
 	// explicitly install their preparation source on meta.
-	svr.meta.preparationSchema = nil
+	svr.meta.PreparationSchema = nil
 
 	signal := make(chan struct{})
 	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {

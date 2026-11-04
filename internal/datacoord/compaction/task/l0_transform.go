@@ -14,11 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package task
 
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -28,9 +29,9 @@ import (
 // transformCursorUpdates certifies only a continuous Transform prefix. A task
 // can select a subset of L0 files, and task.Pos can even be MaxUint64 (repair),
 // so neither that position nor the maximum selected Delete is a certificate.
-func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs []*datapb.CompactionSegment) ([]UpdateOperator, error) {
-	m, ok := t.meta.(*meta)
-	if !ok || m.streamingNodeCatalog == nil || t.GetTaskProto().GetRestoreJobId() != 0 || len(outputs) == 0 {
+func (t *L0CompactionTask) transformCursorUpdates(ctx context.Context, outputs []*datapb.CompactionSegment) ([]meta.UpdateOperator, error) {
+	m, ok := t.meta.(*meta.Meta)
+	if !ok || m.StreamingNodeCatalog == nil || t.GetTaskProto().GetRestoreJobId() != 0 || len(outputs) == 0 {
 		// Legacy owners have no materialization certificate. Restore applies
 		// source-table Deletes and must retain the target WAL's restore cursor.
 		return nil, nil
@@ -39,7 +40,7 @@ func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs [
 	channel := task.GetChannel()
 	// Capture M before SegmentMeta: observing it proves every physical group
 	// through M was already durably registered, including other partitions.
-	base, err := m.streamingNodeCatalog.GetVChannelBase(ctx, funcutil.ToPhysicalChannel(channel), channel)
+	base, err := m.StreamingNodeCatalog.GetVChannelBase(ctx, funcutil.ToPhysicalChannel(channel), channel)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs [
 	for _, id := range task.GetInputSegments() {
 		inputs[id] = struct{}{}
 		if input := m.GetSegment(ctx, id); input != nil {
-			through = max(through, segmentEffectiveDmlTs(input.SegmentInfo))
+			through = max(through, meta.SegmentEffectiveDmlTs(input.SegmentInfo))
 		}
 	}
 	through = min(through, base.GetTransformMaterializedTimeTick())
@@ -63,13 +64,13 @@ func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs [
 	// Delete is excluded from the certified prefix. Unknown positions block
 	// advancement; they are never interpreted as an unbounded interval.
 	holes := make(map[int64]uint64)
-	for _, input := range m.SelectSegments(ctx, WithCollection(task.GetCollectionID()), WithChannel(channel), SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return s.GetLevel() == datapb.SegmentLevel_L0 && isSegmentHealthy(s)
+	for _, input := range m.SelectSegments(ctx, meta.WithCollection(task.GetCollectionID()), meta.WithChannel(channel), meta.SegmentFilterFunc(func(s *meta.SegmentInfo) bool {
+		return s.GetLevel() == datapb.SegmentLevel_L0 && meta.IsSegmentHealthy(s)
 	})) {
 		if _, selected := inputs[input.GetID()]; selected {
 			continue
 		}
-		start := segmentEffectiveTs(input.SegmentInfo)
+		start := meta.SegmentEffectiveTs(input.SegmentInfo)
 		if input.GetIsImporting() {
 			start = 0 // Its eventual commit timestamp has not been established.
 		}
@@ -82,10 +83,10 @@ func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs [
 			holes[partition] = limit
 		}
 	}
-	updates := make([]UpdateOperator, 0, len(outputs))
+	updates := make([]meta.UpdateOperator, 0, len(outputs))
 	for _, output := range outputs {
 		segment := m.GetSegment(ctx, output.GetSegmentID())
-		if segment == nil || !isSegmentHealthy(segment) || segment.GetTransformStartAfterTimetick() == 0 {
+		if segment == nil || !meta.IsSegmentHealthy(segment) || segment.GetTransformStartAfterTimetick() == 0 {
 			continue
 		}
 		covered := through
@@ -96,22 +97,8 @@ func (t *l0CompactionTask) transformCursorUpdates(ctx context.Context, outputs [
 			covered = min(covered, limit)
 		}
 		if covered > segment.GetTransformStartAfterTimetick() {
-			updates = append(updates, advanceL0TransformCursor(segment.GetID(), covered))
+			updates = append(updates, meta.AdvanceL0TransformCursor(segment.GetID(), covered))
 		}
 	}
 	return updates, nil
-}
-
-// advanceL0TransformCursor runs on the same private mutation pack as deltalogs
-// and Manifest publication. Concurrent completions and callback replays cannot
-// regress coverage. Unknown old coverage requires migration, not inference here.
-func advanceL0TransformCursor(segmentID int64, through uint64) UpdateOperator {
-	return func(pack *updateSegmentPack) bool {
-		segment := pack.Get(segmentID)
-		if segment == nil || !isSegmentHealthy(segment) || segment.GetTransformStartAfterTimetick() == 0 || through <= segment.GetTransformStartAfterTimetick() {
-			return false
-		}
-		segment.TransformStartAfterTimetick = through
-		return true
-	}
 }

@@ -91,7 +91,7 @@ func (t *L0CompactionTask) GetTaskVersion() int64 {
 func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
 	if t.restoreMutationApplied() {
-		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+		if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved)); err != nil {
 			log.Warn(t.context(), "retrying restored delete completion metadata", mlog.Err(err))
 		}
 		return
@@ -341,7 +341,7 @@ func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datap
 				(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
 				!info.GetIsImporting() &&
 				info.GetLevel() != datapb.SegmentLevel_L0 &&
-				meta.SegmentEffectiveTs(info.meta.SegmentInfo) < taskProto.GetPos().GetTimestamp()
+				meta.SegmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
 		}))
 	}
 

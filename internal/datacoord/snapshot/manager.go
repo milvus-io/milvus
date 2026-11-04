@@ -356,9 +356,10 @@ type SnapshotManager interface {
 // Implementation: Struct and Constructor
 // ============================================================================
 
-// snapshotManager implements the SnapshotManager interface.
+// Manager implements the SnapshotManager interface.
 type Manager struct {
-	collectionRestorer RestoreCollectionManager
+	CollectionRestorer RestoreCollectionManager
+	IndexMeta          *index.IndexMeta
 	// Core dependencies
 	meta            *meta.Meta                  // Segment metadata management
 	snapshotMeta    *SnapshotMeta               // Snapshot metadata management
@@ -921,7 +922,7 @@ func (sm *Manager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
-	if sm.collectionRestorer != nil {
+	if sm.CollectionRestorer != nil {
 		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
 	}
 	snapshotFingerprint := ""
@@ -1698,7 +1699,7 @@ func (sm *Manager) createRestoreJob(
 		}
 
 		if !createsCollection {
-			targetSegments[targetSegmentID] = restoredSegmentInfo(segDesc, targetCollection, targetPartitionID, targetSegmentID, targetChannelName, starts[targetChannelName])
+			targetSegments[targetSegmentID] = copysegment.RestoredSegmentInfo(segDesc, targetCollection, targetPartitionID, targetSegmentID, targetChannelName, starts[targetChannelName])
 		}
 	}
 

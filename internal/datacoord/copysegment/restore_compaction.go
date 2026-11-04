@@ -14,14 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package copysegment
 
 import (
 	"fmt"
 	"maps"
 	"sort"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -29,11 +29,11 @@ import (
 
 // materializeRestoreDeletes runs only after every copy task has durably
 // completed. Importing stays set until all fixed-target L0 plans have committed.
-func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
-	recipe := job.(*copySegmentJob)
+func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
+	recipe := job.(*Job)
 	persisted := make(map[int64]*datapb.CompactionTask)
 	if len(recipe.GetRestoreCompactionPlans()) > 0 {
-		for _, task := range c.meta.GetCompactionTasksByTriggerID(c.ctx, job.GetJobId()) {
+		for _, task := range c.CompactionTasks.GetCompactionTasksByTriggerID(job.GetJobId()) {
 			persisted[task.GetPlanID()] = task
 		}
 		complete := true
@@ -46,9 +46,9 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 	}
 
 	groups := make(map[string]*datapb.CompactionTask)
-	targets := make([]*SegmentInfo, 0, len(job.GetIdMappings()))
+	targets := make([]*meta.SegmentInfo, 0, len(job.GetIdMappings()))
 	for _, mapping := range job.GetIdMappings() {
-		segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId())
+		segment := c.Meta.GetSegment(c.Ctx, mapping.GetTargetSegmentId())
 		if segment == nil {
 			return false, merr.WrapErrDataIntegrityMsg("restore segment %d missing before delete materialization", mapping.GetTargetSegmentId())
 		}
@@ -63,7 +63,7 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 				TriggerID: job.GetJobId(), RestoreJobId: job.GetJobId(), CollectionID: job.GetCollectionId(),
 				PartitionID: segment.GetPartitionID(), Channel: segment.GetInsertChannel(),
 				Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
-				NodeID: NullNodeID,
+				NodeID: meta.NullNodeID,
 			}
 			groups[key] = plan
 		}
@@ -76,7 +76,7 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 		}
 		return true, nil
 	}
-	snapshot, err := loadCopySnapshot(c.ctx, job, c.meta.snapshotMeta)
+	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource)
 	if err != nil {
 		return false, err
 	}
@@ -102,14 +102,14 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 		for i, key := range keys {
 			ids[key] = first + int64(i)
 		}
-		if err := c.copyMeta.UpdateJob(c.ctx, job.GetJobId(), func(job CopySegmentJob) {
-			job.(*copySegmentJob).RestoreCompactionPlans = maps.Clone(ids)
+		if err := c.CopyMeta.UpdateJob(c.Ctx, job.GetJobId(), func(job CopySegmentJob) {
+			job.(*Job).RestoreCompactionPlans = maps.Clone(ids)
 		}); err != nil {
 			return false, err
 		}
-		recipe = c.copyMeta.GetJob(c.ctx, job.GetJobId()).(*copySegmentJob)
+		recipe = c.CopyMeta.GetJob(c.Ctx, job.GetJobId()).(*Job)
 	}
-	if c.compactions == nil {
+	if c.Compactions == nil {
 		return false, merr.WrapErrServiceUnavailableMsg("restore compaction scheduler is not ready")
 	}
 	for _, key := range keys {
@@ -127,8 +127,7 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 				// Cleanup has released the previous attempt's input locks. Reuse its
 				// durable identity; no concurrent attempt may publish to these bases.
 			case datapb.CompactionTaskState_pipelining:
-				inspector, ok := c.compactions.(*compactionInspector)
-				if !ok || inspector.getCompactionTask(plan.PlanID) != nil {
+				if c.Compactions.HasCompactionTask(plan.PlanID) {
 					continue
 				}
 				// Admission persisted the plan but a full queue rejected it.
@@ -137,39 +136,9 @@ func (c *copySegmentChecker) materializeRestoreDeletes(job CopySegmentJob) (bool
 				continue
 			}
 		}
-		if err := c.compactions.enqueueCompaction(plan); err != nil {
+		if err := c.Compactions.EnqueueCompaction(plan); err != nil {
 			return false, err
 		}
 	}
 	return false, nil
-}
-
-// A restore L0 transaction retires all inputs together with every target delta.
-// This closes the crash window between that commit and the task-state write.
-func (t *l0CompactionTask) restoreMutationApplied() bool {
-	if t.GetTaskProto().GetRestoreJobId() == 0 || len(t.GetTaskProto().GetInputSegments()) == 0 {
-		return false
-	}
-	for _, id := range t.GetTaskProto().GetInputSegments() {
-		segment := t.meta.GetSegment(t.context(), id)
-		if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped || !segment.GetCompacted() {
-			return false
-		}
-	}
-	return true
-}
-
-func (t *l0CompactionTask) restoreTargets() ([]*SegmentInfo, error) {
-	plan := t.GetTaskProto()
-	targets := make([]*SegmentInfo, 0, len(plan.GetRestoreTargetSegments()))
-	for _, id := range plan.GetRestoreTargetSegments() {
-		segment := t.meta.GetSegment(t.context(), id)
-		if !isSegmentHealthy(segment) || !isFlushState(segment.GetState()) || segment.GetCollectionID() != plan.GetCollectionID() ||
-			segment.GetInsertChannel() != plan.GetChannel() || segment.GetLevel() == datapb.SegmentLevel_L0 ||
-			(plan.GetPartitionID() != common.AllPartitionsID && segment.GetPartitionID() != plan.GetPartitionID()) {
-			return nil, merr.WrapErrDataIntegrityMsg("restore compaction target %d is no longer valid", id)
-		}
-		targets = append(targets, segment)
-	}
-	return targets, nil
 }

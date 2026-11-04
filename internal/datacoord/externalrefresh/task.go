@@ -549,12 +549,12 @@ func normalizeExternalRefreshUpdatedSegment(
 // L1 Flush, so it retains the business VChannel's CreateCollection TimeTick,
 // including after refresh and recovery. Source-side deletes belong to the
 // refreshed base, not this VChannel's TransformLog.
-func externalRefreshTransformStart(ctx context.Context, mt *meta, collectionID int64, vchannel string) (uint64, error) {
-	if mt.dataViewManager == nil {
+func externalRefreshTransformStart(ctx context.Context, mt *meta.Meta, collectionID int64, vchannel string) (uint64, error) {
+	if mt.DataViewManager == nil {
 		// Legacy loading without DataViews does not consume Transform cursors.
 		return 0, nil
 	}
-	ref, err := mt.dataViewManager.Latest(ctx, collectionID)
+	ref, err := mt.DataViewManager.Latest(ctx, collectionID)
 	if err != nil {
 		return 0, merr.Wrap(err, "read external collection DataView")
 	}

@@ -18,35 +18,8 @@ func (s *Server) PrepareDataViewSchema(ctx context.Context, id int64, published,
 	}
 	var project dataview.Projector
 	if resource.SchemaRequiresMaterialization(published, target) {
-		project = s.meta.loadableProjection
+		project = s.meta.LoadableProjection
 	}
 	_, err := s.dataViewManager.AdvanceSchema(ctx, id, target.GetVersion(), project)
 	return err
-}
-
-// checkCompactionSchemaPublication prevents any physical replacement (sort,
-// merge, clustering or schema-bump) from removing columns before the direct
-// DDL has published its logical read schema. The task retries its metadata
-// commit; direct DDL never waits for that task. Derived-output materialization
-// is deliberately allowed before publication, because DDL waits for its result.
-func (m *meta) checkCompactionSchemaPublication(ctx context.Context, collectionID int64, target *schemapb.CollectionSchema) error {
-	if m.dataViewManager == nil {
-		return nil
-	}
-	ref, err := m.dataViewManager.Latest(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if ref == nil {
-		return merr.WrapErrServiceNotReadyMsg("collection %d DataView is not initialized", collectionID)
-	}
-	defer ref.Deref()
-	if ref.DataView().GetSchemaVersion() >= target.GetVersion() {
-		return nil
-	}
-	published := m.GetCollection(collectionID)
-	if published != nil && resource.SchemaRequiresMaterialization(published.Schema, target) {
-		return nil
-	}
-	return merr.WrapErrServiceNotReadyMsg("collection %d must publish DataView schema %d before committing physical cleanup", collectionID, target.GetVersion())
 }

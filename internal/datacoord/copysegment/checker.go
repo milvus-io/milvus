@@ -81,13 +81,26 @@ type CopySegmentChecker interface {
 	Close() // Stop the checker gracefully
 }
 
-// copySegmentChecker implements the copy segment job state machine and monitoring.
+type RestoreCompactionScheduler interface {
+	EnqueueCompaction(*datapb.CompactionTask) error
+	HasCompactionTask(int64) bool
+}
+type RestoreCompactionTasks interface {
+	GetCompactionTasksByTriggerID(int64) []*datapb.CompactionTask
+}
+
+// Checker implements the copy segment job state machine and monitoring.
 //
 // This runs as a background service in DataCoord, checking all copy segment jobs
 // periodically and progressing them through their state machine.
 type Checker struct {
-	compactions compaction.CompactionInspector
-	collectionRestorer snapshot.RestoreCollectionManager
+	Compactions        RestoreCompactionScheduler
+	CompactionTasks    RestoreCompactionTasks
+	SnapshotSource     SnapshotSource
+	CollectionRestorer interface {
+		CompleteRestoreCollection(context.Context, int64) error
+		IsCollectionDropped(context.Context, int64) (bool, error)
+	}
 	Ctx      context.Context     // Context for lifecycle management
 	Meta     *meta.Meta          // Segment metadata for state updates
 	broker   broker.Broker       // Broker for coordinator communication
@@ -266,20 +279,20 @@ func (c *Checker) LogTaskStats() {
 // checkRestoreTarget uses the same authoritative lifecycle check as Import.
 // Public HasCollection/Describe cannot distinguish a still-restoring target from
 // a deleted one, and process-local DataView drop markers do not survive recovery.
-func (c *copySegmentChecker) checkRestoreTarget(job CopySegmentJob) bool {
-	if !job.(*copySegmentJob).GetCreatesCollection() {
+func (c *Checker) checkRestoreTarget(job CopySegmentJob) bool {
+	if !job.(*Job).GetCreatesCollection() {
 		return true
 	}
-	dropped, err := c.collectionRestorer.IsCollectionDropped(c.ctx, job.GetCollectionId())
+	dropped, err := c.CollectionRestorer.IsCollectionDropped(c.Ctx, job.GetCollectionId())
 	if err != nil {
-		mlog.Warn(c.ctx, "retrying restore target lifecycle check", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		mlog.Warn(c.Ctx, "retrying restore target lifecycle check", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
 		return false
 	}
 	if !dropped {
 		return true
 	}
-	if err := c.copyMeta.FailJobForDroppedCollection(c.ctx, job.GetJobId()); err != nil {
-		mlog.Warn(c.ctx, "retrying restore termination for deleted target", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+	if err := c.CopyMeta.FailJobForDroppedCollection(c.Ctx, job.GetJobId()); err != nil {
+		mlog.Warn(c.Ctx, "retrying restore termination for deleted target", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
 	}
 	return false
 }
@@ -342,16 +355,16 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 		return
 	}
 
-	if job.(*copySegmentJob).GetCreatesCollection() && len(job.GetIdMappings()) > 0 {
+	if job.(*Job).GetCreatesCollection() && len(job.GetIdMappings()) > 0 {
 		if err := c.registerRestoreSegments(job); err != nil {
-			log.Warn(c.ctx, "retrying restored segment registration", mlog.Err(err))
+			log.Warn(c.Ctx, "retrying restored segment registration", mlog.Err(err))
 			return
 		}
 	}
 
 	// Step 1: Validate job has segment mappings
 	idMappings := job.GetIdMappings()
-	if len(idMappings) == 0 && job.(*copySegmentJob).GetCreatesCollection() {
+	if len(idMappings) == 0 && job.(*Job).GetCreatesCollection() {
 		c.finishJob(job, 0)
 		return
 	}
@@ -545,7 +558,7 @@ func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 		return
 	}
 
-	if job.(*copySegmentJob).GetCreatesCollection() && !allRestoreSegmentsCopied(job, tasks) {
+	if job.(*Job).GetCreatesCollection() && !allRestoreSegmentsCopied(job, tasks) {
 		return
 	}
 
@@ -585,10 +598,10 @@ func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 //   - totalRows: Total row count across all copied segments
 func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
-	if job.(*copySegmentJob).GetCreatesCollection() {
+	if job.(*Job).GetCreatesCollection() {
 		ready, err := c.materializeRestoreDeletes(job)
 		if err != nil || !ready {
-			log.Warn(c.ctx, "waiting for restored delete materialization", mlog.Err(err))
+			log.Warn(c.Ctx, "waiting for restored delete materialization", mlog.Err(err))
 			return
 		}
 	}
@@ -640,7 +653,7 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 	}
 
 	// Step 3: Fail the job if any segment flush failed (prevents silent data availability issues)
-	if flushFailures > 0 && job.(*copySegmentJob).GetCreatesCollection() {
+	if flushFailures > 0 && job.(*Job).GetCreatesCollection() {
 		return // Copied data is durable; retry metadata publication.
 	}
 	if flushFailures > 0 {
@@ -659,26 +672,26 @@ func (c *Checker) finishJob(job CopySegmentJob, totalRows int64) {
 	c.publishRestoredCollection(job, totalRows)
 }
 
-func (c *copySegmentChecker) publishRestoredCollection(job CopySegmentJob, totalRows int64) {
+func (c *Checker) publishRestoredCollection(job CopySegmentJob, totalRows int64) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 	// Completion is downstream of the durable DataView publication. The target
 	// remains unavailable if reconciliation fails; a checker retry resumes it.
-	if c.meta.dataViewManager != nil {
-		version, err := c.meta.dataViewManager.RecomputeNow(c.ctx, job.GetCollectionId(), c.meta.loadableProjection)
+	if c.Meta.DataViewManager != nil {
+		version, err := c.Meta.DataViewManager.RecomputeNow(c.Ctx, job.GetCollectionId(), c.Meta.LoadableProjection)
 		if err != nil || version == nil {
 			if !c.checkRestoreTarget(job) {
 				return
 			}
-			log.Warn(c.ctx, "waiting for restored DataView publication", mlog.Err(err))
+			log.Warn(c.Ctx, "waiting for restored DataView publication", mlog.Err(err))
 			return
 		}
 	}
-	if job.(*copySegmentJob).GetCreatesCollection() {
-		if err := c.collectionRestorer.CompleteRestoreCollection(c.ctx, job.GetCollectionId()); err != nil {
+	if job.(*Job).GetCreatesCollection() {
+		if err := c.CollectionRestorer.CompleteRestoreCollection(c.Ctx, job.GetCollectionId()); err != nil {
 			if !c.checkRestoreTarget(job) {
 				return
 			}
-			log.Warn(c.ctx, "waiting to publish restored collection", mlog.Err(err))
+			log.Warn(c.Ctx, "waiting to publish restored collection", mlog.Err(err))
 			return
 		}
 	}
@@ -776,7 +789,7 @@ func (c *Checker) tryTimeoutJob(job CopySegmentJob) {
 		return
 	}
 
-	if job.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(job, c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())) {
+	if job.(*Job).GetCreatesCollection() && allRestoreSegmentsCopied(job, c.CopyMeta.GetTasksByJobID(c.Ctx, job.GetJobId())) {
 		return // Only idempotent metadata publication remains.
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
@@ -822,12 +835,12 @@ func (c *Checker) checkGC(job CopySegmentJob) {
 		job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
 		return
 	}
-	if job.(*copySegmentJob).GetCreatesCollection() {
+	if job.(*Job).GetCreatesCollection() {
 		for _, mapping := range job.GetIdMappings() {
-			segment := c.meta.GetSegment(c.ctx, mapping.GetTargetSegmentId())
+			segment := c.Meta.GetSegment(c.Ctx, mapping.GetTargetSegmentId())
 			if segment != nil && segment.GetIsImporting() && segment.GetCompacted() {
-				if err := c.meta.UpdateSegmentsInfo(c.ctx, UpdateIsImporting(segment.GetID(), false)); err != nil {
-					mlog.Warn(c.ctx, "retrying restored L0 retirement cleanup", mlog.Err(err))
+				if err := c.Meta.UpdateSegmentsInfo(c.Ctx, meta.UpdateIsImporting(segment.GetID(), false)); err != nil {
+					mlog.Warn(c.Ctx, "retrying restored L0 retirement cleanup", mlog.Err(err))
 					return
 				}
 			}

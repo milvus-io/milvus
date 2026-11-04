@@ -261,7 +261,7 @@ func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {
 	return dataview.LoadableSegment{
 		PartitionStatsVersion:       seg.GetPartitionStatsVersion(),
 		SchemaVersion:               seg.GetSchemaVersion(),
-		TransformStartAfterTimetick: segmentTransformStart(seg),
+		TransformStartAfterTimetick: SegmentTransformStart(seg),
 		SegmentID:                   seg.GetID(),
 		VChannel:                    seg.GetInsertChannel(),
 		PartitionID:                 seg.GetPartitionID(),

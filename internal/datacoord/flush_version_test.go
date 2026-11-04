@@ -11,8 +11,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -308,7 +308,7 @@ func (s *ServerSuite) TestFlushPublishesCommittedSize() {
 
 func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
 	t := s.T()
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil,
 		dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
 			t.Fatal("native Flush must not read collection cache or checkpoint")
@@ -319,11 +319,11 @@ func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
 		}))
 	_, err := manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch1"}, TransformStarts: map[string]uint64{"ch1": 10}})
 	require.NoError(t, err)
-	s.testServer.meta.catalog = catalog
+	s.testServer.meta.Catalog = catalog
 	s.testServer.dataViewManager = manager
 	req := s.addFlushVersionSegment(10, 10)
 	// Final Flush follows the durable first-pack publication.
-	require.NoError(t, s.testServer.meta.UpdateSegmentsInfo(t.Context(), UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 10, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 50}}})))
+	require.NoError(t, s.testServer.meta.UpdateSegmentsInfo(t.Context(), meta.UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 10, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 50}}})))
 	req.GrowingTransformStartAfterTimetick = 100
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -360,7 +360,9 @@ func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
 	// A newer proof on a duplicate RPC must not change the original binding.
 	req.GrowingTransformStartAfterTimetick = 500
 	require.True(t, proto.Equal(version, s.flushVersion(req)))
-	recompute := mockey.Mock((*meta).recomputeDataView).To(func(_ *meta, _ context.Context, _ int64) { t.Fatal("checkpoint report must not enqueue a DataView") }).Build()
+	recompute := mockey.Mock((*meta.Meta).RecomputeDataView).To(func(_ *meta.Meta, _ context.Context, _ int64) {
+		t.Fatal("checkpoint report must not enqueue a DataView")
+	}).Build()
 	defer recompute.UnPatch()
 	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoint(t.Context(), "ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: []byte{2}, Timestamp: 200}))
 	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoints(t.Context(), []*msgpb.MsgPosition{{ChannelName: "ch1", MsgID: []byte{3}, Timestamp: 300}}))
