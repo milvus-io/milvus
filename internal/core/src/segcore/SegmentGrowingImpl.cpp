@@ -3640,7 +3640,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
 void
 SegmentGrowingImpl::search_ids(BitsetType& bitset,
-                               const IdArray& id_array) const {
+                               const IdArray& id_array,
+                               milvus::OpContext* /*op_ctx*/) const {
     auto schema = get_schema_snapshot();
     auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");

@@ -83,9 +83,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     // segments would make each segment's search_storage_cost_ accumulate
     // every prior segment's bytes.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     auto field_data = bulk_subscript(
         &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
@@ -112,9 +115,12 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     // See FillPrimaryKeys: per-call OpContext so storage_usage stays scoped
     // to this segment's fills.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
@@ -308,6 +314,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     // Carry the upstream cancel_token down into FillTargetEntry so the
     // take()/Arrow-convert path can short-circuit on abort.
     milvus::OpContext fte_op_ctx;
+    fte_op_ctx.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
     if (retrieve_results.field_data_.empty()) {
         FillTargetEntry(trace_ctx,
@@ -439,6 +447,7 @@ SegmentInternalInterface::FillOrderByResult(
     }
 
     milvus::OpContext op_ctx;
+    op_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
 
     // Two-project mode: bulk-fetch deferred fields using segment offsets.
     if (!deferred.empty()) {
@@ -583,9 +592,12 @@ SegmentInternalInterface::FillTargetEntry(
     // bytes. Inherit the caller's cancellation_token and load priority so
     // in-loop cancellation still propagates.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -697,6 +709,8 @@ SegmentInternalInterface::Retrieve(
     // Carry the upstream cancel_token down into the take() + Arrow-convert
     // path so RetrieveByOffsets on external fields can short-circuit.
     milvus::OpContext fte_op_ctx;
+    fte_op_ctx.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
     FillTargetEntry(
         trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
@@ -915,6 +929,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
             continue;
         }
         milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         auto sibling =
             bulk_subscript(&op_ctx, sibling_id, row_ids.data(), count);
         const auto& validity = GetFieldDataRowValidData(*sibling);
@@ -955,6 +971,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
             lengths[i] = range.second - range.first;
         }
         milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         auto sibling = bulk_subscript(&op_ctx, sibling_id, row_ids, count);
         const auto& validity = GetFieldDataRowValidData(*sibling);
         return CreateNullStructSubFieldDataArray(

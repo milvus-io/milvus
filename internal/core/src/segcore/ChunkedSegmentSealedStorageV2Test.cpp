@@ -1750,6 +1750,118 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
     }
 }
 
+TEST_P(TestLazyManifest, UnsortedPkInPreservesQueryLoadPriority) {
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = std::make_shared<Schema>();
+    const auto type = GetParam() ? DataType::VARCHAR : DataType::INT64;
+    const auto pk = schema->AddDebugField("pk", type, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kRows = 64;
+    auto expected = DataGen(schema, kRows, 42);
+    std::vector<proto::plan::GenericValue> values(1);
+    IdArray ids;
+    if (GetParam()) {
+        auto value = expected.get_col<std::string>(pk)[0];
+        values[0].set_string_val(value);
+        ids.mutable_str_id()->add_data(value);
+    } else {
+        auto value = expected.get_col<int64_t>(pk)[0];
+        values[0].set_int64_val(value);
+        ids.mutable_int_id()->add_data(value);
+    }
+    // A fresh index and evicted PK column exercise the real translator load.
+    for (bool query : {false, true}) {
+        SCOPED_TRACE(query);
+        auto path = UniqueManifestTestPath("unsorted_pk_priority");
+        StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            kRows,
+            1,
+            TestLocalPath,
+            path,
+            fmt::format("{},{}", pk.get(), TimestampFieldID.get()));
+        auto segment = CreateV3ManifestSegment(
+            data, 3290 + query + 10 * GetParam(), 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto runtime = impl->TestCloneMutableRuntimeResourceState();
+        auto column = runtime->fields.at(pk);
+        column->ManualEvictCache();
+        bool loaded = false;
+        class CheckingPkTranslator
+            : public storagev2translator::PkIndexTranslator {
+         public:
+            CheckingPkTranslator(int64_t id,
+                                 std::shared_ptr<ChunkedColumnInterface> column,
+                                 DataType type,
+                                 bool query,
+                                 bool& loaded)
+                : PkIndexTranslator(id, std::move(column), type, false),
+                  query_(query),
+                  loaded_(loaded) {
+            }
+            std::vector<
+                std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<storagev2translator::PkIndexCell>>>
+            get_cells(milvus::OpContext* ctx,
+                      const std::vector<cachinglayer::cid_t>& cids) override {
+                loaded_ = true;
+                if (query_) {
+                    EXPECT_NE(ctx, nullptr);
+                    if (ctx)
+                        EXPECT_EQ(ctx->runtime_load_priority,
+                                  proto::common::LoadPriority::HIGH);
+                } else {
+                    EXPECT_TRUE(ctx == nullptr ||
+                                !ctx->runtime_load_priority.has_value());
+                }
+                return PkIndexTranslator::get_cells(ctx, cids);
+            }
+
+         private:
+            bool query_;
+            bool& loaded_;
+        };
+        runtime->pk_index_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                    std::make_unique<CheckingPkTranslator>(
+                        impl->get_segment_id(), column, type, query, loaded));
+        EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+        impl->TestPublishRuntimeResourceState(std::move(runtime));
+        if (query) {
+            auto plan = std::make_unique<query::RetrievePlan>(schema);
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            plan->plan_node_->plannodes_ =
+                milvus::test::CreateRetrievePlanByExpr(
+                    std::make_shared<expr::TermFilterExpr>(
+                        expr::ColumnInfo(pk, type), values));
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            EXPECT_GT(result->offset_size(), 0);
+        } else {
+            BitsetType bits(kRows, false);
+            static_cast<SegmentInternalInterface*>(impl)->search_ids(bits, ids);
+            EXPECT_TRUE(bits[0]);
+        }
+        EXPECT_TRUE(loaded);
+    }
+}
+
 TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto warmup_policies =
