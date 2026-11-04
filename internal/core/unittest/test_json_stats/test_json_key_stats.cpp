@@ -15,6 +15,7 @@
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/coro/WithCancellation.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -2198,6 +2199,21 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
                      translator.get_cells_async(&cancelled_ctx, {0})),
                  SegcoreError);
     EXPECT_EQ(fs->async_opens.load(), before_cancel);
+
+    // Coroutine cancellation is independent of the explicit operation context.
+    OpContext active_ctx;
+    for (auto* ctx : {static_cast<OpContext*>(nullptr), &active_ctx}) {
+        const auto before = fs->async_opens.load();
+        try {
+            folly::coro::blockingWait(folly::coro::co_withCancellation(
+                cancelled.getToken(), translator.get_cells_async(ctx, {0})));
+            FAIL() << "expected inherited cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(fs->async_opens.load(), before);
+    }
+    EXPECT_FALSE(active_ctx.cancellation_token.isCancellationRequested());
 
     if (use_async) {
         folly::CancellationSource during_open;
