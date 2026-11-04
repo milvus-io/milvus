@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -217,8 +218,17 @@ class MarisaIndexReader final : public IIndexReaderBase,
     MarisaIndexReader(std::shared_ptr<const MarisaIndex> index,
                       milvus::OpContext* op_ctx);
 
+    const std::shared_ptr<const MarisaIndexStorage>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
+
     std::shared_ptr<const MarisaIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const MarisaIndexStorage> storage_;
 };
 
 }  // namespace milvus::index

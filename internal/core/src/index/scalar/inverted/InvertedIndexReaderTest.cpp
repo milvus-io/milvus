@@ -31,7 +31,7 @@
 namespace milvus::index::test {
 namespace {
 
-TEST(InvertedIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+TEST(InvertedIndexCacheTest, FreshSlotUsesEachReadersContext) {
     const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
     auto dlist = std::make_shared<cachinglayer::internal::DList>(
         false, limit, limit, limit, cachinglayer::EvictionConfig{});
@@ -71,28 +71,34 @@ TEST(InvertedIndexCacheTest, EvictionReloadsWithEachReadersContext) {
                            true},
         {1024 * 1024, 0},
         {},
-        0};
-    auto slot = std::make_shared<
-        cachinglayer::CacheSlot<InvertedIndexStorage<int64_t>>>(
-        std::make_unique<
-            SingleCellIndexStorageTranslator<InvertedIndexStorage<int64_t>>>(
-            cache, false, load),
-        dlist.get(),
-        true,
-        true,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
-    auto index = std::make_shared<InvertedIndex<int64_t>>(
-        slot,
-        IndexMetadata{
-            ReaderCaps{.predicate = true}, Domain::Row, DataType::INT64, 2});
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<InvertedIndexStorage<int64_t>>>
+        slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<
+            cachinglayer::CacheSlot<InvertedIndexStorage<int64_t>>>(
+            std::make_unique<SingleCellIndexStorageTranslator<
+                InvertedIndexStorage<int64_t>>>(cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<InvertedIndex<int64_t>>(
+            slot,
+            IndexMetadata{ReaderCaps{.predicate = true},
+                          Domain::Row,
+                          DataType::INT64,
+                          2});
+    };
+    auto index = make_index();
     OpContext first_ctx;
     first_ctx.runtime_load_priority = 0;
     OpContext second_ctx;
     second_ctx.runtime_load_priority = 1;
     auto first = index->CreateReader(&first_ctx);
-    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_TRUE(priorities.empty());
     const auto* predicates =
@@ -100,17 +106,27 @@ TEST(InvertedIndexCacheTest, EvictionReloadsWithEachReadersContext) {
     ASSERT_NE(predicates, nullptr);
     const int64_t key = 7;
     EXPECT_EQ(predicates->In(1, &key).count(), 1);
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
     EXPECT_EQ(predicates->NotIn(1, &key).count(), 1);
     EXPECT_EQ(predicates->Range(key, CompareOp::NotEqual).count(), 1);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
-    EXPECT_TRUE(slot->ManualEvict(0));
     index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
     first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
     const auto* nulls = dynamic_cast<const INullReader*>(second.get());
     ASSERT_NE(nulls, nullptr);
     EXPECT_EQ(nulls->IsNull().count(), 0);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 template <typename T>

@@ -26,6 +26,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -35,6 +36,9 @@
 #include <vector>
 
 #include "arrow/buffer.h"
+#include "cachinglayer/Metrics.h"
+#include "folly/ScopeGuard.h"
+#include "knowhere/index/index_factory.h"
 #include "common/Utils.h"
 #include "common/OpContext.h"
 #include "index/IndexTypeAdapter.h"
@@ -259,6 +263,7 @@ struct DiskBuildCase {
     const void* tensor = nullptr;
     bool cached = false;
     OpContext* reader_context = nullptr;
+    std::optional<IndexCacheConfig> cache_config;
 };
 
 template <typename T>
@@ -383,6 +388,9 @@ BuildDisk(const std::string& raw_path,
             {1024 * 1024, 1024 * 1024},
             {},
             4096});
+    }
+    if (build.cache_config) {
+        cache = build.cache_config;
     }
     auto index = LoaderRegistry::Instance()
                      .Lookup(adapted.family)
@@ -698,6 +706,98 @@ TEST(VectorDiskCacheTest, ColdMetadataAndCancelledCountDoNotOpenEngine) {
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), FollyCancel);
     }
+}
+
+// Scope the lazy feature bit on real DiskANN to exercise the loader policy
+// even when a native lazy backend is not linked. Backend algorithms are unchanged.
+TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
+    auto& features = const_cast<std::map<std::string, uint64_t>&>(
+        knowhere::IndexFactory::GetIndexFeatures());
+    auto& disk_features = features.at(knowhere::IndexEnum::INDEX_DISKANN);
+    const auto original_features = disk_features;
+    auto restore_features =
+        folly::makeGuard([&] { disk_features = original_features; });
+    disk_features |= knowhere::feature::LAZY_LOAD;
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_native_lazy_XXXXXX", "native lazy budget test");
+    const auto raw_path = files->Path() + "/raw";
+    WriteRaw(raw_path, MakeRows<float>(), kRows, kDim);
+    auto& resident = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& loading = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& resident_disk = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    auto& loading_disk = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    const auto resident_disk_before = resident_disk.Value();
+    const auto loading_disk_before = loading_disk.Value();
+    const auto resident_before = resident.Value();
+    const auto loading_before = loading.Value();
+    IndexCacheConfig config{
+        files->Path() + "/native_engine",
+        cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 1024 * 1024},
+        {4096, 4096},
+        4096,
+        0,
+        {8192, 0}};
+    OpContext ctx;
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.cached = true, .reader_context = &ctx, .cache_config = config});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    ctx.cancellation_token = cancelled.getToken();
+    EXPECT_THROW(vector->Prefetch(), SegcoreError);
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    ctx.cancellation_token = {};
+    vector->Prefetch();
+    EXPECT_EQ(opened.base->Count(), kRows);
+    EXPECT_EQ(resident.Value(),
+              resident_before + config.loaded_usage.memory_bytes);
+    EXPECT_EQ(resident_disk.Value(),
+              resident_disk_before + config.loaded_usage.file_bytes);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    vector->Prefetch();
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+
+    // A request larger than the test cache budget must fail admission.
+    config.loaded_usage.memory_bytes = int64_t{1} << 40;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.cached = true, .cache_config = config});
+    vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    try {
+        vector->Prefetch();
+        FAIL() << "native lazy load bypassed resource admission";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), InsufficientResource);
+    }
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
 }
 
 TEST(VectorDiskFamilyTest, CachedFloatBuildLoadSearchAndRawCapability) {

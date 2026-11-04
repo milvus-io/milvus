@@ -15,15 +15,17 @@ storage of variable-length values such as strings must stay alive until `Build` 
 may iterate the input repeatedly within the synchronous call, but neither the builder nor the
 Artifact may retain the borrowed input.
 
-The Artifact owns the build result and emits it through `Serialize`; the Loader opens a Reader
-independently from the persisted artifact; the Reader owns the engine, mappings, backing files and
-accounting state that queries need. `hybrid/` probes cardinality within the same `Build`, selects a
+The Artifact owns the build result and emits it through `Serialize`; the Loader opens an Index
+independently from the persisted artifact. The Index owns resident storage or a cache slot and
+creates request Readers. A single-cell Reader acquires storage on first use and retains it until
+destruction; all query methods reuse that storage. Mappings, backing files, and accounting remain
+owned by the storage and cache slot. `hybrid/` probes cardinality within the same `Build`, selects a
 concrete family by field shape, nested state, version and the low/high-cardinality configuration,
 and then hands the same complete input to that family; the Hybrid Artifact records the selector. The
 platform AUTOINDEX configuration is not part of the Hybrid policy here.
 
-`TextIndexArtifact` implements the optional consuming Reader conversion, handing the completed
-Tantivy engine, the null state and the directory owner, when needed, to `TextIndexReader`. The
+`TextIndexArtifact` implements the optional consuming Index conversion, handing the completed
+Tantivy engine, the null state and the directory owner, when needed, to `TextIndex`. The
 conversion consumes the Artifact; Hybrid and JSON projected Artifacts only wrap the serialized state
 of the selection or projection and do not pass this capability through.
 
@@ -44,11 +46,11 @@ and the `string_view` from `Gather` is valid only during the synchronous callbac
 V3 Artifacts write directly to `IndexEntryWriter`. Reads use `IndexEntryReader` or
 `AsyncIndexEntryReader` directly; `FileSink` / `FileSource` handle only legacy files.
 Each Loader's `PlanPacked` validates the directory and metadata and assigns the final memory/file
-targets, and `FinishPacked` creates the Reader from the completed targets. The synchronous and
+targets, and `FinishPacked` creates storage from the completed targets. The synchronous and
 asynchronous entry points share these two steps. `PackedIndexLoad` handles reads, CRC, draining
 after cancellation, target commit and failure cleanup; asynchronous file preparation and file-backed
 engine initialization run on LocalFileIOPool. Before file targets are committed, the plan is
-responsible for cleaning them up; after success, the Reader's mapping/directory owner keeps them
+responsible for cleaning them up; after success, the storage's mapping/directory owner keeps them
 alive. Initialization without file targets stays on the async executor.
 
 ## Family boundaries

@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -380,13 +381,22 @@ class SortedIndexReader final
               std::enable_if_t<std::is_same_v<U, std::string_view>, int> = 0>
     TargetBitmap
     PatternMatchImpl(std::string_view pattern, PatternOp op) const {
-        const auto storage = index_->PinStorage(op_ctx_);
+        const auto& storage = GetStorage();
         return storage->values.PatternMatch(
             storage->state.total_num_rows, pattern, op);
     }
 
+    const std::shared_ptr<const SortedIndexStorage<T>>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
+
     std::shared_ptr<const SortedIndex<T>> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const SortedIndexStorage<T>> storage_;
 };
 
 }  // namespace milvus::index

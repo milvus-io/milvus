@@ -1159,6 +1159,13 @@ JsonFlatIndexReader::JsonFlatIndexReader(
     : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
+const std::shared_ptr<const JsonFlatIndexStorage>&
+JsonFlatIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
 JsonFlatIndexReader::~JsonFlatIndexReader() = default;
 
 ReaderCaps
@@ -1175,7 +1182,7 @@ int64_t
 JsonFlatIndexReader::Count() const {
     if (const auto count = index_->Metadata().count)
         return *count;
-    return index_->PinStorage(op_ctx_)->Count();
+    return GetStorage()->Count();
 }
 
 DataType
@@ -1185,12 +1192,12 @@ JsonFlatIndexReader::ValueType() const {
 
 TargetBitmap
 JsonFlatIndexReader::IsNull() const {
-    return index_->PinStorage(op_ctx_)->FieldIsNull();
+    return GetStorage()->FieldIsNull();
 }
 
 TargetBitmap
 JsonFlatIndexReader::IsNotNull() const {
-    return index_->PinStorage(op_ctx_)->FieldIsNotNull();
+    return GetStorage()->FieldIsNotNull();
 }
 
 JsonResolvedReader
@@ -1204,16 +1211,16 @@ JsonFlatIndexReader::Resolve(std::string_view path,
     switch (cast_type.element_type()) {
         case JsonCastType::DataType::BOOL:
             return JsonResolvedReader::Owned(
-                std::make_unique<JsonBoolPathReader>(
-                    index_->PinStorage(op_ctx_), std::move(*tantivy_path)));
+                std::make_unique<JsonBoolPathReader>(GetStorage(),
+                                                     std::move(*tantivy_path)));
         case JsonCastType::DataType::DOUBLE:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonNumericPathReader>(
-                    index_->PinStorage(op_ctx_), std::move(*tantivy_path)));
+                    GetStorage(), std::move(*tantivy_path)));
         case JsonCastType::DataType::VARCHAR:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonStringPathReader>(
-                    index_->PinStorage(op_ctx_), std::move(*tantivy_path)));
+                    GetStorage(), std::move(*tantivy_path)));
         case JsonCastType::DataType::UNKNOWN:
         case JsonCastType::DataType::ARRAY:
         case JsonCastType::DataType::JSON:
@@ -1227,7 +1234,7 @@ JsonFlatIndexReader::Exists(std::string_view path) const {
     auto tantivy_path = ResolveTantivyPath(index_->RootPath(), path);
     AssertInfo(tantivy_path.has_value(),
                "JSON Exists requires a path supported by CastTypesOf");
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->Count());
     storage->Engine().json_exist_query(
         *tantivy_path, true, ::JsonExistValueType::Any, &result);

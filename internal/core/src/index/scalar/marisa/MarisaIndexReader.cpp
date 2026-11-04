@@ -277,7 +277,7 @@ MarisaIndexReader::Count() const {
     if (const auto count = index_->Metadata().count) {
         return *count;
     }
-    return static_cast<int64_t>(index_->PinStorage(op_ctx_)->str_ids_size);
+    return static_cast<int64_t>(GetStorage()->str_ids_size);
 }
 
 DataType
@@ -311,7 +311,7 @@ TargetBitmap
 MarisaIndexReader::In(size_t n, const std::string_view* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "marisa In received a null value array");
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     for (size_t i = 0; i < n; ++i) {
         const auto key_id = LookupKeyId(*storage, values[i]);
@@ -326,7 +326,7 @@ TargetBitmap
 MarisaIndexReader::NotIn(size_t n, const std::string_view* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "marisa NotIn received a null value array");
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size, true);
     for (size_t i = 0; i < n; ++i) {
         const auto key_id = LookupKeyId(*storage, values[i]);
@@ -351,7 +351,7 @@ MarisaIndexReader::Range(const std::string_view& value, CompareOp op) const {
         return NotIn(1, &value);
     }
 
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     const bool ordered = (storage->trie->node_order() == MARISA_LABEL_ORDER);
     marisa::Agent agent;
@@ -394,7 +394,7 @@ MarisaIndexReader::Range(const std::string_view& lo,
                          bool lo_inc,
                          const std::string_view& hi,
                          bool hi_inc) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     if (lo > hi || (lo == hi && !(lo_inc && hi_inc))) {
         return result;
@@ -424,7 +424,7 @@ MarisaIndexReader::Range(const std::string_view& lo,
 
 std::optional<std::string>
 MarisaIndexReader::Lookup(int64_t offset) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     AssertInfo(
         offset >= 0 && static_cast<size_t>(offset) < storage->str_ids_size,
         "marisa lookup offset {} is out of range [0, {})",
@@ -449,7 +449,7 @@ MarisaIndexReader::Gather(
     AssertInfo(count >= 0, "marisa gather count must not be negative");
     AssertInfo(count == 0 || offsets != nullptr,
                "marisa Gather received a null offset array");
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     marisa::Agent agent;
     for (int64_t i = 0; i < count; ++i) {
         const auto offset = offsets[i];
@@ -471,7 +471,7 @@ MarisaIndexReader::Gather(
 
 TargetBitmap
 MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     if (op == PatternOp::PrefixMatch) {
         for (const auto key_id : PrefixMatchKeyIds(*storage, pattern)) {
@@ -523,7 +523,7 @@ MarisaIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
 
 TargetBitmap
 MarisaIndexReader::IsNull() const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     for (size_t row = 0; row < storage->str_ids_size; ++row) {
         if (IsNullKeyId(storage->str_ids[row])) {
@@ -535,7 +535,7 @@ MarisaIndexReader::IsNull() const {
 
 TargetBitmap
 MarisaIndexReader::IsNotNull() const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap result(storage->str_ids_size);
     for (size_t row = 0; row < storage->str_ids_size; ++row) {
         if (!IsNullKeyId(storage->str_ids[row])) {

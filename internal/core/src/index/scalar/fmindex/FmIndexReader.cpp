@@ -362,6 +362,13 @@ FmIndexReader::FmIndexReader(std::shared_ptr<const FmIndex> index,
     : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
+const std::shared_ptr<const FmIndexStorage>&
+FmIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
 FmIndexReader::~FmIndexReader() = default;
 
 ReaderCaps
@@ -386,7 +393,7 @@ FmIndexReader::ValueType() const {
 
 TargetBitmap
 FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (pattern.empty()) {
         switch (op) {
@@ -512,7 +519,7 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
     if (pattern.empty()) {
         return true;
     }
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     const auto occurrences = PatternCount(storage, pattern, op);
     if (occurrences < 0) {
@@ -528,12 +535,12 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
 
 TargetBitmap
 FmIndexReader::IsNull() const {
-    return index_->PinStorage(op_ctx_)->NullBitmap().clone();
+    return GetStorage()->NullBitmap().clone();
 }
 
 TargetBitmap
 FmIndexReader::IsNotNull() const {
-    return NonNullBitmap(*index_->PinStorage(op_ctx_));
+    return NonNullBitmap(*GetStorage());
 }
 
 std::optional<FmIndexReader::RarestFragment>
@@ -567,7 +574,7 @@ FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
     if (parts.empty()) {
         return false;
     }
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     const auto rarest = RarestMatchFragment(storage, parts);
     if (rarest->occurrences == 0) {
@@ -592,7 +599,7 @@ FmIndexReader::RegexGuardAccepts(std::string_view pattern) const {
     if (condition.IsTrue()) {
         return false;
     }
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     double occurrences;
     condition.Select(

@@ -577,7 +577,7 @@ TEST(JsonFlatIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
     }
 }
 
-TEST(JsonFlatIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+TEST(JsonFlatIndexCacheTest, FreshSlotUsesEachReadersContext) {
     const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
     auto dlist = std::make_shared<cachinglayer::internal::DList>(
         false, limit, limit, limit, cachinglayer::EvictionConfig{});
@@ -620,24 +620,29 @@ TEST(JsonFlatIndexCacheTest, EvictionReloadsWithEachReadersContext) {
                            true},
         {1024 * 1024, 0},
         {},
-        0};
-    auto slot = std::make_shared<cachinglayer::CacheSlot<JsonFlatIndexStorage>>(
-        std::make_unique<
-            SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
-            cache, false, load),
-        dlist.get(),
-        true,
-        true,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
-    auto index = std::make_shared<JsonFlatIndex>(slot, 2, "");
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot =
+            std::make_shared<cachinglayer::CacheSlot<JsonFlatIndexStorage>>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
+                    cache, false, load),
+                dlist.get(),
+                true,
+                true,
+                true,
+                std::chrono::seconds(5),
+                std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<JsonFlatIndex>(slot, 2, "");
+    };
+    auto index = make_index();
     OpContext first_ctx;
     first_ctx.runtime_load_priority = 0;
     OpContext second_ctx;
     second_ctx.runtime_load_priority = 1;
     auto first = index->CreateReader(&first_ctx);
-    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_TRUE(priorities.empty());
     const auto* json = dynamic_cast<const IJsonIndexReader*>(first.get());
@@ -650,17 +655,30 @@ TEST(JsonFlatIndexCacheTest, EvictionReloadsWithEachReadersContext) {
     ASSERT_NE(predicate, nullptr);
     const bool value = true;
     ExpectBitmap(predicate->In(1, &value), Hits(2, {0}));
-    EXPECT_FALSE(slot->ManualEvict(0));
-    path = {};
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    EXPECT_EQ(json->Exists("/flag").count(), 2);
+    EXPECT_EQ(dynamic_cast<const INullReader*>(first.get())->IsNull().count(),
+              0);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
-    EXPECT_TRUE(slot->ManualEvict(0));
     index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
     first.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    path = {};
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
     const auto* nulls = dynamic_cast<const INullReader*>(second.get());
     ASSERT_NE(nulls, nullptr);
     EXPECT_EQ(nulls->IsNull().count(), 0);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {

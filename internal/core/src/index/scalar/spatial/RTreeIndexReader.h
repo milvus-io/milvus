@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <variant>
 
@@ -172,6 +173,11 @@ class RTreeIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const RTreeIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const RTreeIndexState> storage_;
+
+    const std::shared_ptr<const RTreeIndexState>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

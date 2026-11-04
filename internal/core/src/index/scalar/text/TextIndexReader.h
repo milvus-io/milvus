@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <string_view>
 #include <vector>
 #include <variant>
@@ -211,6 +212,11 @@ class TextIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const TextIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const TextIndexStorage> storage_;
+
+    const std::shared_ptr<const TextIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

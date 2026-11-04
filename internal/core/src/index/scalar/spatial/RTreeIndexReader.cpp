@@ -229,6 +229,13 @@ RTreeIndexReader::RTreeIndexReader(std::shared_ptr<const RTreeIndex> index,
     : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
+const std::shared_ptr<const RTreeIndexState>&
+RTreeIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
 RTreeIndexReader::~RTreeIndexReader() = default;
 
 ReaderCaps
@@ -265,7 +272,7 @@ RTreeIndexState::CellByteSize() const {
 TargetBitmap
 RTreeIndexReader::Candidates(SpatialOp op, const Geometry& query_geom) const {
     static_cast<void>(op);
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     if (!query_geom.IsValid() || storage->Engines().empty()) {
         return storage->Validity().ToBitmap();
     }
@@ -289,9 +296,9 @@ RTreeIndexReader::Candidates(SpatialOp op, const Geometry& query_geom) const {
 
 std::shared_ptr<const SharedValidityBitmap::Snapshot>
 RTreeIndexReader::Validity() const {
-    auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     const auto* validity = &storage->Validity();
-    return {std::move(storage), validity};
+    return {storage, validity};
 }
 
 TargetBitmap
@@ -303,7 +310,7 @@ RTreeIndexReader::IsNull() const {
 
 TargetBitmap
 RTreeIndexReader::IsNotNull() const {
-    return index_->PinStorage(op_ctx_)->Validity().ToBitmap();
+    return GetStorage()->Validity().ToBitmap();
 }
 
 }  // namespace milvus::index

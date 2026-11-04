@@ -288,6 +288,13 @@ TextIndexStorage::CellByteSize() const {
     return {MemoryUsage(), file_backed_ ? ToUsageBytes(payload_bytes_) : 0};
 }
 
+const std::shared_ptr<const TextIndexStorage>&
+TextIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
 TextIndexReader::~TextIndexReader() = default;
 
 ReaderCaps
@@ -304,7 +311,7 @@ int64_t
 TextIndexReader::Count() const {
     if (const auto count = index_->Metadata().count)
         return *count;
-    return index_->PinStorage(op_ctx_)->count_;
+    return GetStorage()->count_;
 }
 
 DataType
@@ -315,7 +322,7 @@ TextIndexReader::ValueType() const {
 TargetBitmap
 TextIndexReader::MatchQuery(std::string_view query,
                             uint32_t min_should_match) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap bitset(static_cast<size_t>(storage->count_));
     storage->engine_->match_query(OwnString(query), min_should_match, &bitset);
     return bitset;
@@ -323,7 +330,7 @@ TextIndexReader::MatchQuery(std::string_view query,
 
 TargetBitmap
 TextIndexReader::PhraseMatchQuery(std::string_view query, uint32_t slop) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap bitset(static_cast<size_t>(storage->count_));
     storage->engine_->phrase_match_query(OwnString(query), slop, &bitset);
     return bitset;
@@ -332,7 +339,7 @@ TextIndexReader::PhraseMatchQuery(std::string_view query, uint32_t slop) const {
 TargetBitmap
 TextIndexReader::FuzzyMatchQuery(std::string_view query,
                                  uint32_t max_edit_distance) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     TargetBitmap bitset(static_cast<size_t>(storage->count_));
     storage->engine_->fuzzy_match_query(
         OwnString(query), max_edit_distance, &bitset);
@@ -341,9 +348,9 @@ TextIndexReader::FuzzyMatchQuery(std::string_view query,
 
 std::shared_ptr<const SharedValidityBitmap::Snapshot>
 TextIndexReader::Validity() const {
-    auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     const auto* validity = &storage->validity_;
-    return {std::move(storage), validity};
+    return {storage, validity};
 }
 
 TargetBitmap
@@ -355,7 +362,7 @@ TextIndexReader::IsNull() const {
 
 TargetBitmap
 TextIndexReader::IsNotNull() const {
-    return index_->PinStorage(op_ctx_)->validity_.ToBitmap();
+    return GetStorage()->validity_.ToBitmap();
 }
 
 }  // namespace milvus::index

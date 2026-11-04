@@ -207,6 +207,11 @@ class FailingIteratorReader final : public index::IVectorReader {
     mutable knowhere::Json received;
 
     void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
+    void
     Search(const DatasetPtr& dataset,
            const index::VectorSearchParams& params,
            const BitsetView& filter,

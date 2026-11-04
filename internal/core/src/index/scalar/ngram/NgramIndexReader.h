@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -216,6 +217,11 @@ class NgramIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const NgramIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const NgramIndexStorage> storage_;
+
+    const std::shared_ptr<const NgramIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

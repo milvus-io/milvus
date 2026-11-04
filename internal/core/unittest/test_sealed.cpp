@@ -45,6 +45,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/CacheSlot.h"
+#include "cachinglayer/Metrics.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -1212,7 +1213,15 @@ TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
     ASSERT_NE(snapshot, nullptr);
     EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto key = OnlyIndexKey(*sealed, vector);
+    auto& loaded = cachinglayer::monitor::cache_cell_loaded_count(
+        cachinglayer::CellDataType::VECTOR_INDEX,
+        cachinglayer::StorageType::MEMORY);
+    const auto loaded_before = loaded.Value();
     auto pin = sealed->CreateIndexReader(nullptr, key);
+    EXPECT_EQ(loaded.Value(), loaded_before);
+    // Even an already resolved Index needs an explicit engine prefetch.
+    sealed->prefetch_vector(nullptr, vector);
+    EXPECT_EQ(loaded.Value(), loaded_before + 1);
     ASSERT_TRUE(pin);
     const auto* reader = dynamic_cast<const index::IVectorReader*>(pin.get());
     ASSERT_NE(reader, nullptr);
@@ -1397,8 +1406,16 @@ TEST(SealedLazyIndexSlot, CardinalMissingArtifactRetriesAtFirstPin) {
     ASSERT_NE(snapshot, nullptr);
     EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
     const auto key = OnlyIndexKey(*sealed, vector);
-    EXPECT_THROW(sealed->CreateIndexReader(nullptr, key), std::exception);
-    EXPECT_TRUE(ResolvedIndexes(snapshot->runtime->indexes).empty());
+    EXPECT_THROW(
+        {
+            auto failed = sealed->CreateIndexReader(nullptr, key);
+            const auto* reader =
+                dynamic_cast<const index::IVectorReader*>(failed.get());
+            ASSERT_NE(reader, nullptr);
+            reader->Prefetch();
+        },
+        std::exception);
+    // Metadata may already be resolved; the engine load must remain retryable.
 
     chunk_manager->Write(path, saved.data(), saved.size());
     restore_artifact.dismiss();

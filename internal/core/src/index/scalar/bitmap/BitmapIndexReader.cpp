@@ -16,6 +16,8 @@
 
 #include "index/scalar/bitmap/BitmapIndexReader.h"
 
+#include <mutex>
+
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -225,13 +227,13 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     In(size_t n, const T* values) const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         return InStorage(*pin, n, values);
     }
 
     TargetBitmap
     NotIn(size_t n, const T* values) const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         auto result = InStorage(storage, n, values);
         result.flip();
@@ -241,7 +243,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     Range(const T& value, CompareOp op) const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         if (op == CompareOp::Equal) {
             return InStorage(storage, 1, &value);
@@ -281,7 +283,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         TargetBitmap result(storage.options.total_num_rows, false);
         if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
@@ -299,8 +301,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     std::optional<StoredT>
     Lookup(int64_t offset) const override {
-        const auto pin = index_->PinStorage(op_ctx_);
-        const auto& storage = *pin;
+        const auto& storage = *GetStorage();
         if (!storage.options.value_lookup) {
             return std::nullopt;
         }
@@ -327,7 +328,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
            int64_t count,
            const std::function<void(int64_t i, const T*, bool valid)>& out)
         const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
                    "bitmap Gather received invalid offsets/count");
@@ -358,7 +359,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     IsNull() const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         auto result = storage.options.valid_bitset.clone();
         result.flip();
@@ -367,7 +368,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     IsNotNull() const override {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         return storage.options.valid_bitset.clone();
     }
@@ -376,7 +377,7 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
     template <typename Matches>
     TargetBitmap
     MatchPostings(Matches&& matches) const {
-        const auto pin = index_->PinStorage(op_ctx_);
+        const auto& pin = GetStorage();
         const auto& storage = *pin;
         TargetBitmap result(storage.options.total_num_rows, false);
         for (const auto& [key, posting] : storage.postings) {
@@ -493,8 +494,17 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         return values;
     }
 
+    const std::shared_ptr<const Storage>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
+
     std::shared_ptr<const BitmapIndexImpl<T, Posting>> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const Storage> storage_;
 };
 
 template <typename T, typename Posting>

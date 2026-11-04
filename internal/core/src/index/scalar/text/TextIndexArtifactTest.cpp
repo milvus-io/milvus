@@ -210,7 +210,7 @@ TEST(TextIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
     }
 }
 
-TEST(TextIndexCacheTest, EvictionReloadsWithEachReadersContext) {
+TEST(TextIndexCacheTest, FreshSlotUsesEachReadersContext) {
     const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
     auto dlist = std::make_shared<cachinglayer::internal::DList>(
         false, limit, limit, limit, cachinglayer::EvictionConfig{});
@@ -254,45 +254,64 @@ TEST(TextIndexCacheTest, EvictionReloadsWithEachReadersContext) {
                            true},
         {1024 * 1024, 0},
         {},
-        0};
-    auto slot = std::make_shared<cachinglayer::CacheSlot<TextIndexStorage>>(
-        std::make_unique<SingleCellIndexStorageTranslator<TextIndexStorage>>(
-            cache, false, load),
-        dlist.get(),
-        true,
-        true,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
-    auto index = std::make_shared<TextIndex>(
-        slot,
-        IndexMetadata{
-            ReaderCaps{.text_match = true}, Domain::Row, DataType::VARCHAR, 2});
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<cachinglayer::CacheSlot<TextIndexStorage>>(
+            std::make_unique<
+                SingleCellIndexStorageTranslator<TextIndexStorage>>(
+                cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<TextIndex>(
+            slot,
+            IndexMetadata{ReaderCaps{.text_match = true},
+                          Domain::Row,
+                          DataType::VARCHAR,
+                          2});
+    };
+    auto index = make_index();
     OpContext first_ctx;
     first_ctx.runtime_load_priority = 0;
     OpContext second_ctx;
     second_ctx.runtime_load_priority = 1;
     auto first = index->CreateReader(&first_ctx);
-    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_TRUE(priorities.empty());
     const auto* text = dynamic_cast<const ITextMatchReader*>(first.get());
     ASSERT_NE(text, nullptr);
     EXPECT_EQ(text->MatchQuery("apple", 1).count(), 1);
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    EXPECT_EQ(text->MatchQuery("banana", 1).count(), 1);
     auto validity =
         dynamic_cast<const TextIndexReader*>(first.get())->Validity();
-    EXPECT_FALSE(slot->ManualEvict(0));
+    EXPECT_EQ(validity->Count(), 2);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
     EXPECT_EQ(validity->Count(), 2);
     validity.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
-    EXPECT_TRUE(slot->ManualEvict(0));
-    index.reset();
-    first.reset();
     const auto* nulls = dynamic_cast<const INullReader*>(second.get());
     ASSERT_NE(nulls, nullptr);
     EXPECT_EQ(nulls->IsNull().count(), 0);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 TEST(TextIndexArtifactTest, WriterBudgetConstantsMatchBuildAndGrowingModes) {

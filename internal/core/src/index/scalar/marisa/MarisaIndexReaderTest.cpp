@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <string_view>
+#include <stdexcept>
 
 #include "cachinglayer/CacheSlot.h"
 #include "folly/coro/BlockingWait.h"
@@ -147,6 +148,10 @@ class MarisaStorageTranslator final
     get_cells(OpContext* ctx,
               const std::vector<cachinglayer::cid_t>& cids) override {
         ++loads;
+        if (fail_next_load) {
+            fail_next_load = false;
+            throw std::runtime_error("injected storage load failure");
+        }
         last_context = ctx;
         if (ctx) {
             storage::ThrowIfCancelled(ctx->cancellation_token,
@@ -161,6 +166,7 @@ class MarisaStorageTranslator final
         }
         return result;
     }
+    bool fail_next_load{false};
     int loads{0};
     OpContext* last_context{nullptr};
 
@@ -219,12 +225,44 @@ TEST_F(MarisaIndexCacheTest,
     EXPECT_EQ(observer->loads, 1);
 }
 
+TEST_F(MarisaIndexCacheTest, LookupRetainsStorageAndFailedLoadCanRetry) {
+    auto index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
+    OpContext ctx;
+    auto reader = index->CreateReader(&ctx);
+    const auto* values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(reader.get());
+    ASSERT_NE(values, nullptr);
+    EXPECT_EQ(observer->loads, 0);
+    observer->fail_next_load = true;
+    EXPECT_THROW(values->Lookup(0), std::runtime_error);
+    EXPECT_EQ(observer->loads, 1);
+    EXPECT_EQ(values->Lookup(0), "apple");
+    const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    EXPECT_FALSE(values->Lookup(1).has_value());
+    EXPECT_EQ(values->Lookup(0), "apple");
+    EXPECT_EQ(observer->loads, 2);
+    EXPECT_EQ(ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
+    std::weak_ptr slot_lifetime = slot;
+    index.reset();
+    slot.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+
+    CreateSlot(true);
+    index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
+    auto next = index->CreateReader(&ctx);
+    const auto* next_values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(next.get());
+    EXPECT_EQ(next_values->Lookup(0), "apple");
+    EXPECT_EQ(observer->loads, 1);
+}
+
 TEST_F(MarisaIndexCacheTest, MetadataStaysColdAndOperationsUseRequestContext) {
     auto index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
     OpContext first_ctx;
-    OpContext second_ctx;
     auto first = index->CreateReader(&first_ctx);
-    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(index->Metadata().count, 2);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_EQ(first->ValueType(), DataType::VARCHAR);
@@ -238,18 +276,31 @@ TEST_F(MarisaIndexCacheTest, MetadataStaysColdAndOperationsUseRequestContext) {
     EXPECT_EQ(predicate->In(2, keys).count(), 1);
     EXPECT_EQ(observer->loads, 1);
     EXPECT_EQ(observer->last_context, &first_ctx);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto scanned_bytes =
+        first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    EXPECT_EQ(predicate->NotIn(2, keys).count(), 0);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(),
+              scanned_bytes);
+    std::weak_ptr slot_lifetime = slot;
     index.reset();
+    slot.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
     first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+
+    CreateSlot(true);
+    index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
+    OpContext second_ctx;
+    auto second = index->CreateReader(&second_ctx);
     const auto* nulls = dynamic_cast<const INullReader*>(second.get());
     ASSERT_NE(nulls, nullptr);
     EXPECT_EQ(nulls->IsNull().count(), 1);
-    EXPECT_EQ(observer->loads, 2);
+    EXPECT_EQ(observer->loads, 1);
     EXPECT_EQ(observer->last_context, &second_ctx);
-    EXPECT_TRUE(slot->ManualEvict(0));
 }
 
-TEST_F(MarisaIndexCacheTest, JsonExistenceAndPredicatesReloadTheSameStorage) {
+TEST_F(MarisaIndexCacheTest, JsonExistenceAndPredicatesRetainTheSameStorage) {
     auto child =
         std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, std::nullopt);
     auto index = JsonPathIndex::FromStorage(
@@ -268,29 +319,44 @@ TEST_F(MarisaIndexCacheTest, JsonExistenceAndPredicatesReloadTheSameStorage) {
     EXPECT_FALSE(exists[1]);
     EXPECT_EQ(observer->loads, 1);
     EXPECT_EQ(observer->last_context, &first_ctx);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto exists_bytes =
+        first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(exists_bytes, 0);
+    EXPECT_EQ(json->Exists("/a").count(), 1);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), exists_bytes);
     const auto* predicate =
         dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
             resolved.get());
     ASSERT_NE(predicate, nullptr);
     const std::string_view key = "apple";
     EXPECT_EQ(predicate->In(1, &key).count(), 1);
-    EXPECT_EQ(observer->loads, 2);
-    EXPECT_TRUE(slot->ManualEvict(0));
-    OpContext next_ctx;
-    auto next = index->CreateReader(&next_ctx);
+    EXPECT_EQ(observer->loads, 1);
+    std::weak_ptr slot_lifetime = slot;
     index.reset();
     child.reset();
+    slot.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    resolved = {};
     reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+
+    CreateSlot(true);
+    child =
+        std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, std::nullopt);
+    index = JsonPathIndex::FromStorage(
+        child,
+        JsonProjectedIndexSpec(
+            "/a", JsonCastType::FromString("VARCHAR"), std::nullopt));
+    OpContext next_ctx;
+    auto next = index->CreateReader(&next_ctx);
     json = dynamic_cast<const IJsonIndexReader*>(next.get());
     ASSERT_NE(json, nullptr);
     EXPECT_EQ(json->Exists("/a").count(), 1);
-    EXPECT_EQ(observer->loads, 3);
+    EXPECT_EQ(observer->loads, 1);
     EXPECT_EQ(observer->last_context, &next_ctx);
-    EXPECT_TRUE(slot->ManualEvict(0));
 }
 
-TEST_F(MarisaIndexCacheTest, UnknownCountLoadsAndGatherRetainsPin) {
+TEST_F(MarisaIndexCacheTest, UnknownCountAndGatherSharePin) {
     auto index =
         std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, std::nullopt);
     OpContext ctx;
@@ -299,21 +365,27 @@ TEST_F(MarisaIndexCacheTest, UnknownCountLoadsAndGatherRetainsPin) {
     EXPECT_EQ(observer->loads, 0);
     EXPECT_EQ(reader->Count(), 2);
     EXPECT_EQ(observer->last_context, &ctx);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
     const auto* values =
         dynamic_cast<const IScalarValueReader<std::string_view>*>(reader.get());
     ASSERT_NE(values, nullptr);
     const int64_t rows[]{0, 1};
     values->Gather(
         rows, 2, [&](int64_t row, const std::string_view* value, bool valid) {
-            EXPECT_FALSE(slot->ManualEvict(0));
             EXPECT_EQ(valid, row == 0);
             if (valid) {
                 EXPECT_EQ(*value, "apple");
             }
         });
-    EXPECT_EQ(observer->loads, 2);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_EQ(observer->loads, 1);
+    EXPECT_EQ(ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
+    std::weak_ptr slot_lifetime = slot;
+    index.reset();
+    slot.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 TEST_F(MarisaIndexCacheTest,
@@ -330,7 +402,10 @@ TEST_F(MarisaIndexCacheTest,
     auto second = index->CreateReader(&next);
     EXPECT_EQ(second->Count(), 2);
     EXPECT_EQ(observer->last_context, &next);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    const auto scanned_bytes = next.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    EXPECT_EQ(second->Count(), 2);
+    EXPECT_EQ(next.storage_usage.scanned_total_bytes.load(), scanned_bytes);
 }
 
 TEST(MarisaIndexReaderTest, AdvertisesVarcharQueries) {

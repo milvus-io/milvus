@@ -208,7 +208,13 @@ one cache cell. It is not a mandatory layer. An implementation with its own cell
 those directly without changing the query contracts. This migration does not implement block loading
 or make synchronous query methods asynchronous.
 
-Ordinary scalar operations hold one storage pin through computation and `Gather` callbacks.
+Current single-cell readers acquire storage or the engine on the first operation that needs it
+and retain that pin until Reader destruction. All operations reuse the same cell, including
+predicates, null checks, `Lookup`, and `Gather`. Initialization is synchronized and failures can
+be retried. Reader creation and metadata already available from the Index remain free of storage
+I/O. A used Reader prevents eviction even between operations; consumers should release it when
+finished. This is a concrete single-cell policy, not a requirement to load every cell of future
+multi-cell indexes.
 JSON path indexes retain child Index objects and create child request readers with the same context.
 Projection existence metadata is loaded with the concrete scalar Storage. JSON flat resolution
 returns a path reader retaining its Storage pin across subsequent predicates; callers still obey

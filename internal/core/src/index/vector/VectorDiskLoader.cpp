@@ -527,11 +527,15 @@ VectorDiskLoader::Load(milvus::OpContext* context,
     AssertInfo(source_.has_value(),
                "cached vector construction consumed this loader");
     const auto params = ParseRuntimeParams(options_.params);
-    // Native lazy engines own their data cache; retain the engine itself directly.
-    if (!cache || knowhere::IndexFactory::Instance().FeatureCheck(
-                      params.index_type, knowhere::feature::LAZY_LOAD)) {
+    if (!cache) {
         co_return co_await RunLegacyLoad(
             *source_, options_, &LoadLegacy, context);
+    }
+    auto cache_config = *cache;
+    // Native lazy engines still need admission and resident metadata accounting.
+    if (knowhere::IndexFactory::Instance().FeatureCheck(
+            params.index_type, knowhere::feature::LAZY_LOAD)) {
+        cache_config.meta.support_eviction = false;
     }
     const auto open_options = ParseOpenOptions(options_.params, params);
     const bool use_async = source_->use_async;
@@ -545,7 +549,7 @@ VectorDiskLoader::Load(milvus::OpContext* context,
     auto slot =
         cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
             std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
-                *cache, use_async, std::move(load)),
+                std::move(cache_config), use_async, std::move(load)),
             context);
     co_return std::make_shared<VectorIndex>(std::move(slot),
                                             params.physical_type,

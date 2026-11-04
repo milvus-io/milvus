@@ -50,8 +50,9 @@ typed JSON projections), vector indexes, and text indexes. The flag defaults to 
 future loads; already registered entries keep their initialization policy.
 
 Storage cache warmup follows the configured policy independently of lazy Index creation.
-A vector engine with native lazy loading owns its own loading behavior and has no outer engine
-cache slot. Its initialization happens when the Index is constructed.
+A vector engine with native lazy loading manages its own data cache. Its non-evictable engine
+slot preserves loading admission and resident resource accounting. Engine initialization follows
+slot warmup or the first operation that needs it; Reader creation alone does not load it.
 
 During loading, `IndexInventory::Register` installs one entry into a new runtime generation. An
 eager entry resolves its family, value type, and capability before registration. A lazy entry

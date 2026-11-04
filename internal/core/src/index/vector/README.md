@@ -32,12 +32,19 @@ operation support and verification limits are listed below.
 `VectorIndex` owns either a resident engine or a `CacheSlot<KnowhereEngine>`, expressed as a
 variant. `CreateReader(op_ctx)` creates a `VectorIndexReader` that retains this Index and borrows
 the request context without pinning the engine. The reader inherits `IIndexReaderBase` and the
-query-only mixin `IVectorReader`. Search, retrieval, and iterator creation acquire the engine using
-the bound context; returned iterators retain the exact engine pin.
+query-only mixin `IVectorReader`. The first operation that needs the engine acquires it using
+the bound context; the reader retains and reuses that pin until destruction. Returned iterators
+retain the exact engine pin independently of the reader.
 
-A native lazy-loading backend is resident at this boundary and manages its own cache. No outer
-whole-engine cache is added around it. Sparse vectors and VECTOR_ARRAY use the same Index/Reader
-ownership model. Segment-level lazy Index creation is described in
+`IVectorReader::Prefetch()` synchronously initializes the same retained engine pin. The search
+operator schedules prefetch concurrently with filtering; merely creating a Reader does not load
+the engine. The temporary prefetch Reader releases its pin at destruction, after which residency
+follows the cache policy.
+
+A native lazy-loading backend manages its own data cache. Persisted loads with cache configuration
+use a non-evictable engine slot for loading admission and resident resource accounting; the slot
+does not evict the backend or its internal cache. Sparse vectors and VECTOR_ARRAY use the same
+Index/Reader ownership model. Segment-level lazy Index creation is described in
 [Segment index architecture](../../segcore/indexing/README.md#sealed-loading-and-publication).
 Inside `KnowhereEngine`, the backing owner is declared before the native handle, so the native node
 is destroyed before the final owner of the mmap files or the FileManager generation.

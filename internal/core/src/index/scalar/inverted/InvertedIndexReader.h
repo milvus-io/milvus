@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string_view>
 #include <vector>
 #include <variant>
@@ -222,6 +223,11 @@ class InvertedIndexReader final
 
     std::shared_ptr<const InvertedIndex<T>> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const InvertedIndexStorage<T>> storage_;
+
+    const std::shared_ptr<const InvertedIndexStorage<T>>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -201,6 +202,11 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const JsonFlatIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const JsonFlatIndexStorage> storage_;
+
+    const std::shared_ptr<const JsonFlatIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

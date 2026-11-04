@@ -313,12 +313,15 @@ TargetBitmap
 JsonPathIndexReader::Exists(std::string_view path) const {
     AssertInfo(path == index_->spec_.JsonPath(),
                "typed JSON Exists called for an unregistered path");
-    const auto* resident =
-        std::get_if<std::shared_ptr<const TargetBitmap>>(&index_->exists_);
-    const auto exists =
-        resident ? *resident
-                 : std::get<JsonPathIndex::PinExists>(index_->exists_)(op_ctx_);
-    return exists->clone();
+    std::call_once(exists_once_, [this] {
+        const auto* resident =
+            std::get_if<std::shared_ptr<const TargetBitmap>>(&index_->exists_);
+        exists_ =
+            resident
+                ? *resident
+                : std::get<JsonPathIndex::PinExists>(index_->exists_)(op_ctx_);
+    });
+    return exists_->clone();
 }
 
 std::vector<JsonCastType>

@@ -314,6 +314,13 @@ NgramIndexStorage::CellByteSize() const {
     return {MemoryUsage(), mmap_ ? ToUsageBytes(engine_bytes_) : 0};
 }
 
+const std::shared_ptr<const NgramIndexStorage>&
+NgramIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
 NgramIndexReader::~NgramIndexReader() = default;
 
 ReaderCaps
@@ -330,7 +337,7 @@ int64_t
 NgramIndexReader::Count() const {
     if (const auto count = index_->Metadata().count)
         return *count;
-    return index_->PinStorage(op_ctx_)->count_;
+    return GetStorage()->count_;
 }
 
 DataType
@@ -383,7 +390,7 @@ void
 NgramIndexReader::Candidates(std::string_view literal,
                              PatternOp op,
                              TargetBitmap& candidates) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     AssertInfo(candidates.size() == storage.count_,
                "NGRAM candidates size {} disagrees with count {}",
@@ -470,7 +477,7 @@ NgramIndexReader::ApplyLiterals(const NgramIndexStorage& storage,
 
 TargetBitmap
 NgramIndexReader::IsNull() const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (storage.all_valid_) {
         return TargetBitmap(storage.count_);
@@ -482,7 +489,7 @@ NgramIndexReader::IsNull() const {
 
 TargetBitmap
 NgramIndexReader::IsNotNull() const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (storage.all_valid_) {
         return TargetBitmap(storage.count_, true);

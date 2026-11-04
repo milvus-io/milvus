@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -76,7 +77,7 @@ class VectorIndex final : public IIndex,
         IndexType index_type;
         MetricType metric;
     };
-    // Keeps the exact engine cell alive through one operation or iterator.
+    // Keeps the exact engine cell alive through a reader or iterator.
     std::shared_ptr<const KnowhereEngine>
     PinEngine(milvus::OpContext* op_ctx) const;
 
@@ -121,6 +122,9 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     DataType
     ValueType() const override;
+
+    void
+    Prefetch() const override;
 
     void
     Search(const DatasetPtr& dataset,
@@ -253,8 +257,17 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     bool
     IsEmptyEngine(const KnowhereEngine& engine) const;
 
+    const std::shared_ptr<const KnowhereEngine>&
+    GetEngine() const {
+        std::call_once(engine_once_,
+                       [this] { engine_ = index_->PinEngine(op_ctx_); });
+        return engine_;
+    }
+
     std::shared_ptr<const VectorIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag engine_once_;
+    mutable std::shared_ptr<const KnowhereEngine> engine_;
 };
 
 }  // namespace milvus::index

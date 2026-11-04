@@ -290,6 +290,14 @@ InvertedIndexStorage<T>::CellByteSize() const {
 }
 
 template <typename T>
+const std::shared_ptr<const InvertedIndexStorage<T>>&
+InvertedIndexReader<T>::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
+template <typename T>
 InvertedIndexReader<T>::~InvertedIndexReader() = default;
 
 template <typename T>
@@ -309,7 +317,7 @@ int64_t
 InvertedIndexReader<T>::Count() const {
     if (const auto count = index_->Metadata().count)
         return *count;
-    return index_->PinStorage(op_ctx_)->count_;
+    return GetStorage()->count_;
 }
 
 template <typename T>
@@ -321,7 +329,7 @@ InvertedIndexReader<T>::ValueType() const {
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::In(size_t n, const T* values) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     return InStorage(*pin, n, values);
 }
 
@@ -367,7 +375,7 @@ InvertedIndexReader<T>::ApplyValidityMask(
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::NotIn(size_t n, const T* values) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     auto result = InStorage(storage, n, values);
     result.flip();
@@ -378,7 +386,7 @@ InvertedIndexReader<T>::NotIn(size_t n, const T* values) const {
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::Range(const T& value, CompareOp op) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (op == CompareOp::Equal) {
         return InStorage(storage, 1, &value);
@@ -440,7 +448,7 @@ InvertedIndexReader<T>::Range(const T& lo,
                               bool lo_inc,
                               const T& hi,
                               bool hi_inc) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     TargetBitmap result(storage.count_);
     if constexpr (std::is_same_v<T, std::string_view>) {
@@ -474,7 +482,7 @@ template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::PatternMatchImpl(std::string_view pattern,
                                          PatternOp op) const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     const auto owned = OwnString(pattern);
     switch (op) {
@@ -516,7 +524,7 @@ InvertedIndexReader<T>::PatternQuery(const InvertedIndexStorage<T>& storage,
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNull() const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (storage.all_valid_) {
         return TargetBitmap(storage.count_);
@@ -529,7 +537,7 @@ InvertedIndexReader<T>::IsNull() const {
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNotNull() const {
-    const auto pin = index_->PinStorage(op_ctx_);
+    const auto& pin = GetStorage();
     const auto& storage = *pin;
     if (storage.all_valid_) {
         return TargetBitmap(storage.count_, true);

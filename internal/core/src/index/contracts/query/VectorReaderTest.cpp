@@ -144,27 +144,43 @@ TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
             knowhere::Status::success);
         co_return engine;
     };
-    auto slot = std::make_shared<cachinglayer::CacheSlot<KnowhereEngine>>(
-        std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
-            config, false, load),
-        dlist.get(),
-        true,
-        true,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
-    auto index = std::make_shared<VectorIndex>(slot,
-                                               DataType::VECTOR_FLOAT,
-                                               knowhere::IndexEnum::INDEX_HNSW,
-                                               knowhere::metric::L2);
+    std::weak_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<cachinglayer::CacheSlot<KnowhereEngine>>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                config, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<VectorIndex>(slot,
+                                             DataType::VECTOR_FLOAT,
+                                             knowhere::IndexEnum::INDEX_HNSW,
+                                             knowhere::metric::L2);
+    };
+    auto index = make_index();
     OpContext ctx;
     auto reader = index->CreateReader(&ctx);
     EXPECT_EQ(loads, 0);
     EXPECT_EQ(reader->Count(), 3);
     EXPECT_EQ(loads, 1);
-    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    reader = index->CreateReader(&ctx);
     const auto* vector = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vector, nullptr);
+    vector->Prefetch();
+    EXPECT_EQ(loads, 2);
+    const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    vector->Prefetch();
+    EXPECT_EQ(loads, 2);
     const std::array<float, 2> query{0, 0};
     auto iterators = vector->Iterators(GenDataset(1, kDim, query.data()),
                                        {{"metric_type", "L2"}, {"ef", 64}},
@@ -172,9 +188,10 @@ TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 1);
     EXPECT_EQ(loads, 2);
+    EXPECT_EQ(ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
     index.reset();
     reader.reset();
-    EXPECT_FALSE(slot->ManualEvict(0));
+    EXPECT_FALSE(slot_lifetime.expired());
     const auto has_next = iterators.value().front()->HasNext();
     ASSERT_TRUE(has_next.has_value());
     ASSERT_TRUE(has_next.value());
@@ -182,7 +199,7 @@ TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
     ASSERT_TRUE(hit.has_value());
     EXPECT_EQ(hit.value().first, 0);
     iterators.value().clear();
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 TEST(VectorIndexOwnershipTest, IteratorRetainsEngineAfterReadersAreReleased) {

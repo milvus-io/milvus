@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -266,6 +267,11 @@ class FmIndexReader final : public IIndexReaderBase,
 
     std::shared_ptr<const FmIndex> index_;
     milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const FmIndexStorage> storage_;
+
+    const std::shared_ptr<const FmIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

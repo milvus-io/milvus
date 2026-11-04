@@ -22,6 +22,7 @@
 #include <optional>
 #include <variant>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -170,6 +171,8 @@ class JsonPathIndexReader final : public IIndexReaderBase,
     std::shared_ptr<const JsonPathIndex> index_;
     IIndexReaderBasePtr inner_;
     OpContext* const op_ctx_;
+    mutable std::once_flag exists_once_;
+    mutable std::shared_ptr<const TargetBitmap> exists_;
 };
 
 }  // namespace milvus::index

@@ -266,6 +266,11 @@ VectorIndex::CreateReader(milvus::OpContext* op_ctx) const {
         new VectorIndexReader(shared_from_this(), op_ctx));
 }
 
+void
+VectorIndexReader::Prefetch() const {
+    (void)GetEngine();
+}
+
 VectorIndexReader::VectorIndexReader(KnowhereEngine engine)
     : VectorIndexReader(std::make_shared<VectorIndex>(std::move(engine)),
                         nullptr) {
@@ -312,7 +317,7 @@ int64_t
 VectorIndexReader::Count() const {
     if (index_->physical_count_)
         return *index_->physical_count_;
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     return IsEmptyEngine(engine) ? 0 : engine.native_index.Count();
 }
@@ -327,7 +332,7 @@ VectorIndexReader::Search(const DatasetPtr& dataset,
                           const VectorSearchParams& params,
                           const BitsetView& bitset,
                           SearchResult& result) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     if (!IsGrowingGeneration()) {
         if (index_->backend_ == Backend::Disk) {
@@ -352,7 +357,7 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorIndexReader::Iterators(const DatasetPtr& dataset,
                              const knowhere::Json& json,
                              const BitsetView& bitset) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     const auto shape = detail::ValidateQueryDataset(
         dataset, engine.PhysicalType(), engine.Dim());
@@ -384,14 +389,14 @@ VectorIndexReader::Iterators(const DatasetPtr& dataset,
 
 bool
 VectorIndexReader::RefineEnabled() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     return !IsEmptyEngine(engine) && engine.native_index.IsIndexRefineEnabled();
 }
 
 bool
 VectorIndexReader::HasRawData() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     return IsEmptyEngine(engine) ||
            engine.native_index.HasRawData(engine.Metric());
@@ -399,7 +404,7 @@ VectorIndexReader::HasRawData() const {
 
 std::vector<uint8_t>
 VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     auto reject_sparse = [&]() -> std::vector<uint8_t> {
         ThrowInfo(Unsupported,
@@ -440,7 +445,7 @@ VectorIndexReader::GetVector(const DatasetPtr& dataset) const {
 
 std::unique_ptr<const knowhere::sparse::SparseRow<SparseValueType>[]>
 VectorIndexReader::GetSparseVector(const DatasetPtr& dataset) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     if (index_->backend_ == Backend::Disk) {
         ThrowInfo(Unsupported,
@@ -521,7 +526,7 @@ VectorIndexReader::KnowhereIndexType() const {
 
 int64_t
 VectorIndexReader::Dim() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     return engine.Dim();
 }
@@ -531,21 +536,21 @@ VectorIndexReader::PrepareSearchParams(const VectorSearchParams& params) const {
     if (!IsGrowingGeneration()) {
         return PrepareVectorSearchParams(params);
     }
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     return PrepareVectorSearchParams(
         EffectiveSearchParams(*engine_pin, params));
 }
 
 bool
 VectorIndexReader::HasValidData() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     return EngineHasValidity(engine);
 }
 
 int64_t
 VectorIndexReader::ValidCount() const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     // A growing generation reports the vector count it froze, not the live
     // count of the shared engine.
@@ -563,7 +568,7 @@ VectorIndexReader::ValidCount() const {
 
 bool
 VectorIndexReader::IsRowValid(int64_t logical_offset) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     if (IsGrowingGeneration() &&
         (logical_offset < 0 || logical_offset >= index_->logical_count_)) {
@@ -576,7 +581,7 @@ void
 VectorIndexReader::ApplyValidDataByRange(int64_t logical_offset,
                                          int64_t count,
                                          TargetBitmapView valid_result) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity range result size mismatch");
@@ -605,7 +610,7 @@ VectorIndexReader::ApplyValidDataByOffsets(
     const int64_t* offsets,
     int64_t count,
     TargetBitmapView valid_result) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     AssertInfo(count >= 0 && valid_result.size() == static_cast<size_t>(count),
                "validity offset result size mismatch");
@@ -631,7 +636,7 @@ VectorIndexReader::CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
                                  const int64_t* labels,
                                  size_t labels_len,
                                  bool is_cosine) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     ValidateGenerationIds(engine, labels, labels_len, "calculate distance");
     return engine.native_index.CalcDistByIDs(
@@ -641,7 +646,7 @@ VectorIndexReader::CalcDistByIDs(const knowhere::DataSetPtr& query_dataset,
 std::pair<std::vector<uint8_t>, std::vector<size_t>>
 VectorIndexReader::GetEmbListByIds(const DatasetPtr& dataset,
                                    const std::string& metric_type) const {
-    const auto engine_pin = index_->PinEngine(op_ctx_);
+    const auto& engine_pin = GetEngine();
     const auto& engine = *engine_pin;
     using Result = std::pair<std::vector<uint8_t>, std::vector<size_t>>;
     return DispatchPhysicalVectorDataType(

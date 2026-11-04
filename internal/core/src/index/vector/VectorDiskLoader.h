@@ -36,8 +36,9 @@ class KnowhereEngine;
  *
  * Non-streaming backends materialize a unique DiskFileManager generation.
  * Streaming backends open exact raw, unsliced inventory objects; legacy
- * sidecars still use FileSource. Native lazy backends own their cache; other
- * cached loads transfer the source and fixed options to a typed engine slot.
+ * sidecars still use FileSource. Cached loads transfer the source and fixed
+ * options to a typed engine slot. Native lazy backends use a non-evictable
+ * slot for admission/accounting while keeping their internal data cache.
  */
 class VectorDiskLoader final : public IndexLoader {
  public:

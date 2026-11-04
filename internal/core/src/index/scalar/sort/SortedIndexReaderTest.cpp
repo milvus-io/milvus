@@ -39,7 +39,7 @@
 namespace milvus::index::test {
 namespace {
 
-TEST(SortedIndexCacheTest, GatherRetainsPinAndReloadUsesReadersContext) {
+TEST(SortedIndexCacheTest, OperationsSharePinUntilReaderDestruction) {
     const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
     auto dlist = std::make_shared<cachinglayer::internal::DList>(
         false, limit, limit, limit, cachinglayer::EvictionConfig{});
@@ -72,54 +72,79 @@ TEST(SortedIndexCacheTest, GatherRetainsPinAndReloadUsesReadersContext) {
                            true},
         {1024 * 1024, 0},
         {},
-        0};
-    auto slot = std::make_shared<
-        cachinglayer::CacheSlot<SortedIndexStorage<std::string_view>>>(
-        std::make_unique<SingleCellIndexStorageTranslator<
-            SortedIndexStorage<std::string_view>>>(cache, false, load),
-        dlist.get(),
-        true,
-        true,
-        true,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5));
-    auto index = std::make_shared<SortedIndex<std::string_view>>(
-        slot,
-        IndexMetadata{ReaderCaps{.predicate = true,
-                                 .pattern_match = true,
-                                 .value_lookup = true,
-                                 .cheap_value_lookup = true},
-                      Domain::Row,
-                      DataType::VARCHAR,
-                      2});
+        128};
+    std::weak_ptr<cachinglayer::CacheSlot<SortedIndexStorage<std::string_view>>>
+        slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<
+            cachinglayer::CacheSlot<SortedIndexStorage<std::string_view>>>(
+            std::make_unique<SingleCellIndexStorageTranslator<
+                SortedIndexStorage<std::string_view>>>(cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<SortedIndex<std::string_view>>(
+            slot,
+            IndexMetadata{ReaderCaps{.predicate = true,
+                                     .pattern_match = true,
+                                     .value_lookup = true,
+                                     .cheap_value_lookup = true},
+                          Domain::Row,
+                          DataType::VARCHAR,
+                          2});
+    };
+    auto index = make_index();
     OpContext first_ctx;
     first_ctx.runtime_load_priority = 0;
     OpContext second_ctx;
     second_ctx.runtime_load_priority = 1;
     auto first = index->CreateReader(&first_ctx);
-    auto second = index->CreateReader(&second_ctx);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_TRUE(priorities.empty());
     const auto* values =
         dynamic_cast<const IScalarValueReader<std::string_view>*>(first.get());
     ASSERT_NE(values, nullptr);
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            first.get());
+    ASSERT_NE(predicate, nullptr);
+    const std::string_view key = "apple";
+    EXPECT_EQ(predicate->Range(key, CompareOp::Equal).count(), 1);
+    const auto scanned_bytes =
+        first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    EXPECT_EQ(predicate->NotIn(1, &key).count(), 0);
     const int64_t rows[] = {0, 1};
     values->Gather(
         rows, 2, [&](int64_t i, const std::string_view* value, bool valid) {
-            EXPECT_FALSE(slot->ManualEvict(0));
             EXPECT_EQ(valid, i == 0);
             if (valid)
                 EXPECT_EQ(*value, "apple");
         });
     EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
-    EXPECT_TRUE(slot->ManualEvict(0));
+    EXPECT_EQ(values->Lookup(0), "apple");
+    EXPECT_FALSE(values->Lookup(1).has_value());
+    EXPECT_EQ(values->Lookup(0), "apple");
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(),
+              scanned_bytes);
     index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
     first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
     const auto* nulls = dynamic_cast<const INullReader*>(second.get());
     ASSERT_NE(nulls, nullptr);
     EXPECT_EQ(nulls->IsNull().count(), 1);
     EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
-    EXPECT_TRUE(slot->ManualEvict(0));
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
 }
 
 TEST(SortedIndexOwnershipTest, ReadersShareLayoutAndPreserveNulls) {

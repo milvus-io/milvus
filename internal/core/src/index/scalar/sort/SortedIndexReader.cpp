@@ -885,7 +885,7 @@ SortedIndexStorage<T>::CellByteSize() const {
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::In(size_t n, const T* values) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     AssertInfo(n == 0 || values != nullptr,
                "sorted In received null values with non-zero count");
     TargetBitmap result(storage->state.total_num_rows, false);
@@ -901,7 +901,7 @@ SortedIndexReader<T>::In(size_t n, const T* values) const {
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::NotIn(size_t n, const T* values) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     if constexpr (std::is_same_v<T, std::string_view>) {
         AssertInfo(n == 0 || values != nullptr,
                    "sorted NotIn received null values with non-zero count");
@@ -921,7 +921,7 @@ SortedIndexReader<T>::NotIn(size_t n, const T* values) const {
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::Range(const T& value, CompareOp op) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     return storage->values.Range(storage->state.total_num_rows,
                                  *storage->state.valid_bitset,
                                  storage->state.value_lookup,
@@ -935,7 +935,7 @@ SortedIndexReader<T>::Range(const T& lo,
                             bool lo_inc,
                             const T& hi,
                             bool hi_inc) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     return storage->values.Range(storage->state.total_num_rows,
                                  *storage->state.valid_bitset,
                                  storage->state.value_lookup,
@@ -948,7 +948,7 @@ SortedIndexReader<T>::Range(const T& lo,
 template <typename T>
 std::optional<owned_t<T>>
 SortedIndexReader<T>::Lookup(int64_t offset) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     if (!storage->state.value_lookup) {
         return std::nullopt;
     }
@@ -980,7 +980,7 @@ SortedIndexReader<T>::Gather(
     const int64_t* offsets,
     int64_t count,
     const std::function<void(int64_t i, const T*, bool valid)>& out) const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
                "sorted Gather received invalid offsets/count");
     if (!storage->state.value_lookup) {
@@ -1019,7 +1019,7 @@ SortedIndexReader<T>::Gather(
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::IsNull() const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     auto result = storage->state.valid_bitset->clone();
     result.flip();
     return result;
@@ -1028,7 +1028,7 @@ SortedIndexReader<T>::IsNull() const {
 template <typename T>
 TargetBitmap
 SortedIndexReader<T>::IsNotNull() const {
-    const auto storage = index_->PinStorage(op_ctx_);
+    const auto& storage = GetStorage();
     return storage->state.valid_bitset->clone();
 }
 

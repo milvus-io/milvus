@@ -55,6 +55,13 @@ class IVectorReader {
  public:
     virtual ~IVectorReader() = default;
 
+    /** @brief Load the engine using the bound context; throws on failure.
+     * @note Synchronous. The caller schedules overlap with other query work.
+     * The current single-cell reader retains the engine until reader destruction.
+     */
+    virtual void
+    Prefetch() const = 0;
+
     virtual void
     Search(const DatasetPtr& dataset,
            const VectorSearchParams& params,
