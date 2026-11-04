@@ -113,7 +113,7 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 		r.hasIndex = true
 		r.targetFieldIDs = append(r.targetFieldIDs, vectorFieldIDs...)
 		if len(vectorFieldIDs) == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			for _, index := range m.indexMeta.GetIndexesForCollection(collection.ID, "") {
+			for _, index := range m.indexMeta.GetPhysicalIndexesForCollection(collection.ID) {
 				r.targetFieldIDs = append(r.targetFieldIDs, index.FieldID)
 			}
 		}

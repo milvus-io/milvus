@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -315,7 +316,7 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		return nil
 	}
 
-	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	indexes := i.meta.indexMeta.GetPhysicalIndexesForCollection(segment.CollectionID)
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 
 	for _, index := range indexes {
@@ -346,6 +347,9 @@ func (i *indexInspector) canCreateIndexForSegment(ctx context.Context, segment *
 	if err != nil || collection == nil || collection.Schema == nil {
 		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
+		return nil, false
+	}
+	if indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(collection.Schema, index.FieldID).GetDataType(), index.IndexParams) {
 		return nil, false
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
@@ -487,12 +491,19 @@ func (i *indexInspector) estimateIndexFieldSize(ctx context.Context, coll *colle
 }
 
 func (i *indexInspector) reloadFromMeta() {
+	// Include historical logical-only records here so their dispatch/poll guards
+	// cancel the worker and persist a terminal abort. Regular build selection
+	// continues to use GetPhysicalIndexesForCollection/GetSegmentIndexes.
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
+		for _, segIndex := range i.meta.indexMeta.GetAllSegmentIndexes(segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {
+				continue
+			}
+
+			if !i.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 				continue
 			}
 

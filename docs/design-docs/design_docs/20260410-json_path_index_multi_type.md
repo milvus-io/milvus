@@ -182,7 +182,7 @@ public:
 
 ### 6. Query Execution Path (C++)
 
-For range/comparison expressions, the current dispatch dynamic_casts to `ScalarIndex<T>*` if the index is not a `JsonFlatIndex`. This already works for Sort, Bitmap, and Hybrid because they are all `ScalarIndex<T>` subclasses with `Range()`, `In()`, `NotIn()` implementations. **No changes needed.**
+Range/comparison expressions use the selected typed JSON path reader and its scalar family's predicate implementation. Sort, Bitmap, and Hybrid-backed path indexes continue to execute through that family. Physical JSON flat indexes are removed; see [JSON flat index deprecation](20261104-json-flat-index-deprecation.md).
 
 ### 7. Go-Side Parameter Validation
 

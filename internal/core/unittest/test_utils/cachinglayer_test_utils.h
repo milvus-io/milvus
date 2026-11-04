@@ -315,7 +315,6 @@ GenIndexParams(const milvus::index::IIndexReaderBase* reader,
         {index::families::kFmIndex, index::FMINDEX_INDEX_TYPE},
         {index::families::kNgram, index::NGRAM_INDEX_TYPE},
         {index::families::kRTree, index::RTREE_INDEX_TYPE},
-        {index::families::kJsonFlat, "JSON_FLAT"},
     };
     const auto found = scalar_types.find(family);
     AssertInfo(found != scalar_types.end(),

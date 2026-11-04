@@ -206,10 +206,8 @@ BuildIndex(FieldId field_id,
     const auto family = index::ResolvePackedLoadFamily(
         adapted.family, source->IndexMeta(), adapted.params);
     auto load_params = std::move(adapted.params);
-    if (family != index::families::kJsonFlat) {
-        load_params = index::AnnotateJsonProjectionCompleteness(
-            std::move(load_params), source->Directory(), source->IndexMeta());
-    }
+    load_params = index::AnnotateJsonProjectionCompleteness(
+        std::move(load_params), source->Directory(), source->IndexMeta());
     const auto loader = index::LoaderRegistry::Instance().Lookup(family);
     AssertInfo(static_cast<bool>(loader), "missing consumer fixture loader");
     storage::LoadOptions options;

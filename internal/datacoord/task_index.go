@@ -157,6 +157,10 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
+	if it.meta.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		it.SetState(indexpb.JobState_JobStateNone, indexparams.JSONFlatIndexDeprecationReason)
+		return nil
+	}
 	published, err := it.publishIndexToManifest(result)
 	if err != nil {
 		return err
@@ -180,6 +184,9 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 // segment's current revision instead of the possibly-stale revision the build
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
+	if it.meta.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		return false, nil
+	}
 	ctx := it.meta.ctx
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
@@ -865,6 +872,9 @@ const (
 // segment is no longer healthy or the field index has been dropped. Both are
 // irreversible, so the task can never be needed again.
 func (it *indexBuildTask) droppedTargetReason(segment *SegmentInfo, segIndex *model.SegmentIndex) (string, bool) {
+	if it.meta.indexMeta.isJSONFlatIndexByID(segIndex.CollectionID, segIndex.IndexID) {
+		return indexparams.JSONFlatIndexDeprecationReason, true
+	}
 	if !isSegmentHealthy(segment) {
 		return indexTaskAbortReasonSegmentDropped, true
 	}

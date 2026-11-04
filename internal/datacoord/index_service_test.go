@@ -2970,6 +2970,7 @@ func TestJsonIndex(t *testing.T) {
 					DataType:  schemapb.DataType_JSON,
 					IsDynamic: true,
 				},
+				{FieldID: 3, Name: "scalar", DataType: schemapb.DataType_Int64},
 			},
 		},
 	}, nil)
@@ -3132,6 +3133,28 @@ func TestJsonIndex(t *testing.T) {
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// Flat metadata remains visible and repeated creates retain the successful hint.
+	assert.Contains(t, resp.GetReason(), "deprecated")
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "h",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_JSON))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+	assert.Contains(t, resp.GetReason(), "deprecated")
+	assert.Len(t, indexMeta.GetIndexesForCollection(req.GetCollectionID(), "h"), 1)
+
+	// Ignored JSON extras on a scalar index must not change its semantics or hint.
+	req = &indexpb.CreateIndexRequest{FieldID: 3, IndexName: "scalar", IndexParams: []*commonpb.KeyValuePair{
+		{Key: common.IndexTypeKey, Value: "INVERTED"},
+		{Key: common.JSONCastTypeKey, Value: "JSON"},
+		{Key: common.JSONPathKey, Value: ""},
+	}}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+	assert.Empty(t, resp.GetReason())
 
 	// duplicated json flat index
 	req = &indexpb.CreateIndexRequest{

@@ -672,7 +672,7 @@ class SegmentInternalInterface : public SegmentInterface {
         return true;
     }
 
-    // Projects whether IndexCapability contains a JsonFlat or JSON-cast entry;
+    // Projects whether IndexCapability contains a typed JSON-path entry;
     // it does not pin the reader. Default false covers segment types that do
     // not install sealed JSON indexes, such as growing segments.
     virtual bool

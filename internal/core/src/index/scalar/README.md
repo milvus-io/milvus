@@ -61,9 +61,8 @@ alive. Initialization without file targets stays on the async executor.
 - A JSON projected Artifact wraps a plain scalar Artifact and serializes the path, cast, row count
   and non-exist state; after loading, `JsonPathIndexReader` routes to the inner typed Reader, and the
   outer layer does not directly expose the inner predicate/pattern/ngram mixins.
-- JsonFlat's root and path Readers share immutable field state; the bool, numeric and string path
-  Readers implement boolean ranges, numeric bounds across int64/double, and string
-  ownership/pattern routing, respectively.
+- The `JSON` cast name remains parseable for logical index definitions, but native physical build
+  and load requests reject it as Unsupported. Only typed JSON-path indexes have physical artifacts.
 
 ## Parameter, storage and resource constraints
 
@@ -79,7 +78,7 @@ alive. Initialization without file targets stays on the async executor.
   format boundary.
 - Each Tantivy family defines its own reserved file names, sidecar set and per-storage-generation
   validation. The shared file enumeration explicitly distinguishes regular files from all
-  non-directory entries; JsonFlat performs its own file-set and sidecar-conflict validation.
+  non-directory entries.
 - Explicit close/unlink failures on the normal path must be reported; cleanup during destruction and
   exception unwinding is best-effort. A Reader must keep file mappings, the directory owner and
   other backing resources alive for the full lifetime of its query objects, and destroy them in

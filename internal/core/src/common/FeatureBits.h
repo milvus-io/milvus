@@ -45,7 +45,7 @@ enum class FeatureBit : uint32_t {
     RetiredScalarIndexHybrid = 10,
     ScalarIndexRtree = 11,
     ScalarIndexNgram = 12,
-    ScalarIndexJsonFlat = 13,
+    // 13 is reserved for the removed JSON flat index.
     FilterIndexDeclined = 14,
     ExprCacheHit = 15,
     InterimIndexSearch = 16,

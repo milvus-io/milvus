@@ -152,30 +152,6 @@ class ExprCacheHelper {
 
         return {result, valid};
     }
-
-    // Cache one immutable bitmap artifact using the same backend, admission,
-    // staleness, and segment-invalidation rules as full expression results.
-    // The all-ones companion satisfies the existing two-bitmap cache value
-    // contract and is compressed efficiently by the memory backend.
-    template <typename SignatureFn, typename ComputeFn>
-    static std::shared_ptr<TargetBitmap>
-    GetOrComputeBitmap(const segcore::SegmentInternalInterface* segment,
-                       SignatureFn&& make_signature,
-                       int64_t active_count,
-                       ComputeFn&& compute,
-                       bool enable_cache_write = true) {
-        auto cached = GetOrCompute(
-            segment,
-            std::forward<SignatureFn>(make_signature),
-            active_count,
-            [&]() -> ComputeResult {
-                auto result = compute();
-                TargetBitmap valid(result.size(), true);
-                return {std::move(result), std::move(valid)};
-            },
-            enable_cache_write);
-        return cached.result;
-    }
 };
 
 }  // namespace exec

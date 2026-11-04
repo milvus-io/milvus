@@ -570,7 +570,7 @@ func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 
 func (t *clusteringCompactionTask) processIndexing() error {
 	// wait for segment indexed
-	collectionIndexes := t.meta.GetIndexMeta().GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
+	collectionIndexes := t.meta.GetIndexMeta().GetPhysicalIndexesForCollection(t.GetTaskProto().GetCollectionID())
 	if len(collectionIndexes) == 0 {
 		mlog.Debug(context.TODO(), "the collection has no index, no need to do indexing")
 		return t.completeTask()

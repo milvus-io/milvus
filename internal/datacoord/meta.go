@@ -336,6 +336,13 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Assign sub-metas after all goroutines complete
 	mt.indexMeta = im
+	im.getCollectionSchema = func(collectionID UniqueID) *schemapb.CollectionSchema {
+		collection := mt.GetCollection(collectionID)
+		if collection == nil {
+			return nil
+		}
+		return collection.Schema
+	}
 	mt.analyzeMeta = am
 	mt.partitionStatsMeta = psm
 	mt.compactionTaskMeta = ctm

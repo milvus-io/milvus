@@ -450,7 +450,7 @@ execution paths below.
 
 | Execution path | Integrated expressions | Conditions and exclusions |
 |----------------|------------------------|---------------------------|
-| Scalar index, including JSON path indexes | `UnaryRangeExpr` (comparisons, supported string pattern operations, and indexed array equality), `BinaryRangeExpr`, `TermExpr`, `JsonContainsExpr` (`Contains`, `ContainsAny`, and `ContainsAll`), JSON `ExistsExpr`, and the scalar-index branches of `BinaryArithOpEvalRangeExpr` and `TimestamptzArithCompareExpr` | The concrete scalar index must accept the operator. The generic integration covers normal scalar indexes and compatible JSON flat/path indexes. An operator rejected by `ShouldUseOp` or an incompatible JSON path/type may fall back to `RawData`; it then participates only when it is in the RawData adapter's supported scope. NGRAM is explicitly routed to its own execution path. |
+| Scalar index, including JSON path indexes | `UnaryRangeExpr` (comparisons, supported string pattern operations, and indexed array equality), `BinaryRangeExpr`, `TermExpr`, `JsonContainsExpr` (`Contains`, `ContainsAny`, and `ContainsAll`), JSON `ExistsExpr`, and the scalar-index branches of `BinaryArithOpEvalRangeExpr` and `TimestamptzArithCompareExpr` | The concrete scalar index must accept the operator. The generic integration covers normal scalar indexes and compatible typed JSON path indexes. An operator rejected by `ShouldUseOp` or an incompatible JSON path/type may fall back to `RawData`; it then participates only when it is in the RawData adapter's supported scope. NGRAM is explicitly routed to its own execution path. |
 | JSON statistics | JSON `UnaryRangeExpr`, `BinaryRangeExpr`, `TermExpr`, all implemented `JsonContainsExpr` variants, and `ExistsExpr` | Sealed segments only. `plan_options.expr_use_json_stats` must be enabled, JSON stats must exist, and the nested path must be non-empty and contain no numeric path component. |
 | Text index | `TextMatch`, `PhraseMatch`, and `TextMatchFuzzy` in `UnaryRangeExpr` | Uses `segment->GetTextIndex()`. Sealed segments only in both memory and disk modes. Growing text-index results bypass cache reads and writes even when `memory.enableGrowing=true`. |
 | RawData, including scans assisted by `SkipIndex` | Row-level `UnaryRangeExpr`, `BinaryRangeExpr`, `TermExpr`, `BinaryArithOpEvalRangeExpr` (primitive scalars, JSON, and ARRAY), `JsonContainsExpr` (JSON and ARRAY contains/any/all), JSON `ExistsExpr`, and `TimestamptzArithCompareExpr` | The resolved path must be `RawData`. Element-level output, VECTOR_ARRAY arithmetic, text-index operators, and NGRAM execution remain unsupported. A miss is inserted only after contiguous, unmasked full-segment coverage. |
@@ -473,13 +473,7 @@ work within one execution and must not be confused with
 
 Most offset-input/iterative branches bypass the sub-expression cache because
 they evaluate only the supplied candidates. `BinaryRangeExpr` has explicit
-full-bitmap-and-gather exceptions for JSON statistics and compatible
-`JsonFlatIndex` execution.
-
-For `JsonFlatIndex`, the generic scalar-index integration can also store a
-separate `json-flat-validity:*` bitmap artifact. This entry is shared across
-different literals and operators for the same exact path and value family, and
-it consumes cache capacity independently from the expression result entry.
+full-bitmap-and-gather exceptions for JSON statistics.
 
 #### Effective segment support by backend
 

@@ -19,11 +19,9 @@
 #include <algorithm>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "common/Types.h"
-#include "common/Utils.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/ISpatialReader.h"
@@ -94,10 +92,6 @@ struct ExprIndexRequirement {
     // even when both expose the same scalar value type.
     bool json_array_cast{false};
 
-    // Int64 JSON literals at or beyond +/-2^53 can alias in DOUBLE projections.
-    // Require a field-level JSON router (flat) that keeps integer precision.
-    bool requires_flat_json_index{false};
-
     // Whether execution can refine a candidate superset. If false, an entry with
     // caps.exact == false is unusable and selection must fall back to RawData.
     bool accepts_candidates{true};
@@ -129,11 +123,6 @@ struct ExecPathDecision {
 // Runtime literal-dependent guards still belong on the selected pinned reader.
 namespace index_path_detail {
 
-inline bool
-IsFlatJsonIndex(const segcore::IndexCapabilityEntry& entry) {
-    return entry.caps.json_paths && entry.value_type == DataType::JSON;
-}
-
 inline DataType
 NormalizeJsonValueType(DataType type) {
     if (type == DataType::INT8 || type == DataType::INT16 ||
@@ -148,51 +137,9 @@ NormalizeJsonValueType(DataType type) {
 }
 
 inline bool
-IsPathPrefix(std::string_view prefix, std::string_view path) {
-    return prefix.empty() || path == prefix ||
-           (path.size() > prefix.size() &&
-            path.compare(0, prefix.size(), prefix) == 0 &&
-            path[prefix.size()] == '/');
-}
-
-inline bool
-RelativePathContainsInteger(std::string_view prefix, std::string_view path) {
-    auto relative = path.substr(prefix.size());
-    size_t pos = 0;
-    while (pos < relative.size()) {
-        if (relative[pos] == '/') {
-            ++pos;
-            continue;
-        }
-        const auto end = relative.find('/', pos);
-        const auto token = relative.substr(
-            pos,
-            end == std::string_view::npos ? relative.size() - pos : end - pos);
-        if (!token.empty() && milvus::IsInteger(std::string(token))) {
-            return true;
-        }
-        pos = end == std::string_view::npos ? relative.size() : end;
-    }
-    return false;
-}
-
-inline bool
 ReaderMatches(const ExprIndexRequirement& req,
               const segcore::IndexCapabilityEntry& entry) {
     const auto& caps = entry.caps;
-    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
-    if (multi_path_router) {
-        // Field-level JSON null checks cannot use a typed path view. The
-        // selector resolves views after pinning, and Resolve(JSON) is absent.
-        if (req.reader == RequiredReader::Null &&
-            req.value_type == DataType::JSON) {
-            return false;
-        }
-        return req.reader == RequiredReader::Predicate ||
-               req.reader == RequiredReader::PatternMatch ||
-               req.reader == RequiredReader::Null ||
-               req.reader == RequiredReader::JsonPath;
-    }
     switch (req.reader) {
         case RequiredReader::Predicate:
             return caps.predicate;
@@ -224,12 +171,7 @@ PathMatchScore(const ExprIndexRequirement& req,
     if (entry.json_path == req.json_path) {
         return {2, entry.json_path.size()};
     }
-    const bool multi_path_router = IsFlatJsonIndex(entry);
-    if (!multi_path_router || !IsPathPrefix(entry.json_path, req.json_path) ||
-        RelativePathContainsInteger(entry.json_path, req.json_path)) {
-        return {-1, 0};
-    }
-    return {1, entry.json_path.size()};
+    return {-1, 0};
 }
 
 // AdaptIndexType builds a TIMESTAMPTZ index over its INT64 storage, so the
@@ -244,10 +186,6 @@ inline bool
 ValueTypeMatches(const ExprIndexRequirement& req,
                  const segcore::IndexCapabilityEntry& entry) {
     if (req.value_type == DataType::NONE) {
-        return true;
-    }
-    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
-    if (multi_path_router) {
         return true;
     }
     const bool matches =
@@ -297,8 +235,6 @@ DetermineExecPath(const ExprIndexRequirement& req,
         const bool needs_refine =
             index_path_detail::NeedsCandidateRefine(req.reader, entry.caps);
         if (entry.key.field_id != req.field_id ||
-            (req.requires_flat_json_index &&
-             !index_path_detail::IsFlatJsonIndex(entry)) ||
             !index_path_detail::ReaderMatches(req, entry) ||
             (needs_refine && !req.accepts_candidates) ||
             (req.has_offset_input && req.reader == RequiredReader::Ngram) ||
@@ -315,8 +251,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
                                    entry.caps.cheap_value_lookup
                                ? 1
                                : 0);
-        // Preserve exact/prefix and refine/cheap scoring. Among equal scores,
-        // prefer the most specific JSON root before the stable identity order.
+        // Preserve refine/cheap scoring before the stable identity order.
         if (selected == nullptr || score > selected_score ||
             (score == selected_score && root_length > selected_root_length)) {
             selected = &entry;

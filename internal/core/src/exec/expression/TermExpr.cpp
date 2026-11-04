@@ -267,9 +267,6 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             if constexpr (std::is_same_v<ValueType, int64_t>) {
-                if (PinnedJsonIndexIsFlat()) {
-                    return ExecVisitorImplForIndex<int64_t>();
-                }
                 return ExecVisitorImplForIndex<double>();
             } else {
                 return ExecVisitorImplForIndex<ValueType>();
@@ -1301,10 +1298,15 @@ PhyTermFilterExpr::DetermineExecPath() {
     if (data_type == DataType::JSON && !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val) {
-        req.requires_flat_json_index = std::any_of(
-            expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
-                return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
-            });
+        if (std::any_of(expr_->vals_.begin(),
+                        expr_->vals_.end(),
+                        [this](const auto& val) {
+                            return !IsInt64SafeForJsonDoubleIndex(
+                                val.int64_val());
+                        })) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
     }
     SelectAndPinIndex(req);
 }
