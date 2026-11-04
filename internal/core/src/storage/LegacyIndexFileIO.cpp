@@ -34,6 +34,7 @@
 #include "folly/OperationCancelled.h"
 #include "folly/coro/AsyncScope.h"
 #include "folly/coro/Collect.h"
+#include "folly/coro/CurrentExecutor.h"
 #include "milvus-storage/common/extend_status.h"
 #include "monitor/Monitor.h"
 #include "storage/DataCodec.h"
@@ -760,6 +761,8 @@ InspectLegacyIndexFilesAsync(std::span<const std::string> files,
     infos->reserve(files.size());
     auto inspect = [&](const std::string& path,
                        LegacyIndexFileInfo& info) -> folly::coro::Task<void> {
+        // Ready reads can otherwise chain thousands of coroutine resumptions.
+        co_await folly::coro::co_reschedule_on_current_executor;
         auto input = co_await OpenLegacyIndexInputAsync(
             chunk_manager, fs, path, priority);
         info = co_await InspectLegacyIndexFileAsync(*input, priority, token);
