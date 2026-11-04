@@ -244,7 +244,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			exist = true
 			tmp, err := strconv.ParseInt(param.Value, 10, 64)
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", param.Key, field.GetName())
 			}
 			dim = tmp
 			break
@@ -898,7 +898,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.Fields {
 		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 		}
 		// shoud load field, skip other check
 		if shouldLoad {
@@ -925,7 +925,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		for _, field := range structArrayField.Fields {
 			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s.%s must be a boolean", common.FieldSkipLoadKey, structArrayField.GetName(), field.GetName())
 			}
 			if shouldLoad {
 				if typeutil.IsVectorType(field.ElementType) {
