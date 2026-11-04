@@ -1,0 +1,86 @@
+{
+  "server_version": "3.0.5-multisearch-proxy",
+  "tests": [
+    {
+      "name": "One native MilvusService.MultiSearch RPC; no client Search fan-out",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Envelope rejects missing and invalid credentials before dispatch",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "50 searches match ordinary Search across two databases and four shared collection names",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Input dictionaries and connection database remain unchanged",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Omitted item database inherits client default while explicit override works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Missing database and invalid dimension isolated from successful siblings",
+      "passed": true,
+      "detail": [
+        null,
+        {
+          "code": 800,
+          "message": "database not found[database=ms_v2_missing]"
+        },
+        {
+          "code": 2000,
+          "message": "failed to search: failed to search/query delegator 1 for channel by-dev-rootcoord-dml_0_470158214201082876v0: fail to search on QueryNode 1: worker(1) query failed: parser searchRequest failed:  => vector dimension mismatch, expected vector size(byte) 512, actual 8. at ../internal/core/src/query/Plan.cpp:183\n: segcore error[segcoreCode=2001]"
+        },
+        null
+      ]
+    },
+    {
+      "name": "Reject duplicate ids",
+      "passed": true,
+      "detail": {
+        "code": 1100
+      }
+    },
+    {
+      "name": "Reject 129 items",
+      "passed": true,
+      "detail": {
+        "code": 1100
+      }
+    },
+    {
+      "name": "Reject oversized request",
+      "passed": true,
+      "detail": {
+        "code": 1102
+      }
+    },
+    {
+      "name": "Same collection name in different databases has independent RBAC",
+      "passed": true,
+      "detail": {
+        "grpc_code": 7,
+        "message": "PrivilegeSearch: permission deny to ms_v2_reader in the `ms_v2_b` database"
+      }
+    },
+    {
+      "name": "Envelope deadline",
+      "passed": true,
+      "detail": "DEADLINE_EXCEEDED"
+    },
+    {
+      "name": "Successful request after cancellation",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "all_passed": true
+}

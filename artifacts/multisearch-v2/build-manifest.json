@@ -1,0 +1,40 @@
+{
+  "milvus_base_tag": "v3.0.5",
+  "milvus_base_commit": "af15c807513eb6508ae22d0f3a6484e8937be1a5",
+  "milvus_proto_base_commit": "2f00c7cf17db3ab3bb7b93ea8f2a7261bcc264da",
+  "pymilvus_base_commit": "f63a1aa2816205c165f04d33e658b06e9b1cee11",
+  "stock_image": "milvusdb/milvus@sha256:b9b79b4a284b41cd12d60abc418310f84621fa4c977d409b38f501519a7ccf8a",
+  "native_libraries": "unchanged from the stock v3.0.5 image",
+  "build_tags": "dynamic,sonic,with_jemalloc,bytedance_tango",
+  "go": "go1.26.9",
+  "pgo": "configs/pgo/default.pgo (empty in source checkout)",
+  "server_cpu_cores": 4,
+  "server_cpuset_active": "64-67",
+  "server_cpuset_inactive": "68-71",
+  "load_generator_cpuset": "32-39",
+  "storage": "bounded 4 GiB tmpfs; CPU/read benchmark, not disk I/O",
+  "rows": 160000,
+  "collections": 8,
+  "databases": 2,
+  "index": "FLAT",
+  "dimensions": [
+    128,
+    192,
+    256
+  ],
+  "metric_types": [
+    "L2",
+    "IP",
+    "COSINE"
+  ],
+  "modified_binary_sha256": "627c5efeb448deeb0d6e61151e463a756dbafad1e6d0b9d64762e2d28ef32a36",
+  "stock_binary_sha256": "8ea7eaad6eab04babe04b0eab6bbec4be58153f0df720aa3825177ed9fff70ee",
+  "cpu_model": "Intel Xeon Gold 6338N @ 2.20GHz",
+  "host_logical_cpus": 128,
+  "host_physical_cores": 64,
+  "host_shared": true,
+  "cpu_pinning_note": "CPU sets restrict scheduling; sibling hyperthreads and NUMA memory placement are not reserved.",
+  "saturation_cpu_limit": 2,
+  "saturation_cpuset": "64-65",
+  "saturation_GOMAXPROCS": 4
+}

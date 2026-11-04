@@ -1,0 +1,15 @@
+*
+!.gitignore
+!README.md
+!manifest.json
+!verification.json
+!functional.json
+!kubernetes-functional-1.json
+!kubernetes-functional-2.json
+!binary-sha256.txt
+!kubernetes-binary-sha256.txt
+!failure-audit.md
+!summary.json
+!report.html
+!report.pdf
+!standalone-binary-sha256.txt

@@ -1,0 +1,11 @@
+# Raw samples (including excluded runs) ship in the evidence bundle.
+*
+!.gitignore
+!README.md
+!manifest.json
+!summary.json
+!comparisons.json
+!excluded-runs.json
+!mixed-report.html
+!mixed-report.pdf
+!mixed-timeline.svg
