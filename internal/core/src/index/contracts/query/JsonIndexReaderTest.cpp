@@ -753,8 +753,8 @@ TEST(JsonPathIndexOwnershipTest, RequestsShareMetadataAndRetainTypedIndex) {
         EXPECT_FALSE(exists[1]);
         EXPECT_TRUE(exists[2]);
         EXPECT_EQ(second->Count(), 3);
-        const auto* nulls = dynamic_cast<const INullReader*>(
-            json->Resolve("/flag", cast).get());
+        const auto resolved = json->Resolve("/flag", cast);
+        const auto* nulls = dynamic_cast<const INullReader*>(resolved.get());
         ASSERT_NE(nulls, nullptr);
         const auto missing_or_null = nulls->IsNull();
         EXPECT_FALSE(missing_or_null[0]);
