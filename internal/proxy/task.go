@@ -385,7 +385,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse schema for collection %s", t.GetCollectionName())
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
@@ -596,7 +596,7 @@ func (t *addCollectionFieldTask) PreExecute(ctx context.Context) error {
 	t.fieldSchema = &schemapb.FieldSchema{}
 	err := proto.Unmarshal(t.GetSchema(), t.fieldSchema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse field schema for collection %s", t.GetCollectionName())
 	}
 	fieldList := typeutil.NewSet[string]()
 	for _, schema := range t.oldSchema.Fields {

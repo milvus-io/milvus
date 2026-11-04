@@ -424,6 +424,11 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if start >= end {
+		// Empty ranges still validate defaults, but must not read columns or
+		// change the row count.
+		return b.prepareAppendDefaults()
+	}
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}

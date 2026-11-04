@@ -6599,3 +6599,41 @@ func TestHasPropInDeletekeys(t *testing.T) {
 		assert.Equal(t, "", hasPropInDeletekeys([]string{}))
 	})
 }
+
+func TestDDLTaskMalformedSchema(t *testing.T) {
+	ctx := context.Background()
+	createTask := &createCollectionTask{
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: "invalid_schema",
+			Schema:         []byte{0xff},
+		},
+	}
+	addFieldTask := &addCollectionFieldTask{
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
+			CollectionName: "invalid_schema",
+			Schema:         []byte{0xff},
+		},
+		oldSchema: &schemapb.CollectionSchema{},
+	}
+	for _, tc := range []struct {
+		name       string
+		preExecute func(context.Context) error
+	}{
+		{name: "create collection", preExecute: createTask.PreExecute},
+		{name: "add field", preExecute: addFieldTask.PreExecute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.preExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, proto.Error)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), "schema")
+			assert.Contains(t, status.GetReason(), "invalid_schema")
+			assert.Contains(t, status.GetReason(), "proto:")
+		})
+	}
+}
