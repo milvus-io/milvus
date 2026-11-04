@@ -149,7 +149,7 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	}
 	var paused pkindexgc.Paused
 	if s.garbageCollector != nil {
-		paused = s.garbageCollector.isPaused
+		paused = s.garbageCollector.IsPaused
 	}
 	gc, err := pkindexgc.New(meta, store, rootPath, cfg, mgr,
 		// TODO: pass the outputs of the in-flight compactions of the primary

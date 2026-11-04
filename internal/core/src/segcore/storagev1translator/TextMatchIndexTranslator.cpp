@@ -192,10 +192,12 @@ TextMatchIndexTranslator::estimated_loading_usage(
     }
     if (file_load_resource_request_) {
         const auto& request = *file_load_resource_request_;
-        return {{request.final_memory_cost, request.final_disk_cost},
-                {request.max_memory_cost - request.final_memory_cost -
-                     shared_overhead_.memory_bytes,
-                 request.max_disk_cost - request.final_disk_cost},
+        return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
+                                                    request.final_disk_cost),
+                milvus::cachinglayer::ResourceUsage(
+                    request.max_memory_cost - request.final_memory_cost -
+                        shared_overhead_.memory_bytes,
+                    request.max_disk_cost - request.final_disk_cost),
                 shared_overhead_};
     }
     // ignore the cid checking, because there is only one cell
