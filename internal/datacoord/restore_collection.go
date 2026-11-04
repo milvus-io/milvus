@@ -61,6 +61,7 @@ type restorePublication struct {
 	starts            map[string]uint64
 	createsCollection bool
 	replicated        bool
+	snapshotID        int64
 }
 
 func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snapshot *snapshotstorage.SnapshotData, name string, sourceID int64, target, db string, pinID int64, external bool, location, spec string) (int64, error) {
@@ -148,6 +149,7 @@ func (sm *snapshotManager) broadcastRestoreCollection(ctx context.Context, snaps
 	header := &message.RestoreSnapshotMessageHeader{
 		SnapshotName: name, CollectionId: collectionID, JobId: jobID,
 		SourceCollectionId: sourceID, PinId: pinID, External: external, SnapshotS3Location: location, ExternalSpec: spec,
+		SnapshotId: snapshot.SnapshotInfo.GetId(),
 	}
 	if external {
 		header.SnapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshot)
@@ -223,6 +225,6 @@ func (sm *snapshotManager) applyRestoreCollection(ctx context.Context, result me
 	h := result.Message.Header()
 	_, err := sm.restoreData(ctx, h.GetSourceCollectionId(), h.GetSnapshotName(), h.GetSnapshotS3Location(), h.GetCollectionId(),
 		h.GetJobId(), h.GetPinId(), h.GetExternal(), h.GetExternalSpec(), h.GetSnapshotFingerprint(),
-		&restorePublication{starts: starts, createsCollection: true, replicated: result.Message.ReplicateHeader() != nil})
+		&restorePublication{starts: starts, createsCollection: true, replicated: result.Message.ReplicateHeader() != nil, snapshotID: h.GetSnapshotId()})
 	return err
 }

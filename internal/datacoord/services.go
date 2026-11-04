@@ -2725,7 +2725,8 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 	defer broadcaster.Close()
 
 	// Double-check after acquiring lock - another goroutine may have dropped it.
-	if _, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName()); err != nil {
+	snapshot, err := s.snapshotManager.GetSnapshot(ctx, req.GetCollectionId(), req.GetName())
+	if err != nil {
 		if errors.Is(err, merr.ErrSnapshotNotFound) {
 			mlog.Info(context.TODO(), "DropSnapshot: snapshot not found after lock, returning success (idempotent)")
 			return merr.Success(), nil
@@ -2762,6 +2763,7 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 		WithHeader(&message.DropSnapshotMessageHeader{
 			Name:         req.GetName(),
 			CollectionId: req.GetCollectionId(),
+			SnapshotId:   snapshot.GetId(),
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
 		WithControlChannelBroadcast().

@@ -42,7 +42,7 @@ func TestReplicatedRestoreCreationIdentity(t *testing.T) {
 				},
 				CrossClusterTopology: []*commonpb.CrossClusterTopology{{SourceClusterId: "primary", TargetClusterId: "secondary"}},
 			})
-			header := &message.RestoreSnapshotMessageHeader{CollectionId: 551, SourceCollectionId: 100, JobId: 77, PinId: 31, SnapshotName: "snapshot"}
+			header := &message.RestoreSnapshotMessageHeader{CollectionId: 551, SourceCollectionId: 100, JobId: 77, PinId: 31, SnapshotName: "snapshot", SnapshotId: 9001}
 			body := &messagespb.RestoreSnapshotMessageBody{}
 			if !legacy {
 				body.CollectionHeader = &message.CreateCollectionMessageHeader{CollectionId: 551, DbId: 9, PartitionIds: []int64{601, 602}}

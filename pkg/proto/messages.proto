@@ -667,7 +667,7 @@ message DropIndexMessageBody {}
 
 // CreateSnapshotMessageHeader is the header of create snapshot message.
 // Contains all fields from CreateSnapshotRequest (except base).
-// snapshot_id is allocated in the callback.
+// snapshot_id is allocated before broadcasting new messages.
 message CreateSnapshotMessageHeader {
     int64 collection_id = 1;
     string name         = 2;
@@ -685,6 +685,7 @@ message CreateSnapshotMessageBody {}
 message DropSnapshotMessageHeader {
     string name = 1;
     int64 collection_id = 2; // collection id for per-collection name uniqueness
+    int64 snapshot_id = 3; // Exact snapshot generation; zero retains legacy name lookup.
 }
 
 // DropSnapshotMessageBody is the body of drop snapshot message.
@@ -713,6 +714,7 @@ message RestoreSnapshotMessageHeader {
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
     string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
+    int64 snapshot_id = 10; // Source snapshot identity; zero retains legacy name lookup.
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.

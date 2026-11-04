@@ -152,6 +152,15 @@ Job. Replicated DropSnapshot may retry until that Job releases its pin; the
 checker releases it without acquiring the callback's resource keys. Old messages
 carrying `_ur` retain their local-only behavior.
 
+New RestoreSnapshot and DropSnapshot headers also carry the source SnapshotID.
+Callbacks resolve that exact generation and never substitute a newer snapshot
+with the same name. Restore jobs persist the ID for asynchronous recovery; local
+pin installation and snapshot reads use it, and external bundles must match it.
+A missing generation is logged at Error level and does not hold the DDL callback
+open. Restore retains a Failed Job for diagnosis, while Drop is a no-op. Transient
+storage or catalog failures still retry, as does Drop while the matching snapshot
+is pinned. Zero-ID historical messages retain their legacy name lookup.
+
 ## Truncate API Completion
 
 TruncateCollection broadcasts with `AckSyncUp` to all collection VChannels and

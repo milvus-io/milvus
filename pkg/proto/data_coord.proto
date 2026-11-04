@@ -1513,6 +1513,7 @@ message CopySegmentJob {
   map<string, string> channel_mapping = 25; // Source -> target channels for idempotent segment registration.
   // Stable plan identities for restore-owned L0 materialization, keyed by channel/partition.
   map<string, int64> restore_compaction_plans = 26;
+  int64 snapshot_id = 27; // Source snapshot identity, retained across asynchronous job recovery.
 }
 
 message ImportJob {

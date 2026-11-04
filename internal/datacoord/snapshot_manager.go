@@ -1017,6 +1017,7 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 
 	header := &message.RestoreSnapshotMessageHeader{
 		SnapshotName:        snapshotName,
+		SnapshotId:          snapshotData.SnapshotInfo.GetId(),
 		CollectionId:        collectionID,
 		JobId:               jobID,
 		SourceCollectionId:  sourceCollectionID,
@@ -1352,8 +1353,13 @@ func (sm *snapshotManager) restoreData(
 	expectedSnapshotFingerprint string,
 	publication ...*restorePublication,
 ) (int64, error) {
+	var snapshotID int64
+	if len(publication) != 0 {
+		snapshotID = publication[0].snapshotID
+	}
 	mlog.Info(ctx, "restore data started",
 		mlog.String("snapshot", snapshotName),
+		mlog.Int64("snapshotID", snapshotID),
 		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(snapshotS3Location)),
 		mlog.Int64("sourceCollectionID", sourceCollectionID),
 		mlog.Int64("collectionID", collectionID),
@@ -1361,6 +1367,11 @@ func (sm *snapshotManager) restoreData(
 		mlog.Bool("external", external),
 		mlog.Bool("externalSpecSet", externalSpec != ""))
 	handleSourceError := func(operation string, err error) (int64, error) {
+		if errors.Is(err, merr.ErrSnapshotNotFound) {
+			mlog.Error(ctx, "restore source snapshot identity not found",
+				mlog.Int64("sourceCollectionID", sourceCollectionID), mlog.String("snapshotName", snapshotName),
+				mlog.Int64("snapshotID", snapshotID), mlog.FieldJobID(jobID), mlog.Err(err))
+		}
 		if !external && len(publication) == 0 {
 			return 0, merr.Wrap(err, operation)
 		}
@@ -1391,7 +1402,13 @@ func (sm *snapshotManager) restoreData(
 	if !external && len(publication) != 0 && publication[0].replicated && pinID != 0 {
 		// API admission pins on the primary. Replicated callbacks must install
 		// that same durable pin locally before any asynchronous copy can start.
-		active, err := sm.snapshotMeta.ensureRestorePin(ctx, sourceCollectionID, snapshotName, pinID)
+		var active int
+		var err error
+		if snapshotID == 0 {
+			active, err = sm.snapshotMeta.ensureRestorePin(ctx, sourceCollectionID, snapshotName, pinID)
+		} else {
+			active, err = sm.snapshotMeta.ensureRestorePinByID(ctx, sourceCollectionID, snapshotName, pinID, snapshotID)
+		}
 		if err != nil {
 			return handleSourceError("failed to pin restore snapshot", err)
 		}
@@ -1418,12 +1435,18 @@ func (sm *snapshotManager) restoreData(
 			true,
 			resolved.ForeignStorageConfig,
 		)
+	} else if snapshotID != 0 {
+		snapshotData, err = sm.snapshotMeta.readSnapshotData(ctx, sourceCollectionID, snapshotName, true, snapshotID)
 	} else {
 		snapshotData, err = sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
 	}
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data", mlog.Err(err))
 		return handleSourceError("failed to read snapshot data", err)
+	}
+	if snapshotID != 0 && snapshotData.SnapshotInfo.GetId() != snapshotID {
+		return handleSourceError("restore snapshot identity mismatch", merr.WrapErrDataIntegrityMsg(
+			"source snapshot has ID %d, expected %d", snapshotData.SnapshotInfo.GetId(), snapshotID))
 	}
 	actualSnapshotFingerprint := ""
 	if external {
@@ -1500,6 +1523,10 @@ func (sm *snapshotManager) handleRestoreSourceError(
 	}
 
 	createsCollection := len(publication) > 0 && publication[0].createsCollection
+	var snapshotID int64
+	if len(publication) > 0 {
+		snapshotID = publication[0].snapshotID
+	}
 	now := uint64(time.Now().UnixNano())
 	failedJob := &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{
@@ -1510,6 +1537,7 @@ func (sm *snapshotManager) handleRestoreSourceError(
 			StartTs:            now,
 			CompleteTs:         now,
 			SnapshotName:       snapshotName,
+			SnapshotId:         snapshotID,
 			SourceCollectionId: sourceCollectionID,
 			External:           external,
 			SnapshotS3Location: snapshotS3Location,
@@ -1813,6 +1841,7 @@ func (sm *snapshotManager) createRestoreJob(
 			TotalSegments:                int64(len(idMappings)),
 			TotalRows:                    totalRows,
 			SnapshotName:                 snapshotData.SnapshotInfo.GetName(),
+			SnapshotId:                   snapshotData.SnapshotInfo.GetId(),
 			SourceCollectionId:           snapshotData.SnapshotInfo.GetCollectionId(),
 			PinId:                        pinID,
 			External:                     external,

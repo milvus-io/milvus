@@ -20,6 +20,8 @@ import (
 	"context"
 	"sort"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -27,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
@@ -85,12 +88,26 @@ func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result mes
 	log := mlog.With(
 		mlog.String("snapshotName", header.Name),
 		mlog.FieldCollectionID(header.CollectionId),
+		mlog.Int64("snapshotID", header.GetSnapshotId()),
 	)
 	log.Info(ctx, "dropSnapshotV2AckCallback received")
 
-	// Delete snapshot using SnapshotManager interface (idempotent)
-	if err := s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
+	var err error
+	if header.GetSnapshotId() != 0 {
+		err = s.snapshotManager.(*snapshotManager).snapshotMeta.dropSnapshot(ctx, header.CollectionId, header.Name, header.GetSnapshotId())
+		if err == nil {
+			deleteSnapshotActivePinsGauge(header.CollectionId, header.Name)
+		}
+	} else {
+		// Persisted messages without an ID retain their legacy name lookup.
+		err = s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name)
+	}
+	if err != nil {
 		log.Error(ctx, "failed to drop snapshot via DDL callback", mlog.Err(err))
+		if errors.Is(err, merr.ErrSnapshotNotFound) {
+			// A missing generation must not delete a newer namesake or block DDL.
+			return nil
+		}
 		return err
 	}
 
@@ -148,7 +165,12 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		jobID int64
 		err   error
 	)
-	if header.GetExternal() {
+	if header.GetSnapshotId() != 0 {
+		jobID, err = s.snapshotManager.(*snapshotManager).restoreData(ctx,
+			header.SourceCollectionId, header.SnapshotName, header.GetSnapshotS3Location(), header.CollectionId,
+			header.JobId, header.PinId, header.GetExternal(), header.GetExternalSpec(), header.GetSnapshotFingerprint(),
+			&restorePublication{snapshotID: header.GetSnapshotId()})
+	} else if header.GetExternal() {
 		// External restores do not have a local snapshot catalog entry or pin.
 		// The WAL header carries the metadata URI and external_spec needed to
 		// recreate the source storage in the async copy job.
@@ -174,6 +196,9 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 	}
 	if err != nil {
 		log.Error(ctx, "failed to restore data", mlog.Err(err))
+		if errors.Is(err, merr.ErrSnapshotNotFound) {
+			return nil
+		}
 		return err
 	}
 

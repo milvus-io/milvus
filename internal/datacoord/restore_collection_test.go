@@ -76,6 +76,7 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 			restore := message.MustAsBroadcastRestoreSnapshotMessageV2(msg)
 			require.Equal(t, int64(100), restore.Header().GetCollectionId())
 			require.Equal(t, int64(77), restore.Header().GetJobId())
+			require.EqualValues(t, 9001, restore.Header().GetSnapshotId())
 			require.True(t, proto.Equal(body, restore.MustBody()))
 			require.ElementsMatch(t, []string{"v1", "v2"}, msg.BroadcastHeader().VChannels)
 			return &types.BroadcastAppendResult{BroadcastID: 1}, nil
@@ -83,7 +84,8 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 		legacy := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(0), merr.ErrServiceInternal).Build()
 		sm := &snapshotManager{collectionRestorer: &rootcoord.Core{}, allocator: &restoreAllocatorTarget{}}
 		job, err := sm.finishRestoreSnapshot(t.Context(), nil, &snapshotstorage.SnapshotData{
-			Collection: &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"_default": 1, "p1": 2}},
+			SnapshotInfo: &datapb.SnapshotInfo{Id: 9001},
+			Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"_default": 1, "p1": 2}},
 		}, "snapshot", 10, "target", "default", 5, false, "", "", nil, nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, int64(77), job)

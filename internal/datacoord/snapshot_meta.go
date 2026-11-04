@@ -644,10 +644,14 @@ func (sm *snapshotMeta) SaveSnapshot(ctx context.Context, snapshot *snapshotstor
 // Returns:
 //   - error: Error if snapshot not found or catalog update fails
 func (sm *snapshotMeta) DropSnapshot(ctx context.Context, collectionID int64, snapshotName string) error {
-	// Step 1: Lookup snapshot by name within collection
-	snapshot, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
+	return sm.dropSnapshot(ctx, collectionID, snapshotName, 0)
+}
+
+func (sm *snapshotMeta) dropSnapshot(ctx context.Context, collectionID int64, snapshotName string, snapshotID int64) error {
+	// Resolve the exact generation before taking its per-snapshot lock.
+	snapshot, err := sm.getSnapshotByID(ctx, collectionID, snapshotName, snapshotID)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to get snapshot by name", mlog.Err(err))
+		mlog.Error(ctx, "failed to get snapshot for drop", mlog.Err(err))
 		return err
 	}
 
@@ -935,8 +939,12 @@ func (sm *snapshotMeta) GetSnapshot(ctx context.Context, collectionID int64, sna
 //     SegmentIDs always populated for new format snapshots)
 //   - error: Error if snapshot not found or S3 read fails
 func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+	return sm.readSnapshotData(ctx, collectionID, snapshotName, includeSegments, 0)
+}
+
+func (sm *snapshotMeta) readSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool, snapshotID int64) (*snapshotstorage.SnapshotData, error) {
 	// Step 1: Get snapshot metadata from memory to find S3 location
-	snapshotInfo, err := sm.getSnapshotByName(ctx, collectionID, snapshotName)
+	snapshotInfo, err := sm.getSnapshotByID(ctx, collectionID, snapshotName, snapshotID)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to get snapshot by name", mlog.Err(err))
 		return nil, err
@@ -952,6 +960,9 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data from S3", mlog.Err(err))
 		return nil, err
+	}
+	if snapshotID != 0 && snapshotData.SnapshotInfo.GetId() != snapshotID {
+		return nil, merr.WrapErrDataIntegrityMsg("snapshot metadata has ID %d, expected %d", snapshotData.SnapshotInfo.GetId(), snapshotID)
 	}
 	// Named, referenced snapshots point at this instance's storage. Older
 	// snapshots retain relative V3 manifest bases whose files remain under the
@@ -1028,18 +1039,20 @@ func (sm *snapshotMeta) ReadAndValidateExternalSnapshotDataWithChunkManager(
 	return snapshotData, nil
 }
 
-// getSnapshotByName is an internal helper that looks up snapshot metadata by name within a collection.
-//
-// This uses the per-collection snapshotName2ID index for O(1) lookup instead of scanning.
-//
-// Parameters:
-//   - ctx: Context for cancellation (currently unused but reserved for future)
-//   - collectionID: Collection ID to scope the name lookup
-//   - snapshotName: Name of the snapshot to find (unique within collection)
-//
-// Returns:
-//   - *datapb.SnapshotInfo: Snapshot metadata if found
-//   - error: Error if snapshot not found
+// getSnapshotByID resolves a snapshot generation, retaining name lookup only for
+// legacy callers passing zero. A nonzero ID never falls back to a reused name.
+func (sm *snapshotMeta) getSnapshotByID(ctx context.Context, collectionID int64, snapshotName string, snapshotID int64) (*datapb.SnapshotInfo, error) {
+	if snapshotID == 0 {
+		return sm.getSnapshotByName(ctx, collectionID, snapshotName)
+	}
+	info, ok := sm.snapshotID2Info.Get(snapshotID)
+	if !ok || info.GetCollectionId() != collectionID || info.GetName() != snapshotName || info.GetState() == datapb.SnapshotState_SnapshotStateDeleting {
+		return nil, merr.WrapErrSnapshotNotFound(snapshotName, fmt.Sprintf("snapshot ID %d in collection %d", snapshotID, collectionID))
+	}
+	return info, nil
+}
+
+// getSnapshotByName looks up snapshot metadata through the per-collection name index.
 func (sm *snapshotMeta) getSnapshotByName(ctx context.Context, collectionID int64, snapshotName string) (*datapb.SnapshotInfo, error) {
 	// O(1) lookup using per-collection name index
 	nameMap, ok := sm.snapshotName2ID.Get(collectionID)
@@ -1644,8 +1657,12 @@ func (sm *snapshotMeta) PinSnapshot(ctx context.Context, collectionID int64, nam
 // ensureRestorePin installs the primary's pin identity on a receiving replica.
 // Replays keep one permanent pin until the durable restore job releases it.
 func (sm *snapshotMeta) ensureRestorePin(ctx context.Context, collectionID int64, name string, pinID int64) (int, error) {
+	return sm.ensureRestorePinByID(ctx, collectionID, name, pinID, 0)
+}
+
+func (sm *snapshotMeta) ensureRestorePinByID(ctx context.Context, collectionID int64, name string, pinID, snapshotID int64) (int, error) {
 	sm.pinMu.RLock()
-	snapshot, err := sm.getSnapshotByName(ctx, collectionID, name)
+	snapshot, err := sm.getSnapshotByID(ctx, collectionID, name, snapshotID)
 	sm.pinMu.RUnlock()
 	if err != nil {
 		return 0, err

@@ -1811,11 +1811,16 @@ func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots *snapsh
 				job.GetSnapshotS3Location(),
 				true,
 			)
+		} else if job.GetSnapshotId() != 0 {
+			loaded, err = snapshots.readSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true, job.GetSnapshotId())
 		} else {
 			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
 		}
 		if err != nil {
 			return nil, err
+		}
+		if expected := job.GetSnapshotId(); expected != 0 && loaded.SnapshotInfo.GetId() != expected {
+			return nil, merr.WrapErrDataIntegrityMsg("restore source snapshot has ID %d, expected %d", loaded.SnapshotInfo.GetId(), expected)
 		}
 		if expected := job.GetSnapshotFingerprint(); expected != "" {
 			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
