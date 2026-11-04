@@ -62,7 +62,7 @@ func TestNormalizeReshardBatchKeepsFunctionOutput(t *testing.T) {
 			{FieldID: 101, Name: "embedding_out", DataType: schemapb.DataType_Int64, IsFunctionOutput: true},
 		},
 	}
-	data, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	data, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	data.Data[100] = &storage.Int64FieldData{Data: []int64{1, 2}}
 	data.Data[101] = &storage.Int64FieldData{Data: []int64{10, 20}}
@@ -88,7 +88,7 @@ func TestNormalizeReshardBatchKeepsBackupFunctionOutput(t *testing.T) {
 			{FieldID: 101, Name: "embedding_out", DataType: schemapb.DataType_Int64, IsFunctionOutput: true},
 		},
 	}
-	data, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	data, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	data.Data[100] = &storage.Int64FieldData{Data: []int64{1, 2}}
 	data.Data[101] = &storage.Int64FieldData{Data: []int64{10, 20}}
@@ -120,7 +120,7 @@ func TestRunReshardFunctionsGeneratesBM25AndMinHash(t *testing.T) {
 			{Name: "mh", Type: schemapb.FunctionType_MinHash, InputFieldIds: []int64{101}, OutputFieldIds: []int64{103}},
 		},
 	}
-	data, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	data, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	data.Data[100] = &storage.Int64FieldData{Data: []int64{1, 2}}
 	data.Data[101] = &storage.StringFieldData{Data: []string{"milvus vector database", "milvus again"}}
@@ -157,7 +157,7 @@ func TestRunReshardFunctionsOverwritesUserMinHash(t *testing.T) {
 			{Name: "mh", Type: schemapb.FunctionType_MinHash, InputFieldIds: []int64{101}, OutputFieldIds: []int64{103}},
 		},
 	}
-	data, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	data, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	data.Data[100] = &storage.Int64FieldData{Data: []int64{1, 2}}
 	data.Data[101] = &storage.StringFieldData{Data: []string{"milvus vector database", "milvus again"}}
@@ -1108,7 +1108,7 @@ func TestExecuteReshardPlanRunsFunctionsInPrepareStage(t *testing.T) {
 	mkBatch := func(ids []int64, texts []string) *storage.InsertData {
 		// Same shape real readers produce: the function output column starts
 		// as an empty placeholder the pipeline fills in.
-		data, err := storage.NewInsertDataWithFunctionOutputField(schema)
+		data, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 		require.NoError(t, err)
 		data.Data[100] = &storage.Int64FieldData{Data: ids}
 		data.Data[101] = &storage.StringFieldData{Data: texts}

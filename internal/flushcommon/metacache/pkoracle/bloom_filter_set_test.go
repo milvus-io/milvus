@@ -42,12 +42,12 @@ func (s *BloomFilterSetSuite) TearDownSuite() {
 }
 
 func (s *BloomFilterSetSuite) GetFieldData(ids []int64) storage.FieldData {
-	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
+	fd, err := storage.NewFieldDataBuilder(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	}, len(ids))
+	}).WithCapacity(len(ids)).Build()
 	s.Require().NoError(err)
 
 	for _, id := range ids {
