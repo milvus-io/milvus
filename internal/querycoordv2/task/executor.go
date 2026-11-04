@@ -250,6 +250,20 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
+	// The segment is loaded by the delegator of the shard the task targets,
+	// which is the shard the target groups the segment under. The load info
+	// carries the channel datacoord's segment meta records, and the querynode
+	// picks the delegator by it. The two differ only in a shard split's lineage
+	// window, where the target groups a split target's flushed segment under
+	// the split source so that the source delegator serves it; for any other
+	// segment they are equal and this is a no-op.
+	if loadInfo.GetInsertChannel() != task.Shard() {
+		mlog.Info(ctx, "load segment through the shard the target attributes it to",
+			mlog.FieldSegmentID(action.SegmentID),
+			mlog.String("recordedChannel", loadInfo.GetInsertChannel()),
+			mlog.String("shard", task.Shard()))
+		loadInfo.InsertChannel = task.Shard()
+	}
 	req := packLoadSegmentRequest(
 		task,
 		action,
@@ -401,6 +415,61 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 	}
 }
 
+// checkShardSplitMove refuses a watch of the channel on node that moves it while a
+// shard split freezes it (meta.ShardSplitFreeze), judged on the shard states
+// just read fresh.
+//
+// A watch moves the channel when another node of the task's replica already
+// serves it. A watch no node of the replica serves is recovery and is left to
+// the shard's own recovery path, since refusing it would leave the channel
+// with no delegator at all -- but only once the distribution can be trusted to
+// say so: the distribution misses a live delegator until its node's first pull
+// succeeds (a pull that failed right after a QueryCoord restart, for one). So a
+// frozen channel counts as unserved only when every node of the replica still
+// in the node manager has had a distribution pull succeed; a node gone from the
+// node manager serves nothing.
+func (ex *Executor) checkShardSplitMove(ctx context.Context, task *ChannelTask, node int64, channel string, states meta.ShardStates) error {
+	servedElsewhere := false
+	for _, delegator := range ex.dist.ChannelDistManager.GetByFilter(
+		meta.WithReplica2Channel(task.replica), meta.WithChannelName2Channel(channel)) {
+		if delegator.Node != node {
+			servedElsewhere = true
+			break
+		}
+	}
+	notPulled := ex.nodesWithoutDistribution(task.replica)
+	if !servedElsewhere && len(notPulled) == 0 {
+		return nil
+	}
+	err := meta.NewShardSplitFreeze(ctx, ex.targetMgr, task.CollectionID(), states).CheckChannel(channel)
+	if err == nil {
+		return nil
+	}
+	if !servedElsewhere {
+		err = merr.Wrapf(err, "the distribution of nodes %v has not been pulled yet, so another node may still serve it", notPulled)
+	}
+	mlog.Warn(ctx, "refuse to move a channel a shard split freezes",
+		mlog.String("channel", channel), mlog.Bool("servedElsewhere", servedElsewhere),
+		mlog.Int64s("nodesNotPulled", notPulled), mlog.Err(err))
+	return err
+}
+
+// nodesWithoutDistribution returns the replica's nodes, still in the node
+// manager, whose distribution has never been pulled successfully (a successful
+// pull is what sets a node's heartbeat).
+func (ex *Executor) nodesWithoutDistribution(replica *meta.Replica) []int64 {
+	if ex.nodeMgr == nil {
+		return nil
+	}
+	var out []int64
+	for _, nodeID := range replica.GetNodes() {
+		if info := ex.nodeMgr.Get(nodeID); info != nil && info.LastHeartbeat().UnixNano() == 0 {
+			out = append(out, nodeID)
+		}
+	}
+	return out
+}
+
 func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
@@ -418,6 +487,18 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
+		return err
+	}
+	// The checkers chose this watch from a shard-state view that may be
+	// seconds old. This describe is fresh, so it has the last word on whether a
+	// shard split still allows the watch, and the move it may be part of.
+	states := meta.ShardStatesOf(collectionInfo)
+	if err = states.CheckWatchable(action.ChannelName()); err != nil {
+		mlog.Warn(ctx, "refuse to watch a channel a shard split does not allow to watch",
+			mlog.String("channel", action.ChannelName()), mlog.Err(err))
+		return err
+	}
+	if err = ex.checkShardSplitMove(ctx, task, action.Node(), action.ChannelName(), states); err != nil {
 		return err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())

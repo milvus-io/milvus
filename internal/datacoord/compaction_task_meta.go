@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -154,6 +155,40 @@ func (csm *compactionTaskMeta) GetCompactionTasksByTriggerID(triggerID int64) []
 		for _, task := range tasks {
 			res = append(res, proto.Clone(task).(*datapb.CompactionTask))
 		}
+	}
+	return res
+}
+
+// compactionTaskDigest is the part of a compaction task a caller reads to
+// follow its progress. Copied out of compaction meta without cloning the task,
+// which carries the full collection schema.
+type compactionTaskDigest struct {
+	PlanID        int64
+	Type          datapb.CompactionType
+	State         datapb.CompactionTaskState
+	InputSegments []int64
+	StartTime     int64
+	EndTime       int64
+}
+
+// GetCompactionTaskDigestsByTriggerID returns the digests of every task of a
+// trigger. Unlike GetCompactionTasksByTriggerID it deep-copies nothing but the
+// input id lists: a stored task is replaced on every save, never changed in
+// place, so its scalar fields are read as they are under the lock.
+func (csm *compactionTaskMeta) GetCompactionTaskDigestsByTriggerID(triggerID int64) []compactionTaskDigest {
+	csm.RLock()
+	defer csm.RUnlock()
+	tasks := csm.compactionTasks[triggerID]
+	res := make([]compactionTaskDigest, 0, len(tasks))
+	for _, task := range tasks {
+		res = append(res, compactionTaskDigest{
+			PlanID:        task.GetPlanID(),
+			Type:          task.GetType(),
+			State:         task.GetState(),
+			InputSegments: slices.Clone(task.GetInputSegments()),
+			StartTime:     task.GetStartTime(),
+			EndTime:       task.GetEndTime(),
+		})
 	}
 	return res
 }

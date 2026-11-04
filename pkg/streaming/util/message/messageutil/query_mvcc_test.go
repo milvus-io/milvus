@@ -4,9 +4,11 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -55,4 +57,49 @@ func TestQueryTransformSchemaChangeClassification(t *testing.T) {
 			require.Equal(t, want, AdvancesQueryTransformMVCC(immutable))
 		})
 	}
+}
+
+// TestIsVChannelGenesisMessage: CreateCollection and the TARGET replica of a
+// SplitShard are a vchannel's genesis; the source replica, the control-channel
+// replica and ordinary records are not. Both the mutable and the immutable
+// forms of the replica answer the same.
+func TestIsVChannelGenesisMessage(t *testing.T) {
+	broadcast := message.NewSplitShardMessageBuilderV2().
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:    1,
+			SplitTaskId:     2,
+			SourceVchannel:  "p0_1v0",
+			TargetVchannels: []string{"p1_1v1", "p2_1v2"},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		WithBroadcast([]string{"p0_1v0", "p1_1v1", "p2_1v2"}, message.OptBuildBroadcastAppendFirst("p0_1v0")).
+		MustBuildBroadcast().
+		WithBroadcastID(1)
+	want := map[string]bool{"p0_1v0": false, "p1_1v1": true, "p2_1v2": true}
+	seen := 0
+	for _, replica := range broadcast.SplitIntoMutableMessage() {
+		expected, ok := want[replica.VChannel()]
+		if !ok {
+			continue
+		}
+		seen++
+		assert.Equal(t, expected, IsVChannelGenesisMessage(replica), replica.VChannel())
+		immutable := replica.WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		assert.Equal(t, expected, IsVChannelGenesisMessage(immutable), replica.VChannel())
+		assert.True(t, AdvancesQueryTransformMVCC(replica))
+	}
+	assert.Equal(t, 3, seen)
+
+	create := message.NewCreateCollectionMessageBuilderV1().
+		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.CreateCollectionRequest{}).
+		WithVChannel("p0_1v0").
+		MustBuildMutable()
+	assert.True(t, IsVChannelGenesisMessage(create))
+	insert := message.NewInsertMessageBuilderV1().
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithVChannel("p0_1v0").
+		MustBuildMutable()
+	assert.False(t, IsVChannelGenesisMessage(insert))
 }
