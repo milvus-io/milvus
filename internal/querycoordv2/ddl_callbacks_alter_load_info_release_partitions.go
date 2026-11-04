@@ -89,6 +89,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				ExpectedReplicaNumber:            currentLoadConfig.GetReplicaNumber(),
 				ExpectedFieldIndexID:             currentLoadConfig.GetFieldIndexID(),
 				ExpectedLoadFields:               currentLoadConfig.GetLoadFields(),
+				ExpectedRequiredFields:           currentLoadConfig.Collection.GetRequiredFields(),
 				ExpectedPriority:                 commonpb.LoadPriority_HIGH,
 				ExpectedUserSpecifiedReplicaMode: currentLoadConfig.GetUserSpecifiedReplicaMode(),
 			},

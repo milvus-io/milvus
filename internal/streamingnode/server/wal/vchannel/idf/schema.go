@@ -121,14 +121,14 @@ func (b *viewBinding) Prepare(ctx context.Context, loadInfo queryresource.LoadIn
 			return err
 		}
 		view.PartitionIDs = append([]int64{}, info.PartitionIDs...)
-		view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, info.RequiredFields)
+		view.RequiredFields = info.RequiredFields
 	}
 	// Resource enumeration is scoped by DataView/partitions; DataCoord does not
 	// require LoadInfoVersion. A shared field must not retain its first View's ID.
 	view.LoadInfoVersion = 0
 	if b.fields == nil {
 		allowed := make(map[int64]bool)
-		for _, field := range qviews.ResolveRequiredFields(view.Schema, view.RequiredFields) {
+		for _, field := range view.RequiredFields {
 			allowed[field.GetFieldId()] = true
 		}
 		keys := make([]fieldKey, 0)

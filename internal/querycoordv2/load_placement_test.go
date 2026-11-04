@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -152,7 +153,7 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 	const collectionID = int64(7)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker, qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}}}
 	var captured *capturedPlacement
@@ -258,7 +259,7 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 	const collectionID = int64(8)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker, qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}}}
 	var captured *capturedPlacement
@@ -297,7 +298,7 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 	const collectionID = int64(9)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	s := &Server{broker: broker}
 	current := loadedIn(collectionID, "rg_a")
 	current.Collection = &meta.Collection{
@@ -337,7 +338,7 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 	const collectionID = int64(10)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	s := &Server{broker: broker}
 	// The collection is registered as loaded, so CheckIfLoadPartitionsExecutable
 	// runs for real: the scoped expansion must pass it.
@@ -393,7 +394,7 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 	const collectionID = int64(11)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
 	s := &Server{broker: broker, qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}}}
 	var captured *capturedPlacement
@@ -429,7 +430,7 @@ func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
 	const collectionID = int64(12)
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
+		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil).Maybe()
 	s := &Server{broker: broker}
 	current := loadedIn(collectionID, "rg_a")
 	current.Collection = &meta.Collection{

@@ -27,7 +27,7 @@ func (suite *SegmentSuite) prepareReadState(local *LocalSegment) (ReadState, err
 	for _, field := range typeutil.GetAllFieldSchemas(suite.collection.Schema()) {
 		fields = append(fields, field.GetFieldID())
 	}
-	collection := suite.collection.WithLoadScope([]int64{suite.partitionID}, fields)
+	collection := suite.collection.WithLoadScope([]int64{suite.partitionID}, fields, fields)
 	info := proto.Clone(local.LoadInfo()).(*querypb.SegmentLoadInfo)
 	return local.PrepareReadState(suite.T().Context(), nil, info, collection)
 }

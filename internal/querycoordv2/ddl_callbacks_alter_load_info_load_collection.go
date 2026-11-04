@@ -121,9 +121,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
-			ExpectedLoadFields:               req.GetLoadFields(),
-			ExpectedLoadAllFields:            req.LoadAllFields,
-			ExpectedSkipLoadDynamicField:     req.GetSkipLoadDynamicField(),
+			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.GetSchema(), req.GetLoadFields()),
+			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
@@ -135,8 +134,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		ReplicaNumber:            expectedReplicasNumber,
 		FieldIndexID:             req.GetFieldIndexID(),
 		LoadFields:               req.GetLoadFields(),
-		LoadAllFields:            req.LoadAllFields,
-		SkipLoadDynamicField:     req.GetSkipLoadDynamicField(),
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	})
@@ -225,8 +222,6 @@ type qviewsExpectedLoadConfig struct {
 	ReplicaNumber            map[string]int
 	FieldIndexID             map[int64]int64
 	LoadFields               []int64
-	LoadAllFields            *bool
-	SkipLoadDynamicField     bool
 	Priority                 commonpb.LoadPriority
 	UserSpecifiedReplicaMode bool
 }
@@ -245,15 +240,10 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		DbId:                     coll.GetDbId(),
 		CollectionId:             coll.GetCollectionID(),
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
-		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
+		LoadFields:               generateQViewsLoadFields(loadmgr.PreloadFieldIDsForSchema(coll.GetSchema(), expected.LoadFields), expected.FieldIndexID),
 		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
-	}
-	// Preserve the empty-hint representation for full loads; Proxy has already
-	// resolved a dynamic-field exclusion into explicit preload fields.
-	if expected.LoadAllFields != nil && *expected.LoadAllFields && !expected.SkipLoadDynamicField {
-		header.LoadFields = nil
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil

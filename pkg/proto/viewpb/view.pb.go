@@ -273,9 +273,9 @@ type CollectionLoadConfig struct {
 	// Exact loaded partition membership for this version; empty means no partitions.
 	PartitionIds []int64 `protobuf:"varint,4,rep,packed,name=partition_ids,json=partitionIds,proto3" json:"partition_ids,omitempty"`
 	// Explicit query-visible field scope, including all selected IndexIDs per field.
-	// Materialized before publication; it is never inferred from preload_fields on reads.
+	// Materialized before publication; empty means no fields, never all fields.
 	RequiredFields []*LoadFieldConfig `protobuf:"bytes,5,rep,name=required_fields,json=requiredFields,proto3" json:"required_fields,omitempty"`
-	// Eager-loading hints within required_fields. Empty uses schema-defined preload policy;
+	// Fields to prepare eagerly, always a subset of required_fields. Empty means none;
 	// omitting a field here does not make that required field inaccessible to queries.
 	PreloadFields []*LoadFieldConfig `protobuf:"bytes,6,rep,name=preload_fields,json=preloadFields,proto3" json:"preload_fields,omitempty"`
 	// Desired replicas and their resource-group constraints; node placement belongs to QueryView.

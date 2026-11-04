@@ -200,21 +200,22 @@ existing completion contract.
 
 LoadConfig expresses the desired partition/field/index/replica set. Schema
 identity remains separate; a semantic-only change can require handoff with an
-unchanged LoadInfoVersion. `required_fields` is an internal, explicit, nonempty
-list of the columns the View must be capable of querying. It is initialized from
-the target schema and is not exposed through the user Load API. ALTER adds new
-columns to this list and removes dropped columns, including Function outputs and
-StructArray children. Required physical dependencies are resolved separately.
+unchanged LoadInfoVersion. `required_fields` is the explicit allowed query scope,
+materialized from all target Schema user fields for public Load APIs. ALTER
+adds new columns and removes dropped columns, including Function outputs and
+StructArray children. Empty means no fields, with no worker-side default expansion.
 
-The existing `load_fields` wire field is a preload hint, not a query restriction.
-An empty hint follows the View's target schema; an explicit hint does not gain
-new columns on ALTER. Dropped fields are removed from explicit hints. Thus an
-added field enters `required_fields` without being appended to the hint, although
-an empty hint also covers it implicitly. `skip_load_dynamic_field` affects only
-preloading. Index metadata and query access follow required fields, never hints.
-Readiness establishes complete query capabilities and lazy-loading entry points;
-it does not require every allowed column to be resident. Warmup settings still
-control physical preloading. Both sets are retained in the exact LoadInfo snapshot.
+The independently defined WAL `load_fields` and persisted `preload_fields` carry
+the concrete preload subset. External load selection affects only preloads;
+Coordinator resolves an omitted request against Schema `skip_load` defaults
+before publishing. ALTER preserves existing fields' choices and adds each new
+field to preloads according to its own Schema rules. Dropped fields leave both
+sets. `skip_load_dynamic_field` affects only preloading. Both sets come from the
+same Schema by construction. Workers consume the exact lists, including empty
+lists. Required fields outside preloads retain on-demand access. Index selection
+and query authorization follow required fields. Readiness establishes complete
+query capabilities and preparation entries, and physical warmup policy applies
+to the selected preloads. Both sets remain immutable in the selected LoadInfo.
 
 Each View pins immutable field/partition requirements and exact index selections.
 LoadFieldConfig carries repeated index_ids, supporting multiple JSON path indexes

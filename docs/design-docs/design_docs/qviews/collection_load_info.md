@@ -28,6 +28,34 @@ Each record contains:
 - replica IDs, resource groups and priorities; target node placement belongs
   to Balancer and actual lifecycle state belongs to ShardViewRegistry.
 
+Coordinator materializes two explicit sets before broadcasting or persisting:
+
+- `required_fields` is the allowed query field scope. All current Schema user
+  fields, including dynamic and StructArray child fields, enter this scope for
+  public LoadCollection/LoadPartitions. Fields outside it cannot be loaded on
+  demand either.
+- `preload_fields` is the subset prepared eagerly by a QueryView. Public load
+  field selection affects only this set. An omitted API selection resolves the
+  Schema's `skip_load` defaults at Coordinator; it is not persisted as a sentinel.
+
+Preload selection does not override existing warmup policy. Selected fields
+retain their `sync`, `async` or `disable` behavior. Ready proves preparation of
+the selected field resources; it does not promise that every selected column is
+resident when asynchronous or disabled warmup is configured.
+
+Empty means no fields in both persisted sets and on the QueryView resource RPC.
+Workers never expand an empty set using Schema or another set. The two sets are
+constructed from the same Schema, so preloads are within the allowed scope by
+construction. WAL's independently defined `load_fields` carries this concrete
+preload set alongside `required_fields`; no per-field preload boolean is used.
+
+AlterCollection rebuilds the allowed scope from the target Schema, preserves the
+preload choices of surviving fields, and removes dropped fields. New fields
+always enter `required_fields`; their own Schema `skip_load` determines whether
+they enter `preload_fields`. This applies equally to ordinary, dynamic,
+StructArray child and Function output fields, regardless of the previous API's
+explicit/default selection. Replay is idempotent and old versions stay immutable.
+
 An empty index_ids list means no selected index; it never means "resolve whatever
 index is current". Lists are sorted and deduplicated before publication. Both required fields and preload
 hints use the same index selection. IndexID does not identify a Segment's build,

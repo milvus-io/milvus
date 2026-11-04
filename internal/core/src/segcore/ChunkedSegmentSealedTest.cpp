@@ -630,7 +630,7 @@ TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
     schema->set_primary_field_id(pk);
     schema->set_ttl_field_id(ttl);
     auto layout = std::make_shared<const segcore::SealedFieldLayout>(
-        schema, segcore::LoadScope({pk.get(), value.get()}));
+        schema, segcore::LoadScope({pk.get(), value.get()}, {pk.get(), value.get()}));
     segcore::ChunkedSegmentSealedImpl physical(
         layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
     auto read = physical.PinReadState();

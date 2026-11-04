@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -70,7 +71,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil
+			return &milvuspb.DescribeCollectionResponse{CollectionID: collectionID, Schema: &schemapb.CollectionSchema{}}, nil
 		}).Maybe()
 	broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil).Maybe()
 	return &admissionFixture{meta: m, nodeMgr: nodeMgr, broker: broker}

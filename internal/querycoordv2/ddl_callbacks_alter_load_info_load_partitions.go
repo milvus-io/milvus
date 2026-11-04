@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -95,9 +96,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 			ExpectedPartitionIDs:             partitionIDsSet.Collect(),
 			ExpectedReplicaNumber:            expectedReplicasNumber,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
-			ExpectedLoadFields:               req.GetLoadFields(),
-			ExpectedLoadAllFields:            req.LoadAllFields,
-			ExpectedSkipLoadDynamicField:     req.GetSkipLoadDynamicField(),
+			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.GetSchema(), req.GetLoadFields()),
+			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},

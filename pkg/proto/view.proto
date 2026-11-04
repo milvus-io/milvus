@@ -28,9 +28,9 @@ message CollectionLoadConfig {
     // Exact loaded partition membership for this version; empty means no partitions.
     repeated int64 partition_ids = 4;
     // Explicit query-visible field scope, including all selected IndexIDs per field.
-    // Materialized before publication; it is never inferred from preload_fields on reads.
+    // Materialized before publication; empty means no fields, never all fields.
     repeated LoadFieldConfig required_fields = 5;
-    // Eager-loading hints within required_fields. Empty uses schema-defined preload policy;
+    // Fields to prepare eagerly, always a subset of required_fields. Empty means none;
     // omitting a field here does not make that required field inaccessible to queries.
     repeated LoadFieldConfig preload_fields = 6;
     // Desired replicas and their resource-group constraints; node placement belongs to QueryView.

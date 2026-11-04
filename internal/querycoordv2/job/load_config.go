@@ -26,8 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -92,9 +90,8 @@ type ExpectedLoadConfig struct {
 	ExpectedPartitionIDs             []int64
 	ExpectedReplicaNumber            map[string]int // map resource group name to replica number in resource group
 	ExpectedFieldIndexID             map[int64]int64
-	ExpectedLoadFields               []int64
-	ExpectedLoadAllFields            *bool
-	ExpectedSkipLoadDynamicField     bool
+	ExpectedLoadFields               []int64 // Explicit preloads, already resolved by the request adapter.
+	ExpectedRequiredFields           []*messagespb.LoadFieldConfig
 	ExpectedPriority                 commonpb.LoadPriority
 	ExpectedUserSpecifiedReplicaMode bool
 }
@@ -195,14 +192,9 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		CollectionId:             req.CollectionInfo.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
-		RequiredFields:           loadmgr.FieldsToMessage(qviews.ResolveRequiredFields(req.CollectionInfo.GetSchema(), nil)),
+		RequiredFields:           req.Expected.ExpectedRequiredFields,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
-	}
-	// Empty preload hints follow the bound schema. A dynamic-field exclusion
-	// is already resolved into the explicit field list by Proxy.
-	if req.Expected.ExpectedLoadAllFields != nil && *req.Expected.ExpectedLoadAllFields && !req.Expected.ExpectedSkipLoadDynamicField {
-		header.LoadFields = nil
 	}
 	// check if the load configuration is changed; nothing to broadcast if not.
 	if previousHeader := req.Current.IntoLoadConfigMessageHeader(); proto.Equal(previousHeader, header) {

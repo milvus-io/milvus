@@ -2520,11 +2520,11 @@ type AlterLoadConfigMessageHeader struct {
 	DbId                     int64                `protobuf:"varint,1,opt,name=db_id,json=dbId,proto3" json:"db_id,omitempty"`
 	CollectionId             int64                `protobuf:"varint,2,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`                                         // the collection id that has to be loaded.
 	PartitionIds             []int64              `protobuf:"varint,3,rep,packed,name=partition_ids,json=partitionIds,proto3" json:"partition_ids,omitempty"`                                  // the partition ids that has to be loaded, empty means no partition has to be loaded.
-	LoadFields               []*LoadFieldConfig   `protobuf:"bytes,4,rep,name=load_fields,json=loadFields,proto3" json:"load_fields,omitempty"`                                                // Preload hints; empty follows the target schema. Does not restrict queries.
+	LoadFields               []*LoadFieldConfig   `protobuf:"bytes,4,rep,name=load_fields,json=loadFields,proto3" json:"load_fields,omitempty"`                                                // Explicit preload set; empty means none. Always a subset of required_fields.
 	Replicas                 []*LoadReplicaConfig `protobuf:"bytes,5,rep,name=replicas,proto3" json:"replicas,omitempty"`                                                                      // the replicas that has to be loaded.
 	UserSpecifiedReplicaMode bool                 `protobuf:"varint,6,opt,name=user_specified_replica_mode,json=userSpecifiedReplicaMode,proto3" json:"user_specified_replica_mode,omitempty"` // whether the replica mode is user specified.
 	UseLocalReplicaConfig    bool                 `protobuf:"varint,7,opt,name=use_local_replica_config,json=useLocalReplicaConfig,proto3" json:"use_local_replica_config,omitempty"`          // when true, use local cluster-level replica config instead of the replicas field above.
-	RequiredFields           []*LoadFieldConfig   `protobuf:"bytes,8,rep,name=required_fields,json=requiredFields,proto3" json:"required_fields,omitempty"`                                    // Internal, explicit nonempty query field scope. Never inferred from preload hints.
+	RequiredFields           []*LoadFieldConfig   `protobuf:"bytes,8,rep,name=required_fields,json=requiredFields,proto3" json:"required_fields,omitempty"`                                    // Explicit allowed query field scope; empty means none. Never inferred from load_fields.
 }
 
 func (x *AlterLoadConfigMessageHeader) Reset() {

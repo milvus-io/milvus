@@ -57,6 +57,7 @@ func TestQueryViewReadyAfterOlderSchemaPreparation(t *testing.T) {
 				if meta.GetSchemaVersion() == 3 || oldHasBM25 {
 					next.Schema = fieldTestSchema(meta.GetSchemaVersion(), 102)
 				}
+				next.RequiredFields = testRequiredFields(next.Schema)
 				capture(next)
 				return true
 			}

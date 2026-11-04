@@ -324,17 +324,17 @@ materialization with such projections.
 LoadScope is independent of Schema. It distinguishes the logical field set a View
 may access, supporting physical dependencies, and eager/lazy loading policy.
 Having a cached physical column does not authorize a View to access it. The
-internal `required_fields` list is explicit and nonempty; legacy input is
-normalized before publication. QN rejects snapshots missing this list rather
-than deriving it from the bound schema. Snapshot partition IDs are authoritative,
-including an empty list; QN does not reconstruct them from its local View.
-User `load_fields` is only a preload hint, with
-empty hints following the bound target schema. Fields outside a nonempty hint
-remain accessible within required fields through prepared lazy-loading entries.
-ALTER adds columns to required fields but not to explicit hints. Neither hints
-nor internal physical dependencies expand logical access. PK, TTL inputs,
-StructArray offsets/validity and Function dependencies are included as required;
-BM25 output availability does not imply eagerly loading its raw column.
+internal `required_fields` list is explicit; empty means no user fields. QN
+preserves the snapshot without deriving a scope from Schema. Snapshot partition
+IDs are authoritative, including an empty list; QN does not reconstruct them
+from its local View. Coordinator also materializes the `preload_fields` subset;
+empty means no user preloads, not the bound Schema's defaults. Required fields
+outside preloads remain queryable through prepared on-demand entries. ALTER
+preserves surviving fields' preload choices and applies each new field's own
+Schema default. PK/TTL dependencies can be eager within the required scope but
+cannot expand it. Neither hints nor cached physical resources grant additional
+logical access. BM25 output availability does not imply eagerly loading its raw
+column.
 Partition selection remains at the View/task layer.
 Physical RowNum statistics count inserted rows minus Delete and do not interpret
 View TTL. Sealed delete application deduplicates fixed row offsets; statistics

@@ -31,7 +31,7 @@ func newBM25StatsFromSchema(schema *schemapb.CollectionSchema, loadedFields []in
 			continue
 		}
 		fieldID := function.GetOutputFieldIds()[0]
-		if len(loadedFields) > 0 && !slices.Contains(loadedFields, fieldID) {
+		if !slices.Contains(loadedFields, fieldID) {
 			continue
 		}
 		stats.getOrCreate(fieldID)

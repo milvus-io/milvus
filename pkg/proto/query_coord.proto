@@ -270,10 +270,9 @@ message LoadCollectionRequest {
     bool refresh = 7;
     // resource group names
     repeated string resource_groups = 8;
+    // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
-    optional bool load_all_fields = 11;
-    bool skip_load_dynamic_field = 12;
 }
 
 message ReleaseCollectionRequest {
@@ -304,10 +303,9 @@ message LoadPartitionsRequest {
     // resource group names
     repeated string resource_groups = 9;
     repeated index.IndexInfo index_info_list = 10;
+    // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
-    optional bool load_all_fields = 13;
-    bool skip_load_dynamic_field = 14;
 }
 
 message ReleasePartitionsRequest {
@@ -1259,9 +1257,9 @@ message GetQueryViewLoadInfoResponse {
     int64 collectionID = 2;
     uint64 version = 3;
     repeated int64 partitionIDs = 4;
-    repeated view.LoadFieldConfig load_fields = 5;
+    repeated view.LoadFieldConfig load_fields = 5; // Explicit preload set within required_fields; empty means none.
     repeated index.IndexInfo index_info_list = 6;
-    repeated view.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+    repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
 }
 
 message EnsureCollectionReadyRequest {

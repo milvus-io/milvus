@@ -80,7 +80,7 @@ func (b *readSchemaBinding) Prepare(ctx context.Context, provider LoadInfoProvid
 		if err != nil {
 			return err
 		}
-		view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, info.RequiredFields)
+		view.RequiredFields = info.RequiredFields
 		view.IndexInfos = info.IndexInfos
 	}
 	schema, err := b.module.pool.acquire(ctx, view, b.meta.GetLoadInfoVersion())
@@ -89,7 +89,7 @@ func (b *readSchemaBinding) Prepare(ctx context.Context, provider LoadInfoProvid
 	}
 	// Runner initialization may read external resources. The acquired guard keeps
 	// its schema alive without holding the shared collection registry lock.
-	for _, field := range qviews.ResolveRequiredFields(view.Schema, view.RequiredFields) {
+	for _, field := range view.RequiredFields {
 		if _, err := function.GetManager().RunWithRunner(ctx, view.CollectionID, schema.functionKey, field.GetFieldId(), func(function.FunctionRunner) error { return nil }); err != nil {
 			b.module.pool.release(schema)
 			return err
