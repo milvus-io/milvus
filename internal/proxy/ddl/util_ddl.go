@@ -925,7 +925,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		for _, field := range structArrayField.Fields {
 			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 			if err != nil {
-				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s.%s must be a boolean", common.FieldSkipLoadKey, structArrayField.GetName(), field.GetName())
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 			}
 			if shouldLoad {
 				if typeutil.IsVectorType(field.ElementType) {

@@ -94,7 +94,8 @@ def test_proxy_invalid_skip_load(parameter_error_client, in_struct):
             db_name=env.db_name, collection_name=env.name, schema=schema.SerializeToString()
         ),
     )
-    assert_input_error(status, "field.skipLoad", "items.payload" if in_struct else "payload", "invalid_bool")
+    field_name = "items[payload]" if in_struct else "payload"
+    assert_input_error(status, "field.skipLoad", f"of field {field_name} must be a boolean", "invalid_bool")
 
 
 @pytest.mark.parametrize("add_field", [False, True])

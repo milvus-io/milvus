@@ -211,6 +211,7 @@ func TestValidateLoadFieldsListInvalidSkipLoad(t *testing.T) {
 				}
 			}
 
+			require.NoError(t, transformStructFieldNames(schema))
 			err := validateLoadFieldsList(schema)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.ErrorIs(t, err, strconv.ErrSyntax)
@@ -224,9 +225,7 @@ func TestValidateLoadFieldsListInvalidSkipLoad(t *testing.T) {
 			assert.Contains(t, status.GetReason(), common.FieldSkipLoadKey)
 			assert.Contains(t, status.GetReason(), field.GetName())
 			assert.Contains(t, status.GetReason(), parseErr.Error())
-			if inStruct {
-				assert.Contains(t, status.GetReason(), "items.payload")
-			}
+			assert.Contains(t, status.GetReason(), fmt.Sprintf("of field %s must be a boolean", field.GetName()))
 		})
 	}
 }
