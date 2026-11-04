@@ -3361,6 +3361,13 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	}
 	defer broadcaster.Close()
 
+	var opts []message.OptBuildBroadcast
+	if job.GetCommitByCoordinator() {
+		// Consumer ACK follows query MVCC publication, so the callback cannot
+		// expose imported segments before their commit timestamp is queryable.
+		opts = append(opts, message.OptBuildBroadcastAckSyncUp())
+	}
+
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
 			CollectionId:        job.GetCollectionID(),
@@ -3368,7 +3375,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 			CommitByCoordinator: job.GetCommitByCoordinator(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
-		WithBroadcast(vchannels).
+		WithBroadcast(vchannels, opts...).
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)

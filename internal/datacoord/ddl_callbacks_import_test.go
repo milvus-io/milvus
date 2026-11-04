@@ -1368,6 +1368,8 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 		assert.NoError(t, err)
 		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
 		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+		assert.Equal(t, coordinator, msg.BroadcastHeader().AckSyncUp,
+			"coordinator commits wait for query MVCC publication; legacy commits retain FastAck")
 	}
 }
 

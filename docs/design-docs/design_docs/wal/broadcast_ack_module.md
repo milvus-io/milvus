@@ -162,7 +162,12 @@ part of the truncate flow.
 Import, CommitImport, and RollbackImport broadcast to the business VChannels
 plus CChannel. Business-channel append results supply their own commit fences;
 CChannel supplies the common ordering point for replicated callbacks. These
-messages do not request AckSyncUp: durable WAL append can FastAck the broadcast.
+Import and RollbackImport can FastAck after durable WAL append. Coordinator-owned
+CommitImport requests AckSyncUp: query MVCC publication precedes consumer ACK,
+which must precede the callback publishing imported segments in DataView. This
+applies to both explicit CommitImport RPCs and automatic import commits. Legacy
+consumer-owned CommitImport retains FastAck so its callback can enter Committing
+before the consumer calls HandleCommitVchannel.
 
 New Import messages set `commit_by_coordinator=true` in ImportHeader. The Import
 callback persists this choice in ImportJob, and CommitImportHeader inherits it.

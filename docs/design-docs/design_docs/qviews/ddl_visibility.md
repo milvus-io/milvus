@@ -177,8 +177,12 @@ internal/views/coord/resource/resource.go; internal/views/coord/loadstatus/wait.
 
 ## Import completion and serving readiness
 
-CommitImport completes the storage publication, not the query-node load. Its full
-ACK callback persists Committing, applies each business channel's commit TimeTick
+CommitImport completes the storage publication, not the query-node load.
+Coordinator-owned jobs use AckSyncUp: query MVCC publication precedes consumer
+ACK, so the callback cannot publish imported segments ahead of their Transform
+query frontier. Legacy consumer-owned jobs retain FastAck because their consumer
+commit depends on the callback first entering Committing. The full ACK callback
+persists Committing, applies each business channel's commit TimeTick
 to the imported segments, synchronously publishes their DataView, then persists
 Completed. The existing collection broadcast resource lock serializes these
 publications. Persistence failures retry in Committing; no QueryView Up wait is
