@@ -24,6 +24,7 @@
 
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "index/Families.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/ISpatialReader.h"
@@ -93,6 +94,10 @@ struct ExprIndexRequirement {
     // Projected JSON distinguishes a scalar cast from an array-element cast
     // even when both expose the same scalar value type.
     bool json_array_cast{false};
+
+    // Typed ARRAY projections need persisted missing/null/non-array validity
+    // when stats provide an exact fallback. Only SORT preserves it on reload.
+    bool requires_exact_json_array_validity{false};
 
     // Int64 JSON literals at or beyond +/-2^53 can alias in DOUBLE projections.
     // Require a field-level JSON router (flat) that keeps integer precision.
@@ -295,6 +300,9 @@ DetermineExecPath(const ExprIndexRequirement& req,
         const bool needs_refine =
             index_path_detail::NeedsCandidateRefine(req.reader, entry.caps);
         if (entry.key.field_id != req.field_id ||
+            (req.requires_exact_json_array_validity &&
+             !index_path_detail::IsFlatJsonIndex(entry) &&
+             entry.family != index::families::kSort) ||
             (req.requires_flat_json_index &&
              !index_path_detail::IsFlatJsonIndex(entry)) ||
             !index_path_detail::ReaderMatches(req, entry) ||
