@@ -119,9 +119,9 @@ does not read ParamTable directly.
 |---|---|---|
 | `queryView.balancer.optimization.enabled` | `true` | Enables MayOptimize on both event-triggered and periodic reconciles; mandatory placement, recovery, replica isolation, and releases continue when false. |
 | `queryView.balancer.reconcileInterval` | `1m` | Positive duration between periodic reconciles. Lower values increase optimization/check frequency and CPU overhead; higher values reduce scans. Event-triggered work is independent. |
-| `queryView.balancer.targetRowsPerShardNode` | `100000` | Positive rows used to derive free shard fanout. Increasing favors fewer nodes; decreasing increases the free allowance. Not a node capacity limit. |
+| `queryView.balancer.scoring.targetLogicalSizePerNode` | `100000` | Positive logical-size scale for preferred fanout and collection concentration. Increasing favors fewer nodes; decreasing favors spreading. Not a node capacity limit. |
 
-The row-equivalent scoring parameters and retired keys are listed in
+The active scoring and optimization parameters are listed in
 [the current configuration table](balancer_scoring.md#35-configuration).
 
 All settings are owned by `ComponentParam.QueryViewCfg`, defined in
@@ -715,7 +715,7 @@ Fanout is a one-time cost for opening another QueryNode for this shard:
 FanoutBudget = min(
     EligibleNodeCount,
     SegmentCount,
-    max(1, ceil(ShardTotalRows / TargetRowsPerShardNode)),
+    max(1, ceil(ShardTotalRows / RowsPerNodeScale)),
 )
 ```
 
@@ -751,14 +751,15 @@ relative contribution; they are not normalization constants. A reusable
 segment moves only when the weighted node-load and fanout benefit exceeds its
 weighted stickiness loss.
 
-The production calibration is:
+This historical normalized-score example uses the following fixed calibration;
+these names are formula symbols, not active configuration keys:
 
 ```text
 StickinessWeight       = 1
 NodeLoadWeight         = 1
 FanoutWeight           = 1
 StickyRowsScale        = 1,000,000 rows
-TargetRowsPerShardNode = 100,000 rows
+RowsPerNodeScale       = 100,000 rows
 ```
 
 These defaults intentionally give the two full-point penalties strong boundary

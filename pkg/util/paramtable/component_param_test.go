@@ -643,42 +643,6 @@ func TestComponentParam_QueryViewConcurrency(t *testing.T) {
 	}
 }
 
-func TestComponentParam_QueryViewFullReconsileInterval(t *testing.T) {
-	Init()
-	params := Get()
-	item := &params.QueryCoordCfg.QueryViewFullReconsileInterval
-	params.Reset(item.Key)
-	t.Cleanup(func() { params.Reset(item.Key) })
-
-	assert.Equal(t, "queryCoord.queryView.fullReconsileInterval", item.Key)
-	assert.Equal(t, "10", item.DefaultValue)
-	assert.True(t, item.Export)
-	assert.Equal(t, 10*time.Second, item.GetAsDuration(time.Second))
-	params.Save(item.Key, "300")
-	assert.Equal(t, 5*time.Minute, item.GetAsDuration(time.Second))
-	params.Save(item.Key, "0")
-	assert.Equal(t, time.Second, item.GetAsDuration(time.Second))
-}
-
-func TestComponentParam_QueryViewTargetRowsPerShardNode(t *testing.T) {
-	Init()
-	params := Get()
-	item := &params.QueryCoordCfg.QueryViewTargetRowsPerShardNode
-	params.Reset(item.Key)
-	t.Cleanup(func() { params.Reset(item.Key) })
-
-	assert.Equal(t, "queryCoord.queryView.targetRowsPerShardNode", item.Key)
-	assert.Equal(t, "100000", item.DefaultValue)
-	assert.True(t, item.Export)
-	assert.EqualValues(t, 100_000, item.GetAsInt64())
-	assert.NoError(t, params.Save(item.Key, "250000"))
-	assert.EqualValues(t, 250_000, item.GetAsInt64())
-	assert.NoError(t, params.Save(item.Key, "0"))
-	assert.EqualValues(t, 100_000, item.GetAsInt64())
-	assert.NoError(t, params.Save(item.Key, "invalid"))
-	assert.EqualValues(t, 100_000, item.GetAsInt64())
-}
-
 func TestComponentParam(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))

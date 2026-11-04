@@ -25,8 +25,10 @@ execution. Improve three distinct placement objectives:
 3. Spread large shard replicas, and distribute a large collection replica even
    when it consists of many small shards.
 
-RowNum remains the load metric and nodes are assumed homogeneous. Balanced rows
-do not imply balanced bytes, memory capacity, CPU, or query traffic. RG membership
+Published LogicalSize is the load metric and nodes are assumed homogeneous.
+`queryView.logicalSize.source` selects physical row counts or normalized insert
+bytes; `queryView.logicalSize.segmentBaseCost` adds a fixed cost per segment.
+Balanced logical size does not imply balanced memory capacity, CPU, or query traffic. RG membership
 is owned upstream; the policy does not move data across an RG boundary to fix
 skew. A node reassignment invalidates both affected RGs.
 
@@ -50,7 +52,8 @@ existing legal assignments, and separates intended load from resource residency.
 
 ## 3. Placement Objective
 
-All penalty terms below have units of rows; their weights are dimensionless.
+All penalty terms below use published logical-size units; their weights are
+dimensionless. Row-based examples assume the default `rowCount` source.
 They are not independently clipped to [0, 1]. Compute before/after values using
 the same pinned configuration, demand, topology, and normalization parameters.
 Earlier accepted candidates update the batch's projected placement.
@@ -136,13 +139,13 @@ This is a soft placement cost, not a hard node-count cap.
 ```text
 E(P) = wG * G(P) + wS * sum_s H_s(P) + wC * sum_c H_c(P) + wF * F(P)
 
-Cost(P -> P') = movePrice * MovedRows + loadPrice * AdditionalLoadRows
+Cost(P -> P') = MoveCostPerUnit * MovedLogicalSize + LoadCostPerUnit * AdditionalLoadLogicalSize
 Score(P -> P') = E(P) - E(P') - Cost(P -> P')
 ```
 
-MovedRows counts final placement changes relative to the candidate's baseline.
-AdditionalLoadRows counts missing compatible destination resources, deduplicated
-by destination and materialization identity for that candidate. These are row
+MovedLogicalSize counts final placement changes relative to the candidate's baseline.
+AdditionalLoadLogicalSize counts missing compatible destination resources, deduplicated
+by destination and materialization identity for that candidate. These are logical-size
 estimates, not measured I/O. A reusable destination can avoid loading cost while
 still incurring movement cost. Do not count temporary search intermediates as
 executed moves. Unknown compatibility receives no guaranteed reuse discount.
@@ -167,36 +170,37 @@ Weights and cost prices are finite and nonnegative, Q is positive, and at least
 one objective weight must be positive. All four objectives are enabled by
 default. A zero weight explicitly disables that objective; the Optional RG guard
 remains in force. Configuration is pinned once per batch, with invalid updates
-retaining the last valid complete profile. The new row-equivalent parameters do
-not reinterpret the old normalized-score keys.
+retaining the last valid complete profile. The logical-size scoring parameters are independent of the historical
+normalized-score example.
 
 ### 3.5 Configuration
 
-The following keys are relative to `queryView.balancer.scoring`:
+The following keys are relative to `queryView.balancer`. The definitions in
+`pkg/util/paramtable/query_view_param.go` and `configs/milvus.yaml` are authoritative.
 
 | Key | Default | Adjustment effect |
 |---|---:|---|
-| `globalWeight` | `1` | Higher values favor reducing RG row skew |
-| `shardWeight` | `1` | Higher values favor spreading rows of a large shard |
-| `collectionWeight` | `1` | Higher values favor spreading a collection replica, including many small shards |
-| `fanoutPenaltyWeight` | `1` | Higher values penalize nodes beyond preferred shard fanout more strongly |
-| `movePrice` | `0.02` | Higher values require greater benefit before changing an assignment, even with reuse |
-| `loadPrice` | `0.08` | Higher values discourage destinations without confirmed compatible resources |
-| `relativeTolerance` | `0.1` | Higher values widen the RG balance band relative to mean demand |
-| `absoluteToleranceRows` | `100000` | Higher values tolerate more absolute skew, avoiding low-volume scattering |
-| `localTolerance` | `0.1` | Higher values tolerate greater shard and collection-replica concentration |
-| `fanoutHysteresis` | `0.1` | Higher values require larger row changes before adjusting preferred fanout |
-| `minGainRows` | `1` | Higher values suppress small net improvements |
-| `maxCandidateEvaluations` | `100000` | Lower values yield Optional search earlier and schedule continuations |
+| `reconcileInterval` | `1m` | Positive duration with a unit; controls periodic reconciliation independently of events |
+| `optimization.enabled` | `true` | Enables optional optimization; mandatory recovery and version updates remain active |
+| `optimization.minScoreGain` | `1` | Higher values suppress small net improvements |
+| `optimization.maxCandidateEvaluationsPerShard` | `100000` | Lower values yield optional search earlier and schedule continuations |
+| `scoring.targetLogicalSizePerNode` | `100000` | Concentration scale Q in logical-size units; higher values favor fewer participants |
+| `scoring.resourceGroup.weight` | `1` | Higher values favor reducing RG logical-size skew |
+| `scoring.resourceGroup.relativeTolerance` | `0.1` | Higher values widen the RG balance band relative to mean demand |
+| `scoring.resourceGroup.absoluteTolerance` | `100000` | Higher values tolerate more absolute logical-size skew at low volume |
+| `scoring.concentration.shardWeight` | `1` | Higher values favor spreading a large shard |
+| `scoring.concentration.collectionWeight` | `1` | Higher values favor spreading a collection replica, including many small shards |
+| `scoring.concentration.relativeTolerance` | `0.1` | Higher values tolerate greater shard and collection-replica concentration |
+| `scoring.fanout.weight` | `1` | Higher values penalize nodes beyond preferred shard fanout more strongly |
+| `scoring.fanout.hysteresis` | `0.1` | Higher values require larger logical-size changes before adjusting preferred fanout |
+| `scoring.movement.moveCostPerUnit` | `0.02` | Higher values require greater benefit before changing an assignment, even with reuse |
+| `scoring.movement.loadCostPerUnit` | `0.08` | Higher values discourage destinations without confirmed compatible resources |
 
-`queryView.balancer.targetRowsPerShardNode` remains Q, default `100000` rows.
-Increasing it favors concentration and raises the collection-replica floor.
-`autoBalance` remains true and `reconcileInterval` remains `1m`.
-The retired `stickinessWeight`, `nodeLoadWeight`, `fanoutWeight`, and
-`stickyRowsScale` keys have no aliases: their old units cannot map directly to
-this objective. ParamTable comments and `configs/milvus.yaml` describe each
-setting's effect. These initial defaults pass deterministic placement scenarios;
-production workload calibration is still required.
+Increasing Q raises the preferred concentration scale and collection-replica
+floor. Duration values include units, for example `1m` or `500ms`. These settings
+are owned by `ComponentParam.QueryViewCfg`; QueryCoord's legacy balance switch
+does not control this policy. These initial defaults pass deterministic placement
+scenarios; production workload calibration is still required.
 
 ### 3.6 Quantitative Example
 
