@@ -317,6 +317,39 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	return params
 }
 
+// backgroundManifestIndexRecovery runs reloadSegmentIndexesFromManifests in the
+// background during startup.
+type backgroundManifestIndexRecovery struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
+}
+
+// startManifestIndexRecovery starts recovering m's segment indexes from
+// segment manifests. The caller must call wait before it uses the indexes, or
+// abort when it gives up on m.
+func startManifestIndexRecovery(ctx context.Context, m *meta) *backgroundManifestIndexRecovery {
+	ctx, cancel := context.WithCancel(ctx)
+	r := &backgroundManifestIndexRecovery{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(r.done)
+		r.err = m.reloadSegmentIndexesFromManifests(ctx)
+	}()
+	return r
+}
+
+// wait returns the error of the recovery once it has finished.
+func (r *backgroundManifestIndexRecovery) wait() error {
+	<-r.done
+	return r.err
+}
+
+// abort cancels the recovery if it is still running and waits for it to stop.
+func (r *backgroundManifestIndexRecovery) abort() {
+	r.cancel()
+	<-r.done
+}
+
 // reloadSegmentIndexesFromManifests rebuilds completed index records from
 // retained StorageV3 manifests marked manifest_has_index. Dropped compaction
 // parents still need their indexes for query fallback and orphan-GC protection.

@@ -161,7 +161,13 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			})
 			err := server.initMeta(cm)
 			require.Equal(t, 1, showIDs.Times())
-			require.Equal(t, 1, reads[good])
+			if mode == "dataview-failure" {
+				// A later phase that fails first cancels the manifest scan, which
+				// may not have read every manifest yet; none is read twice.
+				require.LessOrEqual(t, reads[good], 1)
+			} else {
+				require.Equal(t, 1, reads[good])
+			}
 			if mode == "transient" || mode == "collection-reload" || mode == "dataview-reload" {
 				require.NoError(t, err)
 				require.NotNil(t, server.meta)
@@ -183,10 +189,14 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				require.Nil(t, server.meta)
 				require.Nil(t, server.dataViewManager)
 				require.False(t, retry.IsRecoverable(err))
-				if mode == "invalid" || mode == "dataview-failure" {
+				switch mode {
+				case "invalid":
 					require.ErrorIs(t, err, merr.ErrDataIntegrity)
 					require.Equal(t, 1, reads[bad])
-				} else {
+				case "dataview-failure":
+					require.ErrorIs(t, err, merr.ErrDataIntegrity)
+					require.LessOrEqual(t, reads[bad], 1)
+				default:
 					require.Equal(t, 3, reads[bad])
 				}
 			}

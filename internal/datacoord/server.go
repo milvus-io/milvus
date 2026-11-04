@@ -756,7 +756,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
+		recoveredMeta, err = newMetaWithoutManifestIndexes(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -767,8 +767,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.closeManifestCommitExecutor()
 		}
 	}()
+	// Recover the segment indexes recorded in segment manifests while the
+	// collection and DataView phases below run: it needs only the recovered
+	// segments and index meta, and neither phase reads the index meta or the
+	// manifest markers it clears. Publication waits for it. Declared after the
+	// executor cleanup so that it is joined first.
+	manifestIndexes := startManifestIndexRecovery(s.ctx, recoveredMeta)
+	defer manifestIndexes.abort()
 	// Retry each recovery phase independently: a later metadata error must
-	// not repeat newMeta's successful object-storage manifest scan.
+	// not repeat the successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
 		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -808,6 +815,11 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
+	}
+	if err := manifestIndexes.wait(); err != nil {
+		// Object-store reads have already retried per segment. Retrying
+		// initMeta would reread every successful manifest.
+		return retry.Unrecoverable(err)
 	}
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
