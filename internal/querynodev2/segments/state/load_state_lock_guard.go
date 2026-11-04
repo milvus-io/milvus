@@ -22,15 +22,16 @@ type loadStateLockGuard struct {
 
 // Done updates the state of LoadState to target state.
 func (g *loadStateLockGuard) Done(err error) {
-	g.ls.cv.L.Lock()
-	g.ls.cv.Broadcast()
-	defer g.ls.cv.L.Unlock()
+	g.ls.mu.Lock()
+	defer g.ls.mu.Unlock()
 
 	if err != nil {
 		g.ls.state = g.original
+		g.ls.notifyLocked()
 		return
 	}
 	g.ls.state = g.target
+	g.ls.notifyLocked()
 }
 
 // newNopLoadStateLockGuard creates a LoadStateLockGuard that does nothing.

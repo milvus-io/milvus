@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
+	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -243,6 +244,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			// otelgrpc.UnaryServerInterceptor(opts...),
 			mlog.UnaryServerInterceptor(typeutil.QueryNodeRole),
+			streamingserviceinterceptor.NewServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -254,6 +256,7 @@ func (s *Server) startGrpcLoop() {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			// otelgrpc.StreamServerInterceptor(opts...),
 			mlog.StreamServerInterceptor(typeutil.QueryNodeRole),
+			streamingserviceinterceptor.NewServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -268,6 +271,7 @@ func (s *Server) startGrpcLoop() {
 	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("QueryNode"))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
+	s.registerQueryViewServers()
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()

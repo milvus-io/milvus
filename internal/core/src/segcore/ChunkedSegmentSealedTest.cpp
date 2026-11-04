@@ -59,6 +59,8 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
+#include "exec/QueryContext.h"
+#include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -78,6 +80,8 @@
 #include "query/PlanImpl.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/Collection.h"
+#include "segcore/segment_c.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
@@ -578,6 +582,197 @@ TEST(test_chunk_segment, PinnedFillTargetEntryMatchesUnpinned) {
               unpinned.search_storage_cost_.scanned_total_bytes);
 }
 
+TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
+    constexpr int64_t row_count = 16;
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+    auto segment = CreateColdVectorOutputSegment(schema, vector_id, row_count);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(primary, nullptr);
+    auto retained = primary->PinReadState();
+    auto primary_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        primary->CaptureReadSnapshot());
+    auto retained_state = segcore::ChunkedSegmentSealedImpl::ToPublishedState(
+        retained->CaptureReadSnapshot());
+    EXPECT_EQ(primary_state, retained_state);
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {pk_id, scalar_id};
+    auto before = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, before);
+    primary->DropFieldData(scalar_id);
+    EXPECT_FALSE(primary->HasFieldData(scalar_id));
+    EXPECT_TRUE(retained->HasFieldData(scalar_id));
+    auto after = MakeSearchResult({0, 3});
+    retained->TestFillTargetEntry(&plan, after);
+    EXPECT_EQ(before.output_fields_data_.at(scalar_id)->SerializeAsString(),
+              after.output_fields_data_.at(scalar_id)->SerializeAsString());
+
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        before.output_fields_data_.at(pk_id)->scalars().long_data().data(0));
+    Timestamp delete_ts = primary->get_max_timestamp() + 100;
+    primary->Delete(1, &ids, &delete_ts);
+    EXPECT_EQ(primary->get_deleted_count(), 1);
+    EXPECT_EQ(retained->get_deleted_count(), 1);
+}
+
+TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl = schema->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    auto layout = std::make_shared<const segcore::SealedFieldLayout>(
+        schema, segcore::LoadScope({pk.get(), value.get()}));
+    segcore::ChunkedSegmentSealedImpl physical(
+        layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
+    auto read = physical.PinReadState();
+    EXPECT_TRUE(layout->ShouldLoadField(ttl));
+    EXPECT_NO_THROW(read->ValidateLogicalFields({pk, value}));
+    EXPECT_THROW(read->ValidateLogicalFields({ttl}), SegcoreError);
+
+    // Sharing physical columns must not select the query's TTL policy.
+    auto no_ttl = std::make_shared<Schema>();
+    no_ttl->AddDebugField("pk", DataType::INT64);
+    no_ttl->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    no_ttl->AddDebugField("value", DataType::INT64);
+    no_ttl->set_primary_field_id(pk);
+    exec::QueryContext old_view("old", read.get(), 0, 100);
+    exec::QueryContext new_view("new", read.get(), 0, 100);
+    old_view.set_read_schema(no_ttl);
+    new_view.set_read_schema(schema);
+    EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&old_view), nullptr);
+    EXPECT_NE(exec::CreateTTLFieldFilterExpression(&new_view), nullptr);
+}
+
+TEST(test_chunk_segment, SealedReadsRetainPreparingSchema) {
+    auto previous_snapshot_setting =
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.exchange(true);
+    auto restore_snapshot_setting = folly::makeGuard([&] {
+        ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.store(
+            previous_snapshot_setting);
+    });
+    auto preparing = std::make_shared<Schema>();
+    auto pk = preparing->AddDebugField("pk", DataType::INT64);
+    auto vector = preparing->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    preparing->set_primary_field_id(pk);
+    auto query_schema = std::make_shared<Schema>(*preparing);
+    std::weak_ptr<Schema> retired = preparing;
+    auto segment = CreateColdVectorOutputSegment(preparing, vector, 16);
+    auto* physical =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto read = physical->PinReadState();
+    preparing.reset();
+    ASSERT_FALSE(retired.expired());
+
+    query::Plan plan(query_schema);
+    plan.target_entries_ = {pk};
+    auto result = MakeSearchResult({0});
+    read->TestFillTargetEntry(&plan, result);
+    proto::schema::IDs ids;
+    ids.mutable_int_id()->add_data(
+        result.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    auto timestamp = physical->get_max_timestamp() + 100;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    // Replayed or repeated deletes count physical row offsets only once.
+    physical->Delete(1, &ids, &timestamp);
+    ++timestamp;
+    physical->Delete(1, &ids, &timestamp);
+    EXPECT_EQ(physical->get_real_count(), 15);
+    EXPECT_EQ(read->get_real_count(), 15);
+    EXPECT_FALSE(retired.expired());
+
+    // Historical replay after a streaming delete must be included immediately,
+    // even if a timestamped query bitmap snapshot predates the replay.
+    auto next = MakeSearchResult({1});
+    read->TestFillTargetEntry(&plan, next);
+    proto::schema::IDs historical;
+    historical.mutable_int_id()->add_data(
+        next.output_fields_data_.at(pk)->scalars().long_data().data(0));
+    LoadDeletedRecordInfo replay{&timestamp, &historical, 1};
+    physical->LoadDeletedRecord(replay);
+    physical->LoadDeletedRecord(replay);
+    EXPECT_EQ(physical->get_real_count(), 14);
+    EXPECT_EQ(read->get_real_count(), 14);
+
+    physical->ClearData();
+    EXPECT_EQ(physical->get_real_count(), 0);
+    EXPECT_EQ(read->get_real_count(), 14);
+    segment.reset();
+    EXPECT_FALSE(retired.expired());  // the retained read still owns its layout
+    read.reset();
+    EXPECT_TRUE(retired.expired());
+}
+
+TEST(test_chunk_segment, ReadStateForkPreparesEarlierSchemaIndependently) {
+    auto newer = std::make_shared<Schema>();
+    auto pk = newer->AddDebugField("pk", DataType::INT64);
+    auto vec = newer->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    newer->set_primary_field_id(pk);
+    newer->set_schema_version(2);
+    auto segment = CreateColdVectorOutputSegment(newer, vec, 16);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto retained = primary->PinReadState();
+    auto fork = retained->PinReadState();
+    auto older = std::make_shared<Schema>(*newer);
+    older->set_schema_version(1);
+    fork->Reopen(older);
+    EXPECT_EQ(fork->get_schema_snapshot()->get_schema_version(), 1);
+    EXPECT_EQ(retained->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(primary->get_schema_snapshot()->get_schema_version(), 2);
+    EXPECT_EQ(fork->get_row_count(), primary->get_row_count());
+}
+
+TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
+    struct ReadinessSegment : segcore::ChunkedSegmentSealedImpl {
+        using ChunkedSegmentSealedImpl::check_search;
+        using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+    };
+    auto old_schema = std::make_shared<Schema>();
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    auto new_schema = std::make_shared<Schema>(*old_schema);
+    auto added = new_schema->AddDebugField("added", DataType::INT64);
+
+    auto dataset = segcore::DataGen(new_schema, 5);
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto segment = std::make_unique<ReadinessSegment>(
+        new_schema,
+        empty_index_meta,
+        segcore::SegcoreConfig::default_config(),
+        kSegmentID);
+    segment->LoadFieldData(PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm));
+
+    query::Plan plan(old_schema);
+    plan.extra_info_opt_.emplace(pk.get() - START_USER_FIELDID + 1);
+    plan.extra_info_opt_->add_involved_field(pk);
+    ASSERT_NO_THROW(segment->check_search(&plan));
+
+    // Enlarging the request must not accidentally mark unprepared columns ready.
+    auto missing = FieldId(added.get() + 1);
+    auto future_schema = std::make_shared<Schema>(*new_schema);
+    future_schema->AddField(
+        FieldName("missing"), missing, DataType::INT64, false, std::nullopt);
+    query::Plan future_plan(future_schema);
+    future_plan.extra_info_opt_.emplace(missing.get() - START_USER_FIELDID + 1);
+    future_plan.extra_info_opt_->add_involved_field(missing);
+    EXPECT_THROW(segment->check_search(&future_plan), SegcoreError);
+}
+
 TEST(test_chunk_segment, ReopenSkipsFunctionOutputFieldWithoutData) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
@@ -824,13 +1019,13 @@ TEST(test_chunk_segment,
     auto publish_replacement = [&] {
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         segcore::ChunkedSegmentSealedImpl::StateDelta initial;
-        initial.schema = schema;
+        initial.fields = current->fields;
         initial.load_info = current->load_info;
         initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
         initial.commit_ts = current->commit_ts;
         auto staged = sealed->TestBuildNextPublishedState(current, initial);
         segcore::ChunkedSegmentSealedImpl::StateDelta final;
-        final.schema = schema;
+        final.fields = current->fields;
         final.load_info = current->load_info;
         final.commit_ts = current->commit_ts;
         const auto calls_before_publish = probe->calls;
@@ -1241,7 +1436,10 @@ TEST(test_chunk_segment,
         segcore::SegmentLoadInfo info(StructProviderLoadInfo(stored, 3),
                                       schema);
         segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
-            *schema, info, "items");
+            segcore::SealedFieldLayout(
+                schema, segcore::LoadScope::FromLegacySchema(*schema)),
+            info,
+            "items");
     };
     try {
         check({100, 102});
@@ -1268,7 +1466,10 @@ TEST(test_chunk_segment, StructProviderCheckIgnoresIndexOnlyFields) {
         // this test would not cover the index-only field.
         ASSERT_TRUE(info.FieldIndexHasRawData(FieldId(104)));
         segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
-            *schema, info, "items");
+            segcore::SealedFieldLayout(
+                schema, segcore::LoadScope::FromLegacySchema(*schema)),
+            info,
+            "items");
     };
     EXPECT_NO_THROW(check({100}, {104}));
     // A row column of a dropped sub-field still fails, index or not.
@@ -1481,6 +1682,82 @@ TEST(test_chunk_segment,
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
     EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
     EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
+}
+
+TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto left = schema->AddDebugField("left", DataType::INT64);
+    auto right = schema->AddDebugField("right", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto schema_proto = schema->ToProto();
+    segcore::Collection collection(&schema_proto);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(16);
+    auto blob = info.SerializeAsString();
+    for (const auto& fields : {std::vector<int64_t>{pk.get(), left.get()},
+                               std::vector<int64_t>{pk.get(), right.get()}}) {
+        CSegmentInterface raw = nullptr;
+        auto status = NewSealedSegmentWithCollection(
+            &collection,
+            1,
+            &raw,
+            false,
+            reinterpret_cast<const uint8_t*>(blob.data()),
+            blob.size(),
+            fields.data(),
+            fields.size());
+        ASSERT_EQ(status.error_code, 0);
+        std::unique_ptr<segcore::SegmentInterface> segment(
+            static_cast<segcore::SegmentInterface*>(raw));
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        auto loaded_schema = sealed->get_schema_snapshot();
+        EXPECT_TRUE(loaded_schema->IsFieldInLoadScope(FieldId(fields[1])));
+        EXPECT_FALSE(loaded_schema->IsFieldInLoadScope(
+            fields[1] == left.get() ? right : left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(left));
+        EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(right));
+    }
+}
+
+TEST(test_chunk_segment, ReadStateLoadScopeReleasesStructOffsets) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto label =
+        schema->AddDebugArrayField("chunks[label]", DataType::VARCHAR, true);
+    auto score =
+        schema->AddDebugArrayField("chunks[score]", DataType::INT32, true);
+    auto dataset = segcore::DataGen(schema, 5, 42, 0, 1, 3);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* primary =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto old = primary->PinReadState();
+    auto offsets = old->GetStructElementOffsets(label);
+    ASSERT_NE(offsets, nullptr);
+    std::weak_ptr<typename decltype(offsets)::element_type> retired = offsets;
+    offsets.reset();
+
+    // QueryViews bind required fields explicitly; legacy Schema load fields
+    // only control preloading and do not remove fields from the layout.
+    auto target = std::make_shared<const segcore::SealedFieldLayout>(
+        schema, segcore::LoadScope({pk.get()}));
+    auto narrowed = primary->PinReadState();
+    narrowed->Reopen(target);
+    EXPECT_EQ(narrowed->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(narrowed->GetStructElementOffsets(score), nullptr);
+    EXPECT_EQ(old->GetStructElementOffsets(label), retired.lock());
+    EXPECT_EQ(old->GetStructElementOffsets(score), retired.lock());
+    EXPECT_TRUE(schema->IsFieldInLoadScope(label));
+    EXPECT_TRUE(schema->IsFieldInLoadScope(score));
+    primary->AdoptReadState(*narrowed);
+    EXPECT_EQ(primary->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(primary->GetStructElementOffsets(score), nullptr);
+    EXPECT_FALSE(retired.expired());  // the old View still owns its offsets
+    old.reset();
+    EXPECT_TRUE(retired.expired());
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
@@ -2372,7 +2649,8 @@ TEST_P(TestChunkSegment, TestPkRange) {
     using namespace milvus::segcore;
     using namespace milvus::test::consumer;
     bool pk_is_string = GetParam();
-    auto segment_impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    auto segment_impl =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
     // Test cases for sorted PK
@@ -2521,8 +2799,8 @@ TEST(TestTTLFieldFilter, TestMaskWithTTLField) {
 
     // Execute query expression - this will trigger CompileExpressions which
     // automatically adds TTL field filtering expression
-    BitsetType bitset =
-        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+    BitsetType bitset = query::ExecuteQueryExpr(
+        plan, segment.get(), active_count, query_ts, schema);
 
     // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
     // means the row matches (not expired), bitset[i] = false means expired
@@ -2655,8 +2933,8 @@ TEST(TestTTLFieldFilter, TestMaskWithNullableTTLField) {
 
     // Execute query expression - this will trigger CompileExpressions which
     // automatically adds TTL field filtering expression
-    BitsetType bitset =
-        query::ExecuteQueryExpr(plan, segment.get(), active_count, query_ts);
+    BitsetType bitset = query::ExecuteQueryExpr(
+        plan, segment.get(), active_count, query_ts, schema);
 
     // Note: ExecuteQueryExpr already flips the bitset, so bitset[i] = true
     // means the row matches (not expired), bitset[i] = false means expired
@@ -2717,13 +2995,49 @@ BuildVortexInt64ListArray(const std::vector<VortexInt64ListRow>& rows) {
     return array;
 }
 
+// One row of a nested Array<Array<Int64>> with nullable inner arrays and
+// leaves.
+using VortexInt64NestedRow = std::optional<
+    std::vector<std::optional<std::vector<std::optional<int64_t>>>>>;
+
+std::shared_ptr<arrow::Array>
+BuildVortexInt64NestedArray(const std::vector<VortexInt64NestedRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    auto inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), values);
+    arrow::ListBuilder outer(arrow::default_memory_pool(), inner);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(outer.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(outer.Append().ok());
+        for (const auto& element : *row) {
+            if (!element.has_value()) {
+                EXPECT_TRUE(inner->AppendNull().ok());
+                continue;
+            }
+            EXPECT_TRUE(inner->Append().ok());
+            for (const auto& value : *element) {
+                if (value.has_value()) {
+                    EXPECT_TRUE(values->Append(*value).ok());
+                } else {
+                    EXPECT_TRUE(values->AppendNull().ok());
+                }
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(outer.Finish(&array).ok());
+    return array;
+}
+
 VortexColumn::FileInfo
-WriteInt64ListVortexFile(const std::filesystem::path& path,
-                         FieldId field_id,
-                         const std::vector<VortexInt64ListRow>& rows,
-                         int64_t start_index,
-                         const milvus_storage::api::Properties& properties) {
-    auto array = BuildVortexInt64ListArray(rows);
+WriteArrowVortexFile(const std::filesystem::path& path,
+                     FieldId field_id,
+                     const std::shared_ptr<arrow::Array>& array,
+                     int64_t start_index,
+                     const milvus_storage::api::Properties& properties) {
     auto schema = arrow::schema(
         {arrow::field(std::to_string(field_id.get()), array->type(), true)});
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
@@ -2752,6 +3066,19 @@ WriteInt64ListVortexFile(const std::filesystem::path& path,
     info.footer_size =
         cg_file.Get<uint64_t>(milvus_storage::api::kPropertyFooterSize, 0);
     return info;
+}
+
+VortexColumn::FileInfo
+WriteInt64ListVortexFile(const std::filesystem::path& path,
+                         FieldId field_id,
+                         const std::vector<VortexInt64ListRow>& rows,
+                         int64_t start_index,
+                         const milvus_storage::api::Properties& properties) {
+    return WriteArrowVortexFile(path,
+                                field_id,
+                                BuildVortexInt64ListArray(rows),
+                                start_index,
+                                properties);
 }
 
 }  // namespace
@@ -2826,13 +3153,13 @@ TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     segcore::ChunkedSegmentSealedImpl::StateDelta initial;
-    initial.schema = schema;
+    initial.fields = current->fields;
     initial.load_info = current->load_info;
     initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial.commit_ts = current->commit_ts;
     auto staged = sealed->TestBuildNextPublishedState(current, initial);
     segcore::ChunkedSegmentSealedImpl::StateDelta final;
-    final.schema = schema;
+    final.fields = current->fields;
     final.load_info = current->load_info;
     final.commit_ts = current->commit_ts;
     sealed->TestStageLoadFieldDataThenPublish(field,
@@ -2881,4 +3208,162 @@ TEST(test_chunk_segment, VortexElementNullableArrayOutput) {
             }
         }
     }
+}
+
+// A nested Array<Array<Int64>> struct sub-field with validity at every level,
+// loaded as Vortex. Row-nullable Vortex output goes through the owned Take with
+// ArrayValueView; the result must equal what BulkArrayValueAt returns for the
+// same rows.
+//   0 [[1, NULL], NULL, []]   1 NULL row   2 []
+//   3 [[NULL], [4, 5]]        4 [[6]]
+TEST(test_chunk_segment, VortexNestedArrayOutputMatchesBulkArrayValueAt) {
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("s[nested]");
+    field_schema.set_fieldid(101);
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Array);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(true);
+    auto* root = field_schema.mutable_type_schema();
+    root->set_nullable(true);
+    auto* inner = root->mutable_array_element();
+    inner->set_nullable(true);
+    auto* leaf = inner->mutable_array_element();
+    leaf->set_nullable(true);
+    leaf->set_leaf_type(proto::schema::DataType::Int64);
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto parsed = FieldMeta::ParseFrom(field_schema);
+    const auto field = parsed.get_id();
+    ASSERT_NE(field, pk);
+    schema->AddField(std::move(parsed));
+    const auto& field_meta = (*schema)[field];
+    ASSERT_TRUE(field_meta.is_nested_array());
+    ASSERT_TRUE(field_meta.has_nullable_array_element());
+
+    // DataGen cannot generate nested Arrays; generate the primary key only.
+    auto pk_schema = std::make_shared<Schema>();
+    ASSERT_EQ(pk_schema->AddDebugField("pk", DataType::INT64), pk);
+    pk_schema->set_primary_field_id(pk);
+    constexpr int64_t rows = 5;
+    auto data = segcore::DataGen(pk_schema, rows);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    (*properties)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*properties)[PROPERTY_FS_ROOT_PATH] = std::string("/");
+    auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_segment_vortex_nested_" + std::to_string(::getpid()) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    auto dir_guard =
+        folly::makeGuard([&dir] { std::filesystem::remove_all(dir); });
+    using Leaf = std::vector<std::optional<int64_t>>;
+    using Row = std::vector<std::optional<Leaf>>;
+    auto first = WriteArrowVortexFile(
+        dir / "first.vx",
+        field,
+        BuildVortexInt64NestedArray(
+            {Row{Leaf{1, std::nullopt}, std::nullopt, Leaf{}}, std::nullopt}),
+        0,
+        *properties);
+    auto second = WriteArrowVortexFile(
+        dir / "second.vx",
+        field,
+        BuildVortexInt64NestedArray(
+            {Row{}, Row{Leaf{std::nullopt}, Leaf{4, 5}}, Row{Leaf{6}}}),
+        2,
+        *properties);
+    std::vector<std::string> field_names{std::to_string(field.get())};
+    auto column_group = std::make_shared<VortexColumnGroup>(
+        std::vector<VortexColumn::FileInfo>{first, second},
+        properties,
+        field_names,
+        field_names.size(),
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+        nullptr);
+    auto column = std::make_shared<VortexColumn>(field,
+                                                 field_meta,
+                                                 std::to_string(field.get()),
+                                                 properties,
+                                                 column_group);
+
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+    initial.fields = current->fields;
+    initial.load_info = current->load_info;
+    initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+    initial.commit_ts = current->commit_ts;
+    auto staged = sealed->TestBuildNextPublishedState(current, initial);
+    segcore::ChunkedSegmentSealedImpl::StateDelta final;
+    final.fields = current->fields;
+    final.load_info = current->load_info;
+    final.commit_ts = current->commit_ts;
+    sealed->TestStageLoadFieldDataThenPublish(field,
+                                              column,
+                                              rows,
+                                              DataType::ARRAY,
+                                              schema,
+                                              runtime,
+                                              staged.get(),
+                                              current,
+                                              final,
+                                              [] {});
+
+    const std::vector<int64_t> offsets{4, 0, 1, 3, 2, 0};
+    auto result = segment->bulk_subscript(
+        nullptr, field, offsets.data(), static_cast<int64_t>(offsets.size()));
+    ASSERT_NE(result, nullptr);
+    const auto& row_valid = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(row_valid.size(), offsets.size());
+    const auto& array_data = result->scalars().array_data();
+    ASSERT_EQ(array_data.data_size(), offsets.size());
+
+    std::vector<ScalarFieldProto> expected(offsets.size());
+    column->BulkArrayValueAt(
+        nullptr,
+        [&](ScalarFieldProto&& value, size_t i) {
+            expected.at(i) = std::move(value);
+        },
+        offsets.data(),
+        offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        SCOPED_TRACE(offsets[i]);
+        EXPECT_EQ(row_valid[i], offsets[i] != 1);
+        if (offsets[i] == 1) {
+            continue;
+        }
+        EXPECT_EQ(array_data.data(i).SerializeAsString(),
+                  expected[i].SerializeAsString());
+    }
+
+    // Row 3: [[NULL], [4, 5]]
+    ArrayValue row3(array_data.data(3), field_meta.get_array_type_schema());
+    auto view = row3.View();
+    ASSERT_FALSE(view.is_null());
+    ASSERT_EQ(view.size(), 2);
+    auto first_inner = view.array_at(0);
+    ASSERT_EQ(first_inner.size(), 1);
+    EXPECT_FALSE(first_inner.is_valid(0));
+    auto second_inner = view.array_at(1);
+    ASSERT_EQ(second_inner.size(), 2);
+    EXPECT_EQ(second_inner.get_data_unchecked<int64_t>(0), 4);
+    EXPECT_EQ(second_inner.get_data_unchecked<int64_t>(1), 5);
+    // Row 0: [[1, NULL], NULL, []]
+    ArrayValue row0(array_data.data(1), field_meta.get_array_type_schema());
+    auto view0 = row0.View();
+    ASSERT_EQ(view0.size(), 3);
+    EXPECT_TRUE(view0.is_valid(0));
+    EXPECT_FALSE(view0.is_valid(1));
+    EXPECT_TRUE(view0.is_valid(2));
+    EXPECT_EQ(view0.array_at(0).get_data_unchecked<int64_t>(0), 1);
+    EXPECT_FALSE(view0.array_at(0).is_valid(1));
+    EXPECT_TRUE(view0.array_at(2).empty());
 }

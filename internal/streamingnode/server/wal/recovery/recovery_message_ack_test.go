@@ -463,7 +463,10 @@ func TestFlushAllCheckpointWaitsForEveryL0AndCapturesMaterializedMeta(t *testing
 	storage := newTestRecoveryStorage(t, initial)
 	t.Cleanup(storage.metrics.Close)
 	var tasks []nodescheduler.Task
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks = append(tasks, task)
+		return nil
+	}).Build()
 	defer submit.UnPatch()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
@@ -506,7 +509,10 @@ func TestBroadcastFlushWaitsForL0AndCloseDoesNotCompleteIt(t *testing.T) {
 			ctx := context.Background()
 			storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 			tasks := make(chan nodescheduler.Task, 4)
-			submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks <- task; return nil }).Build()
+			submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+				tasks <- task
+				return nil
+			}).Build()
 			defer submit.UnPatch()
 			defer storage.closeRecoveryResources()
 			summary := walsummary.NewManager(walsummary.ManagerConfig{})
@@ -553,7 +559,7 @@ func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
 	ctx := context.Background()
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 	tasks := make(chan nodescheduler.Task, 4)
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle {
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 		tasks <- task
 		return nil
 	}).Build()
@@ -613,7 +619,10 @@ func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
 	storage := newTestRecoveryStorage(t, initial)
 	t.Cleanup(storage.metrics.Close)
 	var tasks []nodescheduler.Task
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks = append(tasks, task)
+		return nil
+	}).Build()
 	defer submit.UnPatch()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	ack := mockey.Mock((*walsummary.Manager).LastAcked).Return(uint64(30)).Build()

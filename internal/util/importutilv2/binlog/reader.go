@@ -723,7 +723,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if r.readErr != nil {
 		return nil, r.readErr
 	}
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+	insertData, err := storage.NewInsertDataWithMemoryTracking(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +780,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		for _, field := range allFields {
 			fieldData := insertData.Data[field.GetFieldID()]
 			if fieldData == nil {
-				fieldData, err = storage.NewFieldData(field.GetDataType(), field, 1024)
+				fieldData, err = storage.NewFieldDataWithMemoryTracking(field.GetDataType(), field, 1024)
 				if err != nil {
 					return nil, err
 				}
@@ -793,7 +793,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			}
 			rowNum++
 		}
-		if rowNum%100 == 0 && // Prevent frequent memory check
+		if rowNum%100 == 0 && // Prevent frequent memory check.
 			insertData.GetMemorySize() >= r.bufferSize {
 			break
 		}

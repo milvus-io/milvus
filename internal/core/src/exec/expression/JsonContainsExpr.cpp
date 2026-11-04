@@ -136,7 +136,10 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     const bool is_element_level_array =
         expr_->column_.data_type_ == DataType::ARRAY &&
         expr_->column_.element_level_;
-    if (expr_->vals_.empty() && !is_element_level_array) {
+    // array_contains*(s[i][tags], []) still yields UNKNOWN for a missing or
+    // null element, so it takes the data path.
+    if (expr_->vals_.empty() && !is_element_level_array &&
+        !IsNestedArrayElementOperand()) {
         auto real_batch_size =
             has_offset_input_ ? input->size() : GetNextBatchSize();
         if (real_batch_size == 0) {
@@ -333,6 +336,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
         return ExecArrayContainsImpl<ArrayValueView, ExprValueType, true>(
             context);
     }
+    if (is_native_list_array_) {
+        return ExecArrayContainsImpl<ArrayValueView, ExprValueType, false>(
+            context);
+    }
     return ExecArrayContainsImpl<ArrayView, ExprValueType, false>(context);
 }
 
@@ -375,8 +382,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
                "ARRAY contains element-level mismatch: plan={}, executor={}",
                expr_->column_.element_level_,
                ElementLevel);
-    AssertInfo(expr_->column_.nested_path_.size() == 0,
-               "[ExecArrayContains]nested path must be null");
+    const int nested_index =
+        ArrayContainsNestedIndex<ArrayType, ElementLevel>();
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -397,8 +404,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
 
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&processed_cursor, &
-         bitmap_input ]<FilterType filter_type = FilterType::sequential>(
+        [&processed_cursor, &bitmap_input,
+         nested_index ]<FilterType filter_type = FilterType::sequential>(
             const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -412,10 +419,15 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-        auto executor = [&](size_t i) {
-            const auto& array = data[i];
+        // Null elements match no value.
+        auto executor = [&](const ArrayType& array) {
             const auto array_size = GetArrayRowSize(array);
             for (size_t j = 0; j < array_size; ++j) {
+                if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                    if (!array.is_valid(j)) {
+                        continue;
+                    }
+                }
                 if (elements.find(array.template get_data_unchecked<GetType>(
                         j)) != elements.end()) {
                     return true;
@@ -436,7 +448,19 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[i] = executor(offset);
+            if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                if (nested_index >= 0) {
+                    auto inner =
+                        NestedArrayElementAt(data[offset], nested_index);
+                    if (!inner.has_value()) {
+                        res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    res[i] = executor(*inner);
+                    continue;
+                }
+            }
+            res[i] = executor(data[offset]);
         }
         processed_cursor += size;
     };
@@ -977,6 +1001,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
         return ExecArrayContainsAllImpl<ArrayValueView, ExprValueType, true>(
             context);
     }
+    if (is_native_list_array_) {
+        return ExecArrayContainsAllImpl<ArrayValueView, ExprValueType, false>(
+            context);
+    }
     return ExecArrayContainsAllImpl<ArrayView, ExprValueType, false>(context);
 }
 
@@ -989,8 +1017,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                            ExprValueType>;
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    AssertInfo(expr_->column_.nested_path_.size() == 0,
-               "[ExecArrayContainsAll]nested path must be null");
+    const int nested_index =
+        ArrayContainsNestedIndex<ArrayType, ElementLevel>();
     auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
     if (!next_batch_size.has_value()) {
         return nullptr;
@@ -1028,8 +1056,13 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     std::vector<uint64_t> found_large(
         matcher.use_small() ? 0 : matcher.num_words());
     auto execute_sub_batch =
-        [&processed_cursor, &bitmap_input, &matcher, &
-         found_large ]<FilterType filter_type = FilterType::sequential>(
+        [
+            &processed_cursor,
+            &bitmap_input,
+            &matcher,
+            &found_large,
+            nested_index
+        ]<FilterType filter_type = FilterType::sequential>(
             const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
@@ -1043,16 +1076,27 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             processed_cursor += size;
             return;
         }
-        auto executor = [&](size_t i) {
-            const auto array_size = GetArrayRowSize(data[i]);
+        // Null elements match no value.
+        auto executor = [&](const ArrayType& array) {
+            const auto array_size = GetArrayRowSize(array);
+            auto is_null_at = [&](size_t j) {
+                if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                    return !array.is_valid(j);
+                } else {
+                    return false;
+                }
+            };
             if (array_size < matcher.target_count()) {
                 return false;
             }
             if (matcher.use_small()) {
                 uint64_t found = 0;
                 for (size_t j = 0; j < array_size; ++j) {
+                    if (is_null_at(j)) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
-                            data[i].template get_data_unchecked<GetType>(j),
+                            array.template get_data_unchecked<GetType>(j),
                             found)) {
                         return true;
                     }
@@ -1062,8 +1106,11 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (size_t j = 0; j < array_size; ++j) {
+                    if (is_null_at(j)) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
-                            data[i].template get_data_unchecked<GetType>(j),
+                            array.template get_data_unchecked<GetType>(j),
                             found_large,
                             remaining)) {
                         return true;
@@ -1085,7 +1132,19 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
                 continue;
             }
-            res[i] = executor(offset);
+            if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                if (nested_index >= 0) {
+                    auto inner =
+                        NestedArrayElementAt(data[offset], nested_index);
+                    if (!inner.has_value()) {
+                        res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    res[i] = executor(*inner);
+                    continue;
+                }
+            }
+            res[i] = executor(data[offset]);
         }
         processed_cursor += size;
     };

@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +36,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -62,10 +64,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// ================================
-// Import Callbacks Test Suite
-// ================================
-
 func patchSnapshotImportWAL(t *testing.T) {
 	t.Helper()
 	type snapshotWAL struct{ streaming.WALAccesser }
@@ -79,8 +77,8 @@ func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 	ctx := context.Background()
 	type mappingBroker struct{ broker.Broker }
 	s := &Server{broker: &mappingBroker{}}
-	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
-	require.NoError(t, s.validateSnapshotPartitionTargets(ctx, 1, nil, snapshotImportTestOptions()))
+	opts := append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	require.NoError(t, newDDLCallbacks(s).ValidateSnapshotPartitionTargets(ctx, 1, nil, bulkimport.SnapshotImportTestOptions()))
 	for _, tc := range []struct {
 		name      string
 		names     []string
@@ -98,7 +96,7 @@ func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			show := mockey.Mock((*mappingBroker).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{PartitionNames: tc.names, PartitionIDs: tc.ids}, tc.readErr).Build()
 			defer show.UnPatch()
-			err := s.validateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
+			err := newDDLCallbacks(s).ValidateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 			} else {
@@ -110,9 +108,9 @@ func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 
 func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	patchSnapshotImportWAL(t)
-	patchSnapshotImportInstance(t)
+	bulkimport.PatchSnapshotImportInstance(t)
 	ctx := context.Background()
-	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	snapshot := bulkimport.SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 	snapshot.Collection.Partitions = map[string]int64{"A": 10, "B": 20}
 	snapshot.Segments[0].PartitionId = 20
 	for _, segment := range snapshot.Segments {
@@ -122,9 +120,9 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 		ChannelName: "source", PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV1,
 		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delete"}}}},
 	})
-	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	validation := mockey.Mock((*ddl.Callbacks).ValidateImportRequest).Return(nil).Build()
 	defer validation.UnPatch()
-	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(nil).Build()
 	defer replication.UnPatch()
 	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
 		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
@@ -133,16 +131,16 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	defer read.UnPatch()
 	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
-	api := newMockBroadcastAPIImpl()
+	api := meta.NewMockBroadcastAPIImpl()
 	locked := false
-	start := mockey.Mock((*Server).startBroadcastWithCollectionID).To(func(_ *Server, _ context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
+	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).To(func(_ *ddl.Callbacks, _ context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
 		locked = true
 		return api, nil
 	}).Build()
 	defer start.UnPatch()
 	type mappingBroker struct{ broker.Broker }
 	fake := &mappingBroker{}
-	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
 	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
 		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
@@ -150,7 +148,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	}).Build()
 	defer show.UnPatch()
 	called := false
-	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		called = true
 		decoded := message.MustAsBroadcastImportMessageV1(msg)
 		require.True(t, decoded.Header().GetCommitByCoordinator())
@@ -159,21 +157,21 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 		for key, value := range decoded.MustBody().GetOptions() {
 			options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
 		}
-		files := importFilesFromMessage(decoded.MustBody().GetFiles(), options)
+		files := ddl.ImportFilesFromMessage(decoded.MustBody().GetFiles(), options)
 		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
 		require.True(t, importutilv2.IsSnapshotPreparation(files))
 		require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", decoded.MustBody().Options[importutilv2.SnapshotSourceURI])
 		return &types.BroadcastAppendResult{}, nil
 	}).Build()
 	defer transport.UnPatch()
-	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
-	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
-	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
+	s := &Server{broker: fake, meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}}
+	opts := append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	_, _, err := newDDLCallbacks(s).BroadcastImport(ctx, 100, []int64{200, 100},
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.True(t, called)
-	require.True(t, api.closeCalled.Load())
+	require.True(t, api.CloseCalled.Load())
 }
 
 func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
@@ -181,24 +179,24 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	ctx := context.Background()
 	// Exercise the real broadcast path while replacing external validation,
 	// metadata I/O, and WAL transport. Source expansion does not select targets.
-	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	validation := mockey.Mock((*ddl.Callbacks).ValidateImportRequest).Return(nil).Build()
 	defer validation.UnPatch()
-	expansion := mockey.Mock(prepareSnapshotImportFiles).Return(
-		[]*internalpb.ImportFile{{Paths: []string{"root/data/manifest"}}}, snapshotImportTestOptions(), nil).Build()
+	expansion := mockey.Mock(bulkimport.PrepareSnapshotImportFiles).Return(
+		[]*internalpb.ImportFile{{Paths: []string{"root/data/manifest"}}}, bulkimport.SnapshotImportTestOptions(), nil).Build()
 	defer expansion.UnPatch()
-	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(nil).Build()
 	defer replication.UnPatch()
-	api := newMockBroadcastAPIImpl()
-	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	api := meta.NewMockBroadcastAPIImpl()
+	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
 	type testBroker struct{ broker.Broker }
 	fakeBroker := &testBroker{}
 	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
 	var received []int64
-	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
-		func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(
+		func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 			decoded, err := message.AsBroadcastImportMessageV1(msg)
 			require.NoError(t, err)
 			received = decoded.MustBody().GetPartitionIDs()
@@ -207,23 +205,23 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	defer transport.UnPatch()
 	server := &Server{broker: fakeBroker}
 	partitionIDs := []int64{20, 10}
-	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
+	_, duplicated, err := newDDLCallbacks(server).BroadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
+		bulkimport.SnapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.False(t, duplicated)
 	require.Equal(t, partitionIDs, received)
-	require.True(t, api.closeCalled.Load())
+	require.True(t, api.CloseCalled.Load())
 	expansion.UnPatch()
-	invalidExpansion := mockey.Mock(prepareSnapshotImportFiles).Return([]*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+	invalidExpansion := mockey.Mock(bulkimport.PrepareSnapshotImportFiles).Return([]*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data", 1), SourceChannel: "source", SourcePartitionId: 10,
-	}}}, snapshotImportTestOptions(), nil).Build()
+	}}}, bulkimport.SnapshotImportTestOptions(), nil).Build()
 	defer invalidExpansion.UnPatch()
 	received = nil
-	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
+	_, _, err = newDDLCallbacks(server).BroadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
+		bulkimport.SnapshotImportTestOptions(), 1000, []string{"target_v1"}, "",
 		internalpb.ImportVersion_ImportVersionV2)
 	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
@@ -240,7 +238,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				}
 				return nil
 			}
-			opts := snapshotImportTestOptions()
+			opts := bulkimport.SnapshotImportTestOptions()
 			files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
 				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1),
 			}}}
@@ -252,24 +250,24 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				files = []*internalpb.ImportFile{{Paths: []string{"rows.json"}}}
 				schema.Fields[0].AutoID = true
 			}
-			validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+			validation := mockey.Mock((*ddl.Callbacks).ValidateImportRequest).Return(nil).Build()
 			defer validation.UnPatch()
-			expansion := mockey.Mock(prepareSnapshotImportFiles).Return(files, opts, errFor("prepare")).Build()
+			expansion := mockey.Mock(bulkimport.PrepareSnapshotImportFiles).Return(files, opts, errFor("prepare")).Build()
 			defer expansion.UnPatch()
-			replication := mockey.Mock((*Server).validateImportReplication).Return(errFor("replication")).Build()
+			replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(errFor("replication")).Build()
 			defer replication.UnPatch()
-			partitions := mockey.Mock((*Server).validateSnapshotPartitionTargets).Return(errFor("partition_targets")).Build()
+			partitions := mockey.Mock((*ddl.Callbacks).ValidateSnapshotPartitionTargets).Return(errFor("partition_targets")).Build()
 			defer partitions.UnPatch()
-			size := mockey.Mock(validateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
+			size := mockey.Mock(ddl.ValidateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
 			defer size.UnPatch()
-			api := newMockBroadcastAPIImpl()
-			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+			api := meta.NewMockBroadcastAPIImpl()
+			start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 			defer start.UnPatch()
 			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
 				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: schema}, nil).Build()
 			defer describe.UnPatch()
-			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
-				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(
+				func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 					decoded := message.MustAsBroadcastImportMessageV1(msg)
 					// ID allocation follows preimport, not the initial broadcast.
 					for _, file := range decoded.MustBody().GetFiles() {
@@ -284,8 +282,8 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
 			}
 			type boundaryAllocator struct{ allocator.Allocator }
-			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
-			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
+			s := &Server{meta: &meta.Meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			_, _, err := newDDLCallbacks(s).BroadcastImport(context.Background(), 100, []int64{10}, files,
 				opts, 1, []string{"v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
 			if stage == "auto_id" {
@@ -305,30 +303,30 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 
 func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	patchSnapshotImportWAL(t)
-	patchSnapshotImportInstance(t)
+	bulkimport.PatchSnapshotImportInstance(t)
 	ctx := context.Background()
-	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	validation := mockey.Mock((*ddl.Callbacks).ValidateImportRequest).Return(nil).Build()
 	defer validation.UnPatch()
-	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	replication := mockey.Mock((*ddl.Callbacks).ValidateImportReplication).Return(nil).Build()
 	defer replication.UnPatch()
 	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
-	api := newMockBroadcastAPIImpl()
-	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	api := meta.NewMockBroadcastAPIImpl()
+	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
 	type testBroker struct{ broker.Broker }
 	fakeBroker := &testBroker{}
 	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: snapshotImportTestSchema()}, nil).Build()
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
 	defer describe.UnPatch()
-	server := &Server{broker: fakeBroker, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	server := &Server{broker: fakeBroker, meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}}
 	for _, encrypted := range []bool{false, true} {
 		name, suppliedEZK := "plaintext", "not-base64"
 		if encrypted {
-			name, suppliedEZK = "encrypted", snapshotImportTestEZK(10)
+			name, suppliedEZK = "encrypted", bulkimport.SnapshotImportTestEZK(10)
 		}
 		t.Run(name, func(t *testing.T) {
-			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			snapshot := bulkimport.SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			if encrypted {
 				snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "10"}}
 			}
@@ -338,8 +336,8 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 			}, nil).Build()
 			defer read.UnPatch()
 			var received map[string]string
-			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
-				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(
+				func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 					decoded, err := message.AsBroadcastImportMessageV1(msg)
 					require.NoError(t, err)
 					// Decode the wire body used by ACK/replay, not the original
@@ -350,9 +348,9 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 					return &types.BroadcastAppendResult{}, nil
 				}).Build()
 			defer transport.UnPatch()
-			options := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: suppliedEZK},
+			options := append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: suppliedEZK},
 				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
-			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
+			_, _, err := newDDLCallbacks(server).BroadcastImport(ctx, 100, []int64{10},
 				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
 				options, 1000, []string{"target_v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
@@ -386,17 +384,13 @@ func TestImportCallbacksSuite(t *testing.T) {
 }
 
 // newTestMetaWithChunkManager returns a minimal meta carrying a chunk manager,
-// which validateImportRequest needs to resolve the storage root path when it
+// which ValidateImportRequest needs to resolve the storage root path when it
 // checks caller-supplied import paths against Milvus's internal directories.
-func newTestMetaWithChunkManager(t *testing.T) *meta {
+func newTestMetaWithChunkManager(t *testing.T) *meta.Meta {
 	cm := mocks2.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("files").Maybe()
-	return &meta{chunkManager: cm}
+	return &meta.Meta{ChunkManager: cm}
 }
-
-// --------------------------------
-// validateImportRequest Tests
-// --------------------------------
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsError() {
 	ctx := context.Background()
@@ -409,7 +403,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 		{Key: "timeout", Value: "invalid_timeout_format"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, options)
 
 	s.Error(err)
 	s.Contains(err.Error(), "timeout")
@@ -434,7 +428,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_RejectsInternalStorageP
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, options)
 
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrImportFailed))
@@ -445,7 +439,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -456,7 +450,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 	defer mockBalance.UnPatch()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
@@ -467,7 +461,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, options)
 
 	s.Error(err)
 	s.Contains(err.Error(), "balancer not available")
@@ -476,7 +470,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterReturnsError() {
 	ctx := context.Background()
 
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -502,7 +496,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 	defer mockAssignment.UnPatch()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
@@ -513,7 +507,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, options)
 
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrOperationNotSupported))
@@ -526,7 +520,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key, "true")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.Key)
 
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -551,21 +545,21 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 	defer mockAssignment.UnPatch()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	files := []*msgpb.ImportFile{
 		{Id: 1, Paths: []string{"/test/file1.json"}},
 	}
 
-	err := server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, []*commonpb.KeyValuePair{
 		{Key: "timeout", Value: "300s"},
 	})
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrOperationNotSupported))
 	s.Contains(err.Error(), "auto_commit=true")
 
-	err = server.validateImportRequest(ctx, files, []*commonpb.KeyValuePair{
+	err = newDDLCallbacks(server).ValidateImportRequest(ctx, files, []*commonpb.KeyValuePair{
 		{Key: "timeout", Value: "300s"},
 		{Key: importutilv2.AutoCommitKey, Value: "false"},
 	})
@@ -575,7 +569,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {
 	ctx := context.Background()
 
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -595,7 +589,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 	defer mockAssignment.UnPatch()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
@@ -606,30 +600,26 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 		{Key: "timeout", Value: "300s"},
 	}
 
-	err := server.validateImportRequest(ctx, files, options)
+	err := newDDLCallbacks(server).ValidateImportRequest(ctx, files, options)
 
 	s.NoError(err)
 }
 
-// --------------------------------
-// broadcastImport Tests
-// --------------------------------
-
-// A request that fails validateImportRequest is rejected before any broadcast wiring is
+// A request that fails ValidateImportRequest is rejected before any broadcast wiring is
 // touched -- server.broker is nil here, so reaching it would panic or block. The trigger
 // is an unparsable timeout, i.e. a pure function of the request. The job-count limit is
 // admission over mutable cluster state rather than a pure function of the request, but
-// it runs in the same place -- validateImportRequest, before any resource key is taken;
+// it runs in the same place -- ValidateImportRequest, before any resource key is taken;
 // see TestImportV2_JobLimitStillRejectsANewJob.
 func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError() {
 	ctx := context.Background()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -649,7 +639,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 	ctx := context.Background()
 
 	// Setup validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -668,17 +658,17 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
+	// Mock broker.DescribeCollectionInternal to fail (called in StartBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -698,7 +688,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	ctx := context.Background()
 
 	// Setup validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -717,7 +707,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
+	// Mock broker.DescribeCollectionInternal to return dbName (called in StartBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -732,12 +722,12 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	defer mockBroadcast.UnPatch()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -757,7 +747,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	ctx := context.Background()
 
 	// Setup validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -777,15 +767,15 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	defer mockAssignment.UnPatch()
 
 	// Mock StartBroadcastWithResourceKeys to succeed
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
-	// second call returns error status (in broadcastImport after getting broadcaster)
+	// Mock broker: first DescribeCollectionInternal succeeds (in StartBroadcastWithCollectionID),
+	// second call returns error status (in BroadcastImport after getting broadcaster)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -796,12 +786,12 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	}, nil).Once()
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -821,7 +811,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	ctx := context.Background()
 
 	// Setup validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -841,8 +831,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	defer mockAssignment.UnPatch()
 
 	// Mock StartBroadcastWithResourceKeys to succeed
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcastAPI.broadcastErr = errors.New("broadcast failed")
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
+	mockBroadcastAPI.BroadcastErr = errors.New("broadcast failed")
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
@@ -850,7 +840,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -859,12 +849,12 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	}, nil).Times(2)
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -884,7 +874,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	ctx := context.Background()
 
 	// Setup validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -904,7 +894,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	defer mockAssignment.UnPatch()
 
 	// Mock StartBroadcastWithResourceKeys to succeed
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
@@ -912,7 +902,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -928,12 +918,12 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	}, nil).Times(2)
 
 	server := &Server{
-		importMeta: &importMeta{},
+		importMeta: &bulkimport.Meta{},
 		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	_, _, err := server.broadcastImport(
+	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
 		100,
 		[]int64{1},
@@ -949,8 +939,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 
 	s.NoError(err)
 	// The caller supplies data channels; Broadcaster adds the control channel.
-	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
-	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.capturedMsg)
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.CapturedMsg.BroadcastHeader().VChannels)
+	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.CapturedMsg)
 	s.NoError(err)
 	body, err := msg.Body(ctx)
 	s.NoError(err)
@@ -960,10 +950,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.Equal(int64(common.StartOfUserFieldID), body.GetSchema().GetFields()[0].GetFieldID())
 }
 
-// --------------------------------
-// RegisterDDLCallbacks Import Tests
-// --------------------------------
-
 func (s *ImportCallbacksSuite) TestRegisterDDLCallbacks_DoesNotPanic() {
 	server := &Server{}
 
@@ -971,10 +957,6 @@ func (s *ImportCallbacksSuite) TestRegisterDDLCallbacks_DoesNotPanic() {
 		RegisterDDLCallbacks(server)
 	})
 }
-
-// --------------------------------
-// Helper Types for Mocking
-// --------------------------------
 
 // mockBalancerImpl is a mock implementation for balancer.Balancer interface
 type mockBalancerImpl struct {
@@ -987,266 +969,7 @@ func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAs
 	return result, nil
 }
 
-// mockBroadcastAPIImpl is a mock implementation for broadcaster.BroadcastAPI interface
-// This implementation has configurable behavior and uses enough code to be patchable by mockey
-type mockBroadcastAPIImpl struct {
-	broadcastResult *types.BroadcastAppendResult
-	broadcastErr    error
-	closeCalled     atomic.Bool
-	// capturedMsg is the last message handed to Broadcast, for assertions on what the
-	// caller actually put on the wire.
-	capturedMsg message.BroadcastMutableMessage
-}
-
-func newMockBroadcastAPIImpl() *mockBroadcastAPIImpl {
-	// Initialize with default success result
-	mock := &mockBroadcastAPIImpl{
-		broadcastResult: &types.BroadcastAppendResult{
-			BroadcastID: 12345,
-		},
-		broadcastErr: nil,
-	}
-	mock.closeCalled.Store(false)
-	return mock
-}
-
-func (m *mockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	// Add operations to ensure the function is long enough for mockey
-	if ctx == nil {
-		return nil, errors.New("context is nil")
-	}
-	if msg == nil {
-		return nil, errors.New("message is nil")
-	}
-	m.capturedMsg = msg
-	if m.broadcastErr != nil {
-		return nil, m.broadcastErr
-	}
-	if m.broadcastResult != nil {
-		return m.broadcastResult, nil
-	}
-	return &types.BroadcastAppendResult{BroadcastID: 0}, nil
-}
-
-func (m *mockBroadcastAPIImpl) Close() {
-	// Add operations to ensure the function is long enough for mockey
-	m.closeCalled.Store(true)
-	if m.closeCalled.Load() {
-		// Already closed, do nothing
-		return
-	}
-}
-
-// --------------------------------
-// Import Flow Documentation Tests
-// --------------------------------
-
-// TestImportV2_OnlyBroadcast verifies that ImportV2 is dedicated to broadcasting.
-// ImportV2 no longer handles ack callbacks - they are processed by createImportJobFromAck.
-func TestImportV2_OnlyBroadcast(t *testing.T) {
-	t.Run("ImportV2 is only for proxy broadcast", func(t *testing.T) {
-		// Create request - ImportV2 always broadcasts
-		req := &internalpb.ImportRequestInternal{
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1},
-			ChannelNames:   []string{"vchannel1"},
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 1, Name: "id", DataType: schemapb.DataType_Int64},
-				},
-			},
-			Files: []*internalpb.ImportFile{
-				{Id: 1, Paths: []string{"/test/file1.json"}},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{Key: "timeout", Value: "300"},
-			},
-		}
-
-		// ImportV2 always broadcasts, regardless of DataTimestamp
-		// Ack callbacks are handled by createImportJobFromAck internally
-		assert.NotNil(t, req, "ImportV2 should handle broadcast only")
-	})
-}
-
-// TestImportV2_ProxyCallPath tests the proxy call path (DataTimestamp == 0)
-// This test verifies that the new broadcast flow is triggered
-func TestImportV2_ProxyCallPath(t *testing.T) {
-	t.Run("Proxy call should trigger broadcast", func(t *testing.T) {
-		req := &internalpb.ImportRequestInternal{
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1},
-			ChannelNames:   []string{"vchannel1"},
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-			},
-			Files: []*internalpb.ImportFile{
-				{Id: 1, Paths: []string{"/test/file1.json"}},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{Key: "timeout", Value: "300"},
-			},
-			DataTimestamp: 0, // Proxy call - no timestamp
-			JobID:         0,
-		}
-
-		// Verify this is identified as proxy call
-		isFromAckCallback := req.GetDataTimestamp() > 0
-		assert.False(t, isFromAckCallback, "DataTimestamp=0 should be identified as proxy call")
-
-		// The ImportV2 method should:
-		// 1. Allocate job ID
-		// 2. Call broadcastImport
-		// 3. Return job ID without creating job (job created by ack callback)
-	})
-}
-
-// TestImportV2_AckCallbackPath tests the ack callback path (DataTimestamp > 0)
-// This test verifies that the job creation flow is triggered
-func TestImportV2_AckCallbackPath(t *testing.T) {
-	t.Run("Ack callback should trigger job creation", func(t *testing.T) {
-		req := &internalpb.ImportRequestInternal{
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1},
-			ChannelNames:   []string{"vchannel1"},
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-			},
-			Files: []*internalpb.ImportFile{
-				{Id: 1, Paths: []string{"/test/file1.json"}},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{Key: "timeout", Value: "300"},
-			},
-			DataTimestamp: 123456789, // Ack callback - has timestamp from broadcast
-			JobID:         1000,      // Ack callback - has job ID
-		}
-
-		// Verify this is identified as ack callback
-		isFromAckCallback := req.GetDataTimestamp() > 0
-		assert.True(t, isFromAckCallback, "DataTimestamp>0 should be identified as ack callback")
-
-		// The ImportV2 method should:
-		// 1. Skip broadcast
-		// 2. Process files
-		// 3. Create import job
-		// 4. Return job ID
-	})
-}
-
-// TestProxyImportRequest tests that proxy correctly constructs the request
-func TestProxyImportRequest(t *testing.T) {
-	t.Run("Proxy should not set DataTimestamp", func(t *testing.T) {
-		// Simulating what proxy does in task_import.go
-		req := &internalpb.ImportRequestInternal{
-			DbID:           0, // deprecated
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1, 2},
-			ChannelNames:   []string{"vchannel1", "vchannel2"},
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-			},
-			Files: []*internalpb.ImportFile{
-				{Id: 1, Paths: []string{"/test/file1.json"}},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{Key: "timeout", Value: "300"},
-			},
-			DataTimestamp: 0, // CRITICAL: Must be 0 for proxy calls
-			JobID:         0, // Let DataCoord allocate
-		}
-
-		// Verify proxy request structure
-		assert.Equal(t, uint64(0), req.DataTimestamp, "Proxy must set DataTimestamp to 0")
-		assert.Equal(t, int64(0), req.JobID, "Proxy should let DataCoord allocate job ID")
-		assert.NotEmpty(t, req.ChannelNames, "Proxy must provide channel names")
-		assert.NotNil(t, req.Schema, "Proxy must provide schema")
-	})
-}
-
-// TestAckCallbackImportRequest tests that ack callback correctly constructs the request
-func TestAckCallbackImportRequest(t *testing.T) {
-	t.Run("Ack callback should set DataTimestamp", func(t *testing.T) {
-		// Simulating what ack callback does in ddl_callbacks_import.go
-		req := &internalpb.ImportRequestInternal{
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1, 2},
-			ChannelNames:   []string{"vchannel1", "vchannel2"}, // Only acked channels
-			Schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-			},
-			Files: []*internalpb.ImportFile{
-				{Id: 1, Paths: []string{"/test/file1.json"}},
-			},
-			Options: []*commonpb.KeyValuePair{
-				{Key: "timeout", Value: "300"},
-			},
-			DataTimestamp: 123456789, // CRITICAL: Set from broadcast message timestamp
-			JobID:         1000,      // Set from broadcast message
-		}
-
-		// Verify ack callback request structure
-		assert.Greater(t, req.DataTimestamp, uint64(0), "Ack callback must set DataTimestamp from message")
-		assert.Greater(t, req.JobID, int64(0), "Ack callback must set JobID from message")
-	})
-}
-
-// TestImportFlowIntegration documents the complete import flow
-func TestImportFlowIntegration(t *testing.T) {
-	t.Run("Document complete import flow", func(t *testing.T) {
-		// This test documents the expected flow but doesn't execute it
-		// (would require full integration test setup)
-
-		// STEP 1: Proxy receives import request from user
-		proxyReq := &internalpb.ImportRequestInternal{
-			CollectionID:   100,
-			CollectionName: "test_collection",
-			PartitionIDs:   []int64{1},
-			ChannelNames:   []string{"vchannel1"},
-			Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-			Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file1.json"}}},
-			Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "300"}},
-			DataTimestamp:  0, // Proxy call
-			JobID:          0,
-		}
-
-		// STEP 2: Proxy calls DataCoord.ImportV2() via RPC
-		// DataCoord identifies this as proxy call (DataTimestamp == 0)
-		assert.Equal(t, uint64(0), proxyReq.DataTimestamp)
-
-		// STEP 3: DataCoord broadcasts message
-		// (broadcastImport is called internally)
-
-		// STEP 4: Ack callback is triggered
-		ackCallbackReq := &internalpb.ImportRequestInternal{
-			CollectionID:   proxyReq.CollectionID,
-			CollectionName: proxyReq.CollectionName,
-			PartitionIDs:   proxyReq.PartitionIDs,
-			ChannelNames:   []string{"vchannel1"}, // Only acked channels
-			Schema:         proxyReq.Schema,
-			Files:          proxyReq.Files,
-			Options:        proxyReq.Options,
-			DataTimestamp:  123456789, // Set from broadcast message
-			JobID:          1000,      // Set from broadcast message
-		}
-
-		// STEP 5: DataCoord identifies this as ack callback (DataTimestamp > 0)
-		assert.Greater(t, ackCallbackReq.DataTimestamp, uint64(0))
-
-		// STEP 6: DataCoord creates import job
-		// (ImportV2 continues with job creation logic)
-
-		t.Log("Import flow documented successfully")
-	})
-}
-
-func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
+func newTestImportMeta(t *testing.T) (bulkimport.ImportMeta, *mocks.DataCoordCatalog) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
@@ -1257,7 +980,7 @@ func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	alloc := allocator.NewMockAllocator(t)
-	importMeta, err := NewImportMeta(context.Background(), catalog, alloc, nil)
+	importMeta, err := bulkimport.NewImportMeta(context.Background(), catalog, alloc, nil)
 	assert.NoError(t, err)
 	return importMeta, catalog
 }
@@ -1290,19 +1013,19 @@ func TestCommitImportCallback_UncommittedToCompleted(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:      1,
 			State:      internalpb.ImportJobState_Uncommitted,
 			AutoCommit: false,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(1))
 	assert.NoError(t, err)
 
 	updatedJob := importMeta.GetJob(ctx, 1)
@@ -1314,19 +1037,19 @@ func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:      11,
 			State:      internalpb.ImportJobState_Importing,
 			AutoCommit: false,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(11))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(11))
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
 
@@ -1375,8 +1098,8 @@ func TestCommitImportCallback_MissingJob_PrimaryIsNoOp(t *testing.T) {
 
 	// A replayed CommitImport for a job that checkGC already removed must not
 	// keep the broadcast task alive: nothing can create that job again.
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err := callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
 	assert.NoError(t, err)
 	assert.Nil(t, importMeta.GetJob(ctx, 13))
 }
@@ -1388,24 +1111,24 @@ func TestCommitImportCallback_MissingJob_SecondaryRetries(t *testing.T) {
 
 	// On a secondary the replicated CommitImport can arrive before the local
 	// Import ack callback creates the job, so the callback must wait.
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err := callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err := callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
 	assert.Nil(t, importMeta.GetJob(ctx, 13))
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:      13,
 			State:      internalpb.ImportJobState_Uncommitted,
 			AutoCommit: false,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err = importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(13))
 	assert.NoError(t, err)
 
 	updatedJob := importMeta.GetJob(ctx, 13)
@@ -1417,25 +1140,25 @@ func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:      12,
 			State:      internalpb.ImportJobState_Importing,
 			AutoCommit: false,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
 	assert.Error(t, err)
 
-	err = importMeta.UpdateJob(ctx, 12, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	err = importMeta.UpdateJob(ctx, 12, bulkimport.UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	assert.NoError(t, err)
 
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(12))
 	assert.NoError(t, err)
 
 	updatedJob := importMeta.GetJob(ctx, 12)
@@ -1447,20 +1170,20 @@ func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:             2,
 			State:             internalpb.ImportJobState_Uncommitted,
 			AutoCommit:        false,
 			RequestedDiskSize: 1024 * 1024, // nonzero so we can observe release
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(2))
 	assert.NoError(t, err)
 
 	// Segment cleanup is handled by the import inspector's processFailed (covered
@@ -1481,18 +1204,18 @@ func TestCommitImportCallback_AfterAbort_NoOp(t *testing.T) {
 	importMeta, _ := newTestImportMeta(t)
 
 	// Job already Failed (abort won the race).
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: 3,
 			State: internalpb.ImportJobState_Failed,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(3))
 	assert.NoError(t, err)
 
 	// UpdateJob skips jobs in Failed state → no-op.
@@ -1506,18 +1229,18 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	importMeta, _ := newTestImportMeta(t)
 
 	// Job already Committing (commit won the race).
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: 4,
 			State: internalpb.ImportJobState_Committing,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := importMeta.AddJob(ctx, job)
 	assert.NoError(t, err)
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	err = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(4))
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	err = callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(4))
 	assert.NoError(t, err)
 
 	// Abort rejected: job already in committed state.
@@ -1541,17 +1264,17 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 		importMeta, _ := newTestImportMeta(t)
 
 		const jobID int64 = 5
-		err := importMeta.AddJob(ctx, &importJob{
+		err := importMeta.AddJob(ctx, &bulkimport.Job{
 			ImportJob: &datapb.ImportJob{
 				JobID:      jobID,
 				State:      internalpb.ImportJobState_Uncommitted,
 				AutoCommit: false,
 			},
-			tr: timerecord.NewTimeRecorder("race"),
+			Tr: timerecord.NewTimeRecorder("race"),
 		})
 		assert.NoError(t, err)
 
-		callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+		callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
 
 		start := make(chan struct{})
 		var commitErr, rollbackErr error
@@ -1560,12 +1283,12 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+			commitErr = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			rollbackErr = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
+			rollbackErr = callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
 		}()
 		close(start)
 		wg.Wait()
@@ -1580,24 +1303,7 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	}
 }
 
-// --------------------------------
-// broadcastCommitImportMessage / broadcastRollbackImportMessage Tests
-// --------------------------------
-
-// captureBroadcastAPI is a BroadcastAPI mock that records the message passed
-// to Broadcast so a test can assert its broadcast target vchannels.
-type captureBroadcastAPI struct {
-	captured message.BroadcastMutableMessage
-}
-
-func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-	c.captured = msg
-	return &types.BroadcastAppendResult{BroadcastID: 1}, nil
-}
-
-func (c *captureBroadcastAPI) Close() {}
-
-func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, bulkimport.ImportJob) error) {
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	t.Cleanup(func() { streaming.SetWALForTest(previous) })
@@ -1612,7 +1318,7 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 		CollectionName: "test_collection",
 	}, nil)
 
-	capture := &captureBroadcastAPI{}
+	capture := &meta.CaptureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return capture, nil
@@ -1620,21 +1326,22 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	defer mockBroadcast.UnPatch()
 
 	server := &Server{broker: mockBroker}
-	job := &importJob{
+	server.ddl = newDDLCallbacks(server)
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        7,
 			CollectionID: 7,
 			Vchannels:    wantVchannels,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
-	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+	assert.NotNil(t, capture.Captured, "Broadcast must have been called")
+	assert.ElementsMatch(t, wantVchannels, capture.Captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
-	assert.False(t, capture.captured.BroadcastHeader().AckSyncUp)
+	assert.False(t, capture.Captured.BroadcastHeader().AckSyncUp)
 }
 
 // CommitImport targets business channels and CChannel for the unified callback.
@@ -1646,14 +1353,14 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	defer streaming.SetWALForTest(previous)
-	capture := &captureBroadcastAPI{}
-	patch := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(capture, nil).Build()
+	capture := &meta.CaptureBroadcastAPI{}
+	patch := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(capture, nil).Build()
 	defer patch.UnPatch()
 	for _, coordinator := range []bool{false, true} {
-		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
+		job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
 		err := (&Server{}).broadcastCommitImportMessage(context.Background(), job)
 		assert.NoError(t, err)
-		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.captured)
+		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
 		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
 	}
 }
@@ -1665,15 +1372,15 @@ func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
 }
 
-func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+func testBroadcastRequiresVchannels(t *testing.T, broadcastFn func(*Server, context.Context, bulkimport.ImportJob) error) {
 	ctx := context.Background()
 	server := &Server{}
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        7,
 			CollectionID: 7,
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 
 	err := broadcastFn(server, ctx, job)
@@ -1690,40 +1397,6 @@ func TestBroadcastCommitImportMessage_RequiresVchannels(t *testing.T) {
 func TestBroadcastRollbackImportMessage_RequiresVchannels(t *testing.T) {
 	testBroadcastRequiresVchannels(t, (*Server).broadcastRollbackImportMessage)
 }
-
-func TestJobIDFromDuplicatedBroadcast(t *testing.T) {
-	msg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
-		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
-		WithBroadcast([]string{"v1"}).
-		MustBuildBroadcast()
-
-	jobID, err := jobIDFromDuplicatedBroadcast(context.Background(), msg, 100)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(4242), jobID)
-}
-
-// The collectionID comparison is an invariant check, not a semantic guard: the key is
-// scoped to a collection ID, so a hit already means both broadcasts targeted the same
-// collection. A mismatch can only come from an encoding or scoping bug, which must fail
-// loudly rather than hand back another collection's jobID.
-func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) {
-	msg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{JobID: 4242, CollectionID: 100}).
-		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(100, "run-1")).
-		WithBroadcast([]string{"v1"}).
-		MustBuildBroadcast()
-
-	_, err := jobIDFromDuplicatedBroadcast(context.Background(), msg, 101)
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
-}
-
-// --------------------------------
-// updateImportAckCallback Tests
-// --------------------------------
 
 // buildUpdateImportBroadcastResult constructs a BroadcastResult for an
 // UpdateImport WAL message, mirroring the commit/rollback builders above.
@@ -1744,8 +1417,8 @@ func buildUpdateImportBroadcastResult(jobID int64, idRanges map[int64]*commonpb.
 	}
 }
 
-func newIDRangeTestJob(jobID int64, state internalpb.ImportJobState) *importJob {
-	return &importJob{
+func newIDRangeTestJob(jobID int64, state internalpb.ImportJobState) *bulkimport.Job {
+	return &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: jobID,
 			State: state,
@@ -1754,7 +1427,7 @@ func newIDRangeTestJob(jobID int64, state internalpb.ImportJobState) *importJob 
 				{Id: 102, Paths: []string{"b.parquet"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 }
 
@@ -1772,13 +1445,13 @@ func validIDRangeFileRanges() map[int64]*commonpb.IDRange {
 func TestUpdateImportAckCallback_FirstApply(t *testing.T) {
 	ctx := context.Background()
 	var saved []*datapb.ImportJob
-	importMeta := newCapturingImportMeta(t, &saved)
+	importMeta := bulkimport.NewCapturingImportMeta(t, &saved)
 
 	job := newIDRangeTestJob(21, internalpb.ImportJobState_PreImporting)
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	require.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(21, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 21)
@@ -1808,8 +1481,8 @@ func TestUpdateImportAckCallback_AppliesInAssigningIDRange(t *testing.T) {
 	job := newIDRangeTestJob(24, internalpb.ImportJobState_AssigningIDRange)
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	require.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(24, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 24)
@@ -1827,14 +1500,14 @@ func TestUpdateImportAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T) 
 	importMeta, _ := newTestImportMeta(t)
 	job := newIDRangeTestJob(22, internalpb.ImportJobState_PreImporting)
 	require.NoError(t, importMeta.AddJob(ctx, job))
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
 
 	// First apply.
-	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+	require.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(22, validIDRangeFileRanges(), 0)))
 
 	// Equal redelivery -> nil, nothing changes.
-	assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+	assert.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(22, validIDRangeFileRanges(), 0)))
 	got := importMeta.GetJob(ctx, 22)
 	assert.EqualValues(t, 1000, got.GetFiles()[0].GetIdRange().GetBegin())
@@ -1846,7 +1519,7 @@ func TestUpdateImportAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T) 
 		0: {Begin: 2000, End: 2010},
 		1: {Begin: 2010, End: 2010},
 	}
-	assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+	assert.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(22, conflicting, 0)))
 	got = importMeta.GetJob(ctx, 22)
 	assert.EqualValues(t, 1000, got.GetFiles()[0].GetIdRange().GetBegin(), "first applied range wins")
@@ -1860,11 +1533,11 @@ func TestUpdateImportAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T) 
 func TestUpdateImportAckCallback_JobNotFoundNoOp(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
 
 	freshTick := tsoutil.ComposeTSByTime(time.Now())
 	for _, tick := range []uint64{freshTick, 0} {
-		assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+		assert.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 			buildUpdateImportBroadcastResult(31, validIDRangeFileRanges(), tick)))
 	}
 	assert.Nil(t, importMeta.GetJob(ctx, 31))
@@ -1886,8 +1559,8 @@ func TestUpdateImportAckCallback_TerminalStatesNoOp(t *testing.T) {
 			job := newIDRangeTestJob(41, state)
 			require.NoError(t, importMeta.AddJob(ctx, job))
 
-			callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-			assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+			callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+			assert.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 				buildUpdateImportBroadcastResult(41, validIDRangeFileRanges(), 0)))
 
 			got := importMeta.GetJob(ctx, 41)
@@ -1939,8 +1612,8 @@ func TestUpdateImportAckCallback_ProtocolViolationsFailJob(t *testing.T) {
 			job := newIDRangeTestJob(51, internalpb.ImportJobState_PreImporting)
 			require.NoError(t, importMeta.AddJob(ctx, job))
 
-			callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-			assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+			callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+			assert.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 				buildUpdateImportBroadcastResult(51, tc.idRanges, 0)))
 
 			got := importMeta.GetJob(ctx, 51)
@@ -1960,7 +1633,7 @@ func TestUpdateImportAckCallback_ProtocolViolationsFailJob(t *testing.T) {
 func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: 26,
 			State: internalpb.ImportJobState_Uncommitted,
@@ -1972,12 +1645,12 @@ func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) 
 				{Id: 102, Paths: []string{"b.parquet"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	require.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(26, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 26)
@@ -1985,10 +1658,6 @@ func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) 
 	assert.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
 	assert.Contains(t, got.GetReason(), "cross-cluster file divergence")
 }
-
-// --------------------------------
-// broadcastUpdateImportMessage Tests
-// --------------------------------
 
 // The producer side of the two-phase flow: per-file ranges (one entry per job file,
 // Index == position, range size == that file's post-preimport row count, zero-row
@@ -2003,7 +1672,7 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 		CollectionName: "test_collection",
 	}, nil)
 
-	capture := &captureBroadcastAPI{}
+	capture := &meta.CaptureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return capture, nil
@@ -2016,7 +1685,8 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	})
 
 	server := &Server{broker: mockBroker, allocator: alloc}
-	job := &importJob{
+	server.ddl = newDDLCallbacks(server)
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        9,
 			CollectionID: 7,
@@ -2027,17 +1697,17 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 				{Id: 103, Paths: []string{"c.parquet"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 
 	// fileRows aligned with job.GetFiles(): 10 rows, 0 rows (empty file), 5 rows.
 	require.NoError(t, server.broadcastUpdateImportMessage(ctx, job, []int64{10, 0, 5}))
 
-	require.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+	require.NotNil(t, capture.Captured, "Broadcast must have been called")
+	assert.ElementsMatch(t, wantVchannels, capture.Captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 
-	msg, err := message.AsBroadcastUpdateImportMessageV2(capture.captured)
+	msg, err := message.AsBroadcastUpdateImportMessageV2(capture.Captured)
 	require.NoError(t, err)
 	assert.EqualValues(t, 7, msg.Header().GetCollectionId())
 	assert.EqualValues(t, 9, msg.Header().GetJobId())
@@ -2070,12 +1740,12 @@ func TestAssignAndBroadcastUpdateImport_ErrorPaths(t *testing.T) {
 	defer mockBroadcast.UnPatch()
 
 	server := &Server{allocator: allocErr}
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: 9, CollectionID: 7, Vchannels: []string{"v0"},
 			Files: []*internalpb.ImportFile{{Id: 101}},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err := server.broadcastUpdateImportMessage(ctx, job, []int64{10})
 	assert.Error(t, err)
@@ -2087,12 +1757,12 @@ func TestAssignAndBroadcastUpdateImport_ErrorPaths(t *testing.T) {
 		return 1000, 1000 + n, nil
 	})
 	server = &Server{allocator: alloc}
-	noVchannelJob := &importJob{
+	noVchannelJob := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID: 9, CollectionID: 7,
 			Files: []*internalpb.ImportFile{{Id: 101}},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	err = server.broadcastUpdateImportMessage(ctx, noVchannelJob, []int64{10})
 	assert.Error(t, err)
@@ -2112,7 +1782,7 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 
 	s := &Server{}
 
-	err := s.validateImportRequest(context.Background(),
+	err := newDDLCallbacks(s).ValidateImportRequest(context.Background(),
 		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
 		[]*commonpb.KeyValuePair{
 			{Key: "backup", Value: "false"},
@@ -2129,15 +1799,15 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	paramtable.Init()
 	type ackAllocator struct{ allocator.Allocator }
-	type ackHandler struct{ Handler }
-	type ackMeta struct{ ImportMeta }
+	type ackHandler struct{ meta.Handler }
+	type ackMeta struct{ bulkimport.ImportMeta }
 	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
 	defer allocate.UnPatch()
 	getCollection := mockey.Mock((*ackHandler).GetCollection).Return(
-		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+		&meta.CollectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
 	defer getCollection.UnPatch()
-	var saved ImportJob
-	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+	var saved bulkimport.ImportJob
+	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job bulkimport.ImportJob) error {
 		saved = job
 		return nil
 	}).Build()
@@ -2164,8 +1834,8 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 
 	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	callbacks := &DDLCallbacks{Server: server}
-	require.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	callbacks := newDDLCallbacks(server)
+	require.NoError(t, callbacks.ImportV1AckCallback(context.Background(), result))
 	require.NotNil(t, saved)
 	assert.Equal(t, int64(1), saved.GetJobID())
 	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
@@ -2180,7 +1850,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 func TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:   27,
 			State:   internalpb.ImportJobState_Uncommitted,
@@ -2193,12 +1863,12 @@ func TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob(t *testin
 				{Id: 102, Paths: []string{"b.parquet"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test"),
+		Tr: timerecord.NewTimeRecorder("test"),
 	}
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+	callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+	require.NoError(t, callbacks.UpdateImportAckCallback(ctx,
 		buildUpdateImportBroadcastResult(27, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 27)

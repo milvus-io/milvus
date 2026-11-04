@@ -228,7 +228,7 @@ source queue → single reader, sequential
 ```
 
 Ordinary normalization follows the V2 order: `CheckRowsEqual` →
-`CheckStructArrayConsistency` → `AppendNullableDefaultFieldsData` →
+`NormalizeStructArrayFields` → `AppendNullableDefaultFieldsData` →
 `FillDynamicData` → `AppendPreallocatedSystemFields` (file IDRange) → hash
 routing → sort. All functions (TextEmbedding, BM25, MinHash) run here once per
 batch, at the V2 pipeline position; backup skips function execution because its

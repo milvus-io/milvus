@@ -132,10 +132,12 @@ class KnowhereEngine {
     }
 
     // Embedding-list offsets are shared with readers through an immutable
-    // generation.
+    // generation. They also mark an index of only empty lists that an older
+    // build persisted for an element-level metric, so they do not require
+    // embedding-list mode here.
     bool
     IsEmptyEmbListIndex() const {
-        return embedding_list_ && !EmptyEmbListOffsets().empty();
+        return !EmptyEmbListOffsets().empty();
     }
 
     void

@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "index/contracts/Registry.h"
 #include "storage/FileManager.h"
 #include "storage/artifact/Artifact.h"
@@ -32,6 +33,8 @@
 #include "storage/artifact/FileSink.h"
 
 namespace milvus::indexbuilder {
+
+class BuildInputMaterializer;
 
 // Native projection of the field schema needed by build orchestration.
 // Protobuf/default-value interpretation remains inside BuildSession.
@@ -41,6 +44,9 @@ struct BuildFieldSpec {
     DataType field_type{DataType::NONE};
     DataType element_type{DataType::NONE};
     bool nullable{false};
+    // VECTOR_ARRAY elements may be null; element-level vector indexes then
+    // carry element-domain validity.
+    bool element_nullable{false};
     size_t estimated_missing_row_bytes{1};
 };
 
@@ -155,6 +161,8 @@ class BuildSession final {
     BuildSession(BuildRequest request,
                  storage::FileManagerContext file_manager_context);
 
+    ~BuildSession();
+
     BuildSession(const BuildSession&) = delete;
     BuildSession&
     operator=(const BuildSession&) = delete;
@@ -168,6 +176,17 @@ class BuildSession final {
     void
     BuildFromSource();
 
+    // Completes decoding before requesting build admission.
+    void
+    LoadData();
+
+    // False retains the prepared input for retry; success belongs to Build.
+    bool
+    TryReserveBuild();
+
+    void
+    Build();
+
     // Publish the retained outcome. Artifact writes may upload incrementally;
     // Finish finalizes publication. A failure leaves the outcome available for
     // another Publish attempt; SkippedEmpty returns empty file stats.
@@ -177,13 +196,14 @@ class BuildSession final {
  private:
     enum class State {
         Ready,
+        Loaded,
         Artifact,
         SkippedEmpty,
         Failed,
     };
 
-    BuildProduct
-    RunToArtifact();
+    std::unique_ptr<BuildInputMaterializer>
+    Materialize();
 
     void
     NormalizeAndValidateRequest();
@@ -191,9 +211,15 @@ class BuildSession final {
     void
     ValidateInputSpec(const index::BuilderInputSpec& spec) const;
 
+    template <typename Materializer>
+    bool
+    ReadDenseInput(Materializer& materializer);
+
     BuildRequest req_;
     storage::FileManagerContext file_manager_context_;
     BuildFieldSpec field_spec_;
+    milvus::OpContext build_context_;
+    std::unique_ptr<BuildInputMaterializer> materializer_;
     std::optional<BuildProduct> product_;
     State state_{State::Ready};
 };

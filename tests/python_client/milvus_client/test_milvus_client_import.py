@@ -104,9 +104,9 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
     @staticmethod
     def _write_rows(file_path, rows, arrow_schema):
         # Write raw files to exercise reader validation without BulkWriter normalizing the input.
-        if file_path.suffix in {".json", ".jsonl"}:
+        if file_path.suffix in {".json", ".jsonl", ".ndjson"}:
             with file_path.open("w", encoding="utf-8") as stream:
-                if file_path.suffix == ".jsonl":
+                if file_path.suffix in {".jsonl", ".ndjson"}:
                     stream.write("\n".join(json.dumps(row, ensure_ascii=False) for row in rows))
                 else:
                     json.dump(rows, stream, ensure_ascii=False)
@@ -247,12 +247,29 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         self._assert_import_rows(client, collection_name, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("file_format", ["json", "jsonl", "csv", "parquet"])
-    def test_import_nullable_fields_preserve_values_across_files(self, file_format, upload_import_file, tmp_path):
+    @pytest.mark.parametrize(
+        "file_format,jsonlines_layout",
+        [
+            pytest.param("json", "default", id="json"),
+            pytest.param("jsonl", "default", id="jsonl"),
+            pytest.param("ndjson", "default", id="ndjson"),
+            pytest.param("csv", "default", id="csv"),
+            pytest.param("parquet", "default", id="parquet"),
+            pytest.param("jsonl", "trailing_newline", id="jsonl-trailing-newline"),
+            pytest.param("jsonl", "blank_lines", id="jsonl-blank-lines"),
+            pytest.param("ndjson", "trailing_newline", id="ndjson-trailing-newline"),
+            pytest.param("ndjson", "blank_lines", id="ndjson-blank-lines"),
+        ],
+    )
+    def test_import_nullable_fields_preserve_values_across_files(
+        self, file_format, jsonlines_layout, upload_import_file, tmp_path
+    ):
         """
         target: nullable scalar, array, JSON and vector value alignment
         method: import distinct per-row values and staggered nulls across files and Parquet row groups
         expected: every cell and null-filter PK set is preserved, including after release/load
+        case extension: IV3-FN-01 — adds NDJSON and JSONL/NDJSON trailing-newline and blank-line variants;
+                        the original multi-file flow and assertions are retained.
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_nullable_values")
@@ -322,6 +339,11 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         for part, group in enumerate((rows[:13], rows[13:])):
             path = tmp_path / f"part_{part}.{file_format}"
             self._write_rows(path, group, pa.schema(arrow_fields))
+            if jsonlines_layout == "trailing_newline":
+                path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            elif jsonlines_layout == "blank_lines":
+                content = path.read_text(encoding="utf-8").replace("\n", "\n\n")
+                path.write_text("\n \t\n" + content + "\n\n", encoding="utf-8")
             if file_format == "parquet":
                 assert pq.read_metadata(path).num_row_groups > 1
             files.append([upload_import_file(path)])
@@ -379,7 +401,8 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         """
         target: missing and null default fields versus explicit falsy values
         method: import a file with omitted columns and a file with null, zero and non-default values
-        expected: only missing/null values use defaults; explicit zero, false and empty strings survive
+        expected: only missing/null values use defaults; explicit zero, false and empty strings survive reload
+        case: IV3-FN-21 SC-05 adds reload and full-row rechecks to the existing V2/V3 case
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_defaults")
@@ -451,6 +474,10 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
             collection_name, files, {"sep": "|", "nullkey": "__NULL__"} if file_format == "csv" else {}
         )
         self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
         self._assert_import_rows(client, collection_name, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -660,6 +687,7 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         target: partition-key routing with explicit PKs and autoID across multiple files
         method: import deterministic rows with four key values and query each key separately
         expected: each key returns exactly its source rows, including scalar and vector values
+        case extension: IV3-FN-13 adds absent-key query/count checks only; original matrix is unchanged
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_partition_values")
@@ -739,6 +767,13 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
                     if field != "id" or not auto_id:
                         assert row[field] == source[field], {"field": field, "row": row, "expected": source}
         assert len(all_ids) == len(rows)
+
+        # IV3-FN-13 extension: an absent key must stay empty in both Import V2 and V3.
+        missing_key = "missing_group" if partition_type == DataType.VARCHAR else -1
+        missing_filter = f"group_key == {json.dumps(missing_key)}"
+        assert self.query(client, collection_name, filter=missing_filter, output_fields=["id"], limit=1)[0] == []
+        count = self.query(client, collection_name, filter=missing_filter, output_fields=["count(*)"])[0]
+        assert count[0]["count(*)"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("action,terminal_state", [("commit", "Completed"), ("abort", "Failed")])

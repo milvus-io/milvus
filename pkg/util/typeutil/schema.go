@@ -42,9 +42,9 @@ import (
 type getVariableFieldLengthPolicy int
 
 const (
-	max    getVariableFieldLengthPolicy = 0
-	avg    getVariableFieldLengthPolicy = 1
-	custom getVariableFieldLengthPolicy = 2
+	maxPolicy    getVariableFieldLengthPolicy = 0
+	avgPolicy    getVariableFieldLengthPolicy = 1
+	customPolicy getVariableFieldLengthPolicy = 2
 )
 
 func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFieldLengthPolicy) (int, error) {
@@ -67,11 +67,11 @@ func getVarFieldLength(fieldSchema *schemapb.FieldSchema, policy getVariableFiel
 			return 0, err
 		}
 		switch policy {
-		case max:
+		case maxPolicy:
 			return maxLength, nil
-		case avg:
+		case avgPolicy:
 			return maxLength / 2, nil
-		case custom:
+		case customPolicy:
 			// TODO this is a hack and may not accurate, we should rely on estimate size per record
 			// However we should report size and datacoord calculate based on size
 			// https://github.com/milvus-io/milvus/issues/17687
@@ -132,15 +132,15 @@ func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled b
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
-	return estimateSizeBy(schema, custom)
+	return estimateSizeBy(schema, customPolicy)
 }
 
 func EstimateMaxSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
-	return estimateSizeBy(schema, max)
+	return estimateSizeBy(schema, maxPolicy)
 }
 
 func EstimateAvgSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
-	return estimateSizeBy(schema, avg)
+	return estimateSizeBy(schema, avgPolicy)
 }
 
 func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLengthPolicy) (int, error) {
@@ -544,6 +544,31 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 	}
 	fieldSchema := helper.allFields[offset]
 	return fieldSchema, nil
+}
+
+// GetUserFieldFromName resolves a user-supplied field name without exposing
+// storage system columns. Internal consumers can still use GetFieldFromName.
+func (helper *SchemaHelper) GetUserFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
+	field, err := helper.GetFieldFromName(fieldName)
+	if err != nil {
+		return nil, err
+	}
+	if common.IsSystemField(field.GetFieldID()) {
+		return nil, merr.WrapErrParameterInvalidMsg("failed to get field schema by name: fieldName(%s) not found", fieldName)
+	}
+	return field, nil
+}
+
+// GetUserFieldFromNameDefaultJSON keeps dynamic-key resolution for names that
+// are not declared user fields, including names shared with system columns.
+func (helper *SchemaHelper) GetUserFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
+	if offset, ok := helper.nameOffset[fieldName]; ok {
+		field := helper.allFields[offset]
+		if !common.IsSystemField(field.GetFieldID()) {
+			return field, nil
+		}
+	}
+	return helper.getDefaultJSONField(fieldName)
 }
 
 func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schemapb.StructArrayFieldSchema {

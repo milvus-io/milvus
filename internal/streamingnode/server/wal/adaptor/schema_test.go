@@ -24,7 +24,7 @@ func (*schemaShardManager) GetWriteSchema(int64, string) (*streamingpb.Collectio
 }
 
 func TestWALSchemaSelectors(t *testing.T) {
-	mockey.PatchConvey("write admission and historical read lookup have independent frontiers", t, func() {
+	mockey.PatchConvey("exact versions prefer write admission and fall back to retained history", t, func() {
 		channel := types.PChannelInfo{AccessMode: types.AccessModeRW}
 		mockey.Mock((*analyzerWALTest).Channel).To(func(*analyzerWALTest) types.PChannelInfo { return channel }).Build()
 		mockey.Mock((*schemaShardManager).GetWriteSchema).To(func(_ *schemaShardManager, collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
@@ -54,16 +54,19 @@ func TestWALSchemaSelectors(t *testing.T) {
 		resp, err := w.GetCollectionSchema(context.Background(), req)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, resp.Schema.Version)
-		require.EqualValues(t, 30, resp.EffectiveTimeTick)
 		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}
 		resp, err = w.GetCollectionSchema(context.Background(), req)
 		require.NoError(t, err)
 		require.Zero(t, resp.Schema.Version)
-		require.EqualValues(t, 10, resp.EffectiveTimeTick)
 		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 2}
-		_, err = w.GetCollectionSchema(context.Background(), req)
-		require.Error(t, err)
-		require.False(t, status.AsStreamingError(err).IsUnrecoverable(), "write schema visibility does not imply observer visibility")
+		resp, err = w.GetCollectionSchema(context.Background(), req)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, resp.Schema.Version)
+		req.Vchannel = "p_1v1"
+		resp, err = w.GetCollectionSchema(context.Background(), req)
+		require.NoError(t, err, "matching write schema is available before the observer creates the module")
+		require.EqualValues(t, 2, resp.Schema.Version)
+		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 1}
 		for _, tc := range []struct {
 			vchannel string
 			terminal bool
@@ -78,8 +81,12 @@ func TestWALSchemaSelectors(t *testing.T) {
 			require.Error(t, err, tc.vchannel)
 			require.Equal(t, tc.terminal, status.AsStreamingError(err).IsUnrecoverable(), tc.vchannel)
 		}
-		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}
+		req.Vchannel = "p_1v0"
 		w.param.ShardManager = nil
+		resp, err = w.GetCollectionSchema(context.Background(), req)
+		require.NoError(t, err, "retained history remains readable if the write lookup fails")
+		require.EqualValues(t, 1, resp.Schema.Version)
+		req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_CurrentWrite{CurrentWrite: true}
 		_, err = w.GetCollectionSchema(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 		channel.AccessMode = types.AccessModeRO

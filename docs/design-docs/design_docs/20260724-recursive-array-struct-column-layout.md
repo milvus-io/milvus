@@ -133,8 +133,10 @@ field: list<item: list<item: int32 nullable> nullable> nullable
 The top-level Arrow field nullable flag equals `FieldSchema.nullable`; the
 first `item` nullable flag equals `FieldSchema.element_nullable`; the second
 `item` nullable flag equals the leaf `TypeSchema.nullable`. The TypeSchema root
-and second node must mirror the first two FieldSchema flags, respectively;
-the leaf flag is independent. Only nested Arrays carry this wire TypeSchema.
+and second node mirror the first two FieldSchema flags: the server sets the
+root's flag from `FieldSchema.nullable`, and rejects a second node whose flag
+differs from `FieldSchema.element_nullable`. The leaf flag is independent.
+Only nested Arrays carry this wire TypeSchema.
 For a single-level element-nullable scalar Array, `FieldMeta` synthesizes an
 internal TypeSchema for `ColumnarArrayChunk`/`ArrayValue`; it is not added to
 the field's wire schema.
@@ -159,3 +161,23 @@ deserializing proto Binary. Null list rows and null inner lists have repeated
 offsets and no child values. The legacy single-level scalar Array with
 non-nullable elements remains one proto-serialized `Binary` per row and loads
 through `ArrayChunk`.
+
+## Growing Segments
+
+Growing segments use the same columnar layout. Each growing chunk copies every
+insert or load batch it receives into memory blocks owned by the chunk (from
+the mmap chunk manager when growing mmap is on, from the heap otherwise) and
+keeps one view per row:
+
+| Field | Per-batch storage | Row view |
+| --- | --- | --- |
+| Native-list scalar Array (`ArrayValue`) | One `ColumnarArrayChunk` | `ArrayValueView` |
+| Legacy scalar Array (`Array`) | One block of row payloads | `ArrayView` |
+| Vector Array (`VectorArray`) | One block of compact vectors and, when element-nullable, one of element validity | `VectorArrayView` |
+
+An insert batch becomes a `ColumnarArrayChunk` built directly from the
+protobuf rows and shares the column's TypeSchema object; a load batch is
+built from the loaded `ArrayValue` rows and shares their TypeSchema. No block
+copies its TypeSchema. `ArrayValue`, `Array` and `VectorArray` objects exist
+only while a row is converted, for example as `FieldData` elements during
+binlog reads, writes and growing loads; no segment stores them.

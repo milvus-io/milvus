@@ -56,6 +56,7 @@ type serverIDPicker struct {
 //     ready RPCs will be terminated with this error's Error() string and
 //     status code Unavailable.
 func (p *serverIDPicker) Pick(pickInfo balancer.PickInfo) (balancer.PickResult, error) {
+	contextutil.SetPickedServerID(pickInfo.Ctx, contextutil.UnspecifiedServerID)
 	if p.fallback != nil && !contextutil.IsFailFastPick(pickInfo.Ctx) {
 		return p.fallback.Pick(pickInfo)
 	}
@@ -75,6 +76,7 @@ func (p *serverIDPicker) Pick(pickInfo balancer.PickInfo) (balancer.PickResult, 
 		}
 	}
 
+	contextutil.SetPickedServerID(pickInfo.Ctx, conn.serverID)
 	return balancer.PickResult{
 		SubConn: conn.subConn,
 		Done:    nil, // TODO: add a done function to handle the rpc finished.

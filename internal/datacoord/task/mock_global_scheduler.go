@@ -232,8 +232,7 @@ func (_c *MockGlobalScheduler_Stop_Call) RunAndReturn(run func()) *MockGlobalSch
 func NewMockGlobalScheduler(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockGlobalScheduler {
+}) *MockGlobalScheduler {
 	mock := &MockGlobalScheduler{}
 	mock.Mock.Test(t)
 

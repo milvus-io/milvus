@@ -290,6 +290,7 @@ type MixCoordClient interface {
 //
 //go:generate mockery --name=MixCoord  --output=../mocks --filename=mock_mixcoord.go --with-expecter
 type MixCoord interface {
+	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)
 	Component
 	rootcoordpb.RootCoordServer
 	querypb.QueryCoordServer
@@ -339,6 +340,9 @@ type MixCoordComponent interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
+
+	// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+	RegisterPKIndexCoordGRPCService(server *grpc.Server)
 
 	GracefulStop()
 
