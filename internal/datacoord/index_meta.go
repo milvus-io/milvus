@@ -1150,8 +1150,8 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 	return true
 }
 
-// UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
-func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
+// UpdateVersion persists the dispatch version, worker and actual index type together before sending the build.
+func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID, indexType string) error {
 	m.keyLock.Lock(buildID)
 	defer m.keyLock.Unlock(buildID)
 
@@ -1164,6 +1164,7 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexVersion++
 		segIdx.NodeID = nodeID
+		segIdx.IndexType = indexType
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 

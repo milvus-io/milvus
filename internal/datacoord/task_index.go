@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -147,12 +148,13 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 	return nil
 }
 
-func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
-	if err := it.meta.indexMeta.UpdateVersion(it.BuildID, nodeID); err != nil {
+func (it *indexBuildTask) UpdateTaskVersion(nodeID int64, indexType string) error {
+	if err := it.meta.indexMeta.UpdateVersion(it.BuildID, nodeID, indexType); err != nil {
 		return err
 	}
 	it.IndexVersion++
 	it.NodeID = nodeID
+	it.IndexType = indexType
 	return nil
 }
 
@@ -426,7 +428,7 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 
 	// Update task version
-	if err := it.UpdateTaskVersion(nodeID); err != nil {
+	if err := it.UpdateTaskVersion(nodeID, GetIndexType(req.GetIndexParams())); err != nil {
 		log.Warn(ctx, "failed to update task version", mlog.Err(err))
 		return
 	}
@@ -670,6 +672,31 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	}
 	buildField := fieldSchemaForIndexBuild(schema, field)
 
+	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
+	if typeutil.IsJSONType(field.GetDataType()) && GetIndexType(params) == indexparamcheck.IndexINVERTED &&
+		Params.AutoIndexConfig.ScalarJSONIndexType.GetValue() == indexparamcheck.IndexHybrid {
+		definitions := it.meta.indexMeta.GetIndexesByID(segIndex.CollectionID, []int64{segIndex.IndexID})
+		if len(definitions) == 1 {
+			definition := definitions[0]
+			userType, _ := getIndexParam(definition.UserIndexParams, common.IndexTypeKey)
+			castType, _ := getIndexParam(params, common.JSONCastTypeKey)
+			// Restore a downgraded AutoIndex only for this build; old segments
+			// must retain their persisted type, including across coordinator restarts.
+			if (userType == common.AutoIndexName || (userType == "" && definition.IsAutoIndex)) &&
+				castType != "" && !strings.EqualFold(castType, "JSON") &&
+				currentScalarIndexVersion >= requiredJSONPathIndexVersion(indexparamcheck.IndexHybrid, castType) &&
+				checkJSONArrayIndexEnabled(indexparamcheck.IndexHybrid, castType) == nil {
+				setIndexParam(params, common.IndexTypeKey, indexparamcheck.IndexHybrid)
+				if _, err := getIndexParam(params, common.BitmapCardinalityLimitKey); err != nil {
+					params = append(params, &commonpb.KeyValuePair{
+						Key:   common.BitmapCardinalityLimitKey,
+						Value: Params.AutoIndexConfig.BitmapCardinalityLimit.GetValue(),
+					})
+				}
+			}
+		}
+	}
+
 	if typeutil.IsArrayType(field.GetDataType()) || typeutil.IsJSONType(field.GetDataType()) {
 		// Resolve the software gate for every build, including new segments of an
 		// existing HYBRID index. Neither saved index nor schema params may override it.
@@ -708,7 +735,6 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 	})
 
 	currentVecIndexVersion := it.indexEngineVersionManager.ResolveVecIndexVersion()
-	currentScalarIndexVersion := it.indexEngineVersionManager.ResolveScalarIndexVersion()
 
 	// Legacy layouts are assembled by C++; segment-rooted builds below carry
 	// the complete prefix derived from the owning manifest, including legacy bases.

@@ -156,7 +156,7 @@ func TestIndexTaskCountsLifecycle(t *testing.T) {
 	require.NoError(t, m.AddSegmentIndex(ctx, model.CloneSegmentIndex(task)))
 	require.Equal(t, indexTaskStateCounts{0, 1}, m.indexTaskCountsSnapshot())
 	require.NoError(t, m.BuildIndex(30))
-	require.NoError(t, m.UpdateVersion(30, 100))
+	require.NoError(t, m.UpdateVersion(30, 100, ""))
 	assertIndexTaskCounts(t, m)
 	for _, state := range []commonpb.IndexState{commonpb.IndexState_Failed, commonpb.IndexState_Retry, commonpb.IndexState_InProgress} {
 		require.NoError(t, m.UpdateIndexState(30, state, ""))
@@ -223,7 +223,7 @@ func TestIndexTaskCountsPersistenceFailures(t *testing.T) {
 			return m.AddSegmentIndex(ctx, &model.SegmentIndex{CollectionID: 1, IndexID: 10, SegmentID: 21, BuildID: 31})
 		},
 		"state":   func(m *indexMeta) error { return m.UpdateIndexState(30, commonpb.IndexState_Retry, "") },
-		"version": func(m *indexMeta) error { return m.UpdateVersion(30, 100) },
+		"version": func(m *indexMeta) error { return m.UpdateVersion(30, 100, "") },
 		"build":   func(m *indexMeta) error { return m.BuildIndex(30) },
 		"finish": func(m *indexMeta) error {
 			return m.FinishTask(&workerpb.IndexTaskInfo{BuildID: 30, State: commonpb.IndexState_Finished})

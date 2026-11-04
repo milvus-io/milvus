@@ -896,7 +896,7 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 
 	// Simulate a reset after the caller built entry. The same build ID now has
 	// a newer task version, which must not be represented by the old artifact.
-	require.NoError(t, meta.indexMeta.UpdateVersion(buildID, 1000))
+	require.NoError(t, meta.indexMeta.UpdateVersion(buildID, 1000, ""))
 
 	manifestCalls := 0
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
