@@ -4140,6 +4140,29 @@ class SegmentExpr : public Expr {
                !nested_path_.empty() && !PathContainsInteger(nested_path_);
     }
 
+    // Whether Eval() implements ExprExecPath::JsonStats for this expression.
+    // Only the expressions that override this may be switched to JsonStats by
+    // FallbackToJsonStatsIfEligible().
+    virtual bool
+    SupportsJsonStatsExecPath() const {
+        return false;
+    }
+
+    // JSON shredding is a typed column scan, not an index lookup: it still
+    // visits every row of the segment on every query. A JSON path index that
+    // serves this expression is preferred; the shredded columns are the
+    // fallback for JSON paths without a usable index. Subclasses therefore
+    // decide index paths in DetermineExecPath() and leave RawData for the
+    // paths they could not serve; this hook upgrades that RawData to
+    // JsonStats when the segment has stats for the field.
+    void
+    FallbackToJsonStatsIfEligible() {
+        if (exec_path_ == ExprExecPath::RawData &&
+            SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+        }
+    }
+
     virtual bool
     CanUseNgramIndex() const {
         return false;
@@ -4176,6 +4199,7 @@ class SegmentExpr : public Expr {
             try {
                 auto self = const_cast<SegmentExpr*>(this);
                 self->DetermineExecPath();
+                self->FallbackToJsonStatsIfEligible();
                 self->RecordExecPath();
             } catch (...) {
                 determine_exec_path_error_ = std::current_exception();
