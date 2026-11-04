@@ -10,9 +10,12 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const replicateRespChanLength = 128
@@ -147,6 +150,16 @@ func (p *ReplicateStreamServer) handleReplicateMessage(req *milvuspb.ReplicateRe
 		return nil
 	}
 	span.RecordError(err)
+	if status.AsStreamingError(err).IsReplicateViolation() {
+		// The stream reconnects and retries from its checkpoint, but a
+		// violation does not clear by itself: replication of every collection
+		// on this pchannel has stopped until the cause is repaired.
+		metrics.StreamingServiceClientReplicateViolations.WithLabelValues(
+			paramtable.GetStringNodeID(), funcutil.ToPhysicalChannel(msg.VChannel())).Inc()
+		mlog.Error(ctx, "append replicate message to wal refused as a replicate violation, replication of the pchannel is stalled until it is repaired",
+			mlog.FieldMessage(msg), mlog.Err(err))
+		return err
+	}
 	// unexpected error, will close the stream and wait for client to reconnect.
 	mlog.Warn(ctx, "append replicate message to wal failed", mlog.FieldMessage(msg), mlog.Err(err))
 	return err

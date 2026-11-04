@@ -122,9 +122,9 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, nil)
-	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1", "ch2"}
+	cache := newInsertTaskIdempotencyMockCache(t, schema, nil, channels...)
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	chMgr := channelmgr.NewChannelsMgr(func(int64) (channelmgr.ChannelInfo, error) {
 		return channelmgr.ChannelInfo{VChans: channels, PChans: channels}, nil
 	})
@@ -132,7 +132,6 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 	task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, chMgr)
 	require.NoError(t, task.PreExecute(ctx))
 	require.NotEmpty(t, task.idempotencyKey)
-	require.Equal(t, channels, task.vChannels)
 	require.Equal(t, task.insertMsg.GetRowIDs(), task.result.GetIDs().GetIntId().GetData())
 
 	actualChannels := rowChannelsByPK(task.result.GetIDs(), channels)
@@ -152,8 +151,8 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 		nextID += int64(count)
 		return begin, nextID, nil
 	}
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs1, schemapb.DataType_Int64, channels, 0, alloc))
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs2, schemapb.DataType_Int64, channels, 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs1, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs2, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0, alloc))
 
 	actualChannels1 := rowChannelsByPK(&schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: rowIDs1}},
@@ -237,7 +236,9 @@ func TestMergeDuplicateInsertResultsAcrossVChannels(t *testing.T) {
 	require.Equal(t, []int64{200, 101, 102, 203, 104, 105}, result.GetIDs().GetIntId().GetData())
 }
 
-func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) Cache {
+// newInsertTaskIdempotencyMockCache is the cache of collection 100; vchannels
+// is its channel list, which the write path reads with its routing.
+func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair, vchannels ...string) Cache {
 	t.Helper()
 
 	cache := NewMockCache(t)
@@ -247,6 +248,7 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, propert
 		DBName:     "db",
 		Schema:     schema,
 		Properties: properties,
+		VChannels:  vchannels,
 	}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	return cache
@@ -336,7 +338,7 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 }
 
 func rowChannelsByPK(ids *schemapb.IDs, channels []string) []string {
-	offsetsByChannel, _ := assignChannelsByPK(ids, channels, &BaseInsertTask{
+	offsetsByChannel, _ := assignChannelsByPK(nil, ids, channels, &BaseInsertTask{
 		InsertRequest: &msgpb.InsertRequest{},
 	})
 	rowChannels := make([]string, len(idsByOffsetsForTest(ids)))

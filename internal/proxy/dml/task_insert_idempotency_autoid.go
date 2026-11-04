@@ -1,18 +1,34 @@
 package dml
 
 import (
+	"fmt"
 	"math"
+	"strings"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func (it *InsertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
-	if len(channelNames) <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
+// reassignAutoIDForStableIdempotency re-draws the auto ids of an idempotent
+// insert so that row offset i always lands on the shard owning residue i % M,
+// M being the routing modulus of route (the collection's modulus once it has
+// been split, its shard count before), whatever ids a retry draws.
+//
+// Pinning offsets to residues, not to positions in a channel list, is what
+// keeps a retry stable across a shard split: a split only refines residues (M
+// stays, or doubles, and i % 2M refines i % M), so a shard the split did not
+// touch owns exactly the offsets it owned before, and the offsets of the split
+// shard go to its targets, where the source's idempotency window answers for
+// them (see split_fence_idempotency.go). For a never-split collection the
+// owner of residue r is the r-th shard and a key's residue is its
+// HashPK2Channels index, so this is the legacy offset % shardNum bucketing bit
+// for bit.
+func (it *InsertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, route *writeRoute) error {
+	placement := newAutoIDPlacement(route)
+	if placement.owners <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
 		return nil
 	}
 	if it.idempotencyKey == "" {
@@ -22,17 +38,11 @@ func (it *InsertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 		return merr.WrapErrServiceInternalMsg("id allocator is required to stabilize auto id shard assignment")
 	}
 
-	// The routing base must stay exactly the channel list returned by the channel
-	// manager: PK routing is index-based (HashPK2Channels only uses len(channels),
-	// then channelNames[idx]), and delete / the delete leg of upsert hash against
-	// that same unpermuted list. Reordering it here would map a PK to a different
-	// vchannel than delete later picks for the very same PK.
-	it.vChannels = channelNames
 	clusterID := paramtable.Get().CommonCfg.ClusterID.GetAsUint64()
-	if err := reassignAutoIDByOffsetChannels(
+	if err := reassignAutoIDByResidue(
 		it.insertMsg.RowIDs,
 		primaryFieldSchema.GetDataType(),
-		channelNames,
+		placement,
 		clusterID,
 		it.idAllocator.Alloc,
 	); err != nil {
@@ -64,68 +74,133 @@ func replacePrimaryFieldData(it *InsertTask, primaryFieldSchema *schemapb.FieldS
 	it.insertMsg.FieldsData = append(it.insertMsg.FieldsData, primaryFieldData)
 }
 
-func reassignAutoIDByOffsetChannels(
+// autoIDPlacement is how auto ids are placed: residue r modulo the modulus is
+// owned by shard ownerOf[r], and shard o owns share[o] residues.
+type autoIDPlacement struct {
+	modulus uint64
+	ownerOf []int
+	share   []int
+	owners  int
+}
+
+// newAutoIDPlacement is the placement of route: its table's residues for a
+// split collection, one residue per shard in channel order for a never-split
+// one.
+func newAutoIDPlacement(route *writeRoute) *autoIDPlacement {
+	if !route.split() {
+		return legacyAutoIDPlacement(len(route.vchannels))
+	}
+	modulus := route.table.Modulus()
+	index := make(map[string]int)
+	placement := &autoIDPlacement{modulus: modulus, ownerOf: make([]int, modulus)}
+	for r := uint64(0); r < modulus; r++ {
+		vchannel, _ := route.table.Lookup(r)
+		owner, ok := index[vchannel]
+		if !ok {
+			owner = len(placement.share)
+			index[vchannel] = owner
+			placement.share = append(placement.share, 0)
+		}
+		placement.ownerOf[r] = owner
+		placement.share[owner]++
+	}
+	placement.owners = len(placement.share)
+	return placement
+}
+
+// legacyAutoIDPlacement is the placement of a never-split collection of n
+// shards: modulus n, shard i owning residue i.
+func legacyAutoIDPlacement(n int) *autoIDPlacement {
+	placement := &autoIDPlacement{modulus: uint64(n), ownerOf: make([]int, n), share: make([]int, n), owners: n}
+	for i := range placement.ownerOf {
+		placement.ownerOf[i] = i
+		placement.share[i] = 1
+	}
+	return placement
+}
+
+// reassignAutoIDByResidue replaces rowIDs so that the id of offset i routes to
+// the owner of residue i % modulus (see reassignAutoIDForStableIdempotency).
+// An id qualifies when its residue is any residue that owner holds, so a row
+// costs about modulus/share draws -- the inverse of its owner's share of the
+// key space, the shard count when shards are even -- not the modulus.
+func reassignAutoIDByResidue(
 	rowIDs []int64,
 	primaryDataType schemapb.DataType,
-	channelNames []vChan,
+	placement *autoIDPlacement,
 	clusterID uint64,
 	allocFunc func(uint32) (int64, int64, error),
 ) error {
-	numChannels := len(channelNames)
-	if len(rowIDs) == 0 || numChannels <= 1 {
+	if len(rowIDs) == 0 || placement.owners <= 1 {
 		return nil
 	}
+	// The ids drawn so far were never written, so they are candidates too.
+	return reassignAutoIDsAtOffsets(rowIDs, allRowOffsets(len(rowIDs)), rowIDs, primaryDataType, placement, clusterID, allocFunc)
+}
+
+// reassignAutoIDsAtOffsets replaces rowIDs[offset], for every offset in
+// offsets, with an id routing to the owner of residue offset % modulus.
+// recycled are ids the caller gives up, placed before any new one is drawn.
+func reassignAutoIDsAtOffsets(
+	rowIDs []int64,
+	offsets []int,
+	recycled []int64,
+	primaryDataType schemapb.DataType,
+	placement *autoIDPlacement,
+	clusterID uint64,
+	allocFunc func(uint32) (int64, int64, error),
+) error {
 	if allocFunc == nil {
 		return merr.WrapErrServiceInternalMsg("id allocator is nil")
 	}
 
-	// Retry stability comes from the offset bucketing alone: offset%numChannels is
-	// evaluated against the caller's channel order, which is the collection's stored
-	// vchannel list. That order must not be permuted here, otherwise the resulting
-	// PK->vchannel map diverges from the one delete uses; see
-	// reassignAutoIDForStableIdempotency.
-	required := make([]int, numChannels)
-	for offset := range rowIDs {
-		required[offset%numChannels]++
+	ownerOfOffset := func(offset int) int {
+		return placement.ownerOf[uint64(offset)%placement.modulus]
+	}
+	required := make([]int, placement.owners)
+	for _, offset := range offsets {
+		required[ownerOfOffset(offset)]++
 	}
 
-	buckets := make([][]int64, numChannels)
-	if err := appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames); err != nil {
+	buckets := make([][]int64, placement.owners)
+	if err := appendAutoIDCandidatesByOwner(buckets, recycled, primaryDataType, placement); err != nil {
 		return err
 	}
-	// Each round allocates ids and routes them to buckets by PK hash, which
-	// normally fills every short bucket within a couple of rounds. Bound the loop
-	// so a pathological hash distribution cannot spin forever and keep burning the
-	// global id space; fail loudly after a generous cap instead.
+	// Each round allocates ids and files them under the owner of their
+	// residue, which normally fills every short bucket within a couple of
+	// rounds. Bound the loop so a pathological hash distribution cannot spin
+	// forever and keep burning the global id space; fail loudly after a
+	// generous cap instead.
 	//
-	// COST (accepted by design): a candidate that hashes into an already-satisfied
-	// bucket is discarded, and each top-up round deliberately over-allocates
-	// (missing * numChannels) so that one round almost always suffices. Id
-	// amplification therefore grows with shard count and shrinks with batch size:
-	// ~1.01x for 100k rows over 4 shards, ~1.25x for 10k over 16, but ~21x for a
-	// 100-row insert over 64 shards, where the over-allocation dominates. Rounds
-	// stay at 1 in the common case, far below maxAutoIDStabilizeRounds. The id
-	// space is int64, so even the worst ratio is immaterial in absolute terms:
-	// 21x of a 100-row insert is ~2k ids. The alternatives do not work: deriving the
-	// shard from the row offset directly would break Delete/Upsert, whose
-	// index-based routing hashes the PK against the same channel list (the
-	// insert's row->shard assignment MUST equal hash(assignedPK)%%n), and
-	// deterministic PRNG-generated ids cannot guarantee global uniqueness. The
-	// id space is int64, so the burn is negligible; the extra RTT only applies
-	// to autoID inserts carrying an explicit idempotency key.
+	// COST (accepted by design): a candidate that falls to an already-satisfied
+	// owner is discarded. Each top-up round sizes each short owner's draws by
+	// the inverse of its share (missing * modulus / share), so that one round
+	// almost always suffices: with even shards that is missing * shardNum, as
+	// before any split, and only a genuinely small shard costs more, bounded by
+	// one over its share. Amplification shrinks with batch size: ~1.01x for 100k
+	// rows over 4 even shards, ~21x for a 100-row insert over 64. The id space
+	// is int64, so the burn is negligible; the extra RTT only applies to autoID
+	// inserts carrying an explicit idempotency key. The alternatives do not work:
+	// deriving the shard from the row offset directly would break Delete/Upsert,
+	// which route the PK by its own hash, and deterministic PRNG-generated ids
+	// cannot guarantee global uniqueness.
 	const maxAutoIDStabilizeRounds = 256
 	for round := 0; ; round++ {
-		missing := missingAutoIDBucketCount(required, buckets)
+		allocCount := uint64(0)
+		missing := 0
+		for owner, count := range required {
+			if short := count - len(buckets[owner]); short > 0 {
+				missing += short
+				allocCount += (uint64(short)*placement.modulus + uint64(placement.share[owner]) - 1) / uint64(placement.share[owner])
+			}
+		}
 		if missing == 0 {
 			break
 		}
 		if round >= maxAutoIDStabilizeRounds {
-			return merr.WrapErrServiceInternalMsg("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d channels after %d allocation rounds", missing, numChannels, maxAutoIDStabilizeRounds)
+			return merr.WrapErrServiceInternalMsg("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d shards after %d allocation rounds", missing, placement.owners, maxAutoIDStabilizeRounds)
 		}
-		allocCount := uint64(missing) * uint64(numChannels)
-		if allocCount < uint64(numChannels) {
-			allocCount = uint64(numChannels)
-		}
+		allocCount = max(allocCount, uint64(placement.owners))
 		if allocCount > math.MaxUint32 {
 			allocCount = math.MaxUint32
 		}
@@ -133,60 +208,175 @@ func reassignAutoIDByOffsetChannels(
 		if err != nil {
 			return err
 		}
-		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, channelNames); err != nil {
+		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, placement); err != nil {
 			return err
 		}
 	}
 
-	cursor := make([]int, numChannels)
-	for offset := range rowIDs {
-		bucket := offset % numChannels
-		rowIDs[offset] = buckets[bucket][cursor[bucket]]
-		cursor[bucket]++
+	cursor := make([]int, placement.owners)
+	for _, offset := range offsets {
+		owner := ownerOfOffset(offset)
+		rowIDs[offset] = buckets[owner][cursor[owner]]
+		cursor[owner]++
 	}
 	return nil
 }
 
-func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, channelNames []vChan) error {
+// repinPendingAutoIDs re-draws the id of every row an idempotent auto-id
+// insert still has to place whose id no longer routes to the owner of its
+// offset's residue under route.
+//
+// PreExecute pins offset i to the owner of residue i % M. When a split's
+// routing commit lands during the request, the rows the fenced source refused
+// are re-routed, and by their ids they would spread over the targets by the
+// ids' residues modulo the new modulus, not by their offsets'. A client retry
+// of the request buckets by offset under the new modulus from the start, so
+// the targets would hold, under the key, other offsets than the retry sends
+// them -- and a target's window would answer for rows the retry does not carry
+// there. Re-drawing keeps the pinning true for every row, whenever it is
+// placed. A pending row was written nowhere, so its id is free to replace; the
+// rows already placed keep theirs.
+func (it *InsertTask) repinPendingAutoIDs(route *writeRoute, pending *pendingRows) error {
+	primary := it.stableAutoIDPrimary
+	if primary == nil || pending.done() {
+		return nil
+	}
+	routeKey := autoIDRouteKey(route)
+	if routeKey == it.stableAutoIDRouteKey {
+		// The routing the ids were pinned against: no row can be misplaced.
+		return nil
+	}
+	placement := newAutoIDPlacement(route)
+	if placement.owners <= 1 {
+		it.stableAutoIDRouteKey = routeKey
+		return nil
+	}
+	rowIDs := it.insertMsg.GetRowIDs()
+	offsets := pending.sortedOffsets()
+	current := make([]int64, len(offsets))
+	for k, offset := range offsets {
+		if offset >= len(rowIDs) {
+			return merr.WrapErrServiceInternalMsg("pending row %d is out of the insert's %d row ids", offset, len(rowIDs))
+		}
+		current[k] = rowIDs[offset]
+	}
+	owners, err := autoIDCandidateOwners(current, primary.GetDataType(), placement)
+	if err != nil {
+		return err
+	}
+	misplaced := make([]int, 0)
+	for k, offset := range offsets {
+		if owners[k] != placement.ownerOf[uint64(offset)%placement.modulus] {
+			misplaced = append(misplaced, offset)
+		}
+	}
+	if len(misplaced) == 0 {
+		it.stableAutoIDRouteKey = routeKey
+		return nil
+	}
+	if it.idAllocator == nil {
+		return merr.WrapErrServiceInternalMsg("id allocator is required to re-pin idempotent auto ids")
+	}
+	// No id is recycled: a row with no response is pending although it may
+	// have landed, and its id must not reappear on another row.
+	if err := reassignAutoIDsAtOffsets(rowIDs, misplaced, nil, primary.GetDataType(), placement,
+		paramtable.Get().CommonCfg.ClusterID.GetAsUint64(), it.idAllocator.Alloc); err != nil {
+		return err
+	}
+
+	primaryFieldData, err := autoGenPrimaryFieldData(primary, rowIDs)
+	if err != nil {
+		return err
+	}
+	primaryFieldData.FieldId = primary.GetFieldID()
+	replacePrimaryFieldData(it, primary, primaryFieldData)
+
+	repinned := make([]int64, len(misplaced))
+	rowOffsets := make([]uint32, len(misplaced))
+	for k, offset := range misplaced {
+		repinned[k] = rowIDs[offset]
+		rowOffsets[k] = uint32(offset)
+	}
+	repinnedFieldData, err := autoGenPrimaryFieldData(primary, repinned)
+	if err != nil {
+		return err
+	}
+	repinnedIDs, err := parsePrimaryFieldData2IDs(repinnedFieldData)
+	if err != nil {
+		return err
+	}
+	// The result is patched in place: the idempotency decoration reads the ids
+	// of the rows it stamps from it.
+	if err := mergeInsertIDsByOffsets(it.result.GetIDs(), repinnedIDs, rowOffsets); err != nil {
+		return err
+	}
+	it.stableAutoIDRouteKey = routeKey
+	return nil
+}
+
+// autoIDRouteKey identifies the auto-id placement of route: its modulus and
+// the vchannel owning every residue. Two routes with the same key place every
+// offset on the same shard.
+func autoIDRouteKey(route *writeRoute) string {
+	var b strings.Builder
+	if !route.split() {
+		fmt.Fprintf(&b, "%d", len(route.vchannels))
+		for _, vchannel := range route.vchannels {
+			b.WriteByte('|')
+			b.WriteString(vchannel)
+		}
+		return b.String()
+	}
+	modulus := route.table.Modulus()
+	fmt.Fprintf(&b, "%d", modulus)
+	for r := uint64(0); r < modulus; r++ {
+		vchannel, _ := route.table.Lookup(r)
+		b.WriteByte('|')
+		b.WriteString(vchannel)
+	}
+	return b.String()
+}
+
+func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, placement *autoIDPlacement) error {
 	rowIDs := make([]int64, 0, end-begin)
 	for id := begin; id < end; id++ {
 		rowIDs = append(rowIDs, id)
 	}
-	return appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames)
+	return appendAutoIDCandidatesByOwner(buckets, rowIDs, primaryDataType, placement)
 }
 
-func appendAutoIDCandidatesByChannels(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, channelNames []vChan) error {
-	ids, err := autoIDCandidatesToPrimaryIDs(rowIDs, primaryDataType)
+// appendAutoIDCandidatesByOwner files every candidate id under the shard that
+// owns the residue of the primary key it becomes.
+func appendAutoIDCandidatesByOwner(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, placement *autoIDPlacement) error {
+	owners, err := autoIDCandidateOwners(rowIDs, primaryDataType, placement)
 	if err != nil {
 		return err
 	}
-	channel2RowOffsets, err := assignChannelsByPK(ids, channelNames, &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{},
-	})
-	if err != nil {
-		return err
-	}
-	channelIndex := make(map[string]int, len(channelNames))
-	for idx, channelName := range channelNames {
-		channelIndex[channelName] = idx
-	}
-	for _, channelName := range channelNames {
-		bucket := channelIndex[channelName]
-		for _, offset := range channel2RowOffsets[channelName] {
-			buckets[bucket] = append(buckets[bucket], rowIDs[offset])
-		}
+	for i, owner := range owners {
+		buckets[owner] = append(buckets[owner], rowIDs[i])
 	}
 	return nil
 }
 
-func missingAutoIDBucketCount(required []int, buckets [][]int64) int {
-	missing := 0
-	for bucket, count := range required {
-		if count > len(buckets[bucket]) {
-			missing += count - len(buckets[bucket])
-		}
+// autoIDCandidateOwners returns, for every candidate id, the shard owning the
+// residue of the primary key it becomes.
+func autoIDCandidateOwners(rowIDs []int64, primaryDataType schemapb.DataType, placement *autoIDPlacement) ([]int, error) {
+	if len(rowIDs) == 0 {
+		return nil, nil
 	}
-	return missing
+	ids, err := autoIDCandidatesToPrimaryIDs(rowIDs, primaryDataType)
+	if err != nil {
+		return nil, err
+	}
+	residues, err := routing.PKResidues(ids, placement.modulus)
+	if err != nil {
+		return nil, err
+	}
+	owners := make([]int, len(residues))
+	for i, residue := range residues {
+		owners[i] = placement.ownerOf[residue]
+	}
+	return owners, nil
 }
 
 func autoIDCandidatesToPrimaryIDs(rowIDs []int64, primaryDataType schemapb.DataType) (*schemapb.IDs, error) {
