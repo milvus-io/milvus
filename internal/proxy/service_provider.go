@@ -281,20 +281,29 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 }
 
 // checkCollectionVisibility keeps authorization out of the shared metadata
-// cache. DescribeCollection is granted to public, but the coordinator also
-// enforces object visibility. Check every response against that contract,
-// including hot cache hits and IDs resolved into another database.
+// cache. DescribeCollection is granted to public, but object visibility is a
+// separate decision. Check every response, including hot cache hits and IDs in
+// another database. The experimental local projection falls back to RC when
+// unavailable; RC remains the default until snapshot consistency is complete.
 func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Context, collection *collectionInfo) error {
+	return node.checkResolvedCollectionVisibility(ctx, collection.DBName, collection.Schema.GetName(), collection.CollID)
+}
+
+func (node *Proxy) checkResolvedCollectionVisibility(ctx context.Context, database, collection string, id int64) error {
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}
 	if err := checkDescribeCollectionUser(ctx); err != nil {
 		return err
 	}
-	if collection.DBName == "" {
+	if database == "" {
 		// Older coordinators may not return the database for an ID-only lookup.
 		// The caller's database is not evidence of the resolved object's owner.
 		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
+	}
+
+	if known, err := tryLocalCollectionVisibility(ctx, database, collection, id); known {
+		return err
 	}
 
 	// Replace an existing outgoing identity rather than appending to it: the
@@ -302,14 +311,14 @@ func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Co
 	// identity already authenticated at the public API may select the user.
 	visible, err := node.mixCoord.DescribeCollection(DescribeCollectionRPCContext(ctx), &milvuspb.DescribeCollectionRequest{
 		Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-		DbName:         collection.DBName,
-		CollectionName: collection.Schema.GetName(),
-		CollectionID:   collection.CollID,
+		DbName:         database,
+		CollectionName: collection,
+		CollectionID:   id,
 	})
 	if err := merr.CheckRPCCall(visible, err); err != nil {
 		return err
 	}
-	if visible.GetCollectionID() == collection.CollID {
+	if visible.GetCollectionID() == id {
 		return nil
 	}
 	// A rename or drop/recreate can race the cached lookup. Deny the stale
@@ -342,7 +351,11 @@ type RemoteProxyServiceProvider struct {
 func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (*milvuspb.DescribeCollectionResponse, error) {
+	localVisibility := localCollectionVisibilityEnabled()
 	dct := NewDescribeCollectionTask(ctx, node, request)
+	if localVisibility {
+		dct.UseInternalMetadata()
+	}
 
 	log := mlog.With(
 		mlog.String("role", typeutil.ProxyRole),
@@ -376,5 +389,11 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		mlog.Uint64("EndTS", dct.EndTs()),
 	)
 
-	return dct.Result(), nil
+	result := dct.Result()
+	if localVisibility && merr.Ok(result.GetStatus()) {
+		if err := node.checkResolvedCollectionVisibility(ctx, result.GetDbName(), result.GetSchema().GetName(), result.GetCollectionID()); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
