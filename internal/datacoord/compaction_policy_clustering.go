@@ -204,22 +204,27 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 
 func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
 	triggers := policy.meta.compactionTaskMeta.GetCompactionTasksByCollection(collectionID)
-	if len(triggers) == 0 {
-		return false, 0
-	}
-	var latestTriggerID int64 = 0
-	for triggerID := range triggers {
+	var latestTriggerID, activeTriggerID int64
+	for triggerID, tasks := range triggers {
+		clusteringTasks := lo.Filter(tasks, func(task *datapb.CompactionTask, _ int) bool {
+			return task.GetType() == datapb.CompactionType_ClusteringCompaction
+		})
+		if len(clusteringTasks) == 0 {
+			continue
+		}
 		if triggerID > latestTriggerID {
 			latestTriggerID = triggerID
 		}
+		// A newer completed trigger must not hide an older clustering task
+		// that is still running.
+		if triggerID > activeTriggerID && summaryCompactionState(triggerID, clusteringTasks).state == commonpb.CompactionState_Executing {
+			activeTriggerID = triggerID
+		}
 	}
-	tasks := triggers[latestTriggerID]
-	if len(tasks) > 0 {
-		cTasks := tasks
-		summary := summaryCompactionState(latestTriggerID, cTasks)
-		return summary.state == commonpb.CompactionState_Executing, cTasks[0].TriggerID
+	if activeTriggerID != 0 {
+		return true, activeTriggerID
 	}
-	return false, 0
+	return false, latestTriggerID
 }
 
 func calculateClusteringCompactionConfig(coll *collectionInfo, view CompactionView, expectedSegmentSize int64) (totalRows, maxSegmentRows, preferSegmentRows int64, err error) {

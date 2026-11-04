@@ -160,12 +160,21 @@ func (s *Suite) TestClusteringCompactionAndSegmentPrune() {
 	s.Require().Equal(commonpb.ErrorCode_Success, index.GetErrorCode(), index.GetReason())
 	s.WaitForIndexBuilt(ctx, name, "vec")
 
-	compact, err := s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
-		CollectionName:  name,
-		MajorCompaction: true,
-	})
-	s.Require().NoError(err)
-	s.Require().Equal(commonpb.ErrorCode_Success, compact.GetStatus().GetErrorCode(), compact.GetStatus().GetReason())
+	// Background compactions can temporarily own the inputs. A successful
+	// response with no plans is a no-op, so retry until clustering is accepted.
+	var compact *milvuspb.ManualCompactionResponse
+	s.Require().Eventually(func() bool {
+		response, err := s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+			CollectionName:  name,
+			MajorCompaction: true,
+		})
+		if err != nil || response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success ||
+			response.GetCompactionID() <= 0 || response.GetCompactionPlanCount() <= 0 {
+			return false
+		}
+		compact = response
+		return true
+	}, 300*time.Second, 2*time.Second, "a major compaction should be accepted after competing compactions finish")
 	s.requireCounterEventually(ctx, typeutil.MixCoordRole, "compaction=clustering",
 		"a major compaction on a clustering key is a clustering compaction")
 
