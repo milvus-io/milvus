@@ -1076,7 +1076,7 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
 }
 
 func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64) {
-	if targetVersion == 0 {
+	if targetVersion <= o.targetVersion.Load() {
 		return
 	}
 
@@ -1292,13 +1292,6 @@ type statsCandidate struct {
 func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 	snapshot, snapshotTs := o.next.GetSnapshot()
 	if snapshot.targetVersion <= o.targetVersion.Load() {
-		// Repeated target publications can mark segments whose stats were already removed.
-		if o.growingDropVersions.Len() != 0 {
-			o.Lock()
-			o.removeDroppedGrowings(o.targetVersion.Load())
-			o.Unlock()
-			o.syncResource()
-		}
 		return false, nil
 	}
 

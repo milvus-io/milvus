@@ -639,6 +639,8 @@ func TestSyncDistributionGrowingDropVersions(t *testing.T) {
 	assert.Equal(t, int64(3), version)
 
 	o.LazyRemoveGrowings(2, 1, 999)
+	assert.False(t, o.growingDropVersions.Contain(1))
+	assert.False(t, o.growingDropVersions.Contain(999))
 	require.NoError(t, o.SyncDistribution())
 	assertCurrentField(t, o, 102, sumStats(kept, delta))
 	assert.False(t, o.growingDropVersions.Contain(1))
@@ -720,4 +722,47 @@ func TestGrowingHandoffLargeStats(t *testing.T) {
 	idf, _, err := o.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: 1 << 17})
 	require.NoError(t, err)
 	assert.Equal(t, sealedStats.BuildIDF(tf), idf[0])
+}
+
+func TestSyncDistributionStaleTargetWhileIDFLocked(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	o.targetVersion.Store(2)
+	o.next.SetSnapshot(syncTestSnapshot(2))
+	o.LazyRemoveGrowings(3, 1)
+
+	o.Lock()
+	done := make(chan struct{})
+	defer func() {
+		o.Unlock()
+		<-done
+	}()
+	var syncErr error
+	go func() {
+		defer close(done)
+		syncErr = o.SyncDistribution()
+	}()
+	select {
+	case <-done:
+		require.NoError(t, syncErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("an already synchronized target waited for the IDF lock")
+	}
+	version, ok := o.growingDropVersions.Get(1)
+	require.True(t, ok)
+	assert.Equal(t, int64(3), version)
+}
+
+func TestSyncTargetVersionFirstTargetDropsGrowing(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	o.RegisterGrowing(1, bm25Stats{102: randomSyncTestStats(rand.New(rand.NewSource(16)), 4)})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	d.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:   1,
+		DroppedInTarget: []int64{1},
+	}, []int64{1})
+	require.Equal(t, int64(1), o.TargetVersion())
+	assertCurrentField(t, o, 102, storage.NewBM25Stats())
+	assert.Empty(t, o.growing)
+	assert.Zero(t, o.growingDropVersions.Len())
 }
