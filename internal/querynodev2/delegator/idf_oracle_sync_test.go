@@ -518,10 +518,16 @@ func TestReopenAddsFieldToSegmentRemovedDuringDownload(t *testing.T) {
 	})
 	seg.load(t, o, 102) // inactive
 
+	syncErr := make(chan error, 1)
 	reopenWithRetry(t, o, seg, func() bool { return false }, func() {
-		syncWithHook(t, o, syncTestSnapshot(2), func() {})
+		// Cleanup waits for this reopen's file writes to finish, but target
+		// publication must finish first so the reopen can detect the removal.
+		o.next.SetSnapshot(syncTestSnapshot(2))
+		go func() { syncErr <- o.SyncDistribution() }()
+		require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 5*time.Second, time.Millisecond)
 		require.False(t, o.sealed.Contain(1))
 	}, 102, 104)
+	require.NoError(t, <-syncErr)
 
 	entry, ok := o.sealed.Get(1)
 	require.True(t, ok)
