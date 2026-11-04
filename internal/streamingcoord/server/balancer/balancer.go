@@ -51,6 +51,9 @@ type Balancer interface {
 	// UpdateBalancePolicy update the balance policy.
 	UpdateBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*streamingpb.UpdateWALBalancePolicyResponse, error)
 
+	// TransferChannels moves WALs and waits for confirmed target assignments.
+	TransferChannels(ctx context.Context, req TransferChannelsRequest) error
+
 	// ReplicateRole returns the replicate role of the balancer.
 	ReplicateRole() replicateutil.Role
 

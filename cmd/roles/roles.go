@@ -485,6 +485,7 @@ func (mr *MilvusRoles) Run() {
 				panic(err)
 			}
 			defer etcd.StopEtcdServer()
+			paramtable.GetBaseTable().InitRemoteConfigs()
 		}
 		paramtable.SetRole(typeutil.StandaloneRole)
 		defer stopRocksmqIfUsed()

@@ -171,9 +171,7 @@ func (bt *BaseTable) init() {
 			return
 		}
 	}
-	if !bt.config.skipRemote {
-		bt.initConfigsFromRemote()
-	}
+	bt.InitRemoteConfigs()
 }
 
 func (bt *BaseTable) initConfigsFromLocal() {
@@ -203,7 +201,16 @@ func (bt *BaseTable) initConfigsFromLocal() {
 	}
 }
 
-func (bt *BaseTable) initConfigsFromRemote() {
+// InitRemoteConfigs registers the remote source once it is available. Embedded
+// deployments call this again after starting etcd, before starting components.
+// Like BaseTable initialization, this must run serially during startup.
+func (bt *BaseTable) InitRemoteConfigs() {
+	if bt.config.skipRemote {
+		return
+	}
+	if _, ok := bt.mgr.GetEtcdSource(); ok {
+		return
+	}
 	refreshInterval := bt.config.refreshInterval
 	etcdConfig := EtcdConfig{}
 	etcdConfig.Init(bt)
