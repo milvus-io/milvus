@@ -229,11 +229,8 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 	for i, stream := range result.SubStreams {
 		var ids []int64
 		var bits uint64
-		for {
+		for int64(len(ids)) < request.SubReqs[i].GetTopk() {
 			chunk, err := stream.Recv()
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			require.NoError(t, err)
 			ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
 			bits |= chunk.GetFeatureBits()

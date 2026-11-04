@@ -120,6 +120,21 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	require.Equal(t, []int64{2, 2}, output.GetTopks())
 }
 
+func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 3, Offset: 1}
+	first := newFinalSearchChunk([]int64{10, 11, 20}, []float32{9, 8, 7}, "v1")
+	first.ResultData.NumQueries, first.ResultData.Topks = 2, []int64{2, 1}
+	last := newFinalSearchChunk([]int64{21, 22}, []float32{6, 5}, "v1")
+	last.ResultData.NumQueries, last.ResultData.Topks = 2, []int64{0, 2}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first, last, nil}}
+
+	result, _, err := (&SearchTask{}).consumeResultStream(stream, request, metric.IP, func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, result.Results.Topks)
+	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
+	require.Len(t, stream.chunks, 1, "Proxy must not pull again to fill the exhausted first vector")
+}
+
 func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
 	task := &SearchTask{
 		SearchRequest: &internalpb.SearchRequest{Nq: 1, Topk: 3, Offset: 1},
