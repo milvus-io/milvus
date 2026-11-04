@@ -79,7 +79,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     const std::string& warmup_policy,
     MmapChunkWritebackMode writeback_mode,
     bool force_one_row_group_per_cell,
-    SkipMetricsByField skip_metrics_by_field)
+    SkipMetricsByField skip_metrics_by_field,
+    MmapAdvice vector_field_mmap_advice)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       key_([&]() {
@@ -141,6 +142,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                                               DataType::ARRAY;
                                    })),
       writeback_mode_(writeback_mode),
+      vector_field_mmap_advice_(vector_field_mmap_advice),
       load_priority_(load_priority) {
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
@@ -570,7 +572,8 @@ GroupChunkTranslator::load_group_chunk(
                                     mmap_populate_,
                                     filepath.string(),
                                     load_priority_,
-                                    writeback_mode_);
+                                    writeback_mode_,
+                                    vector_field_mmap_advice_);
     }
     return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }

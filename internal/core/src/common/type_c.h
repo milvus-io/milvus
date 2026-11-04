@@ -138,6 +138,7 @@ typedef struct CMmapConfig {
     bool mmap_writeback;
     bool json_stats_enable_mmap;
     const char* json_stats_mmap_path;
+    const char* vector_field_mmap_advice;
 } CMmapConfig;
 
 typedef struct CTraceConfig {

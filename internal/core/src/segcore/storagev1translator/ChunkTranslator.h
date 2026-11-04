@@ -19,6 +19,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/Chunk.h"
 #include "common/ChunkTarget.h"
+#include "common/MmapAdvice.h"
 #include "common/type_c.h"
 #include "mmap/Types.h"
 #include "segcore/CacheMetricAttribution.h"
@@ -74,7 +75,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
                     bool mmap_populate,
                     milvus::proto::common::LoadPriority load_priority,
                     const std::string& warmup_policy,
-                    MmapChunkWritebackMode writeback_mode);
+                    MmapChunkWritebackMode writeback_mode,
+                    MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
 
     size_t
     num_cells() const override;
@@ -118,6 +120,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     FieldMeta field_meta_;
     std::string mmap_dir_path_;
     MmapChunkWritebackMode writeback_mode_;
+    MmapAdvice vector_field_mmap_advice_;
     milvus::proto::common::LoadPriority load_priority_{
         milvus::proto::common::LoadPriority::HIGH};
 };

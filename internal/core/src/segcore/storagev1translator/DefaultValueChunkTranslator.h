@@ -26,6 +26,7 @@
 #include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "common/FieldMeta.h"
+#include "common/MmapAdvice.h"
 #include "common/OpContext.h"
 #include "mmap/Types.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -44,7 +45,8 @@ class DefaultValueChunkTranslator
         bool mmap_populate,
         const std::string& warmup_policy,
         MmapChunkWritebackMode writeback_mode,
-        std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr);
+        std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr,
+        MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
     ~DefaultValueChunkTranslator() override;
     size_t
     num_cells() const override;
@@ -114,6 +116,7 @@ class DefaultValueChunkTranslator
     bool use_mmap_;
     bool mmap_populate_;
     MmapChunkWritebackMode writeback_mode_;
+    MmapAdvice vector_field_mmap_advice_;
     std::string mmap_dir_path_;
     CTMeta meta_;
     milvus::FieldMeta field_meta_;

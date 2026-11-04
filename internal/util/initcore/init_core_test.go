@@ -36,6 +36,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestInitMmapManagerRejectsInvalidVectorFieldAdvice(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	base := paramtable.NewBaseTable(paramtable.SkipRemote(true))
+	params.Init(base)
+	require.NoError(t, params.Save(params.QueryNodeCfg.MmapVectorFieldAdvice.Key, "invalid"))
+	err := InitMmapManager(params, 1)
+	require.Error(t, err)
+	assert.Equal(t, int32(merr.CodeConfigInvalid), merr.Code(err))
+	assert.Contains(t, err.Error(), "queryNode.mmap.vectorFieldAdvice")
+	assert.False(t, merr.IsRetryableErr(err))
+}
+
 func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
 	params := &paramtable.ComponentParam{}
 	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))

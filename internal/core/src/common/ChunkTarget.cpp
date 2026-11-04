@@ -19,8 +19,25 @@
 
 #include "File.h"
 #include "common/EasyAssert.h"
+#include "common/MmapAdvice.h"
+#include "log/Log.h"
 
 namespace milvus {
+void
+ApplyMmapAdvice(void* data, size_t size, MmapAdvice advice) {
+    const auto native_advice = NativeMmapAdvice(advice);
+    if (size != 0 && native_advice.has_value() &&
+        madvise(data, size, *native_advice) != 0) {
+        const auto error = errno;
+        LOG_WARN(
+            "failed to advise mapped vector field: advice={}, size={}, "
+            "errno={}",
+            *native_advice,
+            size,
+            error);
+    }
+}
+
 MmapChunkTarget::~MmapChunkTarget() {
     if (mapped_data_ != nullptr) {
         munmap(mapped_data_, cap_);

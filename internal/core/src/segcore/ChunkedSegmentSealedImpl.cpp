@@ -534,6 +534,7 @@ struct ColumnGroupMaterializationParams {
     bool enable_async_load;
     bool mmap_populate;
     MmapChunkWritebackMode writeback_mode;
+    MmapAdvice vector_field_mmap_advice;
     std::string mmap_dir_path;
     milvus::proto::common::LoadPriority load_priority;
     std::string cache_key_suffix;
@@ -596,7 +597,8 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
             context.insert_channel,
             std::move(column_size_estimate),
             context.writeback_mode,
-            context.enable_async_load);
+            context.enable_async_load,
+            context.vector_field_mmap_advice);
     return translator;
 }
 
@@ -2575,6 +2577,7 @@ ChunkedSegmentSealedImpl::LoadLazyColumnGroup(
         .enable_async_load = enable_async_load,
         .mmap_populate = mmap_config.GetMmapPopulate(),
         .writeback_mode = CreateMmapChunkWritebackMode(mmap_config),
+        .vector_field_mmap_advice = mmap_config.GetVectorFieldMmapAdvice(),
         .mmap_dir_path = std::move(mmap_dir_path),
         .load_priority = segment_load_info.GetPriority(),
         .cache_key_suffix = std::to_string(milvus_field_ids.front().get()),
@@ -3360,7 +3363,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 warmup_policy,
                 writeback_mode,
                 packing.force_one_row_group_per_cell,
-                std::move(packing.skip_metrics_by_field));
+                std::move(packing.skip_metrics_by_field),
+                mmap_config.GetVectorFieldMmapAdvice());
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -3584,7 +3588,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                         mmap_config.GetMmapPopulate(),
                         load_info.load_priority,
                         info.warmup_policy,
-                        writeback_mode);
+                        writeback_mode,
+                        mmap_config.GetVectorFieldMmapAdvice());
 
             auto data_type = field_meta.get_data_type();
             auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -9112,7 +9117,8 @@ ChunkedSegmentSealedImpl::fill_empty_field(
             mmap_config.GetMmapPopulate(),
             warmup_policy,
             writeback_mode,
-            struct_offsets);
+            struct_offsets,
+            mmap_config.GetVectorFieldMmapAdvice());
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -9336,7 +9342,8 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                 mmap_config.GetMmapPopulate(),
                 warmup_policy,
                 writeback_mode,
-                struct_offsets);
+                struct_offsets,
+                mmap_config.GetVectorFieldMmapAdvice());
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), nullptr);
         auto column =
@@ -10005,7 +10012,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetInsertChannel(),
             /*column_size_estimate=*/std::move(column_size_estimate),
             /*writeback_mode=*/writeback_mode,
-            /*enable_async_load=*/enable_async_load);
+            /*enable_async_load=*/enable_async_load,
+            mmap_config.GetVectorFieldMmapAdvice());
     const auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 

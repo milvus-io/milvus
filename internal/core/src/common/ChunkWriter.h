@@ -32,6 +32,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/MmapAdvice.h"
 #include "common/Types.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
@@ -381,7 +382,8 @@ create_chunk_buffer(
     const std::string& file_path = "",
     proto::common::LoadPriority load_priority =
         proto::common::LoadPriority::HIGH,
-    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled,
+    MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
 
 // Create a Chunk view from an existing ChunkBuffer. Multiple Chunk instances
 // created from the same buffer will share the same underlying memory via
@@ -399,7 +401,8 @@ create_chunk(
     const std::string& file_path = "",
     proto::common::LoadPriority load_priority =
         proto::common::LoadPriority::HIGH,
-    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled,
+    MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
 
 std::unordered_map<FieldId, std::shared_ptr<Chunk>>
 create_group_chunk(
@@ -410,7 +413,8 @@ create_group_chunk(
     const std::string& file_path = "",
     proto::common::LoadPriority load_priority =
         proto::common::LoadPriority::HIGH,
-    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled);
+    MmapChunkWritebackMode writeback_mode = MmapChunkWritebackMode::Disabled,
+    MmapAdvice vector_field_mmap_advice = MmapAdvice::None);
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);
