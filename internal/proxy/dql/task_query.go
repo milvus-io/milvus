@@ -1407,7 +1407,10 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 	}
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var outputSize int64
-	for {
+	// The internal limit already includes the offset; the pipeline slices the page once.
+	limit := t.GetLimit()
+	var collected int64
+	for limit <= 0 || collected < limit {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
 			break
@@ -1444,7 +1447,11 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 			}
 			if len(output.GetFieldsData()) == 0 {
 				output.ElementLevel = chunk.GetElementLevel()
-				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), max(t.GetLimit(), int64(rowCount)))
+				capacity := limit
+				if capacity <= 0 {
+					capacity = int64(rowCount)
+				}
+				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), capacity)
 			}
 			if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 				return nil, merr.WrapErrServiceInternalMsg(
@@ -1461,11 +1468,17 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 					indices := chunk.GetElementIndices()[row]
 					output.ElementIndices = append(output.ElementIndices, indices)
 					outputSize += int64(proto.Size(indices))
+					collected += int64(len(indices.GetIndices()))
+				} else {
+					collected++
 				}
-			}
-			if outputSize > maxOutputSize {
-				return nil, merr.WrapErrParameterInvalidMsg(
-					"query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				if outputSize > maxOutputSize {
+					return nil, merr.WrapErrParameterInvalidMsg(
+						"query results exceed the maxOutputSize Limit %d", maxOutputSize)
+				}
+				if limit > 0 && collected >= limit {
+					break
+				}
 			}
 		}
 

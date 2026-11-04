@@ -189,7 +189,7 @@ func TestOrderedReduceStreamElementFilter(t *testing.T) {
 		for _, chunk := range results {
 			ids = append(ids, queryTestIDs(chunk)...)
 		}
-		require.Equal(t, []int64{1, 2}, ids)
+		require.Equal(t, []int64{1, 2, 3, 4}, ids)
 		got, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, results)
 		require.NoError(t, err)
 		batch, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
@@ -259,13 +259,30 @@ func TestOrderedReduceStreamMergesChildChunks(t *testing.T) {
 
 	third, err := stream.Recv()
 	require.NoError(t, err)
-	require.Equal(t, []int64{5}, queryTestIDs(third))
+	require.Equal(t, []int64{5, 6}, queryTestIDs(third))
 
 	chunk, err := stream.Recv()
 	require.Nil(t, chunk)
 	require.ErrorIs(t, err, io.EOF)
 	require.Equal(t, 1, childA.closeCount())
 	require.Equal(t, 1, childB.closeCount())
+}
+
+func TestOrderedReduceStreamUnlimitedQuery(t *testing.T) {
+	req := &internalpb.RetrieveRequest{Limit: typeutil.Unlimited}
+	stream, err := NewReduceStream(req, nil, nil, 1)
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+
+	req.IsIterator = true
+	_, err = NewReduceStream(req, nil, nil, 1)
+	require.Error(t, err)
+	req.IsIterator = false
+	req.OrderByFields = []*planpb.OrderByField{{FieldId: 101}}
+	_, err = NewReduceStream(req, nil, nil, 1)
+	require.Error(t, err)
 }
 
 func TestOrderedReduceStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
@@ -376,6 +393,7 @@ func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	}}
 	stream, err := NewReduceStream(
 		&internalpb.RetrieveRequest{
+			Limit:           1, // All group contributions must be merged before Proxy applies LIMIT.
 			GroupByFieldIds: []int64{100},
 			Aggregates: []*planpb.Aggregate{
 				{Op: planpb.AggregateOp_count, FieldId: 101},

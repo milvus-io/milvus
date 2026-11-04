@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestShardReduceStreamElementCountReplacement(t *testing.T) {
@@ -62,18 +63,14 @@ func TestShardReduceStreamElementCountReplacement(t *testing.T) {
 				}
 				require.NoError(t, stream.Close())
 				require.Equal(t, newIndices, indices[0].GetIndices())
-				if grows {
-					require.Equal(t, []int64{1}, ids)
-				} else {
-					require.Equal(t, []int64{1, 2}, ids)
-				}
+				require.Equal(t, []int64{1, 2}, ids)
 			})
 		}
 	}
 }
 
 func TestShardReduceStreamResolvesTimestampsAcrossChunks(t *testing.T) {
-	for _, limit := range []int64{1, 2, 3} {
+	for _, limit := range []int64{1, typeutil.Unlimited} {
 		for _, chunkBytes := range []int{1, 1 << 20} {
 			t.Run(fmt.Sprintf("limit_%d/bytes_%d", limit, chunkBytes), func(t *testing.T) {
 				leftChunks := []*internalpb.RetrieveResults{
@@ -92,7 +89,7 @@ func TestShardReduceStreamResolvesTimestampsAcrossChunks(t *testing.T) {
 				rightChunk := newQueryTestChunk([]int64{1, 2, 3}, []int64{99, 2222, 333})
 				rightChunk.FieldsData = append(rightChunk.FieldsData, makeTimestampField([]int64{20, 20, 20}))
 				right := &queryTestStream{recv: []queryTestRecv{{chunk: rightChunk}}}
-				stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: limit}, nil, []ReduceStream{left, right}, chunkBytes)
+				stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: limit}, nil, []ReduceStream{left, &queryTestStream{}, right}, chunkBytes)
 				require.NoError(t, err)
 				defer stream.Close()
 				var ids, values, timestamps []int64
@@ -109,9 +106,9 @@ func TestShardReduceStreamResolvesTimestampsAcrossChunks(t *testing.T) {
 					values = append(values, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()...)
 					timestamps = append(timestamps, extractTimestamps(chunk)...)
 				}
-				require.Equal(t, []int64{1, 2, 3}[:limit], ids)
-				require.Equal(t, []int64{1 << 56, 222, 333}[:limit], values)
-				require.Equal(t, []int64{30, 40, 20}[:limit], timestamps)
+				require.Equal(t, []int64{1, 2, 3}, ids)
+				require.Equal(t, []int64{1 << 56, 222, 333}, values)
+				require.Equal(t, []int64{30, 40, 20}, timestamps)
 			})
 		}
 	}

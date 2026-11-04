@@ -410,24 +410,38 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
 	second, err := result.Stream.Recv()
 	require.NoError(t, err)
-	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{3, 4}, second.GetIds().GetIntId().GetData())
 	chunk, err := result.Stream.Recv()
 	require.Nil(t, chunk)
 	require.ErrorIs(t, err, io.EOF)
 }
 
-func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
+func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) {
 	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
 	queryNode := qviews.NewQueryNode(11)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	filter, err := planparserv2.CreateRetrievePlan(helper, "id > 0", nil)
+	require.NoError(t, err)
+	expr, err := proto.Marshal(filter)
+	require.NoError(t, err)
+	req := &internalpb.RetrieveRequest{
+		CollectionID: collectionID, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Limit: typeutil.Unlimited, SerializedExprPlan: expr,
+	}
 
 	client := NewLegacyViewQueryClient(
 		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 32},
-		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
-			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
-			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
+		&legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, input *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			plan := legacyQueryPlan(shard, queryNode)
+			plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: proto.Clone(input.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)}
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
 		}},
 		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
 			shardA.VChannel: newTestQueryChunk([]int64{1, 3}),
@@ -436,16 +450,11 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
 	)
 
-	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
-		AllowStreaming: true,
-		Req: &internalpb.RetrieveRequest{
-			CollectionID:     collectionID,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
-			Limit:            3,
-		},
-	})
-
+	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: SupportsQueryStream(req)}
+	result, err := client.Legacy().Query(t.Context(), request)
 	require.NoError(t, err)
+	require.NotNil(t, result.Stream)
+	defer result.Stream.Close()
 	require.Empty(t, result.Results)
 	require.Len(t, result.Plans, 2)
 	first, err := result.Stream.Recv()
@@ -453,7 +462,21 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
 	second, err := result.Stream.Recv()
 	require.NoError(t, err)
-	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{3, 4}, second.GetIds().GetIntId().GetData())
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+
+	streaming := false
+	request.EnableReduceStream = &streaming
+	batch, err := client.Legacy().Query(t.Context(), request)
+	require.NoError(t, err)
+	require.Nil(t, batch.Stream)
+	op := queryutil.NewSortAndCheckPKPageOperator(0, schema, typeutil.Unlimited, 0)
+	want, err := op.Run(t.Context(), nil, batch.Results)
+	require.NoError(t, err)
+	got, err := op.Run(t.Context(), nil, []*internalpb.RetrieveResults{first, second})
+	require.NoError(t, err)
+	require.True(t, proto.Equal(want[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
 }
 
 func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
@@ -592,9 +615,12 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
-func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
+func TestSupportsQueryStream(t *testing.T) {
 	setupTestReplicaRouting(t)
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: -2}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: typeutil.Unlimited}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		Limit:         1,

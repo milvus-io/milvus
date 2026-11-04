@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -443,6 +444,56 @@ func TestSearchTaskDoesNotAddRequestRetryToBatchPath(t *testing.T) {
 	require.Equal(t, 1, legacy.searchCalled)
 }
 
+func TestQueryTaskStopsAtRequestedWindow(t *testing.T) {
+	for _, limit := range []int64{3, typeutil.Unlimited} {
+		offset := int64(0)
+		end := fakeLegacyQueryRecv{err: io.EOF}
+		if limit > 0 {
+			offset = 2
+			end.err = io.ErrUnexpectedEOF // An extra Recv after the fifth row must fail the test.
+		}
+		first := newFinalQueryChunk([]int64{1, 2}, 10)
+		last := newFinalQueryChunk([]int64{3, 4, 5, 6}, 20)
+		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: first}, {chunk: last}, end}}
+		task := newQueryViewQueryTask(&fakeLegacyQueryClient{
+			reduceStreamEnabled: true, queryResult: &queryclient.LegacyQueryResult{Stream: stream},
+		}, offset+limit)
+		require.NoError(t, task.Execute(t.Context()))
+		require.Equal(t, 1, stream.closeCalls)
+		output := task.resultBuf.Collect()
+		require.Len(t, output, 1)
+		require.Equal(t, uint64(20), output[0].GetMvccTimestamp())
+		if limit > 0 {
+			require.Equal(t, []int64{1, 2, 3, 4, 5}, output[0].GetIds().GetIntId().GetData())
+			require.Equal(t, 2, stream.next)
+		} else {
+			require.Equal(t, 3, stream.next)
+		}
+		op := queryutil.NewSortAndCheckPKPageOperator(0, nil, limit, offset)
+		got, err := op.Run(t.Context(), nil, output)
+		require.NoError(t, err)
+		batch, err := op.Run(t.Context(), nil, []*internalpb.RetrieveResults{first, last})
+		require.NoError(t, err)
+		wantPage, gotPage := batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)
+		require.Equal(t, wantPage.GetIds().GetIntId().GetData(), gotPage.GetIds().GetIntId().GetData())
+		require.Len(t, gotPage.GetFieldsData(), 1)
+		require.True(t, proto.Equal(wantPage.GetFieldsData()[0], gotPage.GetFieldsData()[0]))
+	}
+}
+
+func TestQueryTaskUnlimitedStreamEnforcesMaxOutputSize(t *testing.T) {
+	params := paramtable.Get()
+	key := params.QuotaConfig.MaxOutputSize.Key
+	old := params.QuotaConfig.MaxOutputSize.GetValue()
+	t.Cleanup(func() { params.Save(key, old) })
+	params.Save(key, "1")
+	stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}
+	task := newQueryViewQueryTask(&fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, typeutil.Unlimited)
+	require.ErrorContains(t, task.Execute(t.Context()), "maxOutputSize")
+	require.Equal(t, 1, stream.closeCalls)
+	require.Empty(t, task.resultBuf.Collect())
+}
+
 func TestQueryTaskConsumesElementChunks(t *testing.T) {
 	first := newFinalQueryChunk([]int64{1}, 10)
 	first.ElementLevel = true
@@ -453,7 +504,7 @@ func TestQueryTaskConsumesElementChunks(t *testing.T) {
 	task := newQueryViewQueryTask(nil, 4)
 	output, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
 		{chunk: &internalpb.RetrieveResults{Status: merr.Success(), ElementLevel: true}},
-		{chunk: first}, {chunk: second},
+		{chunk: first}, {chunk: second}, {err: io.ErrUnexpectedEOF},
 	}})
 	require.NoError(t, err)
 	require.True(t, output.GetElementLevel())
