@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -30,11 +32,11 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
 	require.NoError(t, err)
 	store := metacache.NewMetaStore(nil)
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
+	s := &Server{dataViewManager: manager, meta: &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	current := packed.CommittedManifestPath("segments", 9, 4096, "remote")
 	for _, id := range []int64{3, 4, 5} {
-		s.meta.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: current}))
+		s.meta.Segments.SetSegment(id, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: current}))
 	}
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
@@ -60,9 +62,9 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	require.NoError(t, err)
 	logs := []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 42}, {LogID: 43, LogPath: "existing/path/43"}}}}
 	store := metacache.NewMetaStore(nil)
-	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
+	s := &Server{dataViewManager: manager, meta: &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	s.meta.segments.SetSegment(3, NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
+	s.meta.Segments.SetSegment(3, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", Bm25Statslogs: logs}))
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
@@ -78,13 +80,14 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 }
 
 func TestQueryViewCollectionIndexInfosResolveExactIDs(t *testing.T) {
-	s := &Server{meta: &meta{indexMeta: &indexMeta{indexes: map[int64]map[int64]*model.Index{
+	im := &index.IndexMeta{Indexes: map[int64]map[int64]*model.Index{
 		1: {
 			100: {CollectionID: 1, FieldID: 10, IndexID: 100, IndexName: "old", IsDeleted: true},
 			101: {CollectionID: 1, FieldID: 10, IndexID: 101, IndexName: "new"},
 			102: {CollectionID: 1, FieldID: 10, IndexID: 102, IndexName: "another-path"},
 		},
-	}}}}
+	}}
+	s := &Server{meta: &meta.Meta{IndexCatalog: im}, domainMetas: domainMetas{indexMeta: im}}
 	current := s.GetQueryViewCollectionIndexInfos(1)
 	require.Len(t, current, 2)
 	require.EqualValues(t, 101, current[0].GetIndexID())
