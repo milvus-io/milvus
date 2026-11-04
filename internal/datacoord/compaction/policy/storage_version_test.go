@@ -1,0 +1,1273 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package policy
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func TestStorageVersionUpgradePolicySuite(t *testing.T) {
+	suite.Run(t, new(StorageVersionUpgradePolicySuite))
+}
+
+type StorageVersionUpgradePolicySuite struct {
+	suite.Suite
+
+	mockAlloc  *allocator.MockAllocator
+	testLabel  *view.CompactionGroupLabel
+	handler    *meta.NMockHandler
+	versionMgr *index.MockVersionManager
+
+	policy *StorageVersionUpgradePolicy
+}
+
+func (s *StorageVersionUpgradePolicySuite) SetupTest() {
+	s.testLabel = &view.CompactionGroupLabel{
+		CollectionID: 1,
+		PartitionID:  10,
+		Channel:      "ch-1",
+	}
+
+	store := metacache.NewMetaStore(nil)
+	mt := &meta.Meta{
+		Segments:  meta.NewSegmentsInfo(store),
+		MetaStore: store,
+	}
+
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+	s.handler = meta.NewNMockHandler(s.T())
+	s.versionMgr = index.NewMockVersionManager(s.T())
+	s.policy = NewStorageVersionUpgradePolicy(mt, s.mockAlloc, s.handler, s.versionMgr)
+}
+
+func (s *StorageVersionUpgradePolicySuite) setPolicyMeta(collID int64, coll *meta.CollectionInfo, segments map[UniqueID]*meta.SegmentInfo) {
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := meta.NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: store,
+	}
+}
+
+func newStorageVersionPolicyTestSegment(collID, segmentID int64, storageVersion int64, format string) *meta.SegmentInfo {
+	return &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storageVersion,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID:     0,
+					ChildFields: []int64{100},
+					Format:      format,
+				},
+			},
+		},
+	}
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestEnable() {
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "false")
+	s.False(s.policy.Enable())
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "false")
+	s.True(s.policy.Enable())
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	s.True(s.policy.Enable())
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	s.True(s.policy.Enable())
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTargetVersion() {
+	// Default: UseLoonFFI is false, target should be StorageV2
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	s.Equal(storage.StorageV2, s.policy.targetVersion())
+
+	// When UseLoonFFI is true, target should be StorageV3
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	s.Equal(storage.StorageV3, s.policy.targetVersion())
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCollections() {
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
+	// Test with no collections
+	events, err := s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Empty(gotViews)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerNoCandidatesSkipsAllocID() {
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	params.Save(params.DataCoordCfg.StorageFormatCompactionEnabled.Key, "false")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
+	defer params.Reset(params.DataCoordCfg.StorageFormatCompactionEnabled.Key)
+
+	coll := &meta.CollectionInfo{ID: 100, Schema: meta.NewTestSchema()}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil)
+	for _, test := range []struct {
+		name     string
+		segments map[UniqueID]*meta.SegmentInfo
+	}{
+		{name: "empty"},
+		{name: "up to date", segments: map[UniqueID]*meta.SegmentInfo{
+			101: newStorageVersionPolicyTestSegment(coll.ID, 101, storage.StorageV3, "parquet"),
+		}},
+	} {
+		s.Run(test.name, func() {
+			s.setPolicyMeta(coll.ID, coll, test.segments)
+			s.policy.currentCount = 1
+			views, err := s.policy.TriggerOneCollection(context.Background(), coll.ID, 10)
+			s.NoError(err)
+			s.Empty(views)
+			s.Equal(1, s.policy.currentCount)
+			s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+		})
+	}
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerExhaustedBudgetSkipsCollectionEnumeration() {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "3600")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "2")
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0"))
+	s.policy.currentCount = 2
+	s.policy.lastPeriod = time.Now()
+
+	enumerations := 0
+	collectionsMock := mockey.Mock((*meta.Meta).GetCollections).To(func(*meta.Meta) []*meta.CollectionInfo {
+		enumerations++
+		return nil
+	}).Build()
+	defer collectionsMock.UnPatch()
+
+	events, err := s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Contains(events, TriggerTypeStorageVersionUpgrade)
+	s.Empty(events[TriggerTypeStorageVersionUpgrade])
+	s.Zero(enumerations)
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+	s.handler.AssertNotCalled(s.T(), "GetCollection", mock.Anything, mock.Anything)
+
+	// The existing rate window still replenishes the budget and resumes scans.
+	s.policy.lastPeriod = time.Now().Add(-2 * time.Hour)
+	_, err = s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Equal(1, enumerations)
+	s.Zero(s.policy.currentCount)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTextCollectionDoesNotDowngradeOrAllocateID() {
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "false")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
+
+	coll := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text}},
+	}}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil).Once()
+	s.setPolicyMeta(coll.ID, coll, map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(coll.ID, 101, storage.StorageV3, "parquet"),
+	})
+
+	views, err := s.policy.TriggerOneCollection(context.Background(), coll.ID, 10)
+	s.NoError(err)
+	s.Empty(views)
+	s.Zero(s.policy.currentCount)
+	s.mockAlloc.AssertNotCalled(s.T(), "AllocID", mock.Anything)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerWithSegments() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true") // target is StorageV3
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create segments with different storage versions
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	// Segment with old storage version (should be upgraded)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2, // Old version
+		},
+	}
+	// Segment already at target version (should NOT be upgraded)
+	segments[102] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             102,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV3, // Already at target
+		},
+	}
+	// L0 segment (should NOT be upgraded)
+	segments[103] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             103,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L0,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      1000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := meta.NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: store,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	// Only segment 101 should be triggered (old version, not L0)
+	s.Equal(1, len(views))
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionAndFormatRefresh() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "vortex")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	segments := map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV2, "parquet"),
+		102: newStorageVersionPolicyTestSegment(collID, 102, storage.StorageV3, "parquet"),
+		103: newStorageVersionPolicyTestSegment(collID, 103, storage.StorageV3, "vortex"),
+	}
+	s.setPolicyMeta(collID, coll, segments)
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Len(views, 2)
+
+	segmentIDs := typeutil.NewSet[int64]()
+	for _, cv := range views {
+		mixView, ok := cv.(*MixSegmentView)
+		s.Require().True(ok)
+		s.Require().Len(mixView.GetSegmentsView(), 1)
+		segmentIDs.Insert(mixView.GetSegmentsView()[0].ID)
+	}
+	s.True(segmentIDs.Contain(int64(101)))
+	s.True(segmentIDs.Contain(int64(102)))
+	s.False(segmentIDs.Contain(int64(103)))
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerFormatRefreshOnly() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "vortex")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	segments := map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "parquet"),
+		102: newStorageVersionPolicyTestSegment(collID, 102, storage.StorageV3, "vortex"),
+		103: newStorageVersionPolicyTestSegment(collID, 103, storage.StorageV2, "parquet"),
+	}
+	s.setPolicyMeta(collID, coll, segments)
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Len(views, 1)
+
+	mixView, ok := views[0].(*MixSegmentView)
+	s.True(ok)
+	s.Len(mixView.GetSegmentsView(), 1)
+	s.Equal(int64(101), mixView.GetSegmentsView()[0].ID)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerFormatRefreshSkipsExternalCollection() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "vortex")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:       1,
+					Name:          "external_pk",
+					DataType:      schemapb.DataType_Int64,
+					ExternalField: "pk_col",
+				},
+			},
+		},
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	segments := map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "lance-table"),
+	}
+	s.setPolicyMeta(collID, coll, segments)
+	s.policy.currentCount = 7
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Empty(views)
+	s.Equal(7, s.policy.currentCount)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestFormatRefreshRespectsSegmentFilters() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "vortex")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageFormatCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+		paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	segments := map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "parquet"),
+		102: newStorageVersionPolicyTestSegment(collID, 102, storage.StorageV3, "parquet"),
+		103: newStorageVersionPolicyTestSegment(collID, 103, storage.StorageV3, "parquet"),
+		104: newStorageVersionPolicyTestSegment(collID, 104, storage.StorageV3, "parquet"),
+		105: newStorageVersionPolicyTestSegment(collID, 105, storage.StorageV3, "parquet"),
+	}
+	segments[101].IsCompacting = true
+	segments[102].IsImporting = true
+	segments[103].Level = datapb.SegmentLevel_L0
+	segments[104].State = commonpb.SegmentState_Dropped
+
+	s.setPolicyMeta(collID, coll, segments)
+	snapMeta := &snapshot.SnapshotMeta{
+		CompactionBlockedCollections: typeutil.NewUniqueSet(),
+		SnapshotPendingCollections:   typeutil.NewUniqueSet(),
+		SegmentProtectionUntil:       map[int64]uint64{105: uint64(time.Now().Add(time.Hour).Unix())},
+	}
+	s.policy.meta.CompactionProtection = snapMeta
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Empty(views)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual() {
+	collID := int64(100)
+	logs := mlog.CaptureGlobalLogs(s.T(), &mlog.Config{
+		Level:             "warn",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	})
+
+	assertLogContains := func(substr string) {
+		s.True(strings.Contains(logs.String(), substr), logs.String())
+	}
+
+	s.True(segmentColumnGroupFormatsAllEqual(
+		newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "vortex"),
+		"vortex",
+	))
+	s.False(segmentColumnGroupFormatsAllEqual(
+		newStorageVersionPolicyTestSegment(collID, 102, storage.StorageV3, "vortex"),
+		"parquet",
+	))
+	s.True(segmentColumnGroupFormatsAllEqual(
+		newStorageVersionPolicyTestSegment(collID, 103, storage.StorageV3, "vortex"),
+		"",
+	))
+	s.True(segmentColumnGroupFormatsAllEqual(
+		newStorageVersionPolicyTestSegment(collID, 104, storage.StorageV2, "parquet"),
+		"vortex",
+	))
+	s.False(segmentColumnGroupFormatsAllEqual(
+		&meta.SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             105,
+				CollectionID:   collID,
+				StorageVersion: storage.StorageV3,
+			},
+		},
+		"vortex",
+	))
+	assertLogContains("unexpected empty binlogs for V3 segment during storage format compaction")
+	assertLogContains("segmentID=105")
+	assertLogContains("targetFormat=vortex")
+	s.False(segmentColumnGroupFormatsAllEqual(
+		newStorageVersionPolicyTestSegment(collID, 106, storage.StorageV3, ""),
+		"vortex",
+	))
+	s.False(segmentColumnGroupFormatsAllEqual(
+		&meta.SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             107,
+				CollectionID:   collID,
+				StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{
+					{Format: "vortex"},
+					{Format: "parquet"},
+				},
+			},
+		},
+		"vortex",
+	))
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	// Create a compacting segment (should NOT be upgraded)
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+		IsCompacting: true, // Already compacting
+	}
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := meta.NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: store,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Equal(0, len(views)) // No segments should be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerWithImportingSegment() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	// Create an importing segment (should NOT be upgraded)
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+			IsImporting:    true, // Importing
+		},
+	}
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := meta.NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: store,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Equal(0, len(views)) // No segments should be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerRateLimiting() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "3600") // 1 hour
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "2")      // Max 2 per interval
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create 5 segments that need upgrade
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	for i := int64(101); i <= 105; i++ {
+		segments[i] = &meta.SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             i,
+				CollectionID:   collID,
+				PartitionID:    10,
+				InsertChannel:  "ch-1",
+				Level:          datapb.SegmentLevel_L1,
+				State:          commonpb.SegmentState_Flushed,
+				NumOfRows:      10000,
+				StorageVersion: storage.StorageV2,
+			},
+		}
+	}
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := meta.NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: store,
+	}
+
+	// Should only trigger 2 segments due to rate limiting
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 2)
+	s.NoError(err)
+	s.Equal(2, len(views))
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNumberOfCalls(s.T(), "AllocID", 1)
+
+	views, err = s.policy.TriggerOneCollection(ctx, collID, 2)
+	s.NoError(err)
+	s.Empty(views)
+	s.Equal(2, s.policy.currentCount)
+	s.mockAlloc.AssertNumberOfCalls(s.T(), "AllocID", 1)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerIntervalReset() {
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1") // 1 second interval
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "5")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+	}()
+
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
+	// Set last period to a time before the interval
+	s.policy.lastPeriod = time.Now().Add(-2 * time.Second)
+	s.policy.currentCount = 100 // Some high count
+
+	// Trigger should reset the counter because interval has passed
+	_, err := s.policy.Trigger(context.Background())
+	s.NoError(err)
+	s.Equal(0, s.policy.currentCount)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerCollectionNotFound() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+
+	// Handler returns nil collection
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, nil)
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  meta.NewSegmentsInfo(store),
+		MetaStore: store,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Nil(views)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerGetCollectionError() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+
+	// Handler returns error
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
+
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  meta.NewSegmentsInfo(store),
+		MetaStore: store,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.Error(err)
+	s.Nil(views)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerAllocIDError() {
+	ctx := context.Background()
+	collID := int64(100)
+	params := paramtable.Get()
+	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
+	params.Save(params.DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
+	defer params.Reset(params.DataCoordCfg.StorageVersionCompactionEnabled.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), context.DeadlineExceeded).Once()
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil).Once()
+	s.setPolicyMeta(collID, coll, map[UniqueID]*meta.SegmentInfo{
+		101: newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV2, "parquet"),
+	})
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.ErrorIs(err, context.DeadlineExceeded)
+	s.Nil(views)
+	s.Zero(s.policy.currentCount)
+
+	// Failed ID allocation must leave the candidate and task budget intact.
+	views, err = s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Require().Len(views, 1)
+	s.EqualValues(101, views[0].GetSegmentsView()[0].ID)
+	s.EqualValues(1000, views[0].GetTriggerID())
+	s.Equal(1, s.policy.currentCount)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
+	ctx := context.Background()
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
+	coll1 := &meta.CollectionInfo{
+		ID:     100,
+		Schema: meta.NewTestSchema(),
+	}
+	coll2 := &meta.CollectionInfo{
+		ID:     200,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll1, nil).Times(1)
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll2, nil).Times(1)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil).Times(2)
+
+	// Create segments for collection 100
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   100,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+	// Create segment for collection 200
+	segments[201] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             201,
+			CollectionID:   200,
+			PartitionID:    20,
+			InsertChannel:  "ch-2",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll1)
+	ms.PutCollection(coll2)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Equal(2, len(gotViews)) // One from each collection
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestViewContent() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Equal(1, len(views))
+
+	// Verify view content
+	mixView, ok := views[0].(*MixSegmentView)
+	s.True(ok)
+	s.NotNil(mixView.GetGroupLabel())
+	s.Equal(collID, mixView.GetGroupLabel().CollectionID)
+	s.Equal(int64(10), mixView.GetGroupLabel().PartitionID)
+	s.Equal("ch-1", mixView.GetGroupLabel().Channel)
+	s.Equal(1, len(mixView.GetSegmentsView()))
+	s.Equal(int64(101), mixView.GetSegmentsView()[0].ID)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	// Create a dropped segment (should NOT be upgraded)
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Dropped,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Equal(0, len(views)) // Dropped segment should not be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+
+	// Create a growing segment (should NOT be upgraded - not flushed)
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Growing,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	views, err := s.policy.TriggerOneCollection(ctx, collID, 10)
+	s.NoError(err)
+	s.Equal(0, len(views)) // Growing segment should not be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequirement() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params with a higher version requirement
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.7.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return a lower version than requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.0"))
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+
+	// Create a segment that would normally be upgraded
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	// Should return empty views because version requirement is not met
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	_, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.False(ok)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfied() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.6.0")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return a version that satisfies requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0"))
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create a segment that should be upgraded
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	// Should trigger because version requirement is met
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Equal(1, len(gotViews)) // Segment should be triggered
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerInvalidVersionRequirement() {
+	// Setup params with an invalid version string
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "invalid-version")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
+
+	// Should return error because version requirement is invalid
+	events, err := s.policy.Trigger(context.Background())
+	s.Error(err)
+	s.Empty(events)
+}
+
+func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
+	ctx := context.Background()
+	collID := int64(100)
+
+	// Setup params - minVersion equals requirement exactly
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key, "2.6.10")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key, "1")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key, "10")
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionSessionVersionRequirement.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitInterval.Key)
+		paramtable.Get().Reset(paramtable.Get().DataCoordCfg.StorageVersionCompactionRateLimitTokens.Key)
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
+	}()
+
+	// Mock version manager to return exact same version as requirement
+	s.versionMgr.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.6.10"))
+
+	coll := &meta.CollectionInfo{
+		ID:     collID,
+		Schema: meta.NewTestSchema(),
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
+	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(1000), nil)
+
+	// Create a segment that should be upgraded
+	segments := make(map[UniqueID]*meta.SegmentInfo)
+	segments[101] = &meta.SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             101,
+			CollectionID:   collID,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      10000,
+			StorageVersion: storage.StorageV2,
+		},
+	}
+
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := meta.NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
+	}
+
+	ms.PutCollection(coll)
+
+	s.policy.meta = &meta.Meta{
+		Segments:  segmentsInfo,
+		MetaStore: ms,
+	}
+
+	// Should trigger because minVersion equals requirement (not less than)
+	events, err := s.policy.Trigger(ctx)
+	s.NoError(err)
+	s.NotNil(events)
+	gotViews, ok := events[TriggerTypeStorageVersionUpgrade]
+	s.True(ok)
+	s.Equal(1, len(gotViews)) // Segment should be triggered
+}
