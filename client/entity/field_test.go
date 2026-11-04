@@ -122,18 +122,27 @@ func TestStructSchemaValidate(t *testing.T) {
 		assert.Error(t, ss.Validate("clips"))
 	})
 
-	t.Run("reject nested array", func(t *testing.T) {
+	t.Run("accept array sub-field with scalar leaf", func(t *testing.T) {
 		ss := NewStructSchema().
 			WithField(NewField().WithName("a").WithDataType(FieldTypeArray).WithElementType(FieldTypeInt32))
+		assert.NoError(t, ss.Validate("clips"))
+	})
+
+	t.Run("reject nested array of array", func(t *testing.T) {
+		ss := NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeArray).WithElementType(FieldTypeArray))
 		assert.Error(t, ss.Validate("clips"))
 	})
 
-	t.Run("reject primary key / nullable / autoID", func(t *testing.T) {
+	t.Run("accept nullable sub-field", func(t *testing.T) {
+		assert.NoError(t, NewStructSchema().
+			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithNullable(true)).
+			Validate("clips"))
+	})
+
+	t.Run("reject primary key / autoID", func(t *testing.T) {
 		assert.Error(t, NewStructSchema().
 			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithIsPrimaryKey(true)).
-			Validate("clips"))
-		assert.Error(t, NewStructSchema().
-			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithNullable(true)).
 			Validate("clips"))
 		assert.Error(t, NewStructSchema().
 			WithField(NewField().WithName("a").WithDataType(FieldTypeInt32).WithIsAutoID(true)).
