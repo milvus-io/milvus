@@ -618,8 +618,9 @@ LegacyScalarIndexLoadResourceAsync(
                 .value_or(false)) {
             resident = SaturatingAdd(
                 resident,
-                SaturatingMultiply(uint64_t{std::max<int64_t>(0, rows)},
-                                   sizeof(void*)));
+                SaturatingMultiply(
+                    static_cast<uint64_t>(std::max<int64_t>(0, rows)),
+                    sizeof(void*)));
         }
         request.final_memory_cost =
             std::max(request.final_memory_cost,
