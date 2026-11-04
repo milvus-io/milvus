@@ -5,13 +5,13 @@ import (
 	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // AddFunctionFields applies the field/index delta of the acknowledged schema
 // DDL. Preload hints are unchanged. Derived fields are included only when their
 // inputs are loaded. The collection guard prevents resurrecting released state.
-func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, added []*messagespb.LoadFieldConfig) error {
+func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID int64, schema *schemapb.CollectionSchema, added []*viewpb.LoadFieldConfig) error {
 	if len(added) == 0 {
 		return nil
 	}
@@ -40,7 +40,7 @@ func (s *LoadConfigStore) AddFunctionFields(ctx context.Context, collectionID in
 				inputsLoaded = inputsLoaded && loaded[id]
 			}
 			if inputsLoaded {
-				cfg.RequiredFields = append(cfg.RequiredFields, &messagespb.LoadFieldConfig{FieldId: field.GetFieldId(), IndexId: field.GetIndexId()})
+				cfg.RequiredFields = append(cfg.RequiredFields, &viewpb.LoadFieldConfig{FieldId: field.GetFieldId(), IndexIds: append([]int64(nil), field.GetIndexIds()...)})
 				loaded[field.GetFieldId()] = true
 				changed = true
 			}

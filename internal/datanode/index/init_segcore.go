@@ -104,6 +104,10 @@ func InitSegcore(nodeID int64) error {
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
+	if err := initcore.InitS3CrtQueueSizes(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
 		return err

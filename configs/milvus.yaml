@@ -163,6 +163,7 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
+  crt_queue_sizes: 125 # S3 CRT queue sizes, converted to the SDK throughput target as value * 0.4 Gbps. Requires restart.
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
@@ -450,6 +451,9 @@ proxy:
   # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
   # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
   splitChunk: true
+  exprParseCache:
+    enabled: true # Enable caching expression parse trees and parsing errors. These settings apply to all components using the expression parser, not only Proxy; each process maintains its own cache. Restart required; disabling the cache does not reject expressions.
+    maxEntries: 1024 # Maximum number of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 1024. Entries retain the existing 10-minute TTL. Restart required.
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -736,6 +740,7 @@ queryNode:
       lazyIndexSlotEnabled: false # When enabled, sealed scalar, vector, and text index translators and cache slots with warmup=disable are created on first access instead of segment load.
       lazyColumnGroupEnabled: false # When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
+    chainPoolSizeFactor: 1 # size factor (CPUNum * factor) of the native function-chain pool; isolated from ordinary query field retrieval; values below 1 use 1
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
     dynamicPoolSizeFactor: 1 # size factor (CPUNum * factor) of the dynamic cgo pool for segment create/release/statistics/index-info
     deletePoolSizeFactor: 1 # size factor (CPUNum * factor) of the DeleteBatch dispatch pool
@@ -993,6 +998,12 @@ dataCoord:
       enabled: true # Enable garbage collection for LOB (TEXT column) files
       safetyWindow: 3600 # Safety window for LOB file GC in seconds. Files older than this are eligible for deletion. Default 1 hour.
       checkInterval: 1800 # Interval for LOB GC check in seconds. Default 30 minutes.
+  pkindex:
+    gc:
+      interval: 3600 # The interval at which data coord runs garbage collection for primary key index files, unit: second.
+      grace: 86400 # Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.
+      manifestRetainVersions: 8 # The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.
+      manifestRetainDuration: 3600 # Garbage collection keeps every primary key index manifest version written within this time, unit: second.
   snapshot:
     pendingTimeout: 60 # Timeout in minutes for pending snapshots before GC cleanup
     maxCompactionProtectionSeconds: 604800 # Maximum allowed compaction protection duration in seconds (default 604800 = 7 days)
@@ -1059,7 +1070,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
-    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    indexTaskSlotUsage: 64 # Deprecated: unused. Vector task slots are estimated from input, build workspace and output memory.
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
@@ -1733,6 +1744,7 @@ queryView:
 
 # Any configuration related to the streaming service.
 streaming:
+  schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
@@ -1888,6 +1900,12 @@ credential:
 
 # Any configuration related to functions
 function:
+  grep:
+    maxArgumentBytes: 65536 # Maximum byte length of GrepOp arguments. Invalid or non-positive values fall back to 65536. Changes apply to newly prepared operators.
+    maxRegexBytes: 10485760 # Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to newly prepared operators.
+    maxDFACacheBytes: 8388608 # Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to newly prepared operators.
+    batchSize: 128 # Candidate text rows per Grep read batch, independent of the matching limit. Invalid or non-positive configuration falls back to 128. Changes apply to newly prepared operators.
+    maxScanRows: 0 # Maximum candidate offsets returned per segment for Grep after filter and MVCC. 0 disables the row cap; invalid or negative configuration falls back to 0. A positive cap truncates candidate selection and logs a warning when more candidates may remain; Grep results may be incomplete. Changes apply to newly enabled candidate plans.
   model:
     requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:

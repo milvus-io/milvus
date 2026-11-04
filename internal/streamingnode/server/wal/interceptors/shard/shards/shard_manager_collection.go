@@ -162,9 +162,8 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 		return nil, err
 	}
 
-	// For schema changes: flush/fence segment allocation and update in-memory schema
-	// atomically within this critical region. Both operations share the same
-	// IsSchemaChange gate so live path and recovery replay stay consistent.
+	// Only encoding/schema changes flush and fence segment allocation. Metadata
+	// updates still replace the current schema snapshot under the same lock.
 	var segmentIDs []int64
 	if messageutil.IsSchemaChange(header) {
 		var err error
@@ -183,16 +182,14 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 				mlog.Int64("collectionID", collectionID))
 			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
-		collectionInfo := m.collections[collectionID]
+	}
+	collectionInfo := m.collections[collectionID]
+	if schema := messageutil.ApplyCollectionSchemaUpdates(collectionInfo.Schema.GetSchema(), header, msg.MustBody()); schema != nil {
 		collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
 			CheckpointTimeTick: timetick,
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 		})
-		logger.Info(context.TODO(), "updated collection schema in shard manager",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Int32("schemaVersion", schema.GetVersion()),
-			mlog.Uint64("checkpointTimeTick", timetick))
 	}
 
 	return segmentIDs, nil

@@ -69,7 +69,7 @@ All topology changes are triggered by `AlterReplicateConfig` broadcast messages,
 
 - **AddNewMember**: Add a new cluster and topology edge. Replication starts from the current WAL position of new incoming `AlterReplicateConfig` message. Existing cluster attributes are immutable.
 - **AddNewPChannel**: Not supported via config change — all clusters must have equal PChannel count set at initial configuration.
-- **SwitchOver**: Update topology edges to reverse roles (e.g., PRIMARY A → SECONDARY B becomes PRIMARY B → SECONDARY A). On the old primary, `SwitchReplicateMode` drops the secondary state. On the new primary, it creates a new secondary state pointing to the new source.
+- **SwitchOver**: Update topology edges to reverse roles (e.g., PRIMARY A → SECONDARY B becomes PRIMARY B → SECONDARY A). On the new primary, `SwitchReplicateMode` drops the secondary state. On the old primary, which becomes a secondary, it creates a new secondary state that points to the new source. A secondary also creates a new secondary state when its source cluster changes.
 - **FailOver**: Remove the failed primary from topology edges and designate a secondary as the new primary by updating the topology. The CDC ChannelReplicator on the old primary stops when it detects its topology edge is removed.
 - **RemoveMember**: Remove topology edges pointing to the target cluster. The CDC ChannelReplicator detects the edge removal via `AlterReplicateConfig` message and cleans up the replicate PChannel metadata from etcd.
 

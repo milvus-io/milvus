@@ -40,8 +40,14 @@ type ResultSet struct {
 	// AggregationBuckets contains search aggregation results for this query.
 	AggregationBuckets []AggregationBucket
 	Scores             []float32 // distance to the target vector
-	Recall             float32   // recall of the query vector's search result (estimated by zilliz cloud)
-	Err                error     // search error if any
+	// ElementOffsets holds, for an element-level search, the offset of the matched struct element
+	// within its row, one per hit. It is nil for other searches.
+	ElementOffsets []int64
+	// QueryElementOffsets holds, for an element-level query (element_filter), the offsets of the
+	// matched struct elements of each returned row. It is nil for other queries.
+	QueryElementOffsets [][]int64
+	Recall              float32 // recall of the query vector's search result (estimated by zilliz cloud)
+	Err                 error   // search error if any
 }
 
 // GetColumn returns column with provided field name.
@@ -59,12 +65,14 @@ func (rs ResultSet) Len() int {
 }
 
 func (rs ResultSet) Slice(start, end int) ResultSet {
+	start, end = normalizeResultSliceRange(start, end, rs.rowCount())
 	result := ResultSet{
 		sch: rs.sch,
 		Fields: lo.Map(rs.Fields, func(column column.Column, _ int) column.Column {
 			return column.Slice(start, end)
 		}),
 		AggregationBuckets: rs.AggregationBuckets,
+		ResultCount:        end - start,
 		// Recall will not be sliced
 		Err: rs.Err,
 	}
@@ -72,25 +80,46 @@ func (rs ResultSet) Slice(start, end int) ResultSet {
 	// Handle IDs - may be nil for Query results
 	if rs.IDs != nil {
 		result.IDs = rs.IDs.Slice(start, end)
-		result.ResultCount = result.IDs.Len()
-	} else if len(result.Fields) > 0 {
-		result.ResultCount = result.Fields[0].Len()
 	}
 
 	if rs.GroupByValue != nil {
 		result.GroupByValue = rs.GroupByValue.Slice(start, end)
 	}
 
-	// Handle Scores - may be nil or empty for Query results
-	if len(rs.Scores) > 0 && result.ResultCount > 0 {
-		scoreEnd := start + result.ResultCount
-		if scoreEnd > len(rs.Scores) {
-			scoreEnd = len(rs.Scores)
-		}
-		result.Scores = rs.Scores[start:scoreEnd]
-	}
+	// Scores and offsets may be nil or empty for Query results
+	result.Scores = sliceResultRows(rs.Scores, start, end)
+	result.ElementOffsets = sliceResultRows(rs.ElementOffsets, start, end)
+	result.QueryElementOffsets = sliceResultRows(rs.QueryElementOffsets, start, end)
 
 	return result
+}
+
+// rowCount returns the number of rows held by the result set's row-aligned data.
+func (rs ResultSet) rowCount() int {
+	if rs.IDs != nil {
+		return rs.IDs.Len()
+	}
+	if len(rs.Fields) > 0 {
+		return rs.Fields[0].Len()
+	}
+	return rs.ResultCount
+}
+
+// normalizeResultSliceRange clamps [start, end) into [0, l]; end == -1 means l.
+func normalizeResultSliceRange(start, end, l int) (int, int) {
+	if end < 0 || end > l {
+		end = l
+	}
+	start = max(start, 0)
+	start = min(start, end)
+	return start, end
+}
+
+func sliceResultRows[T any](rows []T, start, end int) []T {
+	if len(rows) == 0 || start == end {
+		return nil
+	}
+	return rows[min(start, len(rows)):min(end, len(rows))]
 }
 
 // Unmarshal puts dataset into receiver in row based way.

@@ -128,7 +128,7 @@ func initialCheckpointFromLastTimeTickMessage(lastTimeTickMessage message.Immuta
 	return &utility.WALCheckpoint{
 		MessageID: lastTimeTickMessage.LastConfirmedMessageID(),
 		TimeTick:  lastTimeTickMessage.TimeTick(),
-		Magic:     utility.RecoveryMagicRecoveryStorageV2,
+		Magic:     utility.RecoveryMagicSchemaMetadataAligned,
 	}
 }
 
@@ -463,7 +463,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	frozenCheckpoint := &WALCheckpoint{
 		MessageID: completedPoint.MessageID,
 		TimeTick:  completedPoint.TimeTick,
-		Magic:     utility.RecoveryMagicRecoveryStorageV2,
+		Magic:     r.checkpoint.Magic,
 		Term:      r.channel.Term,
 	}
 	// Freeze the latest control state with its own applied frontier. Its
@@ -724,7 +724,7 @@ func (r *recoveryStorageImpl) getCompletedCheckpoint() *WALCheckpoint {
 	return &WALCheckpoint{
 		MessageID: point.MessageID,
 		TimeTick:  point.TimeTick,
-		Magic:     utility.RecoveryMagicRecoveryStorageV2,
+		Magic:     r.checkpoint.Magic,
 		Term:      r.channel.Term,
 	}
 }

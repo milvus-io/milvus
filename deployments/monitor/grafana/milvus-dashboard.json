@@ -2972,7 +2972,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_collection_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_sq_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])))",
               "hide": false,
               "interval": "",
               "legendFormat": "p99-{{query_type}}-{{pod}}-{{node_id}}",
@@ -2984,7 +2984,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_collection_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, query_type) / sum(increase(milvus_proxy_collection_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, query_type)",
+              "expr": "sum(increase(milvus_proxy_sq_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, query_type) / sum(increase(milvus_proxy_sq_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, query_type)",
               "hide": false,
               "interval": "",
               "legendFormat": "avg-{{query_type}}-{{pod}}-{{node_id}}",
@@ -3182,7 +3182,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_collection_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])))",
               "interval": "",
               "legendFormat": "p99-{{pod}}-{{node_id}}-{{msg_type}}",
               "queryType": "randomWalk",
@@ -3194,7 +3194,7 @@
                 "uid": "${datasource}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_collection_mutation_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, msg_type) / sum(increase(milvus_proxy_collection_mutation_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, msg_type)",
+              "expr": "sum(increase(milvus_proxy_mutation_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, msg_type) / sum(increase(milvus_proxy_mutation_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", collection_name=~\"$collection\"}[2m])) by (pod, node_id, msg_type)",
               "hide": false,
               "interval": "",
               "legendFormat": "avg-{{pod}}-{{node_id}}-{{msg_type}}",

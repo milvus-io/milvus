@@ -24,14 +24,17 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Utils.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
@@ -42,6 +45,7 @@
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorDiskArtifact.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
+#include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -54,6 +58,124 @@
 
 namespace milvus::index::test {
 namespace {
+
+// Exercise the native Serialize boundary without building a real ANN index.
+class SerializationTestNode final : public knowhere::IndexNode {
+ public:
+    explicit SerializationTestNode(std::function<knowhere::Status()> serialize)
+        : serialize_(std::move(serialize)) {
+    }
+    knowhere::Status
+    Serialize(knowhere::BinarySet&) const override {
+        return serialize_();
+    }
+    knowhere::Status
+    Train(const knowhere::DataSetPtr,
+          std::shared_ptr<knowhere::Config>,
+          bool) override {
+        throw std::logic_error("unexpected Train");
+    }
+    knowhere::Status
+    Add(const knowhere::DataSetPtr,
+        std::shared_ptr<knowhere::Config>,
+        bool) override {
+        throw std::logic_error("unexpected Add");
+    }
+    knowhere::expected<knowhere::DataSetPtr>
+    Search(const knowhere::DataSetPtr,
+           std::unique_ptr<knowhere::Config>,
+           const knowhere::BitsetView&,
+           milvus::OpContext*) const override {
+        throw std::logic_error("unexpected Search");
+    }
+    knowhere::expected<knowhere::DataSetPtr>
+    GetVectorByIds(const knowhere::DataSetPtr,
+                   milvus::OpContext*) const override {
+        throw std::logic_error("unexpected GetVectorByIds");
+    }
+    bool
+    HasRawData(const std::string&) const override {
+        return false;
+    }
+    knowhere::expected<knowhere::DataSetPtr>
+    GetIndexMeta(std::unique_ptr<knowhere::Config>) const override {
+        throw std::logic_error("unexpected GetIndexMeta");
+    }
+    knowhere::Status
+    Deserialize(const knowhere::BinarySet&,
+                std::shared_ptr<knowhere::Config>) override {
+        throw std::logic_error("unexpected Deserialize");
+    }
+    knowhere::Status
+    DeserializeFromFile(const std::string&,
+                        std::shared_ptr<knowhere::Config>) override {
+        throw std::logic_error("unexpected DeserializeFromFile");
+    }
+    std::unique_ptr<knowhere::BaseConfig>
+    CreateConfig() const override {
+        return std::make_unique<knowhere::BaseConfig>();
+    }
+    int64_t
+    Dim() const override {
+        return 4;
+    }
+    int64_t
+    Size() const override {
+        return 0;
+    }
+    int64_t
+    Count() const override {
+        return 1;
+    }
+    std::string
+    Type() const override {
+        return "serialization-test";
+    }
+
+ private:
+    std::function<knowhere::Status()> serialize_;
+};
+
+class SerializationTestSink final : public storage::FileSink {
+ public:
+    storage::Generation
+    Gen() const override {
+        return storage::Generation::V1V2;
+    }
+    void
+    WriteEntry(std::string_view, const void*, size_t) override {
+        throw std::logic_error("unexpected sliced entry");
+    }
+    void
+    WriteEntryFromLocalFile(std::string_view, const std::string&) override {
+        throw std::logic_error("unexpected sliced file");
+    }
+    void
+    WriteRawEntryFromLocalFile(std::string_view,
+                               const std::string& path) override {
+        ++files;
+        EXPECT_EQ(std::filesystem::file_size(path), 7);
+    }
+    void
+    WriteRawEntry(std::string_view,
+                  std::shared_ptr<arrow::Buffer> data) override {
+        if (fail_write) {
+            throw std::runtime_error("sink write failed");
+        }
+        ++buffers;
+        EXPECT_EQ(data->ToString(), "payload");
+    }
+    storage::ArtifactStats
+    Finish() override {
+        return {};
+    }
+    void
+    ReleaseLocalStaging() override {
+    }
+    int files{0};
+    int buffers{0};
+    bool fail_write{false};
+};
 
 constexpr int64_t kRows = 1000;
 constexpr int64_t kDim = 4;
@@ -116,28 +238,43 @@ struct OpenedDiskIndex {
     std::vector<uint8_t> persisted_validity;
 };
 
+struct DiskBuildCase {
+    std::string metric = "L2";
+    int64_t dim = kDim;
+    int64_t logical_rows = kRows;
+    // A VECTOR_ARRAY field; it has embedding offsets only under an
+    // embedding-list metric.
+    bool vector_array = false;
+    std::string offsets_path;
+    bool mmap = false;
+    std::string validity_path;
+    bool element_nullable = false;
+    bool mmap_id_map = false;
+    // Published next to the engine files as the artifact's validity entry, as
+    // a pre-element-level build published the row-domain validity of its
+    // input.
+    std::vector<uint8_t> legacy_validity;
+    // A resident payload; the raw file then holds only its header.
+    const void* tensor = nullptr;
+};
+
 template <typename T>
 void
 BuildDisk(const std::string& raw_path,
           const std::string& staging_dir,
           OpenedDiskIndex<T>& opened,
-          const std::string& metric = "L2",
-          int64_t dim = kDim,
-          int64_t logical_rows = kRows,
-          const std::string& offsets_path = {},
-          bool mmap = false,
-          const std::string& validity_path = {},
-          bool mmap_id_map = false) {
+          const DiskBuildCase& build = {}) {
+    const bool vector_array = build.vector_array || !build.offsets_path.empty();
+    const bool nullable =
+        !build.validity_path.empty() || !build.legacy_validity.empty();
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
-        .field_type =
-            offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY,
-        .element_type =
-            offsets_path.empty() ? DataType::NONE : PhysicalType<T>(),
+        .field_type = vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>(),
+        .element_type = vector_array ? PhysicalType<T>() : DataType::NONE,
         .index_engine_version =
             knowhere::Version::GetCurrentVersion().VersionNumber(),
-        .params = {{METRIC_TYPE, metric},
-                   {DIM_KEY, dim},
+        .params = {{METRIC_TYPE, build.metric},
+                   {DIM_KEY, build.dim},
                    {DISK_ANN_MAX_DEGREE, "24"},
                    {DISK_ANN_SEARCH_LIST_SIZE, "56"},
                    {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
@@ -151,12 +288,14 @@ BuildDisk(const std::string& raw_path,
     ASSERT_NE(builder, nullptr);
     PreparedVectorBuildFiles<T> input{
         .raw_path = raw_path,
-        .validity_path = validity_path.empty()
+        .validity_path = build.validity_path.empty()
                              ? std::nullopt
-                             : std::make_optional(validity_path),
-        .embedding_offsets_path = offsets_path.empty()
+                             : std::make_optional(build.validity_path),
+        .embedding_offsets_path = build.offsets_path.empty()
                                       ? std::nullopt
-                                      : std::make_optional(offsets_path),
+                                      : std::make_optional(build.offsets_path),
+        .tensor = build.tensor,
+        .raw_file_complete = build.tensor == nullptr,
     };
     auto artifact = std::move(*builder).Build(input);
     ASSERT_NE(artifact, nullptr);
@@ -169,7 +308,7 @@ BuildDisk(const std::string& raw_path,
     config.root_path = staging_dir + "/objects/";
     std::filesystem::create_directories(config.root_path);
     const auto field_type =
-        offsets_path.empty() ? PhysicalType<T>() : DataType::VECTOR_ARRAY;
+        vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>();
     storage::FileManagerContext context({1, 2, 3, 100},
                                         {3,
                                          100,
@@ -178,13 +317,27 @@ BuildDisk(const std::string& raw_path,
                                          "vector_disk_family",
                                          "field",
                                          field_type,
-                                         dim,
+                                         build.dim,
                                          false},
                                         storage::CreateChunkManager(config),
                                         storage::InitArrowFileSystem(config));
     context.use_async_load = false;
     storage::V1DiskSink sink(context);
     artifact->Serialize(sink);
+    if (!build.legacy_validity.empty()) {
+        // Before element-level builds dropped embedding offsets, the disk
+        // builder staged the validity input as a local file and published it
+        // through the same sink entry as the engine files.
+        const auto local = staging_dir + "/legacy_" + VALID_DATA_KEY;
+        {
+            std::ofstream stream(local, std::ios::binary | std::ios::trunc);
+            stream.write(
+                reinterpret_cast<const char*>(build.legacy_validity.data()),
+                static_cast<std::streamsize>(build.legacy_validity.size()));
+            ASSERT_TRUE(stream.good());
+        }
+        sink.WriteEntryFromLocalFile(VALID_DATA_KEY, local);
+    }
     const auto stats = sink.Finish();
     ASSERT_FALSE(stats.Files().empty());
     std::vector<std::string> paths;
@@ -192,7 +345,7 @@ BuildDisk(const std::string& raw_path,
     for (const auto& file : stats.Files()) {
         paths.push_back(file.file_name);
     }
-    if (!validity_path.empty()) {
+    if (nullable) {
         storage::V1RemoteSource source(context,
                                        paths,
                                        {},
@@ -203,14 +356,17 @@ BuildDisk(const std::string& raw_path,
     sink.ReleaseLocalStaging();
     storage::LoadOptions options;
     options.params = adapted.params;
-    options.params[INDEX_NUM_ROWS_KEY] = logical_rows;
-    if (!validity_path.empty()) {
+    options.params[INDEX_NUM_ROWS_KEY] = build.logical_rows;
+    if (vector_array) {
+        options.params[ELEMENT_NULLABLE] = build.element_nullable;
+    }
+    if (nullable) {
         options.params["nullable"] = true;
-        options.params[ENABLE_MMAP_I2O_MAP] = mmap_id_map;
-        options.params[ENABLE_MMAP_O2I_MAP] = mmap_id_map;
+        options.params[ENABLE_MMAP_I2O_MAP] = build.mmap_id_map;
+        options.params[ENABLE_MMAP_O2I_MAP] = build.mmap_id_map;
     }
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
-    options.enable_mmap = mmap;
+    options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
     opened.base =
         LoaderRegistry::Instance()
@@ -224,14 +380,17 @@ BuildDisk(const std::string& raw_path,
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap) {
+RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
     auto values = MakeRows<T>();
-    WriteRaw(raw_path, values, kRows, kDim);
+    WriteRaw(raw_path, resident ? std::vector<T>{} : values, kRows, kDim);
     OpenedDiskIndex<T> opened;
-    BuildDisk(raw_path, files->Path(), opened, "L2", kDim, kRows, {}, mmap);
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.mmap = mmap, .tensor = resident ? values.data() : nullptr});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -297,7 +456,7 @@ TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
     std::array<float, 2> values;
     EXPECT_EQ(stream->Read(values.data(), sizeof(values)), sizeof(values));
     EXPECT_EQ(values, (std::array<float, 2>{1.0f, 2.0f}));
-    EXPECT_TRUE(manager->Files().empty());
+    EXPECT_TRUE(manager->LocalFiles().empty());
     EXPECT_THROW(manager->OpenOutputStream(raw), SegcoreError);
     EXPECT_FALSE(manager->AddFile(raw));
     EXPECT_FALSE(manager->RemoveFile(raw));
@@ -355,22 +514,22 @@ TEST(VectorDiskFileManagerTest, MetadataBeforeOrAfterClosePublishesRawBytes) {
         const std::array<uint8_t, 3> bytes{4, 5, 6};
         milvus::FileManager& base = *manager;
         auto output = base.OpenOutputStream(
-            path, {.expected_size = 1, .use_memory = true});
+            path, {.expected_size = 1, .use_memory = false});
         ASSERT_EQ(output->Write(bytes.data(), bytes.size()), bytes.size());
         const milvus::FileMeta meta{path, bytes.size()};
         if (before_close) {
             ASSERT_TRUE(manager->AddFileMeta(meta));
-            EXPECT_THROW(manager->Files(), SegcoreError);
+            EXPECT_THROW(manager->LocalFiles(), SegcoreError);
         }
         output->Close();
         ASSERT_TRUE(manager->AddFileMeta(meta));
         EXPECT_TRUE(manager->AddFileMeta(meta));
         EXPECT_NO_THROW(manager->RethrowFirstFailure());
-        auto files = manager->Files();
+        auto files = manager->LocalFiles();
         ASSERT_EQ(files.size(), 1);
         EXPECT_EQ(files[0].transport, VectorDiskFileTransport::RawUnsliced);
         EXPECT_EQ(files[0].size, bytes.size());
-        VectorDiskArtifact artifact(owner, std::move(files));
+        VectorDiskArtifact artifact(nullptr, manager);
         storage::StorageConfig config;
         config.storage_type = "local";
         config.root_path = owner->Path() + "/objects/";
@@ -406,7 +565,7 @@ TEST(VectorDiskFileManagerTest, MetadataConflictKeepsOutputFailed) {
             ASSERT_TRUE(manager->AddFileMeta({path, 1}));
             output->Write(&byte, 1);
             EXPECT_THROW(output->Close(), SegcoreError);
-            EXPECT_THROW(manager->Files(), SegcoreError);
+            EXPECT_THROW(manager->LocalFiles(), SegcoreError);
         } else {
             output->Close();
             EXPECT_FALSE(manager->AddFileMeta({path, 2}));
@@ -430,12 +589,123 @@ TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
     ASSERT_TRUE(manager->AddFile(path));
     EXPECT_FALSE(
         manager->AddFileMeta({path, std::filesystem::file_size(path)}));
-    EXPECT_EQ(manager->Files().front().transport,
+    EXPECT_EQ(manager->LocalFiles().front().transport,
               VectorDiskFileTransport::LegacySliced);
+}
+
+TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
+    for (int outputs = 0; outputs < 4; ++outputs) {
+        SCOPED_TRACE(outputs);
+        auto owner = storage::LocalDirectory::CreateOwned(
+            "/tmp", "vector_serialize_XXXXXX", "serialization output test");
+        auto manager = std::make_shared<VectorDiskBuildFileManager>(owner);
+        auto engine = std::make_unique<KnowhereEngine>(
+            DataType::VECTOR_FLOAT,
+            DataType::NONE,
+            knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+            "L2",
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        int calls = 0;
+        engine->native_index =
+            knowhere::Index<SerializationTestNode>::Create([&] {
+                ++calls;
+                for (bool memory : {false, true}) {
+                    if ((outputs & (memory ? 1 : 2)) == 0) {
+                        continue;
+                    }
+                    auto stream = manager->OpenOutputStream(
+                        owner->Path() + (memory ? "/memory" : "/disk"),
+                        {.use_memory = memory});
+                    stream->Write("payload", 7);
+                    stream->Close();
+                }
+                return knowhere::Status::success;
+            });
+        VectorDiskArtifact artifact(std::move(engine), manager);
+        SerializationTestSink sink;
+        if (outputs == 0) {
+            try {
+                artifact.Serialize(sink);
+                FAIL() << "empty output was accepted";
+            } catch (const SegcoreError& error) {
+                EXPECT_NE(std::string(error.what()).find("no completed output"),
+                          std::string::npos);
+            }
+            EXPECT_EQ(sink.buffers + sink.files, 0);
+        } else {
+            ASSERT_NO_THROW(artifact.Serialize(sink));
+            EXPECT_EQ(sink.buffers, outputs & 1 ? 1 : 0);
+            EXPECT_EQ(sink.files, outputs & 2 ? 1 : 0);
+        }
+        EXPECT_EQ(calls, 1);
+        EXPECT_TRUE(manager->TakeOutput().empty());
+        if (outputs == 1) {
+            SerializationTestSink failed;
+            failed.fail_write = true;
+            EXPECT_THROW(artifact.Serialize(failed), std::runtime_error);
+            EXPECT_TRUE(manager->TakeOutput().empty());
+            SerializationTestSink retry;
+            ASSERT_NO_THROW(artifact.Serialize(retry));
+            EXPECT_EQ(retry.buffers, 1);
+            EXPECT_EQ(calls, 3);
+        }
+    }
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
+}
+
+TEST(VectorDiskFamilyTest, ResidentInputBuildLoadSearch) {
+    RunOrdinaryDiskSearch<float>(false, true);
+}
+
+TEST(VectorDiskFamilyTest, PreparedInputFollowsBuilderOptions) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_input_XXXXXX", "vector disk input test");
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .field_type = DataType::VECTOR_FLOAT,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"},
+                   {DIM_KEY, kDim},
+                   {DISK_ANN_MAX_DEGREE, "24"},
+                   {DISK_ANN_SEARCH_LIST_SIZE, "56"},
+                   {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+                   {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+                   {DISK_ANN_BUILD_THREAD_NUM, "2"}},
+    });
+    adapted.params["local_dir"] = files->Path();
+    for (bool direct : {false, true}) {
+        indexbuilder::VectorDiskBuildMaterializer materializer(
+            files->Path(),
+            DataType::VECTOR_FLOAT,
+            DataType::VECTOR_FLOAT,
+            kDim,
+            false,
+            false,
+            kRows,
+            adapted.family,
+            adapted.params);
+        const auto values = MakeRows<float>();
+        const bool use_memory = materializer.InputSpec().use_memory;
+        if (direct && use_memory) {
+            std::memcpy(materializer.AllocateInput(),
+                        values.data(),
+                        values.size() * sizeof(float));
+            materializer.FinishInput(kRows);
+        } else {
+            auto batch = storage::CreateFieldData(
+                DataType::VECTOR_FLOAT, DataType::NONE, false, kDim);
+            batch->FillFieldData(values.data(), kRows);
+            materializer.Add(batch);
+        }
+        materializer.FinishPrimary();
+        auto artifact = std::move(materializer).Build();
+        ASSERT_NE(artifact, nullptr);
+    }
 }
 
 TEST(VectorDiskFamilyTest, Float16BuildLoadSearch) {
@@ -500,10 +770,9 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              knowhere::metric::MAX_SIM_L2,
-              kDim,
-              parents,
-              offsets_path);
+              {.metric = knowhere::metric::MAX_SIM_L2,
+               .logical_rows = parents,
+               .offsets_path = offsets_path});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -533,8 +802,35 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
     EXPECT_EQ(result.distances_.size(), 8);
 }
 
-// Disk validity describes lists; ordinary-metric searches use element ids.
-// Keep the persisted row bitmap and restore element validity during loading.
+std::vector<uint8_t>
+EncodeValidity(const std::vector<bool>& valid) {
+    const uint64_t wire_count = valid.size();
+    std::vector<uint8_t> bytes(sizeof(wire_count) + (valid.size() + 7) / 8, 0);
+    std::memcpy(bytes.data(), &wire_count, sizeof(wire_count));
+    for (size_t i = 0; i < valid.size(); ++i) {
+        if (valid[i]) {
+            bytes[sizeof(wire_count) + i / 8] |=
+                static_cast<uint8_t>(1U << (i % 8));
+        }
+    }
+    return bytes;
+}
+
+std::vector<float>
+RandomVectors(int64_t count) {
+    std::default_random_engine rng(42);
+    std::normal_distribution<float> dist(0.0F, 1.0F);
+    std::vector<float> values(count * kDim);
+    for (auto& value : values) {
+        value = dist(rng);
+    }
+    return values;
+}
+
+// An element-level index of a nullable VECTOR_ARRAY built before element-level
+// builds dropped embedding offsets persists the per-list validity of its
+// input, while the index numbers flattened elements. Loading it restores
+// element validity from the vector count, so it needs no rebuild (#54899).
 void
 RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
                                   bool mmap_id_map) {
@@ -542,54 +838,34 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
         "/tmp", "vector_disk_nullable_XXXXXX", "vector disk nullable test");
     // Both shapes need enough vectors for the disk index's PQ training.
     constexpr int64_t parents = kRows * 2;
-    std::vector<uint8_t> bitmap((parents + 7) / 8, 0);
-    std::vector<size_t> offsets{0};
+    std::vector<bool> row_valid(parents, false);
+    int64_t element_count = 0;
     for (int64_t row = 0; row < parents; ++row) {
         if (row % 5 == 1) {
-            continue;  // Null lists contribute neither vectors nor offsets.
+            continue;  // Null lists contribute no vectors.
         }
-        bitmap[row / 8] |= static_cast<uint8_t>(1U << (row % 8));
-        const size_t vectors = more_rows_than_vectors
-                                   ? (row % 5 == 0 ? 1 : 0)
-                                   : (row % 5 == 3 ? 0 : row % 4 + 1);
-        offsets.push_back(offsets.back() + vectors);
+        row_valid[row] = true;
+        element_count += more_rows_than_vectors
+                             ? (row % 5 == 0 ? 1 : 0)
+                             : (row % 5 == 3 ? 0 : row % 4 + 1);
     }
-    const auto element_count = static_cast<int64_t>(offsets.back());
     ASSERT_EQ(more_rows_than_vectors, parents > element_count);
-    std::default_random_engine rng(42);
-    std::normal_distribution<float> dist(0.0F, 1.0F);
-    std::vector<float> values(element_count * kDim);
-    for (auto& value : values) {
-        value = dist(rng);
-    }
-    std::vector<uint8_t> row_validity(sizeof(uint64_t) + bitmap.size());
-    const uint64_t wire_count = parents;
-    std::memcpy(row_validity.data(), &wire_count, sizeof(wire_count));
-    std::memcpy(
-        row_validity.data() + sizeof(wire_count), bitmap.data(), bitmap.size());
+    const auto values = RandomVectors(element_count);
+    const auto row_validity = EncodeValidity(row_valid);
 
     const auto raw_path = files->Path() + "/raw";
-    const auto offsets_path = files->Path() + "/offsets";
-    const auto validity_path = files->Path() + "/input_" + VALID_DATA_KEY;
     WriteRaw(raw_path, values, element_count, kDim);
-    WriteOffsets(offsets_path, offsets);
-    {
-        std::ofstream stream(validity_path, std::ios::binary | std::ios::trunc);
-        stream.write(reinterpret_cast<const char*>(row_validity.data()),
-                     static_cast<std::streamsize>(row_validity.size()));
-        ASSERT_TRUE(stream.good());
-    }
     OpenedDiskIndex<float> opened;
-    BuildDisk(raw_path,
-              files->Path(),
-              opened,
-              knowhere::metric::COSINE,
-              kDim,
-              parents,
-              offsets_path,
-              KnowhereMmapSupported(knowhere::IndexEnum::INDEX_DISKANN),
-              validity_path,
-              mmap_id_map);
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.metric = knowhere::metric::COSINE,
+         .logical_rows = parents,
+         .vector_array = true,
+         .mmap = KnowhereMmapSupported(knowhere::IndexEnum::INDEX_DISKANN),
+         .mmap_id_map = mmap_id_map,
+         .legacy_validity = row_validity});
     ASSERT_NE(opened.base, nullptr);
     EXPECT_EQ(opened.persisted_validity, row_validity);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
@@ -634,6 +910,99 @@ TEST(VectorDiskFamilyTest, NullableElementLevelLoadsRowValidity) {
 TEST(VectorDiskFamilyTest, MmapNullableElementLevelLoadsRowValidity) {
     RunNullableElementLevelDiskSearch(false, true);
     RunNullableElementLevelDiskSearch(true, true);
+}
+
+// An element-nullable VECTOR_ARRAY persists validity over its logical
+// elements. The loader keeps it, so ids and filters are logical element ids.
+void
+RunElementNullableDiskSearch(bool mmap_id_map) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_element_null_XXXXXX", "vector disk element test");
+    constexpr int64_t parents = kRows * 2;
+    std::vector<bool> element_valid;
+    for (int64_t row = 0; row < parents; ++row) {
+        if (row % 5 == 1) {
+            continue;  // A null row takes no element id.
+        }
+        for (int64_t j = 0; j < row % 4 + 1; ++j) {
+            element_valid.push_back(element_valid.size() % 7 != 3);
+        }
+    }
+    const auto logical = static_cast<int64_t>(element_valid.size());
+    std::vector<int64_t> logical_ids;  // Logical id of each stored vector.
+    for (int64_t id = 0; id < logical; ++id) {
+        if (element_valid[id]) {
+            logical_ids.push_back(id);
+        }
+    }
+    const auto physical = static_cast<int64_t>(logical_ids.size());
+    ASSERT_LT(physical, logical);
+    const auto values = RandomVectors(physical);
+    const auto element_validity = EncodeValidity(element_valid);
+
+    const auto raw_path = files->Path() + "/raw";
+    const auto validity_path = files->Path() + "/input_" + VALID_DATA_KEY;
+    WriteRaw(raw_path, values, physical, kDim);
+    {
+        std::ofstream stream(validity_path, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(element_validity.data()),
+                     static_cast<std::streamsize>(element_validity.size()));
+        ASSERT_TRUE(stream.good());
+    }
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.metric = knowhere::metric::COSINE,
+         .logical_rows = parents,
+         .vector_array = true,
+         .mmap = KnowhereMmapSupported(knowhere::IndexEnum::INDEX_DISKANN),
+         .validity_path = validity_path,
+         .element_nullable = true,
+         .mmap_id_map = mmap_id_map});
+    ASSERT_NE(opened.base, nullptr);
+    EXPECT_EQ(opened.persisted_validity, element_validity);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(opened.base->Count(), physical);
+    EXPECT_TRUE(reader->HasValidData());
+    EXPECT_EQ(reader->ValidCount(), physical);
+    for (int64_t id = 0; id < logical; ++id) {
+        EXPECT_EQ(reader->IsRowValid(id), element_valid[id]) << id;
+    }
+
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 128}},
+        .metric_type_ = knowhere::metric::COSINE,
+        .topk_ = 1,
+    };
+    const auto last = physical - 1;
+    SearchResult result;
+    reader->Search(GenDataset(1, kDim, values.data() + last * kDim),
+                   params,
+                   BitsetView{},
+                   nullptr,
+                   result);
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_[0], logical_ids[last]);
+    // The filter addresses logical element ids as well.
+    TargetBitmap filtered(logical, true);
+    const auto allowed = logical_ids[last - 1];
+    filtered.reset(allowed);
+    SearchResult filtered_result;
+    reader->Search(GenDataset(1, kDim, values.data() + (last - 1) * kDim),
+                   params,
+                   BitsetView(filtered),
+                   nullptr,
+                   filtered_result);
+    ASSERT_EQ(filtered_result.seg_offsets_.size(), 1);
+    EXPECT_EQ(filtered_result.seg_offsets_[0], allowed);
+}
+
+TEST(VectorDiskFamilyTest, ElementNullableElementLevelKeepsElementValidity) {
+    RunElementNullableDiskSearch(false);
+    RunElementNullableDiskSearch(true);
 }
 
 }  // namespace

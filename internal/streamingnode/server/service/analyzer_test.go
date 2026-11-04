@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -75,12 +76,12 @@ func inlineAnalyzerRequest(params string) *streamingpb.StreamingNodeRunAnalyzerR
 
 func TestAnalyzerNativeTransport(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.MaxSendMsgSize(2048), grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 	handler := NewHandlerService(nil) // Inline analyzers do not require any WAL or QN.
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, handler)
 	go server.Serve(listener)
 	defer server.Stop()
-	conn, err := grpc.NewClient("passthrough:///analyzer", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	conn, err := grpc.NewClient("passthrough:///analyzer", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 	client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
@@ -102,6 +103,21 @@ func TestAnalyzerNativeTransport(t *testing.T) {
 	require.Nil(t, resp.GetTokenize())
 	require.Equal(t, []bool{true, true, false}, resp.GetPhraseMatch().GetIsMatch())
 	require.Equal(t, []int64{0, 2, -1}, resp.GetPhraseMatch().GetSlops())
+	highlightReq := inlineAnalyzerRequest(`{"tokenizer":"standard"}`)
+	highlightReq.Placeholder = [][]byte{[]byte("missing"), []byte(strings.Repeat("z ", 2000))}
+	highlightReq.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_Highlight{Highlight: &streamingpb.HighlightOptions{
+		SearchTextNum: 1, CorpusTextNum: 1, Topks: []int64{1}, FragmentSize: 32, NumOfFragments: 1,
+	}}
+	highlighted, err := client.RunAnalyzer(ctx, highlightReq)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(highlighted.GetStatus()))
+	require.Nil(t, highlighted.GetTokenize())
+	require.Len(t, highlighted.GetHighlight().GetResults(), 1)
+	require.Empty(t, highlighted.GetHighlight().GetResults()[0].GetFragments())
+	// Returning the same corpus as detailed tokens really exceeds this RPC limit.
+	highlightReq.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{WithDetail: true}}
+	_, err = client.RunAnalyzer(ctx, highlightReq)
+	require.Equal(t, codes.ResourceExhausted, grpcstatus.Code(err))
 	phrase.Operation = nil
 	resp, err = client.RunAnalyzer(ctx, phrase)
 	require.NoError(t, err)
@@ -154,11 +170,11 @@ func TestAnalyzerFieldNativeTransport(t *testing.T) {
 			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(executionErr)}, nil
 		}).Build()
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(&analyzerManager{}))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///field-analyzer", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///field-analyzer", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
@@ -266,11 +282,11 @@ func TestValidateAnalyzerNativeTransport(t *testing.T) {
 	mockey.PatchConvey("native validation failures use response Status", t, func() {
 		mockey.Mock(fileresource.Acquire).Return(&fileresource.Resources{}, nil).Build()
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///validate-analyzer", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///validate-analyzer", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
@@ -363,11 +379,11 @@ func TestAnalyzerPreparationErrorClassification(t *testing.T) {
 
 func TestRunAnalyzerPreparationStatus(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
 	go server.Serve(listener)
 	defer server.Stop()
-	conn, err := grpc.NewClient("passthrough:///analyzer-preparation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	conn, err := grpc.NewClient("passthrough:///analyzer-preparation", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 	client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
@@ -410,11 +426,11 @@ func TestValidateAnalyzerFetchesMissingNames(t *testing.T) {
 		})
 		defer fileresource.SetResourceFetcher(nil, nil)
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///resource-validation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///resource-validation", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
@@ -441,11 +457,11 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		fileresource.GlobalFileManager = fileresource.NewManager(nil, fileresource.CloseMode)
 		defer func() { fileresource.GlobalFileManager = previous }()
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///missing-validation-file", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///missing-validation-file", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + filepath.Join(t.TempDir(), "missing.txt") + `"}}]}`
@@ -484,11 +500,11 @@ func TestRunDefaultInlineAnalyzerSkipsPreparation(t *testing.T) {
 func TestValidateAnalyzerPreparationStatusTransport(t *testing.T) {
 	mockey.PatchConvey("terminal fetch errors retain their status across preparation and streaming interceptors", t, func() {
 		listener := bufconn.Listen(1024 * 1024)
-		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 		streamingpb.RegisterStreamingNodeHandlerServiceServer(server, NewHandlerService(nil))
 		go server.Serve(listener)
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///validate-preparation", grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///validate-preparation", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
 		var failure error

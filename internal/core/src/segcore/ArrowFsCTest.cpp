@@ -19,9 +19,13 @@
 #include <string>
 
 #include "common/common_type_c.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/arrow_fs_c.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 
 namespace {
@@ -57,6 +61,29 @@ TEST(StorageStatus, ConvertsToCStatusWithoutLosingClassification) {
     EXPECT_NE(std::string(permanent_status.error_msg).find("access denied"),
               std::string::npos);
     FreeStatusMessage(permanent_status);
+}
+
+TEST(ArrowFileSystem,
+     JobStorageUsesNodeCrtQueueSizesWithoutFilesystemInitialization) {
+    auto& singleton =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+    const auto previous = singleton.GetS3CrtQueueSizes();
+    auto restore =
+        folly::makeGuard([previous] { InitS3CrtQueueSizes(previous); });
+    const auto filesystem_properties = singleton.GetProperties();
+    auto status = InitS3CrtQueueSizes(250);
+    ASSERT_EQ(status.error_code, 0);
+    EXPECT_EQ(singleton.GetProperties(), filesystem_properties);
+    CStorageConfig job = {};
+    auto properties = MakeInternalPropertiesFromStorageConfig(job);
+    EXPECT_EQ(milvus_storage::api::GetValueNoError<uint32_t>(
+                  *properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
+              250);
+    job.crt_queue_sizes = 125;
+    properties = MakeInternalPropertiesFromStorageConfig(job);
+    EXPECT_EQ(milvus_storage::api::GetValueNoError<uint32_t>(
+                  *properties, PROPERTY_FS_S3_CRT_QUEUE_SIZES),
+              125);
 }
 
 TEST(ArrowFileSystem, InitAndClean) {
