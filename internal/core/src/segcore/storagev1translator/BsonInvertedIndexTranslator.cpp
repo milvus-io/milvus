@@ -31,6 +31,7 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -118,8 +119,10 @@ BsonInvertedIndexTranslator::get_cells(
         // Load the index using the files from load_info_
         // Files are absolute remote paths (basePath already prepended by caller)
         index->LoadIndex(load_info_.index_files,
-                         static_cast<milvus::proto::common::LoadPriority>(
-                             load_info_.load_priority),
+                         ResolveLoadPriority(
+                             ctx,
+                             static_cast<milvus::proto::common::LoadPriority>(
+                                 load_info_.load_priority)),
                          load_info_.enable_mmap);
     }
 
