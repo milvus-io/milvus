@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -186,20 +188,20 @@ func (suite *IDFOracleSuite) TestSealed() {
 	}
 
 	// register sealed segment and all preload to current
-	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.currentNumRow())
 
 	// update and sync snapshot make all sealed in target activate
 	// and invalid sealed segemnt deactivate
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(len(sealedSegs)), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)), suite.currentNumRow())
 
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(1), suite.currentNumRow())
 
 	sparse := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{4: 1})
 	bytes, avgdl, err := suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1})
@@ -213,7 +215,7 @@ func (suite *IDFOracleSuite) TestSealed() {
 	suite.updateSnapshot(releasedSeg, []int64{}, []int64{})
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(1), suite.currentNumRow())
 }
 
 func (suite *IDFOracleSuite) TestGrow() {
@@ -228,7 +230,7 @@ func (suite *IDFOracleSuite) TestGrow() {
 	}
 
 	// register sealed segment but all deactvate
-	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(4), suite.currentNumRow())
 	suite.updateSnapshot([]int64{}, growSegs, []int64{})
 
 	releasedSeg := []int64{1, 2, 3}
@@ -236,10 +238,10 @@ func (suite *IDFOracleSuite) TestGrow() {
 	suite.idfOracle.LazyRemoveGrowings(suite.snapshot.targetVersion, releasedSeg...)
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(1), suite.currentNumRow())
 
 	suite.idfOracle.UpdateGrowing(4, suite.genStats(5, 6))
-	suite.Equal(int64(2), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(2), suite.currentNumRow())
 }
 
 func (suite *IDFOracleSuite) TestStats() {
@@ -270,7 +272,7 @@ func (suite *IDFOracleSuite) TestLocalCache() {
 	}
 
 	// register sealed segment and all preload to current
-	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)+len(invalidSealedSegs)), suite.currentNumRow())
 
 	// verify all sealed stats have local dir set
 	suite.idfOracle.sealed.Range(func(id int64, stats *sealedBm25Stats) bool {
@@ -284,14 +286,14 @@ func (suite *IDFOracleSuite) TestLocalCache() {
 	suite.updateSnapshot(sealedSegs, []int64{}, []int64{})
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(len(sealedSegs)), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(len(sealedSegs)), suite.currentNumRow())
 
 	// release some segments
 	releasedSeg := []int64{1, 2, 3}
 	suite.updateSnapshot([]int64{}, []int64{}, releasedSeg)
 	suite.idfOracle.SetNext(suite.snapshot)
 	suite.waitTargetVersion(suite.targetVersion)
-	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(1), suite.currentNumRow())
 }
 
 func (suite *IDFOracleSuite) TestFetchStatsRemoved() {
@@ -361,17 +363,17 @@ func (suite *IDFOracleSuite) TestUpdateGrowingCheckMemory() {
 	for i := uint32(2); i < 200; i++ {
 		suite.idfOracle.UpdateGrowing(1, suite.genStats(i, i+1))
 	}
-	suite.Equal(int64(199), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(199), suite.currentNumRow())
 }
 
 func (suite *IDFOracleSuite) TestLoadSealedIdempotent() {
 	suite.registerSealed(1, 1, 5)
-	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(4), suite.currentNumRow())
 	diskSize := suite.idfOracle.sealedDiskSize.Load()
 
 	// duplicate load — should be skipped
 	suite.registerSealed(1, 1, 5)
-	suite.Equal(int64(4), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(4), suite.currentNumRow())
 	suite.Equal(diskSize, suite.idfOracle.sealedDiskSize.Load())
 }
 
@@ -412,7 +414,7 @@ func (suite *IDFOracleSuite) TestLoadSealedNoParse() {
 
 	// segment registered but NOT preloaded (current stays 0)
 	suite.True(suite.idfOracle.sealed.Contain(1))
-	suite.Equal(int64(0), suite.idfOracle.current.NumRow())
+	suite.Equal(int64(0), suite.currentNumRow())
 
 	// disk file should exist
 	segDir := path.Join(suite.idfOracle.dirPath, "1", "102")
@@ -486,6 +488,127 @@ func (suite *IDFOracleSuite) TestFilterBM25Logs() {
 	}})
 	suite.Contains(result, int64(101))
 	suite.Empty(result[101])
+}
+
+// currentNumRow returns the row count of all active stats.
+func (suite *IDFOracleSuite) currentNumRow() int64 {
+	return suite.idfOracle.current.NumRow()
+}
+
+// genOverlapStats builds stats of rows drawing tokens from [0, vocab), so different segments share tokens.
+func (suite *IDFOracleSuite) genOverlapStats(r *rand.Rand, rows int, vocab uint32) map[int64]*storage.BM25Stats {
+	result := map[int64]*storage.BM25Stats{102: storage.NewBM25Stats()}
+	for i := 0; i < rows; i++ {
+		row := map[uint32]float32{}
+		for j := 0; j < 8; j++ {
+			row[uint32(r.Int31n(int32(vocab)))] += 1
+		}
+		result[102].Append(row)
+	}
+	return result
+}
+
+// assertIDFEqual checks that the oracle builds the same IDF and avgdl as expected for every token.
+func (suite *IDFOracleSuite) assertIDFEqual(expected *storage.BM25Stats, vocab uint32) {
+	all := map[uint32]float32{}
+	for i := uint32(0); i < vocab; i++ {
+		all[i] = 1
+	}
+	tf := typeutil.CreateAndSortSparseFloatRow(all)
+	idf, avgdl, err := suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: int64(vocab)})
+	suite.Require().NoError(err)
+	suite.Equal(expected.GetAvgdl(), avgdl)
+	suite.Equal(typeutil.SparseFloatBytesToMap(expected.BuildIDF(tf)), typeutil.SparseFloatBytesToMap(idf[0]))
+}
+
+func (suite *IDFOracleSuite) TestConcurrentPreloadMatchesSerial() {
+	const segNum, vocab = 200, 500
+	r := rand.New(rand.NewSource(7))
+
+	segStats := make(map[int64]*storage.BM25Stats, segNum)
+	cms := make(map[int64]*mocks.ChunkManager, segNum)
+	logs := make(map[int64][]*datapb.FieldBinlog, segNum)
+	for segID := int64(1); segID <= segNum; segID++ {
+		stats := suite.genOverlapStats(r, 20, vocab)
+		data, err := stats[102].Serialize()
+		suite.Require().NoError(err)
+		remotePath := fmt.Sprintf("bm25stats/seg_%d/field_102/0", segID)
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, remotePath).Return(&bytesFileReader{bytes.NewReader(data)}, nil)
+		segStats[segID], cms[segID] = stats[102], cm
+		logs[segID] = []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: remotePath}}}}
+	}
+
+	// load all segments concurrently while searches and memory accounting read the oracle
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		tf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{1: 1})
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				suite.idfOracle.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: 2})
+				suite.idfOracle.MemorySize()
+			}
+		}
+	}()
+	errs := make(chan error, segNum)
+	for segID := int64(1); segID <= segNum; segID++ {
+		wg.Add(1)
+		go func(segID int64) {
+			defer wg.Done()
+			errs <- suite.idfOracle.LoadSealed(context.Background(), segID, logs[segID], cms[segID])
+		}(segID)
+	}
+	wg.Wait()
+	close(stop)
+	<-readerDone
+	close(errs)
+	for err := range errs {
+		suite.Require().NoError(err)
+	}
+
+	expected := storage.NewBM25Stats()
+	for _, stats := range segStats {
+		expected.Merge(stats)
+	}
+	suite.assertIDFEqual(expected, vocab)
+
+	// first target keeps the odd segments: the even ones are deactivated through the parallel diff
+	seals := []int64{}
+	expected = storage.NewBM25Stats()
+	for segID := int64(1); segID <= segNum; segID += 2 {
+		seals = append(seals, segID)
+		expected.Merge(segStats[segID])
+	}
+	suite.updateSnapshot(seals, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.assertIDFEqual(expected, vocab)
+}
+
+func (suite *IDFOracleSuite) TestFetchStatsDiffError() {
+	suite.registerSealed(1, 1, 5)
+	suite.registerSealed(2, 5, 9)
+	stats, ok := suite.idfOracle.sealed.Get(2)
+	suite.Require().True(ok)
+	stats.Remove()
+
+	changes := []statsChange{}
+	suite.idfOracle.sealed.Range(func(_ int64, s *sealedBm25Stats) bool {
+		changes = append(changes, statsChange{stats: s, minus: true})
+		return true
+	})
+	_, err := fetchStatsDiff(changes)
+	suite.Error(err)
+
+	diff, err := fetchStatsDiff(nil)
+	suite.NoError(err)
+	suite.Equal(int64(0), diff.NumRow())
 }
 
 func TestIDFOracle(t *testing.T) {
