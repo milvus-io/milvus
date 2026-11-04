@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Client exposes QueryView query client domains.
@@ -335,7 +336,8 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 	if len(req.GetGroupByFieldIds()) > 0 {
 		return true
 	}
-	return req.GetLimit() > 0 && len(req.GetAggregates()) == 0
+	validLimit := req.GetLimit() > 0 || (req.GetLimit() == typeutil.Unlimited && !req.GetIsIterator())
+	return validLimit && len(req.GetAggregates()) == 0
 }
 
 func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest, chunkBytes int) (*LegacyQueryResult, error) {

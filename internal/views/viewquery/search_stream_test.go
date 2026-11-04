@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
@@ -301,6 +302,23 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, 1, tasks.releaseCount)
 	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
 	require.Equal(t, []int64{456}, provider.selection.GetSegmentIds())
+
+	request.LegacyReq.IsIterator = false
+	request.LegacyReq.Limit = typeutil.Unlimited
+	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	require.NoError(t, err)
+	var ids []int64
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		ids = append(ids, chunk.GetIds().GetIntId().GetData()...)
+	}
+	require.Equal(t, []int64{1, 2, 3}, ids)
+	require.Equal(t, typeutil.Unlimited, provider.queryRequest.GetLimit())
+	require.NoError(t, stream.Close())
 }
 
 func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
