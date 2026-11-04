@@ -179,8 +179,7 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 type growingBm25Stats struct {
 	bm25Stats
 
-	activate       bool
-	droppedVersion int64
+	activate bool
 }
 
 func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
@@ -217,6 +216,9 @@ type idfOracle struct {
 	sync.RWMutex // protect current and growing segment stats
 	current      bm25Stats
 	growing      map[int64]*growingBm25Stats
+
+	// Record removal intent without waiting for the oracle lock held by stats merges.
+	growingDropVersions typeutil.ConcurrentMap[int64, int64]
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
@@ -471,14 +473,29 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
 }
 
 func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64) {
-	o.Lock()
-	defer o.Unlock()
+	if targetVersion <= o.targetVersion.Load() {
+		return
+	}
 
 	for _, segmentID := range segmentIDs {
-		if stats, ok := o.growing[segmentID]; ok && stats.droppedVersion == 0 {
-			stats.droppedVersion = targetVersion
-		}
+		o.growingDropVersions.GetOrInsert(segmentID, targetVersion)
 	}
+}
+
+// Caller holds the oracle write lock so pending removals use the latest growing stats.
+func (o *idfOracle) removeDroppedGrowings(targetVersion int64) {
+	o.growingDropVersions.Range(func(segmentID, droppedVersion int64) bool {
+		if droppedVersion <= targetVersion {
+			if stats, ok := o.growing[segmentID]; ok {
+				if stats.activate {
+					o.current.Minus(stats.bm25Stats)
+				}
+				delete(o.growing, segmentID)
+			}
+			o.growingDropVersions.Remove(segmentID)
+		}
+		return true
+	})
 }
 
 // memSize estimates total in-memory size of current + all growing stats.
@@ -703,15 +720,7 @@ func (o *idfOracle) SyncDistribution() error {
 
 	o.Lock()
 
-	for segmentID, stats := range o.growing {
-		// drop growing segment bm25 stats
-		if stats.droppedVersion != 0 && stats.droppedVersion <= snapshot.targetVersion {
-			if stats.activate {
-				o.current.Minus(stats.bm25Stats)
-			}
-			delete(o.growing, segmentID)
-		}
-	}
+	o.removeDroppedGrowings(snapshot.targetVersion)
 	o.current.Merge(diff)
 
 	// remove sealed segment not in target
