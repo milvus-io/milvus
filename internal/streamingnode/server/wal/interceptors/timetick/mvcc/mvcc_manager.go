@@ -86,14 +86,19 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsControlChannel(vchannel) {
 		return
 	}
+	if messageutil.IsVChannelGenesisMessage(msg) {
+		// CreateCollection, or the target replica of a SplitShard: a brand-new
+		// vchannel's first record registers it live. A split source's own replica
+		// is an ordinary record of a live vchannel and takes the default below.
+		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
+		return
+	}
 	switch msgType {
 	case message.MessageTypeCreateSegment, message.MessageTypeFlush:
 		// These storage operations do not change query-visible data and are not
 		// delivered to the delegator. Tracking them would require another tick
 		// to advance tSafe. The query-plan frontier is handled independently above.
 		return
-	case message.MessageTypeCreateCollection:
-		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
 	case message.MessageTypeDropCollection:
 		// The outer VChannel exclusive append lock covers this callback. Earlier
 		// appends have finished publishing their targets, and the shard has stopped
@@ -101,7 +106,7 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		cm.retiredTimeTick = max(cm.retiredTimeTick, cm.vchannelMVCCTimestamps[vchannel], tt)
 		delete(cm.vchannelMVCCTimestamps, vchannel)
 	default:
-		// Only recovery and CreateCollection register a live shard. In particular,
+		// Only recovery and a genesis record register a live shard. In particular,
 		// late internal/control messages after Drop must not resurrect its entry.
 		if previous, live := cm.vchannelMVCCTimestamps[vchannel]; live {
 			cm.vchannelMVCCTimestamps[vchannel] = max(previous, tt)
