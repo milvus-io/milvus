@@ -1270,6 +1270,17 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
+    if (expr_->column_.data_type_ == DataType::JSON &&
+        CanUseJsonStatsAtInit() &&
+        std::any_of(
+            expr_->vals_.begin(), expr_->vals_.end(), [](const auto& value) {
+                return JsonNumericBoundRequiresPreciseInt64Comparison(value);
+            })) {
+        // Preserve exact membership without loading an unusable numeric index.
+        exec_path_ = ExprExecPath::JsonStats;
+        return;
+    }
+
     // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
     // index below serves this expression; see SegmentExpr::
     // FallbackToJsonStatsIfEligible().

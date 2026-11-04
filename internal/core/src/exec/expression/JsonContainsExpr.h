@@ -503,9 +503,12 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override {
-        // JsonStats is the fallback applied by EnsureExecPathDetermined()
-        // when no index below serves this expression; see SegmentExpr::
-        // FallbackToJsonStatsIfEligible().
+        if (CanUseJsonStatsAtInit()) {
+            // shortcut: array projection validity is unavailable before pinning
+            // on this branch; keep stats until metadata can select a safe index.
+            exec_path_ = ExprExecPath::JsonStats;
+            return;
+        }
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -526,15 +529,6 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         if (exec_path_ != ExprExecPath::ScalarIndex ||
             expr_->column_.data_type_ != DataType::JSON ||
             PinnedJsonIndexIsFlat()) {
-            return;
-        }
-        // Typed ARRAY_* JSON path indexes (INVERTED on this branch) record a
-        // missing, null or non-array target as a valid empty array, so
-        // CONTAINS answers a known FALSE where raw data and JSON stats answer
-        // UNKNOWN, and NOT CONTAINS then returns those rows. Keep the exact
-        // shredded ARRAY kernel instead.
-        if (CanUseJsonStatsAtInit()) {
-            DeclinePinnedIndex();
             return;
         }
         if (value_type_ != DataType::INT64) {
