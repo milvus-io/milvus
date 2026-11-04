@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -17,10 +16,7 @@ import (
 // current configuration only on failure; never turn a loaded collection's
 // transient view error into a terminal not-loaded error.
 func QueryViewLoadError(ctx context.Context, node taskmodel.TaskNode, collectionID int64, partitions []int64, queryErr error) error {
-	var viewErr *viewerror.ViewError
-	var clientStatus *viewerror.ViewClientStatus
-	if errors.IsAny(queryErr, context.Canceled, context.DeadlineExceeded) ||
-		(!errors.As(queryErr, &viewErr) && !errors.As(queryErr, &clientStatus)) {
+	if !errors.IsAny(queryErr, merr.ErrQueryViewNotReady, merr.ErrServiceUnavailable) {
 		return queryErr
 	}
 	info, err := node.MixCoord().GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: collectionID})

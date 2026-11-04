@@ -99,8 +99,8 @@ the same caller deadline, rather than repeatedly generating plans.
 QN transport Unavailable and retryable View errors trigger shard replanning.
 Every current candidate is tried before repeating a temporarily failed one.
 The existing attempt budget defaults to three, extended to cover all untried
-current candidates; exhausting it returns the original failure to Proxy's outer
-recovery (including AutoLoad). Waiting for an empty/uninitialized directory does
+current candidates; exhausting it converts the final failure to a business error
+for Proxy's outer recovery (including AutoLoad). Waiting for an empty/uninitialized directory does
 not consume attempts. After all temporary candidates fail, wait 100 ms or a
 route change before retrying. Request cancellation bounds all waits.
 
@@ -126,6 +126,93 @@ and hybrid subqueries retain separate selections. Requery uses the original
 selection union. Successful empty shards still contribute an empty result and
 MVCC; fieldless aggregation results use the schema-aware identity (for example,
 count=0). Only the successful attempt's ExecutionSummary contributes feature usage.
+
+## Public error boundary
+
+Collection-level `ViewQueryClient.Search/Query` and `Legacy.Search/Query/Statistics`
+normalize every error return through `toMilvusError`, including resolver failures,
+retained requery and reduce/render failures. Internal shard retries continue to use
+ViewError, StreamingError and transport status; those protocol wrappers must not
+escape the collection-level API.
+
+Structured `commonpb.Status` in RPC details takes precedence over generic protocol
+codes, preserving the original business code (including segcore 2042), input/system
+classification and retryability. Existing business errors are preserved. LocalWAL
+protocol errors and remote protocol errors use the same mapping:
+
+- ViewNotFound/ViewInvalidated become retriable `merr.ErrQueryViewNotReady`.
+  Proxy uses that sentinel for whole-request replanning, retaining its existing
+  retry budget, AutoLoad and Iterator restrictions.
+- Shutdown, ownership changes and unavailable transports become retriable
+  `merr.ErrServiceUnavailable`. These do not establish that a collection is unloaded.
+- Cancellation/deadline keep the existing business codes and are marked with
+  `merr.Mark` so `cockroachdb/errors.Is` and `merr.IsCanceledOrTimeout` recognize them.
+- Rate limiting and unimplemented RPCs use their corresponding business errors;
+  unclassified protocol failures become system internal errors. Internal RPC
+  InvalidArgument is not assumed to be invalid user input.
+
+The shared client error interceptors attach an independent `RPCRequestContext`
+protobuf in gRPC status details. It describes the request, not an error category;
+`ViewError` and `StreamingError` remain unchanged. It records the generated full
+RPC method name and a `target` oneof: `QueryNodeRequestContext` or
+`StreamingNodeRequestContext`, each containing only NodeID. PChannel and Term
+are not universal Streaming RPC context and are omitted. Existing routing
+metadata and request-body channel fields remain unchanged.
+
+Routing callers create `WithPickServerID` state immediately before each RPC or
+stream attempt. The shared interceptor reuses it when present, including an
+existing unspecified route; only callers without state get a new instance. The
+same state contains the immutable requested NodeID and an atomic actual NodeID;
+no separate recorder, resolver address or connection metadata is retained. Zero means unspecified: the picker
+selects a ready server and fills the actual ID, which `GetPickServerID` exposes
+when no explicit route was supplied. At the start of each pick the actual ID is
+cleared, so an automatic retry can select a different server and failed attempts
+cannot retain stale attribution. An explicit route stays fixed across retries.
+Diagnostics use only the actual ID, never a request that has not selected a
+connection. Concurrent RPCs may share a parent context, but each explicit route
+is created at dispatch rather than shared between those calls. No additional
+worker or global address lookup is needed.
+
+The shared `streamingutil/service/interceptor` package provides paired
+`NewServiceUnaryClientInterceptor` / `NewServiceUnaryServerInterceptor` and
+`NewServiceStreamClientInterceptor` / `NewServiceStreamServerInterceptor`.
+SN and QN both register the server pair outside cluster/node validation and use
+the client pair on their outbound service connections. Each pair dispatches by
+the proto-package method prefix: Streaming services use StreamingError, View
+services use ViewError, and unrelated services retain their existing errors.
+
+View handlers return domain errors; only the server interceptor encodes them.
+WAL ownership/term/fencing failures become ViewError.NotPrimary, shutdown becomes
+ViewError.OnShutdown, and other WAL protocol failures become ViewError.Unknown.
+Rate limits and business errors retain their merr status details alongside the
+ViewError. Native transport statuses and cancellation retain their gRPC behavior.
+Query-plan logic still maps released load configurations to ViewInvalidated before
+wire conversion, since that is a domain-level replan decision.
+
+The View client always uses ConvertViewError, including SyncQueryView. It does
+not inspect Any types or call Status.Proto to classify errors. The SN assignment
+retry path recognizes ViewError.NotPrimary and reports stale ownership, preserving
+assignment refresh after WAL migration without leaking StreamingError onto a
+View service.
+The interceptors preserve protocol details and error chains for
+readiness, session discovery and retries. It also handles stream creation,
+Header, SendMsg, RecvMsg and CloseSend failures; EOF remains unchanged. Context
+protos are created only for errors with a known selected node. Local failures
+before gRPC invocation carry no remote attribution.
+
+`toMilvusError` restores the business error first, then formats the context with
+`merr.Wrapf`, for example `fail to search on QueryNode 123: <business cause>`.
+Both SN and QN use the actual selected NodeID. This applies to ordinary queries,
+retained requery, filter-only search and statistics below orchestration. Local
+planning/reduction errors are not attributed to a remote worker.
+Proxy's QueryView Search/Query entry points propagate the result directly without
+adding `failed to search/query`. The legacy delegator path retains its own error
+handling. Context details are not retained in the normalized public error, so a
+second normalization cannot duplicate the prefix.
+
+Proxy's load-state error translation consumes the business sentinels and still
+checks the Coordinator's authoritative configuration before reporting
+CollectionNotLoaded/PartitionNotLoaded. Handoff alone never establishes release.
 
 ## Reduction and retained requery
 

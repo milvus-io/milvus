@@ -283,7 +283,7 @@ func requireAllowlistComments(t *testing.T) {
 		t.Fatal("rbacAnnotationAllowlist declaration not found")
 	}
 
-	lines := strings.Split(string(source), "\n")
+	lines := strings.Split(source, "\n")
 	var missingComments []string
 	for _, elt := range allowlist.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)

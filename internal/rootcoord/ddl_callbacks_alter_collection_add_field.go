@@ -113,7 +113,7 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 		}).
 		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
-	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}

@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -213,7 +212,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}).
 		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
-	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
 	}
 	return nil
@@ -338,7 +337,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		}).
 		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
-	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
 	}
 	return nil
@@ -397,7 +396,7 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		}).
 		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
-	if err := c.broadcastCollectionAlter(ctx, bc, msg); err != nil {
+	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err
 	}
 	return nil
@@ -526,12 +525,7 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 		return err
 	}
 	updates := result.Message.MustBody().GetUpdates()
-	fields := make([]*viewpb.LoadFieldConfig, 0, len(updates.GetBoundFieldIndexes()))
-	for _, field := range updates.GetBoundFieldIndexes() {
-		index := field.GetIndexInfo()
-		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: index.GetFieldID(), IndexIds: []int64{index.GetIndexID()}})
-	}
-	if err := resources.PrepareSchema(ctx, id, published.ToCollectionSchemaPB(), updates.GetSchema(), fields); err != nil {
+	if err := resources.PrepareSchema(ctx, id, published.ToCollectionSchemaPB(), updates.GetSchema()); err != nil {
 		return merr.Wrap(err, "prepare collection schema QueryViews")
 	}
 	if err := c.meta.AlterCollection(ctx, result); err != nil {

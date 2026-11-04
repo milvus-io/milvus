@@ -120,8 +120,12 @@ Internal partial-update CAS reads use the ordinary Strong snapshot. Their
 channel ReadTs is max(GrowingMVCC, TransformMVCC): both frontiers come from one
 complete prefix and there are no later query-visible channel changes inside
 that prefix. No extra certificate or requirement that ReadTs reach BeginTs is
-needed. The write path still checks conflicts and retained-history bounds;
-old reads outside the history window fail instead of bypassing validation.
+needed. The write path still checks conflicts and the actual forgotten-write boundary.
+TTL only reclaims PK records: eviction or a budget omission advances that
+boundary to the discarded write's TimeTick, never to current time minus TTL.
+Reads below the boundary fail; equality is valid because that write is already
+in the snapshot. Thus idle snapshots do not expire solely with wall-clock age.
+WAL lifecycle, term and collection/transaction fences remain enforced.
 The client retains successful shard snapshots even for empty results.
 
 DropCollection removes the channel when its complete prefix is published.

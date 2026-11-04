@@ -483,6 +483,10 @@ func (t *L0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 
 func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
+	cursorUpdates, err := t.transformCursorUpdates(ctx, outputSegs)
+	if err != nil {
+		return err
+	}
 	if t.GetTaskProto().GetRestoreJobId() != 0 {
 		if t.restoreMutationApplied() {
 			return nil
@@ -536,13 +540,14 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
-	// Retire the compacted L0 input segments in the same catalog transaction that
-	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
-	// either every target gains its deltalogs and every input turns
-	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
-	// one CommitSegmentManifests call (manifest pointer advance + these operators
-	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
-	// through UpdateSegmentsInfo.
+	// The cursor is certified only for the deltalogs committed by this result.
+	// Keep these updates in the same transaction as both V2/V3 output publication.
+	operators = append(operators, cursorUpdates...)
+
+	// Retire inputs in the same catalog mutation as target deltalogs and cursors.
+	// The catalog commits atomically within its transaction limit; oversized L0
+	// results persist deltalogs before target records and retire inputs last.
+	// V3 folds its manifest pointers and these operators into one publication.
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, meta.UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), meta.UpdateCompactedOperator(segID))
 	}

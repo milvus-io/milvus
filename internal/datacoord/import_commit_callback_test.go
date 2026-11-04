@@ -51,7 +51,9 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true},
 		Tr:        timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&meta.CollectionInfo{ID: 100})
+	segments := meta.NewSegmentsInfo(metaStore)
 	for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
 		segments.SetSegment(id, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel,
@@ -59,7 +61,7 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
 		}})
 	}
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments}}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments, metaStore: metaStore}}}
 	manager, err := dataview.RecoverManager(t.Context(), catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, callbacks.meta, callbacks.importMeta, view)
@@ -126,6 +128,60 @@ func TestImportCommitCallbackRetriesSegmentPersistence(t *testing.T) {
 	require.True(t, server.meta.GetSegment(ctx, 10).GetIsImporting())
 	require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
 	require.Equal(t, internalpb.ImportJobState_Completed, server.importMeta.GetJob(ctx, 1).GetState())
+}
+
+func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		for _, state := range []internalpb.ImportJobState{
+			internalpb.ImportJobState_Uncommitted,
+			internalpb.ImportJobState_Committing,
+			internalpb.ImportJobState_Completed,
+		} {
+			name := "runtime/" + state.String()
+			if recovered {
+				name = "recovered/" + state.String()
+			}
+			t.Run(name, func(t *testing.T) {
+				callbacks, catalog, result := newImportCommitCallbackTest(t)
+				ctx := t.Context()
+				require.NoError(t, callbacks.importMeta.UpdateJob(ctx, 1, UpdateJobState(state)))
+				_, err := callbacks.dataViewManager.OnDropCollection(ctx, 100)
+				require.NoError(t, err)
+				if recovered {
+					callbacks.importMeta, err = NewImportMeta(ctx, catalog, nil, nil)
+					require.NoError(t, err)
+					// No snapshots or in-memory drop markers survive this restart.
+					// Production requires Create/Bootstrap before ordinary recompute.
+					callbacks.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
+						func(context.Context, int64) (bool, error) { return false, nil }, nil, nil, nil,
+						dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+							return nil, nil
+						}))
+					require.NoError(t, err)
+					callbacks.meta.dataViewManager = callbacks.dataViewManager
+				}
+				lookupErr := context.DeadlineExceeded
+				callbacks.SetCollectionDroppedChecker(func(ctx context.Context, id int64) (bool, error) {
+					require.Equal(t, int64(100), id)
+					return lookupErr == nil, lookupErr
+				})
+				// A failed metadata query must not be mistaken for deletion.
+				require.ErrorIs(t, callbacks.commitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
+				if state != internalpb.ImportJobState_Completed {
+					require.Equal(t, internalpb.ImportJobState_Committing, callbacks.importMeta.GetJob(ctx, 1).GetState())
+				}
+				lookupErr = nil
+				require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+				require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result), "completed replay must also finish after drop")
+				imports, err := NewImportMeta(ctx, catalog, nil, nil)
+				require.NoError(t, err)
+				require.Equal(t, internalpb.ImportJobState_Completed, imports.GetJob(ctx, 1).GetState())
+				views, err := catalog.ListAllDataViews(ctx)
+				require.NoError(t, err)
+				require.Empty(t, views, "commit must not resurrect the deleted collection")
+			})
+		}
+	}
 }
 
 func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
@@ -347,8 +403,10 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 		},
 		Tr: timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
-	segments.SetSegment(10, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&meta.CollectionInfo{ID: 100})
+	segments := meta.NewSegmentsInfo(metaStore)
+	segments.SetSegment(10, &meta.SegmentInfo{meta.SegmentInfo: &datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
 		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10,
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
@@ -361,7 +419,7 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 	}, imports, nil, nil)
 	require.NoError(t, imports.AddTask(ctx, v3task))
 
-	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments}}}
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments, metaStore: metaStore}}}
 	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
 		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
 			return pendingTransformBounds(ctx, callbacks.meta, callbacks.importMeta, view)

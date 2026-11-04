@@ -105,7 +105,8 @@ def test_queryview_manual_balance_keeps_queries_available(management_collection)
     assert reads
 
 
-@pytest.mark.tags("L1")
+# Two replicas require a cluster with enough StreamingNodes and QueryNodes.
+@pytest.mark.tags("ClusterOnly")
 def test_queryview_replicas_empty_collection_release_reload(management_collection):
     collection, _, _ = management_collection
     collection.load(replica_number=2)

@@ -27,8 +27,10 @@ transport. Buffer observes the logical stream's Done/Error to propagate terminal
 failure to its retained VChannels; Handler receives only Entry/SyncUp.
 
 The accompanying metadata supply adds unary GetQueryViewSegmentLoadInfo and
-exact retained collection LoadInfo lookup. Segment loading assumes StorageV3
-with index artifacts published into manifests. New View requirements trigger
+exact retained collection LoadInfo lookup. StorageV3 loading uses committed
+Manifests with published indexes. The StorageV2 fallback obtains a fresh full
+loading snapshot per zero-Manifest binding before read reuse, refreshing it on
+preparation failure. New View requirements trigger
 metadata acquisition; ready Views do not poll or subscribe to metadata changes.
 Manifest publication retains its DataView recompute notification.
 `coord/load_info/<collection>/<version>` contains the parent's immutable

@@ -79,7 +79,7 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		WithBody(body).
 		WithBroadcast(newColl.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
-	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, newColl.CollectionID, addedFileResourceIds, err)
 		return err
 	}

@@ -167,11 +167,13 @@ but the projection decides when a Segment is loadable and must not report
 overlapping logical data under different Segment IDs.
 
 Each partition carries a packed Manifest-version array parallel to its Segment
-IDs. The QN resource path assumes StorageV3 and manifest-backed index artifacts.
+IDs. The QN resource path uses committed StorageV3 Manifests, with a
+StorageV2 fallback using full Coordinator loading snapshots.
 It obtains a complete loading snapshot through `GetQueryViewSegmentLoadInfo`
 when a View's requirements cannot reuse resident resources. Positive Manifest
 versions constrain that snapshot; version `0` supplies no explicit minimum,
-but does not enable a non-V3 loading path. SegmentMeta Watch is not used.
+and requires a fresh snapshot per binding before reuse. StorageV2 preparation
+retries refresh that snapshot; ready Views do not poll. SegmentMeta Watch is not used.
 New Manifest publication drives DataView and QueryView advancement. Full
 manifest-only loading without the metadata RPC is a separate capability.
 

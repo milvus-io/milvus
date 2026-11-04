@@ -319,9 +319,20 @@ and replan, but never silently cross schema versions within one execution.
 
 Reuse existing lifecycle states; change the manager's single-Up assumptions,
 schema-aware selectors, statistics and retention decisions. Same-schema view
-replacement keeps normal handoff. Recovery restores published coverage and target
-coverage before resuming their retirement decisions. Preparing target work must
-not starve recovery or necessary data advancement for the published schema.
+replacement keeps normal handoff. Restart restores retained published and target
+views before resuming their retirement decisions. Placement recovery, however,
+may only replace the greatest QueryView and must preserve or advance DataVersion.
+All schemas share one Preparing/Ready slot. While target data is not ready, the
+latest published view can be re-placed with its exact base. Once a newer target
+view exists, failures recover that target instead of creating another old-schema
+view. The latest Unrecoverable stays retained until replacement or explicit
+release, so failed preparation does not make an older base current again.
+
+Existing old-schema Up views and executing queries keep their resource
+references. If their placement fails after newer target preparation begins,
+other eligible replicas may still serve the published schema; otherwise requests
+wait/retry within their deadlines until target handoff and public publication
+complete. Target publication does not wait for old-schema placement recovery.
 
 Multiple schema generations may remain draining under existing lease renewal;
 this design does not promise a fixed two-copy memory bound or introduce a hard

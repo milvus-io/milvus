@@ -44,7 +44,7 @@ func (m *dataViewManager) advanceSchemaLocked(ctx context.Context, state *collec
 	if project != nil {
 		changed := state.changed.Listen(syncutil.VersionedListenAtLatest)
 		var err error
-		segments, err = project(ctx, state.id)
+		segments, err = project(ctx, state.id, base)
 		if err != nil {
 			return nil, nil, err
 		}

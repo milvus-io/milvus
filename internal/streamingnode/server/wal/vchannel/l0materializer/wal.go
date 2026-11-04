@@ -253,8 +253,7 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		if err := m.writer.Materialize(ctx, MaterializeRequest{
 			VChannel: m.vchannel, TargetTimeTick: t.through,
 			Entries: entries, MaxRows: m.maxRows, MaxBytes: m.maxBytes,
-			StartPositions: positions,
-			Checkpoint:     utility.NewMessagePosition(t.handles[len(t.handles)-1].Message(), m.vchannel),
+			DeletePositions: positions,
 		}); err != nil {
 			if errors.Is(err, merr.ErrChannelMisrouted) {
 				t.poison(ctx, err)

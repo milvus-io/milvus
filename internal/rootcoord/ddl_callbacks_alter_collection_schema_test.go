@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1476,7 +1475,7 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 	qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
 	defer qvresource.Init(previous)
 	mixc := imocks.NewMixCoord(t)
-	handoff := mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, id int64, old, target *schemapb.CollectionSchema, _ []*viewpb.LoadFieldConfig) error {
+	handoff := mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, id int64, old, target *schemapb.CollectionSchema) error {
 		require.False(t, published, "public metadata must stay old during preparation")
 		require.EqualValues(t, 1, id)
 		require.EqualValues(t, 1, old.GetVersion())
@@ -2439,24 +2438,36 @@ func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testi
 	// inline index cascade, then capture the synthetic DropIndex callback.
 	initStreamingSystemAndCore(t)
 	registry.ResetRegistration()
+	published := false
 	var droppedIndexIDs []int64
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+		require.True(t, published, "schema publication must precede index cleanup")
 		droppedIndexIDs = append(droppedIndexIDs, result.Message.Header().IndexIds...)
 		return nil
 	})
 
-	meta := &mockMetaTable{}
-	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	// The schema callback reads the published version before preparing the
+	// target. Keep the real unloaded-collection preparation path from the fixture.
+	meta := &MetaTable{}
+	read := mockey.Mock((*MetaTable).GetCollectionByIDWithMaxTs).Return(&model.Collection{
+		CollectionID: 1, Name: "test", SchemaVersion: 1, UpdateTimestamp: 50,
+	}, nil).Build()
+	defer read.UnPatch()
+	publish := mockey.Mock((*MetaTable).AlterCollection).To(func(_ *MetaTable, _ context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		require.EqualValues(t, 2, result.Message.MustBody().GetUpdates().GetSchema().GetVersion())
+		published = true
 		return nil
-	}
-	mixc := imocks.NewMixCoord(t)
-	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+	}).Build()
+	defer publish.UnPatch()
+	mixc := &imocks.MixCoord{}
+	describe := mockey.Mock((*imocks.MixCoord).DescribeIndex).Return(&indexpb.DescribeIndexResponse{
 		Status: merr.Success(),
 		IndexInfos: []*indexpb.IndexInfo{
 			{FieldID: 104, IndexID: 201, IndexName: "items_middle_idx"},
 			{FieldID: 200, IndexID: 202, IndexName: "other_idx"},
 		},
-	}, nil)
+	}, nil).Build()
+	defer describe.UnPatch()
 	core := newTestCore(withMeta(meta), withMixCoord(mixc), withBroker(newValidMockBroker()))
 	controlChannel := funcutil.GetControlChannel("test")
 	raw := message.NewAlterCollectionMessageBuilderV2().
@@ -2478,5 +2489,6 @@ func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testi
 		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
 		Results: map[string]*message.AppendResult{controlChannel: {TimeTick: 100}},
 	}))
+	require.Equal(t, 1, describe.Times())
 	require.Equal(t, []int64{201}, droppedIndexIDs)
 }

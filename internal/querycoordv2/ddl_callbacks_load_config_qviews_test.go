@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -156,7 +157,7 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
-func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoordCatalog, *meta.MockBroker) {
+func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConfigStoreDependencies)) (*Server, *metastoremocks.QueryCoordCatalog, *meta.MockBroker) {
 	t.Helper()
 	paramtable.Init()
 	initStreamingSystem()
@@ -166,9 +167,13 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).
 		Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
 	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
+	loadDependencies := loadmgrtest.FromLegacyCatalog(t, catalog)
+	for _, configureDependencies := range configure {
+		configureDependencies(&loadDependencies)
+	}
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(context.Background(), qviewsRuntimeDependencies{
-		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		loadConfigDependencies: loadDependencies,
 		queryViewCatalog:       &fakeQueryViewCatalog{},
 		viewSyncClient:         &fakeRuntimeViewSyncClient{},
 		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
@@ -181,7 +186,10 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	require.NoError(t, err)
 
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(func() (int64, error) { return 1000, nil }, catalog, nodeMgr, metacache.NewMetaStore(nil))
+	var nextID atomic.Int64
+	nextID.Store(999)
+	allocateID := func() (int64, error) { return nextID.Add(1), nil }
+	m := meta.NewMeta(allocateID, catalog, nodeMgr, metacache.NewMetaStore(nil))
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:  1,
 		Address: "localhost",
@@ -194,6 +202,7 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	t.Cleanup(usage.close)
 	return &Server{
 		meta:            m,
+		idAllocator:     allocateID,
 		broker:          broker,
 		qviewsRuntime:   runtime,
 		collectionUsage: usage,

@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -43,15 +42,15 @@ func TestDQLViewRefresh(t *testing.T) {
 			calls, refreshes int
 		}{
 			{name: "retired schema and expired requery", failures: []error{
-				viewerror.NewViewNotFound("old schema retired"),
-				merr.Wrap(viewerror.ConvertViewError("QueryOnView", viewerror.NewGRPCStatusFromViewError(viewerror.NewViewInvalidated("requery expired")).Err()), "requery"),
+				merr.Wrap(merr.ErrQueryViewNotReady, "old schema retired"),
+				merr.Wrap(merr.Wrap(merr.ErrQueryViewNotReady, "requery expired"), "requery"),
 			}, calls: 3, refreshes: 2},
-			{name: "bounded", failures: []error{viewerror.NewViewNotFound("missing"), viewerror.NewViewNotFound("missing"), viewerror.NewViewNotFound("missing"), viewerror.NewViewNotFound("missing")}, calls: 4, refreshes: 3},
-			{name: "iterator keeps binding", params: []*commonpb.KeyValuePair{{Key: IteratorField, Value: "True"}}, failures: []error{viewerror.NewViewInvalidated("expired")}, calls: 1},
+			{name: "bounded", failures: []error{merr.Wrap(merr.ErrQueryViewNotReady, "missing"), merr.Wrap(merr.ErrQueryViewNotReady, "missing"), merr.Wrap(merr.ErrQueryViewNotReady, "missing"), merr.Wrap(merr.ErrQueryViewNotReady, "missing")}, calls: 4, refreshes: 3},
+			{name: "iterator keeps binding", params: []*commonpb.KeyValuePair{{Key: IteratorField, Value: "True"}}, failures: []error{merr.Wrap(merr.ErrQueryViewNotReady, "expired")}, calls: 1},
 
-			{name: "removed field fails after refresh", failures: []error{viewerror.NewViewNotFound("old schema retired"), merr.WrapErrParameterInvalidMsg("field was removed")}, calls: 2, refreshes: 1},
+			{name: "removed field fails after refresh", failures: []error{merr.Wrap(merr.ErrQueryViewNotReady, "old schema retired"), merr.WrapErrParameterInvalidMsg("field was removed")}, calls: 2, refreshes: 1},
 			{name: "canceled", failures: []error{context.Canceled}, calls: 1},
-			{name: "input error", failures: []error{merr.WrapErrAsInputError(viewerror.NewViewNotFound("invalid input"))}, calls: 1},
+			{name: "input error", failures: []error{merr.WrapErrAsInputError(merr.Wrap(merr.ErrQueryViewNotReady, "invalid input"))}, calls: 1},
 		} {
 			t.Run(autoLoad+"/"+tc.name, func(t *testing.T) {
 				node := &Proxy{metaCache: &metacache.MetaCache{}}

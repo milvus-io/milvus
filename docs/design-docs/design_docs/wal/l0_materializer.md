@@ -36,12 +36,19 @@ all Delete children use the outer commit TimeTick and complete together.
 
 The WAL consumer passes runtime-only positions to the output writer. Each
 physical L0 group's StartPosition comes from its first Delete's TimeTick and
-LastConfirmedMessageID; all groups use the captured batch-end message's complete
-position as their checkpoint. Transaction positions come from the outer Txn,
-never an individual child or the raw Commit message ID. Positions include the
-consumer VChannel and WAL name, including for PChannel-wide Flush messages.
+LastConfirmedMessageID; its checkpoint/DmlPosition comes from its own last
+Delete's complete position. The materialization batch boundary remains separate
+and never substitutes for a Segment's last Delete. Transaction positions come
+from the outer Txn, never an individual child or the raw Commit message ID.
+Positions include the consumer VChannel and WAL name.
 Summary storage gains no MessageID fields. Its retained consumer still supplies
 only timestamps for future QueryView integration.
+
+Within each partition, all Delete blocks at one TimeTick form an indivisible
+output unit. Row/byte limits are checked against the whole unit before admitting
+it to the current L0. If necessary, close that L0 before the unit; an oversized
+unit may exceed the soft limits but cannot be split. Different partitions still
+produce separate L0s, even when their Deletes share a transaction TimeTick.
 
 Snapshot replay filters against the materialized cursor, independently of the
 VChannel metadata checkpoint. Observed positions suppress duplicate pending work.

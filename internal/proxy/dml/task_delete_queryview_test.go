@@ -12,12 +12,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -65,6 +67,14 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				return response, nil
 			}).Build()
 			defer query.UnPatch()
+			// Transient query errors consult the authoritative load config.
+			mixCoord := mockey.Mock((*mockTaskNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
+			defer mixCoord.UnPatch()
+			loadInfo := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(&querypb.GetQueryViewLoadInfoResponse{
+				Status: merr.Success(), PartitionIDs: []int64{11},
+			}, nil).Build()
+			defer loadInfo.UnPatch()
+
 			idPatch := mockey.Mock((*allocator.IDAllocator).AllocOne).Return(int64(42), nil).Build()
 			defer idPatch.UnPatch()
 			tsoPatch := mockey.Mock((*mockTsoAllocator).AllocOne).Return(uint64(100), nil).Build()
@@ -103,6 +113,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			defer produce.UnPatch()
 
 			runner := &DeleteRunner{
+				node:   &mockTaskNode{},
 				req:    &milvuspb.DeleteRequest{CollectionName: "batch_delete", ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
 				result: &milvuspb.MutationResult{Status: merr.Success()},
 				schema: schema, plan: plan, dbID: 9, collectionID: 10, partitionIDs: []int64{11},
@@ -120,6 +131,11 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				require.ErrorIs(t, err, merr.ErrServiceRateLimit)
 			default:
 				require.NoError(t, err)
+			}
+			if scenario == "query_error" {
+				require.Equal(t, 1, loadInfo.Times())
+			} else {
+				require.Zero(t, loadInfo.Times())
 			}
 			require.NotNil(t, captured)
 			require.Equal(t, int64(9), captured.GetDbID())

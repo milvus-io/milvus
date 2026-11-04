@@ -148,8 +148,6 @@ type Server struct {
 
 	// One shared automatic load and readiness wait per collection across Proxies.
 	autoLoadCollectionGroup singleflight.Group
-
-	// query view segment load info watch
 }
 
 type FileResourceObserver interface {

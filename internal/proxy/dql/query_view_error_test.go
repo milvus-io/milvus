@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -28,7 +27,7 @@ func TestQueryViewLoadError(t *testing.T) {
 			mockey.PatchConvey(tc.name, t, func() {
 				mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
 				mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(tc.response, nil).Build()
-				original := viewerror.NewViewNotFound("released or recovering")
+				original := merr.Wrap(merr.ErrQueryViewNotReady, "released or recovering")
 				err := QueryViewLoadError(t.Context(), &namespaceRequeryMockNode{}, 1, []int64{20}, original)
 				if tc.want != nil {
 					require.ErrorIs(t, err, tc.want)

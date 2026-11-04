@@ -134,6 +134,7 @@ type Server struct {
 	metaStore                           metacache.MetaStore
 	catalog                             metastore.DataCoordCatalog
 	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	collectionDropped func(context.Context, int64) (bool, error)
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -274,8 +275,8 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:              make(chan struct{}),
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
-		notifyStatsChan:     make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
+		notifyStatsChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
@@ -571,6 +572,10 @@ func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.Colle
 	s.dataViewCollectionRecoveryValidator = validator
 }
 
+func (s *Server) SetCollectionDroppedChecker(checker func(context.Context, int64) (bool, error)) {
+	s.collectionDropped = checker
+}
+
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
@@ -861,7 +866,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		)
 		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
 		recoveredDomainMetas = dm
-		if err == nil { recoveredMeta.PreparationSchema = coordinatorPreparationSchema }
+		if err == nil { recoveredMeta.PreparationSchema = coordinatorPreparationSchema; recoveredMeta.StreamingNodeCatalog = kvstreamingnode.NewCataLog(s.kv) }
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {

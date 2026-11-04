@@ -7,12 +7,11 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,15 +24,7 @@ func TestAlterCallbacksApplyLoadConfigDirectly(t *testing.T) {
 			name = "database"
 		}
 		t.Run(name, func(t *testing.T) {
-			var persistErr error
 			for _, p := range []*mockey.Mocker{
-				mockey.Mock(catalogkv.Catalog.GetCollections).Return(nil, nil).Build(),
-				mockey.Mock(catalogkv.Catalog.GetPartitions).Return(nil, nil).Build(),
-				mockey.Mock(catalogkv.Catalog.GetReplicas).Return(nil, nil).Build(),
-				mockey.Mock(catalogkv.Catalog.SaveCollection).To(func(catalogkv.Catalog, context.Context, *querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) error {
-					return persistErr
-				}).Build(),
-				mockey.Mock(catalogkv.Catalog.SaveReplica).Return(nil).Build(),
 				mockey.Mock((*MetaTable).AlterCollection).Return(nil).Build(),
 				mockey.Mock((*MetaTable).AlterDatabase).Return(nil).Build(),
 				mockey.Mock((*DDLCallback).ExpireCaches).Return(nil).Build(),
@@ -86,11 +77,14 @@ func TestAlterCallbacksApplyLoadConfigDirectly(t *testing.T) {
 					}}).WithControlChannelBroadcast().MustBuildBroadcast()
 				return c.alterCollectionV2AckCallback(t.Context(), message.BroadcastResultAlterCollectionMessageV2{Message: message.MustAsBroadcastAlterCollectionMessageV2(msg)})
 			}
-			persistErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+			persistErr := merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+			catalog := catalogkv.NewCollectionLoadInfoCatalog(nil)
+			failure := mockey.Mock(mockey.GetMethod(catalog, "Save")).Return(persistErr).Build()
+			t.Cleanup(func() { failure.UnPatch() })
 			require.ErrorIs(t, apply(), persistErr)
 			require.Len(t, store.GetConfig(1).Replicas, 1)
 			require.Zero(t, published)
-			persistErr = nil
+			failure.UnPatch()
 			require.NoError(t, apply())
 			require.NoError(t, apply(), "callback replay is a no-op")
 			require.Equal(t, 1, published)

@@ -253,10 +253,9 @@ func TestWALMaterializerWholeTxnAndFinalPublicationGate(t *testing.T) {
 	require.Len(t, (*batches)[0].Entries, 1)
 	require.Len(t, (*batches)[0].Entries[0].GetDelete().GetBlocks(), 2)
 	require.Equal(t, uint64(300), (*batches)[0].Entries[0].GetTimeTick())
-	require.Len(t, (*batches)[0].StartPositions, 1)
+	require.Len(t, (*batches)[0].DeletePositions, 1)
 	position := utility.NewMessagePosition(txn, "v1")
-	require.True(t, proto.Equal(position, (*batches)[0].StartPositions[300]))
-	require.True(t, proto.Equal(position, (*batches)[0].Checkpoint))
+	require.True(t, proto.Equal(position, (*batches)[0].DeletePositions[300]))
 }
 
 func TestWALMaterializerInsertAndBarrierDoNotFlush(t *testing.T) {
@@ -270,7 +269,7 @@ func TestWALMaterializerInsertAndBarrierDoNotFlush(t *testing.T) {
 	require.Zero(t, m.MaterializedTimeTick(), "no empty L0 needed to advance the global prefix")
 }
 
-func TestWALMaterializerUsesFlushBoundaryPosition(t *testing.T) {
+func TestWALMaterializerSeparatesDeletePositionAndFlushBoundary(t *testing.T) {
 	m, tasks, batches := testWALMaterializer(t, 0, 1<<20)
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	deleted, flushed := walDelete(100), walFlush(200)
@@ -280,7 +279,8 @@ func TestWALMaterializerUsesFlushBoundaryPosition(t *testing.T) {
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
 	require.Len(t, *batches, 1)
 	req := (*batches)[0]
-	require.True(t, proto.Equal(utility.NewMessagePosition(deleted, "v1"), req.StartPositions[100]))
-	require.True(t, proto.Equal(utility.NewMessagePosition(flushed, "v1"), req.Checkpoint))
+	require.True(t, proto.Equal(utility.NewMessagePosition(deleted, "v1"), req.DeletePositions[100]))
+	require.Equal(t, uint64(200), req.TargetTimeTick)
+	require.NotContains(t, req.DeletePositions, uint64(200), "Flush completion is not a Delete position")
 	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
 }

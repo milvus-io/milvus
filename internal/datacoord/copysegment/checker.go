@@ -263,6 +263,27 @@ func (c *Checker) LogTaskStats() {
 // State Machine: Pending → Executing
 // ============================================================================
 
+// checkRestoreTarget uses the same authoritative lifecycle check as Import.
+// Public HasCollection/Describe cannot distinguish a still-restoring target from
+// a deleted one, and process-local DataView drop markers do not survive recovery.
+func (c *copySegmentChecker) checkRestoreTarget(job CopySegmentJob) bool {
+	if !job.(*copySegmentJob).GetCreatesCollection() {
+		return true
+	}
+	dropped, err := c.collectionRestorer.IsCollectionDropped(c.ctx, job.GetCollectionId())
+	if err != nil {
+		mlog.Warn(c.ctx, "retrying restore target lifecycle check", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return false
+	}
+	if !dropped {
+		return true
+	}
+	if err := c.copyMeta.FailJobForDroppedCollection(c.ctx, job.GetJobId()); err != nil {
+		mlog.Warn(c.ctx, "retrying restore termination for deleted target", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+	}
+	return false
+}
+
 // checkPendingJob transitions job from Pending to Executing by creating tasks.
 //
 // This is the first state transition in the job lifecycle. It groups segment ID
@@ -314,6 +335,10 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 	if current.GetState() != datapb.CopySegmentJobState_CopySegmentJobPending {
 		log.Info(c.Ctx, "job is no longer pending, skip pending check",
 			mlog.String("currentState", current.GetState().String()))
+		return
+	}
+
+	if !c.checkRestoreTarget(current) {
 		return
 	}
 
@@ -461,6 +486,9 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 //   - Records completion timestamp and metrics
 func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
+	if !c.checkRestoreTarget(job) {
+		return
+	}
 
 	// Step 1: Fetch all tasks for this job
 	tasks := c.CopyMeta.GetTasksByJobID(c.Ctx, job.GetJobId())
@@ -534,7 +562,6 @@ func (c *Checker) checkCopyingJob(job CopySegmentJob) {
 	}
 
 	c.finishJob(job, totalRows)
-	log.Info(c.Ctx, "all copy segment tasks completed, job finished")
 }
 
 // finishJob completes the job by updating segments to Flushed and marking job as Completed.
@@ -639,12 +666,18 @@ func (c *copySegmentChecker) publishRestoredCollection(job CopySegmentJob, total
 	if c.meta.dataViewManager != nil {
 		version, err := c.meta.dataViewManager.RecomputeNow(c.ctx, job.GetCollectionId(), c.meta.loadableProjection)
 		if err != nil || version == nil {
+			if !c.checkRestoreTarget(job) {
+				return
+			}
 			log.Warn(c.ctx, "waiting for restored DataView publication", mlog.Err(err))
 			return
 		}
 	}
 	if job.(*copySegmentJob).GetCreatesCollection() {
 		if err := c.collectionRestorer.CompleteRestoreCollection(c.ctx, job.GetCollectionId()); err != nil {
+			if !c.checkRestoreTarget(job) {
+				return
+			}
 			log.Warn(c.ctx, "waiting to publish restored collection", mlog.Err(err))
 			return
 		}

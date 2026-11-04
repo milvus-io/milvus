@@ -453,8 +453,14 @@ and query Schema semantics are unchanged.
 
 ## 7. On-demand loading metadata
 
-This path assumes StorageV3 with index artifacts published into the Segment
-Manifest. `GetQueryViewSegmentLoadInfo` is a unary batch request for Segment IDs
+StorageV3 uses committed Manifests with published index artifacts. StorageV2
+without a Manifest uses the complete binlog/index/delta snapshot returned by
+Coordinator. Each zero-Manifest binding obtains fresh metadata before read
+reuse; only identical snapshots with compatible schema/load requirements may
+reuse a prepared read. Preparation failure invalidates that binding's metadata
+check so a retry can discover newly available artifacts. Ready bindings do not
+poll. This fallback does not add notifications for physical changes that do not
+create a new View. `GetQueryViewSegmentLoadInfo` is a unary batch request for Segment IDs
 in one Collection. It returns one result per distinct requested ID, including a
 per-Segment status and, on success, a complete current SegmentLoadInfo. Collection
 index definitions are included once for the batch. The response-level status is

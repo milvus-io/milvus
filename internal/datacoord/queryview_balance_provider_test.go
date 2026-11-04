@@ -12,6 +12,7 @@ import (
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -27,7 +28,7 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		require.NoError(t, err)
 		_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"p0_1v0"}})
 		require.NoError(t, err)
-		firstVersion, err := manager.RecomputeNow(ctx, 1, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+		firstVersion, err := manager.RecomputeNow(ctx, 1, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return []dataview.LoadableSegment{{SegmentID: 10, PartitionID: 2, VChannel: "p0_1v0", ManifestVersion: 3, RowNum: 100}}, nil
 		})
 		require.NoError(t, err)
@@ -49,7 +50,7 @@ func TestQueryViewBalanceProviderUsesPublishedStats(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, int64(100), stats.RowNum)
 
-		_, err = manager.RecomputeNow(ctx, 1, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+		_, err = manager.RecomputeNow(ctx, 1, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return []dataview.LoadableSegment{{SegmentID: 11, PartitionID: 2, VChannel: "p0_1v0", RowNum: 200}}, nil
 		})
 		require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestRefreshDataViewPublishesBeforeReturning(t *testing.T) {
 		require.NoError(t, err)
 		var projectionErr error
 		segments := []dataview.LoadableSegment{{SegmentID: 10, PartitionID: 2, VChannel: "v1", RowNum: 100}}
-		mockey.Mock((*meta).loadableProjection).To(func(_ *meta, _ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+		mockey.Mock((*meta).loadableProjection).To(func(_ *meta, _ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 			return segments, projectionErr
 		}).Build()
 		s := &Server{dataViewManager: manager, meta: &meta{}}
@@ -100,7 +101,48 @@ func TestRefreshDataViewPublishesBeforeReturning(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 		_, err = manager.OnDropCollection(t.Context(), 1)
 		require.NoError(t, err)
+		s.SetCollectionDroppedChecker(func(context.Context, int64) (bool, error) { return true, nil })
 		_, err = s.RefreshDataView(t.Context(), 1)
-		require.ErrorIs(t, err, merr.ErrServiceNotReady)
+		require.ErrorIs(t, err, merr.ErrCollectionNotFound)
 	})
+}
+
+func TestRefreshDataViewChecksCollectionMetaWithoutSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		dropped bool
+		err     error
+		want    error
+	}{
+		{name: "deleted", dropped: true, want: merr.ErrCollectionNotFound},
+		{name: "live but unpublished", want: merr.ErrServiceNotReady},
+		{name: "metadata unavailable", err: context.DeadlineExceeded, want: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey("absence of a snapshot is not proof of collection deletion", t, func() {
+				catalog := &catalogkv.Catalog{MetaKv: NewMetaMemoryKV()}
+				manager, err := dataview.RecoverManager(t.Context(), catalog,
+					func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
+					dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+						return nil, nil
+					}))
+				require.NoError(t, err)
+				s := &Server{dataViewManager: manager, meta: &meta{}}
+				s.UpdateStateCode(commonpb.StateCode_Healthy)
+				lookups := 0
+				s.SetCollectionDroppedChecker(func(ctx context.Context, id int64) (bool, error) {
+					lookups++
+					require.Equal(t, int64(1), id)
+					return tc.dropped, tc.err
+				})
+				version, err := s.RefreshDataView(t.Context(), 1)
+				require.Nil(t, version)
+				require.ErrorIs(t, err, tc.want)
+				require.Equal(t, 1, lookups)
+				views, err := catalog.ListAllDataViews(t.Context())
+				require.NoError(t, err)
+				require.Empty(t, views, "late refresh must not recreate a deleted collection")
+			})
+		})
+	}
 }

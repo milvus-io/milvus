@@ -467,14 +467,6 @@ func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*que
 	return module.QueryRuntime(key)
 }
 
-func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
-	module := m.Module(key.ShardID.VChannel)
-	if module == nil {
-		return nil, false
-	}
-	return module.QueryReadRuntime(key)
-}
-
 // AcquireStream gives each consumer an independent subscription lifetime while
 // retaining the recovery manager's single authoritative summary reader.
 func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
@@ -498,4 +490,12 @@ func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel st
 		_ = stream.Close()
 	}()
 	return stream, nil
+}
+
+func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryReadRuntime(key)
 }

@@ -885,7 +885,6 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 				}
 			}
 		}
-
 	}
 
 	nodes := make([]*commonpb.NodeInfo, 0, len(rg.GetNodes()))

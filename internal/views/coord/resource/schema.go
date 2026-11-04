@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -31,11 +30,11 @@ func PreparationSchema(ctx context.Context, collectionID int64, published func(c
 // PrepareSchema applies the acknowledged ALTER under its existing broadcast
 // guard, and waits for every desired shard to serve the exact target schema.
 // RootCoord must keep its published schema unchanged until this returns.
-func (r *Resources) PrepareSchema(ctx context.Context, collectionID int64, published, target *schemapb.CollectionSchema, bound []*viewpb.LoadFieldConfig) error {
+func (r *Resources) PrepareSchema(ctx context.Context, collectionID int64, published, target *schemapb.CollectionSchema) error {
 	if err := r.checkActive(ctx); err != nil {
 		return err
 	}
-	if err := r.LoadConfigs.ApplySchema(ctx, collectionID, published, target, bound); err != nil {
+	if err := r.LoadConfigs.ApplySchema(ctx, collectionID, published, target, nil); err != nil {
 		return err
 	}
 	if err := r.Reconciler.PrepareDataViewSchema(ctx, collectionID, published, target); err != nil {

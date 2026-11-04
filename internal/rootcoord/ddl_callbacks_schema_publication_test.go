@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -45,7 +44,7 @@ func TestSchemaPublicationRetry(t *testing.T) {
 			mockey.Mock((*MetaTable).GetCollectionByIDWithMaxTs).Return(published, nil).Build()
 			var order []string
 			failure := merr.WrapErrServiceUnavailableMsg("injected transient failure")
-			mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, _ int64, old, target *schemapb.CollectionSchema, _ []*viewpb.LoadFieldConfig) error {
+			mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, _ int64, old, target *schemapb.CollectionSchema) error {
 				require.EqualValues(t, 1, old.GetVersion())
 				require.EqualValues(t, 2, target.GetVersion())
 				order = append(order, "prepare")

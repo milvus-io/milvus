@@ -8038,7 +8038,8 @@ func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
 
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	ctx := context.Background()
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
+	store := metacache.NewMetaStore(nil)
+	segments := meta.NewSegmentsInfo(store)
 	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
 		segments.SetSegment(id, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            id,
@@ -8059,8 +8060,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
 	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
 
-	mt := &meta.Meta{Ctx: ctx, Segments: segments}
-	actual, err := mt.LoadableProjection(ctx, 100)
+	mt := &meta.Meta{Ctx: ctx, MetaStore: store, Segments: segments}
+	actual, err := mt.LoadableProjection(ctx, 100, nil)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
 		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},

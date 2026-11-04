@@ -206,6 +206,7 @@ func (s *mixCoordImpl) initInternal() error {
 		datacoord.WithPKIndexService(s.pkindexService))
 	s.datacoordServer.SetRestoreCollectionManager(s.rootcoordServer)
 	s.datacoordServer.SetDataViewCollectionRecoveryValidator(s.rootcoordServer.ValidateDataViewCollectionForRecovery)
+	s.datacoordServer.SetCollectionDroppedChecker(s.rootcoordServer.IsCollectionDropped)
 	s.datacoordServer.SetSession(s.session)
 	s.datacoordServer.SetAddress(s.address)
 	s.datacoordServer.SetEtcdClient(s.etcdCli)
@@ -1154,10 +1155,6 @@ func (s *mixCoordImpl) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetS
 	return s.queryCoordServer.GetLoadSegmentInfo(ctx, req)
 }
 
-func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
-}
-
 func (s *mixCoordImpl) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.LoadBalance(ctx, req)
 }
@@ -1633,6 +1630,10 @@ func (s *mixCoordImpl) GetStreamingNodeQueryViewResources(ctx context.Context, r
 
 func (s *mixCoordImpl) DataViewProvider() balancer.DataViewProvider {
 	return s.datacoordServer.DataViewProvider()
+}
+
+func (s *mixCoordImpl) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	return s.datacoordServer.GetQueryViewSegmentLoadInfos(ctx, collectionID, segmentIDs)
 }
 
 func (s *mixCoordImpl) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {

@@ -203,6 +203,41 @@ L0 materialization by itself does not advance any selected L1 base's C; the
 appropriate compaction must still inline the complete relevant prefix. Partial
 partition/Segment completion does not prove a shard-wide coverage advance.
 
+### L0 compaction publication
+
+For each ordinary L0 completion, DataCoord reads the VChannel's durable
+`transform_materialized_time_tick` M from the StreamingNode catalog, once,
+before inspecting SegmentMeta. M certifies that every physical L0 group through
+that position was registered and the preceding L1 publication gate passed.
+It is not a physical checkpoint or a new reporting loop.
+
+Let D be the maximum effective DmlPosition of the task's actual L0 inputs.
+Start with T = min(M, D). Never use task.Pos: admission may select only part of
+its candidates, and repair tasks may use MaxUint64. For each target partition,
+cap T strictly before the earliest effective StartPosition of any other live
+L0 in that partition or the all-partitions scope. Reserved inputs of other
+tasks still count as gaps. An unknown gap position prevents advancement.
+Previously retired L0 inputs have already been applied to their eligible
+targets; the L1 publication gate and exclusion of concurrent non-L0 compaction
+preserve that target coverage.
+
+DataNode returns every target it actually checked, including an empty result
+when the Bloom filter proves no matching Delete. DataCoord advances only these
+targets, setting C_new = max(C_old, T). Unknown old C remains unknown; repairing
+legacy coverage is a separate migration. Restore tasks retain the target
+RestoreSnapshot cursor, because source Delete positions use a different domain.
+Missing or lagging M conservatively limits advancement without blocking L0
+completion.
+
+The deltalog, Manifest pointer and C are published by the same metadata mutation.
+When its KV set fits the transaction limit, publication and L0 input retirement
+are atomic. The oversized fallback writes all deltalog keys first, then target
+Segment records (which pair Manifest and C in one key), then retired L0 records.
+A crash must never expose a cursor before its deltalog, or retire an input
+before every checked target is durable. Retries overwrite the same result.
+The existing DataView reconciliation updates A and compact_version, including
+cursor-only no-match results; W is unchanged.
+
 This ordering is required independently of W/A. W/A itself does not require a
 separate periodic materialization-frontier report to DataCoord.
 

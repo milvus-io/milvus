@@ -19,7 +19,7 @@ import (
 func TestBalancer(t *testing.T) {
 	mockey.PatchConvey("WAL distribution distinguishes empty sessions and propagates readiness failures", t, func() {
 		var readyErr, nodesErr, assignmentErr, updateErr error
-		mockey.Mock(balancerImpl.checkIfStreamingServiceReady).To(func(balancerImpl, context.Context) (bool, error) { return readyErr == nil, readyErr }).Build()
+		mockey.Mock(balancerImpl.checkIfStreamingServiceReady).To(func(balancerImpl, context.Context) error { return readyErr }).Build()
 		native := &mock_balancer.MockBalancer{}
 		mockey.Mock((*snmanager.StreamingNodeManager).GetBalancer).Return(native).Build()
 		mockey.Mock((*mock_balancer.MockBalancer).GetAllStreamingNodes).To(func(*mock_balancer.MockBalancer, context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {

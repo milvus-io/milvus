@@ -63,8 +63,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -639,26 +642,22 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	})
 	server.meta.HandleNodeUp(ctx, 1013)
 	server.meta.HandleNodeUp(ctx, 1014)
-	server.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	server.meta.PutCollection(ctx, utils.CreateTestCollection(2, 1))
-	server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		ID:            1,
-		CollectionID:  1,
-		Nodes:         []int64{1011},
-		RoNodes:       []int64{1013},
-		ResourceGroup: "rg11",
-	},
-		typeutil.NewUniqueSet(1011, 1013)),
-	)
-	server.meta.Put(ctx, meta.NewReplica(&querypb.Replica{
-		ID:            2,
-		CollectionID:  2,
-		Nodes:         []int64{1014},
-		RoNodes:       []int64{1012},
-		ResourceGroup: "rg12",
-	},
-		typeutil.NewUniqueSet(1012, 1014)),
-	)
+	// QueryView management reads desired replicas from LoadConfig and retained
+	// placements from the registry, not the legacy ReplicaManager.
+	for id, group := range map[int64]string{1: "rg11", 2: "rg12"} {
+		suite.Require().NoError(server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
+			CollectionID: id,
+			Replicas:     []*loadmgr.ReplicaAssignment{{ReplicaID: id, ResourceGroup: group}},
+		}))
+	}
+	patch := mockey.Mock((*coordview.ShardViewRegistry).SnapshotForCollection).To(func(_ *coordview.ShardViewRegistry, id int64) *coordview.ShardViewSnapshot {
+		nodes := map[int64][]int64{1: {1011, 1013}, 2: {1012, 1014}}
+		return coordview.NewShardViewSnapshot(1, map[qviews.ShardID]*coordview.ShardStats{
+			{ReplicaID: id, VChannel: "v0"}: {ResidentNodes: nodes[id]},
+			{ReplicaID: id, VChannel: "v1"}: {ResidentNodes: nodes[id]},
+		})
+	}).Build()
+	defer patch.UnPatch()
 
 	describeRG := &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: "rg11",

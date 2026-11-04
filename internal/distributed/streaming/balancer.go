@@ -37,7 +37,7 @@ func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingN
 
 // GetWALDistribution distinguishes an empty registered SN from an unknown node.
 func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error) {
-	if _, err := b.checkIfStreamingServiceReady(ctx); err != nil {
+	if err := b.checkIfStreamingServiceReady(ctx); err != nil {
 		return nil, err
 	}
 	sbalancer := snmanager.StaticStreamingNodeManager.GetBalancer()
@@ -82,7 +82,7 @@ func (b balancerImpl) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
 
 // IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
 func (b balancerImpl) IsRebalanceSuspended(ctx context.Context) (bool, error) {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -99,7 +99,7 @@ func (b balancerImpl) IsRebalanceSuspended(ctx context.Context) (bool, error) {
 }
 
 func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (b balancerImpl) SuspendRebalance(ctx context.Context) error {
 }
 
 func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return err
 	}

@@ -1113,7 +1113,7 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 	if t.viewQueryClient != nil {
 		if err := t.executeByQueryView(ctx); err != nil {
 			log.Warn(ctx, "fail to execute query by query view", mlog.Err(err))
-			return errors.Wrap(err, "failed to query")
+			return err
 		}
 		log.Debug(ctx, "Query Execute done.")
 		return nil

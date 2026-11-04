@@ -24,7 +24,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -43,8 +42,7 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 		if err == nil || isIterator || ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || merr.GetErrorType(err) == merr.InputError || refreshes >= 3 {
 			return again, err
 		}
-		viewErr := viewerror.AsViewError(err)
-		if !viewErr.IsViewNotFound() && !viewErr.IsViewInvalidated() {
+		if !errors.Is(err, merr.ErrQueryViewNotReady) {
 			return again, err
 		}
 		refreshes++
@@ -99,8 +97,7 @@ func (node *Proxy) shouldRetryDQLLoad(err error) bool {
 	if errors.Is(err, merr.ErrCollectionNotLoaded) {
 		return true
 	}
-	viewErr := viewerror.AsViewError(err)
-	return viewErr.IsViewNotFound() || viewErr.IsViewInvalidated()
+	return errors.Is(err, merr.ErrQueryViewNotReady)
 }
 
 // ensureCollectionReady sends one load-and-wait RPC per DQL attempt.
