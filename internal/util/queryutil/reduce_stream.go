@@ -234,7 +234,7 @@ func NewReduceStream(
 	if request.GetIsCount() || len(request.GetAggregates()) > 0 {
 		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support global aggregation"))
 	}
-	unlimited := request.GetLimit() == typeutil.Unlimited && !request.GetIsIterator() && len(request.GetOrderByFields()) == 0
+	unlimited := request.GetLimit() == typeutil.Unlimited && len(request.GetOrderByFields()) == 0
 	if request.GetLimit() <= 0 && !unlimited {
 		return nil, merr.WrapErrServiceInternalMsg("invalid Query ReduceStream limit %d", request.GetLimit())
 	}

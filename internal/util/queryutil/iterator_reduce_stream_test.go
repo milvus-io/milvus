@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestOrderedReduceStreamElementIteratorBoundary(t *testing.T) {
@@ -66,11 +67,18 @@ func TestOrderedReduceStreamElementIteratorBoundary(t *testing.T) {
 }
 
 func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
-	for _, mode := range []reduce.IReduceType{reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest} {
+	for _, tc := range []struct {
+		mode  reduce.IReduceType
+		limit int64
+	}{
+		{reduce.IReduceNoOrder, 10}, {reduce.IReduceInOrder, 10}, {reduce.IReduceInOrderForBest, 10},
+		{reduce.IReduceInOrder, typeutil.Unlimited}, {reduce.IReduceInOrderForBest, typeutil.Unlimited},
+	} {
+		mode := tc.mode
 		for _, shardLocal := range []bool{false, true} {
 			for _, incompleteChild := range []int{-1, 0, 1} {
 				for _, chunkBytes := range []int{1, 1 << 20} {
-					t.Run(fmt.Sprintf("mode_%d/shard_%t/incomplete_%d/bytes_%d", mode, shardLocal, incompleteChild, chunkBytes), func(t *testing.T) {
+					t.Run(fmt.Sprintf("mode_%d/limit_%d/shard_%t/incomplete_%d/bytes_%d", mode, tc.limit, shardLocal, incompleteChild, chunkBytes), func(t *testing.T) {
 						inputs := []*internalpb.RetrieveResults{
 							newQueryTestChunk([]int64{1, 3}, []int64{10, 30}),
 							newQueryTestChunk([]int64{2, 100}, []int64{20, 1000}),
@@ -92,7 +100,7 @@ func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
 							}
 							children[i] = child
 						}
-						request := &internalpb.RetrieveRequest{IsIterator: mode != reduce.IReduceNoOrder, ReduceType: int32(mode), Limit: 10}
+						request := &internalpb.RetrieveRequest{IsIterator: mode != reduce.IReduceNoOrder, ReduceType: int32(mode), Limit: tc.limit}
 						var stream ReduceStream
 						if shardLocal {
 							stream, err = NewShardReduceStream(request, nil, children, chunkBytes)

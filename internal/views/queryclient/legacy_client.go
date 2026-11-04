@@ -336,7 +336,7 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 	if len(req.GetGroupByFieldIds()) > 0 {
 		return true
 	}
-	validLimit := req.GetLimit() > 0 || (req.GetLimit() == typeutil.Unlimited && !req.GetIsIterator())
+	validLimit := req.GetLimit() > 0 || req.GetLimit() == typeutil.Unlimited
 	return validLimit && len(req.GetAggregates()) == 0
 }
 

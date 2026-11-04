@@ -223,7 +223,7 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 	}
 	legacyRequest := request.GetLegacyReq()
 	hasGroupBy := legacyRequest != nil && len(legacyRequest.GetGroupByFieldIds()) > 0
-	unlimited := legacyRequest.GetLimit() == typeutil.Unlimited && !legacyRequest.GetIsIterator() && len(legacyRequest.GetOrderByFields()) == 0
+	unlimited := legacyRequest.GetLimit() == typeutil.Unlimited && len(legacyRequest.GetOrderByFields()) == 0
 	if legacyRequest == nil || legacyRequest.GetIsCount() ||
 		(!hasGroupBy && ((legacyRequest.GetLimit() <= 0 && !unlimited) || len(legacyRequest.GetAggregates()) > 0)) {
 		return status.Error(codes.InvalidArgument, "unsupported QueryOnViewStream request or limit")

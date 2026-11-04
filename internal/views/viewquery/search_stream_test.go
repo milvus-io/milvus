@@ -319,6 +319,14 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.Equal(t, []int64{1, 2, 3}, ids)
 	require.Equal(t, typeutil.Unlimited, provider.queryRequest.GetLimit())
 	require.NoError(t, stream.Close())
+
+	request.LegacyReq.IsIterator = true
+	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	require.NoError(t, err)
+	first, err = stream.Recv()
+	require.NoError(t, err)
+	require.True(t, first.GetHasMoreResult())
+	require.NoError(t, stream.Close())
 }
 
 func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
