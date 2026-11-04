@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -20,6 +21,84 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestCloneSegmentMetaStatePreservesEveryProtoField(t *testing.T) {
+	assignment := &streamingpb.SegmentAssignmentMeta{}
+	assignmentFields := assignment.ProtoReflect().Descriptor().Fields()
+	for i := 0; i < assignmentFields.Len(); i++ {
+		field := assignmentFields.Get(i)
+		t.Run("assignment/"+string(field.Name()), func(t *testing.T) {
+			meta := &streamingpb.SegmentAssignmentMeta{}
+			setNonDefaultProtoField(t, meta.ProtoReflect(), field)
+			require.True(t, proto.Equal(meta, cloneSegmentMetaState(meta)), "clone omits %s", field.FullName())
+		})
+	}
+
+	storage := &streamingpb.L1SegmentPersistedStorage{}
+	storageFields := storage.ProtoReflect().Descriptor().Fields()
+	for i := 0; i < storageFields.Len(); i++ {
+		field := storageFields.Get(i)
+		t.Run("storage/"+string(field.Name()), func(t *testing.T) {
+			meta := &streamingpb.SegmentAssignmentMeta{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{}}
+			setNonDefaultProtoField(t, meta.PersistedStorage.ProtoReflect(), field)
+			require.True(t, proto.Equal(meta, cloneSegmentMetaState(meta)), "clone omits %s", field.FullName())
+		})
+	}
+}
+
+func setNonDefaultProtoField(t *testing.T, msg protoreflect.Message, field protoreflect.FieldDescriptor) {
+	t.Helper()
+	value := msg.NewField(field)
+	switch {
+	case field.IsMap():
+		entries := value.Map()
+		entry := entries.NewValue()
+		if field.MapValue().Kind() != protoreflect.MessageKind && field.MapValue().Kind() != protoreflect.GroupKind {
+			entry = nonDefaultProtoScalar(t, field.MapValue().Kind())
+		}
+		entries.Set(nonDefaultProtoScalar(t, field.MapKey().Kind()).MapKey(), entry)
+	case field.IsList():
+		items := value.List()
+		item := items.NewElement()
+		if field.Kind() != protoreflect.MessageKind && field.Kind() != protoreflect.GroupKind {
+			item = nonDefaultProtoScalar(t, field.Kind())
+		}
+		items.Append(item)
+	case field.Kind() != protoreflect.MessageKind && field.Kind() != protoreflect.GroupKind:
+		value = nonDefaultProtoScalar(t, field.Kind())
+	}
+	msg.Set(field, value)
+	require.True(t, msg.Has(field), "test field %s must be populated", field.FullName())
+}
+
+func nonDefaultProtoScalar(t *testing.T, kind protoreflect.Kind) protoreflect.Value {
+	t.Helper()
+	switch kind {
+	case protoreflect.BoolKind:
+		return protoreflect.ValueOfBool(true)
+	case protoreflect.EnumKind:
+		return protoreflect.ValueOfEnum(1)
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		return protoreflect.ValueOfInt32(1)
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return protoreflect.ValueOfInt64(1)
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		return protoreflect.ValueOfUint32(1)
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return protoreflect.ValueOfUint64(1)
+	case protoreflect.FloatKind:
+		return protoreflect.ValueOfFloat32(1)
+	case protoreflect.DoubleKind:
+		return protoreflect.ValueOfFloat64(1)
+	case protoreflect.StringKind:
+		return protoreflect.ValueOfString("value")
+	case protoreflect.BytesKind:
+		return protoreflect.ValueOfBytes([]byte{1})
+	default:
+		t.Fatalf("unsupported protobuf kind %s", kind)
+		return protoreflect.Value{}
+	}
+}
 
 // TestSegmentViewMetaConstructors covers the meta-driven view constructors and
 // the create-segment-message path that builds a view from WAL observations.
