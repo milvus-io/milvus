@@ -3095,6 +3095,26 @@ func TestGpuIndexRequiresGpu(t *testing.T) {
 		assert.False(t, gpuIndexRequiresGpu([]*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
 		}))
+
+		for _, load := range []string{"true", "false"} {
+			params.Save(adaptKey, load)
+			for _, build := range []string{"true", "false"} {
+				t.Run("build="+build+"/load="+load, func(t *testing.T) {
+					indexInfo := &querypb.FieldIndexInfo{
+						IndexParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: "GPU_CAGRA"},
+							{Key: "adapt_for_cpu", Value: build},
+						},
+					}
+					wantGPU := build == "false" && load == "false"
+					assert.Equal(t, wantGPU, gpuIndexRequiresGpu(indexInfo.IndexParams))
+					assert.NoError(t, prepareIndexLoadParams([]*querypb.FieldIndexInfo{indexInfo}))
+					loadParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+					assert.Equal(t, !wantGPU, loadParams["adapt_for_cpu"] == "true")
+					assert.Equal(t, wantGPU, gpuIndexRequiresGpu(indexInfo.IndexParams))
+				})
+			}
+		}
 	})
 }
 
