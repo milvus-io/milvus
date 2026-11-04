@@ -399,7 +399,7 @@ func (s *rawDataSuite) runPropagationStats(ctx context.Context, fixture propagat
 	prefixes := []string{fmt.Sprintf("insert_log/%d", collectionID), "text_log", "json_stats"}
 	before := s.objectSnapshot(ctx, prefixes...)
 	s.Require().NotEmpty(before, "snapshot must include the existing raw input objects")
-	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*statsTask).prepareJobRequest"}
+	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*StatsTask).prepareJobRequest"}
 	if failKey {
 		fixture.setFault(s.T(), fault)
 	}
