@@ -108,7 +108,7 @@ func NewExternalCollectionRefreshMeta(
 }
 
 func (m *ExternalCollectionRefreshMeta) reloadFromKV() error {
-	record := timerecord.NewTimeRecorder("ExternalCollectionRefreshMeta-reloadFromKV")
+	record := timerecord.NewTimeRecorder("externalCollectionRefreshMeta-reloadFromKV")
 
 	// Load jobs
 	jobs, err := m.catalog.ListExternalCollectionRefreshJobs(m.ctx)
@@ -132,7 +132,7 @@ func (m *ExternalCollectionRefreshMeta) reloadFromKV() error {
 		m.addToJobTasks(task)
 	}
 
-	mlog.Info(m.ctx, "ExternalCollectionRefreshMeta reloadFromKV done",
+	mlog.Info(m.ctx, "externalCollectionRefreshMeta reloadFromKV done",
 		mlog.Int("jobCount", len(jobs)),
 		mlog.Int("taskCount", len(tasks)),
 		mlog.Duration("duration", record.ElapseSpan()))
