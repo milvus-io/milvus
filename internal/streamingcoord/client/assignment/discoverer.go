@@ -164,16 +164,15 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 			for _, assignment := range resp.FullAssignment.Assignments {
 				channels := make(map[string]types.PChannelInfo, len(assignment.Channels))
 				for _, channel := range assignment.Channels {
-					channels[channel.Name] = types.NewPChannelInfoFromProto(channel)
-				}
-				secondaryChannels := make(map[string]types.PChannelInfo, len(assignment.SecondaryChannels))
-				for _, channel := range assignment.SecondaryChannels {
-					secondaryChannels[channel.Name] = types.NewPChannelInfoFromProto(channel)
+					info := types.NewPChannelInfoFromProto(channel)
+					// Current channel routing targets only the primary read-write WAL.
+					if info.AccessMode == types.AccessModeRW {
+						channels[info.Name] = info
+					}
 				}
 				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
-					NodeInfo:          types.NewStreamingNodeInfoFromProto(assignment.Node),
-					Channels:          channels,
-					SecondaryChannels: secondaryChannels,
+					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),
+					Channels: channels,
 				}
 			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{

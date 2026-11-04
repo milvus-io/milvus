@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -18,17 +19,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestSendFullAssignmentPublishesSecondaryChannels(t *testing.T) {
-	mc := mock_manager.NewMockManagerClient(t)
-	mc.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+func TestSendFullAssignmentPublishesAccessModes(t *testing.T) {
+	mc := &mock_manager.MockManagerClient{}
+	defer mockey.UnPatchAll()
+	mockey.Mock(mockey.GetMethod(mc, "GetAllStreamingNodes")).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
 		1: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 1, Address: "localhost:1"}, ResourceGroup: "rg1"},
 		2: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 2, Address: "localhost:2"}, ResourceGroup: "rg1"},
-	}, nil)
+	}, nil).Build()
 	resource.InitForTest(resource.OptStreamingManagerClient(mc))
 
-	streamServer := mock_streamingpb.NewMockStreamingCoordAssignmentService_AssignmentDiscoverServer(t)
-	streamServer.EXPECT().Context().Return(context.Background())
-	streamServer.EXPECT().Send(mock.Anything).RunAndReturn(func(resp *streamingpb.AssignmentDiscoverResponse) error {
+	streamServer := &mock_streamingpb.MockStreamingCoordAssignmentService_AssignmentDiscoverServer{}
+	mockey.Mock(mockey.GetMethod(streamServer, "Context")).Return(context.Background()).Build()
+	mockey.Mock(mockey.GetMethod(streamServer, "Send")).To(func(resp *streamingpb.AssignmentDiscoverResponse) error {
 		fullAssignment := resp.GetFullAssignment()
 		assignments := make(map[int64]*streamingpb.StreamingNodeAssignment, len(fullAssignment.Assignments))
 		for _, assignment := range fullAssignment.Assignments {
@@ -37,15 +39,16 @@ func TestSendFullAssignmentPublishesSecondaryChannels(t *testing.T) {
 
 		node1Assignment := assignments[1]
 		assert.NotNil(t, node1Assignment)
-		assert.Equal(t, []string{"rw-channel"}, pchannelNames(node1Assignment.Channels))
-		assert.Equal(t, []string{"ro-channel"}, pchannelNames(node1Assignment.SecondaryChannels))
+		assert.Equal(t, []*streamingpb.PChannelInfo{
+			{Name: "rw-channel", Term: 1, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE},
+			{Name: "ro-channel", Term: 2, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY},
+		}, node1Assignment.Channels)
 
 		node2Assignment := assignments[2]
 		assert.NotNil(t, node2Assignment)
 		assert.Empty(t, node2Assignment.Channels)
-		assert.Empty(t, node2Assignment.SecondaryChannels)
 		return nil
-	})
+	}).Build()
 
 	helper := &discoverGrpcServerHelper{
 		StreamingCoordAssignmentService_AssignmentDiscoverServer: streamServer,
@@ -65,14 +68,6 @@ func TestSendFullAssignmentPublishesSecondaryChannels(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err)
-}
-
-func pchannelNames(channels []*streamingpb.PChannelInfo) []string {
-	names := make([]string, 0, len(channels))
-	for _, channel := range channels {
-		names = append(names, channel.GetName())
-	}
-	return names
 }
 
 func TestAssignmentDiscover(t *testing.T) {

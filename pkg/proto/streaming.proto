@@ -281,7 +281,6 @@ message StreamingNodeInfo {
 message StreamingNodeAssignment {
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
-    repeated PChannelInfo secondary_channels = 3;
 }
 
 // DeliverPolicy is the policy to deliver message.

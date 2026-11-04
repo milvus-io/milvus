@@ -25,17 +25,8 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 		if assignmentsMap[relation.Node.ServerID] == nil {
 			assignmentsMap[relation.Node.ServerID] = newStreamingNodeAssignment(relation.Node)
 		}
-		pchannel := types.NewProtoFromPChannelInfo(relation.Channel)
-		switch relation.Channel.AccessMode {
-		case types.AccessModeRW:
-			assignmentsMap[relation.Node.ServerID].Channels = append(
-				assignmentsMap[relation.Node.ServerID].Channels, pchannel)
-		case types.AccessModeRO:
-			assignmentsMap[relation.Node.ServerID].SecondaryChannels = append(
-				assignmentsMap[relation.Node.ServerID].SecondaryChannels, pchannel)
-		default:
-			panic("undefined pchannel access mode")
-		}
+		assignmentsMap[relation.Node.ServerID].Channels = append(
+			assignmentsMap[relation.Node.ServerID].Channels, types.NewProtoFromPChannelInfo(relation.Channel))
 	}
 	for _, node := range nodes {
 		if assignmentsMap[node.ServerID] == nil {
@@ -73,9 +64,8 @@ func (h *discoverGrpcServerHelper) SendFullAssignment(param balancer.WatchChanne
 
 func newStreamingNodeAssignment(node types.StreamingNodeInfo) *streamingpb.StreamingNodeAssignment {
 	return &streamingpb.StreamingNodeAssignment{
-		Node:              types.NewProtoFromStreamingNodeInfo(node),
-		Channels:          make([]*streamingpb.PChannelInfo, 0),
-		SecondaryChannels: make([]*streamingpb.PChannelInfo, 0),
+		Node:     types.NewProtoFromStreamingNodeInfo(node),
+		Channels: make([]*streamingpb.PChannelInfo, 0),
 	}
 }
 
