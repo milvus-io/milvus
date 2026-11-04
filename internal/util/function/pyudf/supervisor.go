@@ -57,6 +57,9 @@ func StartSupervisor(ctx context.Context) error {
 	if !config.Enabled {
 		return nil
 	}
+	if err := checkFIPSStrict(); err != nil {
+		return err
+	}
 	return processSupervisor.start(ctx, func() (*exec.Cmd, error) {
 		return supervisorCommand(config)
 	})

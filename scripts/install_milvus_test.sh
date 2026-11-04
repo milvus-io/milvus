@@ -101,4 +101,15 @@ rm "$repo_root/internal/core/output/lib/"*.dylib
 run_install
 assert_library libdemo.so libdemo.so.1 libdemo.so.1.2
 
+# MILVUS_FIPS_STRICT installs leave out the PyUDF runtime, even over a default install.
+test -f "$runtime_dir/pyudf/milvus_pyudf_runtime-test.whl"
+MILVUS_FIPS_STRICT=ON run_install
+test ! -e "$runtime_dir/pyudf"
+assert_library libdemo.so libdemo.so.1 libdemo.so.1.2
+
+# They also do not need a built wheel.
+rm "$repo_root/cmake_build/runtime/pyudf/wheels/"*.whl
+MILVUS_FIPS_STRICT=ON run_install
+test ! -e "$runtime_dir/pyudf"
+
 echo "Runtime library symlink installation tests passed."
