@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 
@@ -269,14 +270,14 @@ func TestMarshalStats(t *testing.T) {
 func TestBM25Stats_MemSize(t *testing.T) {
 	stats := NewBM25Stats()
 	baseSize := stats.MemSize()
-	assert.Equal(t, int64(120), baseSize)
+	assert.Equal(t, int64(unsafe.Sizeof(*stats)), baseSize)
 
 	// Add tokens and verify size grows
 	for i := uint32(0); i < 100; i++ {
 		stats.Append(map[uint32]float32{i: 1})
 	}
 	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
-	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
+	assert.Equal(t, baseSize+bm25StatsShards*bm25StatsMapOverhead+100*bytesPerEntry, stats.MemSize())
 }
 
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {
