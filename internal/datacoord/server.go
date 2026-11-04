@@ -30,18 +30,34 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/analyze"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
+	"github.com/milvus-io/milvus/internal/datacoord/gc"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
+	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/datacoord/stats"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -106,33 +122,35 @@ type Server struct {
 	watchClient    kv.WatchKV
 	kv             kv.MetaKv
 	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
+	meta           *meta.Meta
+	segmentManager segment.Manager
 	allocator      allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
 	cluster2         session.Cluster
 	mixCoord         types.MixCoord
-	garbageCollector *garbageCollector
-	gcOpt            GcOption
-	handler          Handler
-	importMeta       ImportMeta
-	importInspector  ImportInspector
-	importChecker    ImportChecker
-	importCheckerV3  ImportChecker
+	garbageCollector *gc.GarbageCollector
+	gcOpt            gc.GcOption
+	handler          meta.Handler
+	importMeta       bulkimport.ImportMeta
+	importInspector  bulkimport.ImportInspector
+	importChecker    bulkimport.ImportChecker
+	importCheckerV3  bulkimport.ImportChecker
 	importJobLock    *lock.KeyLock[int64]
 
-	copySegmentMeta      CopySegmentMeta
-	copySegmentInspector CopySegmentInspector
-	copySegmentChecker   CopySegmentChecker
+	domainMetas
 
-	snapshotManager       SnapshotManager
-	snapshotExportManager *snapshotExportManager
+	copySegmentMeta      copysegment.CopySegmentMeta
+	copySegmentInspector copysegment.CopySegmentInspector
+	copySegmentChecker   copysegment.CopySegmentChecker
 
-	compactionTrigger        trigger
-	compactionInspector      CompactionInspector
-	compactionTriggerManager TriggerManager
+	snapshotManager       snapshot.SnapshotManager
+	snapshotExportManager *snapshot.SnapshotExportManager
+
+	compactionTrigger        compaction.Trigger
+	compactionInspector      compaction.CompactionInspector
+	compactionTriggerManager compaction.TriggerManager
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -153,17 +171,19 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexEngineVersionManager IndexEngineVersionManager
+	indexEngineVersionManager index.IndexEngineVersionManager
 
-	statsInspector                   *statsInspector
-	indexInspector                   *indexInspector
-	analyzeInspector                 *analyzeInspector
 	segmentChangeInspector           *segmentChangeInspector
-	externalCollectionRefreshManager ExternalCollectionRefreshManager
+	statsInspector                   *stats.Inspector
+	indexInspector                   *index.IndexInspector
+	analyzeInspector                 *analyze.AnalyzeInspector
+	externalCollectionRefreshManager externalrefresh.ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
+
+	ddl *ddl.Callbacks
 
 	metricsRequest *metricsinfo.MetricsRequest
 
@@ -199,7 +219,7 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 }
 
 // WithSegmentManager returns an Option to set SegmentManager
-func WithSegmentManager(manager Manager) Option {
+func WithSegmentManager(manager segment.Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
 	}
@@ -317,7 +337,7 @@ func (s *Server) initDataCoord() error {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
+	s.importMeta, err = bulkimport.NewImportMeta(s.ctx, s.meta.Catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
@@ -346,17 +366,17 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, s.globalScheduler, importCheckerHooks{
-		commitImport:        s.broadcastCommitImportMessage,
-		rollbackImport:      s.broadcastRollbackImportMessage,
-		assignImportIDRange: s.broadcastUpdateImportMessage,
-		getReplicationRole:  s.getReplicationRole,
+	s.importChecker = bulkimport.NewImportChecker(s.ctx, s.meta, s.indexMeta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, s.globalScheduler, bulkimport.ImportCheckerHooks{
+		CommitImport:        s.broadcastCommitImportMessage,
+		RollbackImport:      s.broadcastRollbackImportMessage,
+		AssignImportIDRange: s.broadcastUpdateImportMessage,
+		GetReplicationRole:  ddl.GetReplicationRole,
 	})
-	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
-		commitImport:        s.broadcastCommitImportMessage,
-		rollbackImport:      s.broadcastRollbackImportMessage,
-		assignImportIDRange: s.broadcastUpdateImportMessage,
-		getReplicationRole:  s.getReplicationRole,
+	s.importCheckerV3 = bulkimport.NewImportCheckerV3(s.ctx, s.meta, s.indexMeta, s.broker, s.allocator, s.importMeta, s.cluster2, bulkimport.ImportCheckerHooks{
+		CommitImport:        s.broadcastCommitImportMessage,
+		RollbackImport:      s.broadcastRollbackImportMessage,
+		AssignImportIDRange: s.broadcastUpdateImportMessage,
+		GetReplicationRole:  ddl.GetReplicationRole,
 	})
 
 	// init file resource observer
@@ -365,20 +385,24 @@ func (s *Server) initDataCoord() error {
 	}
 
 	// Initialize copy segment meta and components
-	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
+	var snapshotSource copysegment.SnapshotSource
+	if s.snapshotMeta != nil {
+		snapshotSource = s.snapshotMeta
+	}
+	s.copySegmentMeta, err = copysegment.NewCopySegmentMeta(s.ctx, s.meta.Catalog, s.meta, s.indexMeta, snapshotSource, s.allocator)
 	if err != nil {
 		return err
 	}
 
-	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
-	s.copySegmentInspector = NewCopySegmentInspector(
+	s.importInspector = bulkimport.NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
+	s.copySegmentInspector = copysegment.NewCopySegmentInspector(
 		s.ctx,
 		s.meta,
 		s.copySegmentMeta,
 		s.globalScheduler,
 	)
 
-	s.copySegmentChecker = NewCopySegmentChecker(
+	s.copySegmentChecker = copysegment.NewCopySegmentChecker(
 		s.ctx,
 		s.meta,
 		s.broker,
@@ -388,9 +412,9 @@ func (s *Server) initDataCoord() error {
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
 
 	// Initialize snapshot manager
-	snapshotManager := NewSnapshotManager(
+	snapshotManager := snapshot.NewSnapshotManager(
 		s.meta,
-		s.meta.snapshotMeta,
+		s.snapshotMeta,
 		s.copySegmentMeta,
 		s.allocator,
 		s.handler,
@@ -399,13 +423,16 @@ func (s *Server) initDataCoord() error {
 		s.indexEngineVersionManager,
 	)
 	s.snapshotManager = snapshotManager
-	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
+	snapshotExportMeta, err := snapshot.NewSnapshotExportMeta(s.ctx, s.meta.Catalog)
 	if err != nil {
 		return err
 	}
-	s.snapshotExportManager = newSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager)
-	snapshotManager.exportManager = s.snapshotExportManager
+	s.snapshotExportManager = snapshot.NewSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager)
+	snapshotManager.ExportManager = s.snapshotExportManager
 	mlog.Info(s.ctx, "init snapshot manager done")
+
+	// s.ddl must be built after every DDLDeps source field is set and before RegisterDDLCallbacks.
+	s.ddl = newDDLCallbacks(s)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -502,15 +529,18 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
-		cli:              cli,
-		broker:           s.broker,
-		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
-		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
-		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
-		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
-		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-		importJobAlive: func(ctx context.Context, jobID int64) bool {
+	s.garbageCollector = gc.NewGarbageCollector(s.meta, s.handler, gc.GcOption{
+		Cli:              cli,
+		IndexMeta:        s.indexMeta,
+		AnalyzeMeta:      s.analyzeMeta,
+		SnapshotMeta:     s.snapshotMeta,
+		Broker:           s.broker,
+		Enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
+		CheckInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
+		ScanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
+		MissingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
+		DropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		ImportJobAlive: func(ctx context.Context, jobID int64) bool {
 			return s.importMeta.GetJob(ctx, jobID) != nil
 		},
 	})
@@ -519,7 +549,7 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 func (s *Server) initServiceDiscovery() error {
 	r := semver.MustParseRange(">=2.2.3")
 	if s.indexEngineVersionManager == nil {
-		s.indexEngineVersionManager = newIndexEngineVersionManager()
+		s.indexEngineVersionManager = index.NewIndexEngineVersionManager()
 	}
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
@@ -571,7 +601,7 @@ func (s *Server) rewatchQueryNodes(sessions map[string]*sessionutil.Session) err
 // Note: may apply same node multiple times, so rewatchDataNodes must be idempotent
 func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) error {
 	if s.indexEngineVersionManager == nil {
-		s.indexEngineVersionManager = newIndexEngineVersionManager()
+		s.indexEngineVersionManager = index.NewIndexEngineVersionManager()
 	}
 	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
 	if err != nil {
@@ -602,7 +632,7 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 
 func (s *Server) initSegmentManager() error {
 	if s.segmentManager == nil {
-		manager, err := newSegmentManager(s.meta, s.allocator)
+		manager, err := segment.NewSegmentManager(s.meta, s.allocator)
 		if err != nil {
 			return err
 		}
@@ -657,7 +687,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	reloadEtcdFn := func() error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		s.meta, err = meta.NewMeta(s.ctx, catalog, chunkManager, s.broker, loadDomainMetas(catalog, chunkManager, &s.domainMetas))
 		if err != nil {
 			return err
 		}
@@ -665,7 +695,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
 		go func() {
 			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+				return s.meta.ReloadCollectionsFromRootcoord(s.ctx, s.broker)
 			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
 		}()
 		return nil
@@ -675,19 +705,19 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initAnalyzeInspector() {
 	if s.analyzeInspector == nil {
-		s.analyzeInspector = newAnalyzeInspector(s.ctx, s.meta, s.globalScheduler)
+		s.analyzeInspector = analyze.NewAnalyzeInspector(s.ctx, s.meta, s.analyzeMeta, s.globalScheduler)
 	}
 }
 
 func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 	if s.indexInspector == nil {
-		s.indexInspector = newIndexInspector(s.ctx, s.notifyIndexChan, s.meta, s.globalScheduler, s.allocator, s.handler, storageCli, s.indexEngineVersionManager)
+		s.indexInspector = index.NewIndexInspector(s.ctx, s.notifyIndexChan, s.meta, s.indexMeta, s.globalScheduler, s.allocator, s.handler, storageCli, s.indexEngineVersionManager)
 	}
 }
 
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
-		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+		s.statsInspector = stats.NewStatsInspector(s.ctx, s.meta, s.statsTaskMeta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
 	}
 }
 
@@ -700,40 +730,41 @@ func (s *Server) initSegmentChangeInspector() {
 func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
-		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+		s.externalCollectionRefreshManager = externalrefresh.NewExternalCollectionRefreshManager(
+			s.ctx, s.meta, s.indexMeta, s.globalScheduler, s.allocator, s.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
 	}
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.loadMeta()
+	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.meta.Catalog, s.analyzeMeta, s.partitionStatsMeta)
+	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.LoadMeta()
 	s.compactionInspector = cph
-	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
+	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
 func (s *Server) stopCompaction() {
 	if s.compactionTrigger != nil {
-		s.compactionTrigger.stop()
+		s.compactionTrigger.Stop()
 	}
 	if s.compactionTriggerManager != nil {
 		s.compactionTriggerManager.Stop()
 	}
 
 	if s.compactionInspector != nil {
-		s.compactionInspector.stop()
+		s.compactionInspector.Stop()
 	}
 }
 
 func (s *Server) startCompaction() {
 	if s.compactionInspector != nil {
-		s.compactionInspector.start()
+		s.compactionInspector.Start()
 	}
 
 	if s.compactionTrigger != nil {
-		s.compactionTrigger.start()
+		s.compactionTrigger.Start()
 	}
 
 	if s.compactionTriggerManager != nil {
@@ -764,7 +795,7 @@ func (s *Server) startServerLoop() {
 		s.snapshotExportManager.Start()
 	}
 
-	s.garbageCollector.start()
+	s.garbageCollector.Start()
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -783,8 +814,8 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 			mlog.Warn(s.ctx, "collectMetaMetrics ctx done")
 			return
 		case <-ticker.C:
-			s.meta.statsTaskMeta.updateMetrics()
-			s.meta.indexMeta.updateIndexTasksMetrics()
+			s.statsTaskMeta.UpdateMetrics()
+			s.indexMeta.UpdateIndexTasksMetrics()
 		}
 	}
 }
@@ -798,8 +829,8 @@ func (s *Server) startTaskScheduler() {
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
-func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*SegmentInfo {
-	res := make([]*SegmentInfo, 0, len(flushableIDs))
+func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []int64) []*meta.SegmentInfo {
+	res := make([]*meta.SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
 		sinfo := s.meta.GetHealthySegment(ctx, id)
 		if sinfo == nil {
@@ -811,7 +842,7 @@ func (s *Server) getFlushableSegmentsInfo(ctx context.Context, flushableIDs []in
 	return res
 }
 
-func (s *Server) setLastFlushTime(segments []*SegmentInfo) {
+func (s *Server) setLastFlushTime(segments []*meta.SegmentInfo) {
 	for _, sinfo := range segments {
 		s.meta.SetLastFlushTime(sinfo.GetID(), time.Now())
 	}
@@ -987,19 +1018,19 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 2. notify RootCoord segment is flushed
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
-	segment := s.meta.GetHealthySegment(ctx, segmentID)
-	if segment == nil {
+	seg := s.meta.GetHealthySegment(ctx, segmentID)
+	if seg == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	if meta.EnableSortCompaction() {
 		select {
-		case getStatsTaskChSingleton() <- segmentID:
+		case meta.GetStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
 		select {
-		case getBuildIndexChSingleton() <- segmentID:
+		case meta.GetBuildIndexChSingleton() <- segmentID:
 		default:
 		}
 	}
@@ -1007,14 +1038,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	// Insert / delta counts come from Statistics. Stats array is iterated
 	// because Statistics doesn't carry a per-segment stat-file count — V3
 	// reports 0, matching the manifest-driven layout.
-	stats := segment.EnsureStats()
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(stats.GetInsertBinlogCount()))
+	st := seg.EnsureStats()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(st.GetInsertBinlogCount()))
 	statFileNum := 0
-	for _, fieldBinlog := range segment.GetStatslogs() {
+	for _, fieldBinlog := range seg.GetStatslogs() {
 		statFileNum += len(fieldBinlog.GetBinlogs())
 	}
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
-	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(stats.GetDeltaBinlogCount()))
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(st.GetDeltaBinlogCount()))
 
 	mlog.Info(ctx, "flush segment complete", mlog.Int64("id", segmentID))
 	return nil
@@ -1023,18 +1054,18 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 // recovery logic, fetch all Segment in `Flushing` state and do Flush notification logic
 func (s *Server) handleFlushingSegments(ctx context.Context) {
 	segments := s.meta.GetFlushingSegments()
-	for _, segment := range segments {
+	for _, seg := range segments {
 		// The old flushing segment may not be flushed, so we need to flush it again.
 		// It should be retry until success
-		if err := s.flushFlushingSegment(ctx, segment.ID); err != nil {
-			mlog.Warn(ctx, "flush flushing segment failed", mlog.FieldSegmentID(segment.ID), mlog.Err(err))
+		if err := s.flushFlushingSegment(ctx, seg.ID); err != nil {
+			mlog.Warn(ctx, "flush flushing segment failed", mlog.FieldSegmentID(seg.ID), mlog.Err(err))
 			return
 		}
-		mlog.Info(ctx, "flush flushing segment success", mlog.FieldSegmentID(segment.ID))
+		mlog.Info(ctx, "flush flushing segment success", mlog.FieldSegmentID(seg.ID))
 		select {
 		case <-ctx.Done():
 			return
-		case s.flushCh <- segment.ID:
+		case s.flushCh <- seg.ID:
 		}
 	}
 }
@@ -1043,11 +1074,11 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) error {
 	return retry.Do(ctx, func() error {
 		// set segment to SegmentState_Flushed
-		var operators []UpdateOperator
-		if enableSortCompaction() {
-			operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+		var operators []meta.UpdateOperator
+		if meta.EnableSortCompaction() {
+			operators = append(operators, meta.SetSegmentIsInvisible(segmentID, true))
 		}
-		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
+		operators = append(operators, meta.UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
 		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 			mlog.Warn(ctx, "flush segment complete failed", mlog.FieldSegmentID(segmentID), mlog.Err(err))
 			if ctx.Err() != nil {
@@ -1080,7 +1111,7 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	mlog.Info(s.ctx, "datacoord server shutdown")
-	s.garbageCollector.close()
+	s.garbageCollector.Close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()
@@ -1088,7 +1119,7 @@ func (s *Server) Stop() error {
 	}
 
 	if s.meta != nil {
-		s.meta.GetSnapshotMeta().Close()
+		s.snapshotMeta.Close()
 		mlog.Info(s.ctx, "datacoord snapshot meta closed")
 	}
 
@@ -1182,12 +1213,12 @@ func (s *Server) registerMetricsRequest() {
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
+			return s.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			return s.meta.indexMeta.TaskStatsJSON(), nil
+			return s.indexMeta.TaskStatsJSON(), nil
 		})
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.SyncTaskKey,
@@ -1208,7 +1239,7 @@ func (s *Server) registerMetricsRequest() {
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.IndexKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
-			return s.meta.indexMeta.GetIndexJSON(collectionID), nil
+			return s.indexMeta.GetIndexJSON(collectionID), nil
 		})
 	mlog.Info(s.ctx, "register metrics actions finished")
 }
@@ -1238,7 +1269,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	collInfo := &meta.CollectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,
@@ -1308,4 +1339,72 @@ func (s *Server) listLoadedSegments(ctx context.Context) ([]int64, error) {
 	}
 
 	return resp.SegmentIDs, nil
+}
+
+// domainMetas holds the per-domain metas that Server owns.
+type domainMetas struct {
+	indexMeta                     *index.IndexMeta
+	analyzeMeta                   *analyze.AnalyzeMeta
+	partitionStatsMeta            *partitionstats.PartitionStatsMeta
+	compactionTaskMeta            *ctask.CompactionTaskMeta
+	statsTaskMeta                 *stats.StatsTaskMeta
+	externalCollectionRefreshMeta *externalrefresh.ExternalCollectionRefreshMeta
+	snapshotMeta                  *snapshot.SnapshotMeta
+}
+
+// loadDomainMetas returns a DomainMetaLoader that builds every domain meta in parallel into out and returns the index catalog and the compaction protection.
+func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, out *domainMetas) meta.DomainMetaLoader {
+	return func(ctx context.Context, collectionIDs []int64, g *errgroup.Group) func() (meta.SegmentIndexCatalog, meta.CompactionProtection) {
+		g.Go(func() error {
+			var err error
+			out.indexMeta, err = index.NewIndexMeta(ctx, catalog, collectionIDs)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.analyzeMeta, err = analyze.NewAnalyzeMeta(ctx, catalog)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.partitionStatsMeta, err = partitionstats.NewPartitionStatsMeta(ctx, catalog)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.compactionTaskMeta, err = ctask.NewCompactionTaskMeta(ctx, catalog)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.statsTaskMeta, err = stats.NewStatsTaskMeta(ctx, catalog)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.externalCollectionRefreshMeta, err = externalrefresh.NewExternalCollectionRefreshMeta(
+				ctx,
+				catalog,
+				externalrefresh.WithExternalCollectionRefreshResultStore(
+					externalrefresh.NewExternalCollectionRefreshResultStore(chunkManager),
+				),
+			)
+			return err
+		})
+
+		g.Go(func() error {
+			var err error
+			out.snapshotMeta, err = snapshot.NewSnapshotMeta(ctx, catalog, chunkManager)
+			return err
+		})
+
+		return func() (meta.SegmentIndexCatalog, meta.CompactionProtection) {
+			return out.indexMeta, out.snapshotMeta
+		}
+	}
 }
