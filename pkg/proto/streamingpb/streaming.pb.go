@@ -1695,6 +1695,7 @@ type AssignmentDiscoverRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Command:
+	//
 	//	*AssignmentDiscoverRequest_ReportError
 	//	*AssignmentDiscoverRequest_Close
 	Command isAssignmentDiscoverRequest_Command `protobuf_oneof:"command"`
@@ -1872,6 +1873,7 @@ type AssignmentDiscoverResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*AssignmentDiscoverResponse_FullAssignment
 	//	*AssignmentDiscoverResponse_Close
 	Response isAssignmentDiscoverResponse_Response `protobuf_oneof:"response"`
@@ -2243,6 +2245,7 @@ type DeliverPolicy struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Policy:
+	//
 	//	*DeliverPolicy_All
 	//	*DeliverPolicy_Latest
 	//	*DeliverPolicy_StartFrom
@@ -2352,6 +2355,7 @@ type DeliverFilter struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Filter:
+	//
 	//	*DeliverFilter_TimeTickGt
 	//	*DeliverFilter_TimeTickGte
 	//	*DeliverFilter_MessageType
@@ -2843,6 +2847,7 @@ type ProduceRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
+	//
 	//	*ProduceRequest_Produce
 	//	*ProduceRequest_Close
 	Request isProduceRequest_Request `protobuf_oneof:"request"`
@@ -3069,6 +3074,7 @@ type ProduceResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*ProduceResponse_Create
 	//	*ProduceResponse_Produce
 	//	*ProduceResponse_Close
@@ -3237,6 +3243,7 @@ type ProduceMessageResponse struct {
 
 	RequestId int64 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Types that are assignable to Response:
+	//
 	//	*ProduceMessageResponse_Result
 	//	*ProduceMessageResponse_Error
 	Response isProduceMessageResponse_Response `protobuf_oneof:"response"`
@@ -3502,6 +3509,7 @@ type ConsumeRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
+	//
 	//	*ConsumeRequest_CreateVchannelConsumer
 	//	*ConsumeRequest_CreateVchannelConsumers
 	//	*ConsumeRequest_CloseVchannel
@@ -3869,6 +3877,7 @@ type CreateVChannelConsumerResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*CreateVChannelConsumerResponse_ConsumerId
 	//	*CreateVChannelConsumerResponse_Error
 	Response isCreateVChannelConsumerResponse_Response `protobuf_oneof:"response"`
@@ -4047,6 +4056,7 @@ type ConsumeResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*ConsumeResponse_Create
 	//	*ConsumeResponse_Consume
 	//	*ConsumeResponse_CreateVchannel
@@ -4440,6 +4450,7 @@ type TransformLogEntry struct {
 
 	TimeTick uint64 `protobuf:"varint,1,opt,name=time_tick,json=timeTick,proto3" json:"time_tick,omitempty"`
 	// Types that are assignable to Entry:
+	//
 	//	*TransformLogEntry_Delete
 	Entry isTransformLogEntry_Entry `protobuf_oneof:"entry"`
 }
@@ -5742,6 +5753,7 @@ type StreamingNodeWALMetrics struct {
 
 	Info *PChannelInfo `protobuf:"bytes,1,opt,name=info,proto3" json:"info,omitempty"`
 	// Types that are assignable to Metrics:
+	//
 	//	*StreamingNodeWALMetrics_Rw
 	//	*StreamingNodeWALMetrics_Ro
 	Metrics isStreamingNodeWALMetrics_Metrics `protobuf_oneof:"metrics"`
@@ -7066,10 +7078,12 @@ type StreamingNodeRunAnalyzerRequest struct {
 
 	Placeholder [][]byte `protobuf:"bytes,1,rep,name=placeholder,proto3" json:"placeholder,omitempty"`
 	// Types that are assignable to Source:
+	//
 	//	*StreamingNodeRunAnalyzerRequest_InlineAnalyzer
 	//	*StreamingNodeRunAnalyzerRequest_FieldAnalyzer
 	Source isStreamingNodeRunAnalyzerRequest_Source `protobuf_oneof:"source"`
 	// Types that are assignable to Operation:
+	//
 	//	*StreamingNodeRunAnalyzerRequest_Tokenize
 	//	*StreamingNodeRunAnalyzerRequest_PhraseMatch
 	//	*StreamingNodeRunAnalyzerRequest_Highlight
@@ -7446,6 +7460,7 @@ type StreamingNodeRunAnalyzerResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Result:
+	//
 	//	*StreamingNodeRunAnalyzerResponse_Tokenize
 	//	*StreamingNodeRunAnalyzerResponse_PhraseMatch
 	//	*StreamingNodeRunAnalyzerResponse_Highlight
@@ -7697,6 +7712,7 @@ type TransformRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
+	//
 	//	*TransformRequest_Create
 	//	*TransformRequest_CloseSubscription
 	//	*TransformRequest_CloseStream
@@ -7950,6 +7966,7 @@ type TransformResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*TransformResponse_Create
 	//	*TransformResponse_MessageBatch
 	//	*TransformResponse_SyncUp
@@ -8513,6 +8530,7 @@ type StreamingNodeGetCollectionSchemaRequest struct {
 	Vchannel string        `protobuf:"bytes,1,opt,name=vchannel,proto3" json:"vchannel,omitempty"`
 	Pchannel *PChannelInfo `protobuf:"bytes,2,opt,name=pchannel,proto3" json:"pchannel,omitempty"`
 	// Types that are assignable to Selector:
+	//
 	//	*StreamingNodeGetCollectionSchemaRequest_CurrentWrite
 	//	*StreamingNodeGetCollectionSchemaRequest_SchemaVersion
 	Selector isStreamingNodeGetCollectionSchemaRequest_Selector `protobuf_oneof:"selector"`
@@ -8871,6 +8889,7 @@ type ReplicaWatchRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
+	//
 	//	*ReplicaWatchRequest_Create
 	//	*ReplicaWatchRequest_CloseSubscription
 	//	*ReplicaWatchRequest_CloseStream
@@ -9105,6 +9124,7 @@ type ReplicaWatchResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*ReplicaWatchResponse_Create
 	//	*ReplicaWatchResponse_Snapshot
 	//	*ReplicaWatchResponse_SubscriptionError

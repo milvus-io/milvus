@@ -203,6 +203,7 @@ type FunctionParamValue struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Value:
+	//
 	//	*FunctionParamValue_BoolValue
 	//	*FunctionParamValue_Int64Value
 	//	*FunctionParamValue_DoubleValue
@@ -447,6 +448,7 @@ type ExecuteResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Result:
+	//
 	//	*ExecuteResponse_Outputs
 	//	*ExecuteResponse_Error
 	Result isExecuteResponse_Result `protobuf_oneof:"result"`
