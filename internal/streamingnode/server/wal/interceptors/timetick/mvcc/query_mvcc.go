@@ -183,20 +183,23 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 		delete(cm.frontiers, channel)
 		return
 	}
+	// A genesis record (CreateCollection, or the target replica of a SplitShard)
+	// or a RestoreSnapshot opens the vchannel's frontier; nothing else may.
+	genesis := messageutil.IsVChannelGenesisMessage(msg) || kind == message.MessageTypeRestoreSnapshot
 	current, live := cm.frontiers[channel]
-	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot {
+	if !live && !genesis {
 		return
 	}
 	if kind == message.MessageTypeCommitTxn && insertOnly {
 		kind = message.MessageTypeInsert
 	}
-	switch kind {
-	case message.MessageTypeCreateCollection, message.MessageTypeRestoreSnapshot:
+	switch {
+	case genesis:
 		current.GrowingTimetick = tick
 		current.TransformingTimetick = tick
-	case message.MessageTypeInsert:
+	case kind == message.MessageTypeInsert:
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
-	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
+	case kind == message.MessageTypeDelete, kind == message.MessageTypeCommitTxn:
 		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:

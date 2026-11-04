@@ -96,6 +96,11 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 				return err
 			}
 		}
+		// The same refusal as AddCollectionField: coll was re-read under the
+		// collection lock, so the split state it shows is current.
+		if err := refuseTextFieldDuringShardSplit(coll, plan.Field); err != nil {
+			return err
+		}
 		fieldNames := typeutil.NewSet[string]()
 		for _, field := range coll.Fields {
 			fieldNames.Insert(field.Name)

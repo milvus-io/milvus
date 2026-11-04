@@ -669,6 +669,16 @@ func (c *MockMixCoordClientInterface) WatchChannels(ctx context.Context, req *da
 	panic("implement me")
 }
 
+// CommitShardSplit records a committed shard split in datacoord.
+func (c *MockMixCoordClientInterface) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+// CheckShardSplitDrained reports whether a committed shard split's sources are drained.
+func (c *MockMixCoordClientInterface) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	panic("implement me")
+}
+
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
 func (c *MockMixCoordClientInterface) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	panic("implement me")
@@ -1148,6 +1158,37 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
 		assert.Equal(t, c.Schema.Name, "bar")
+	})
+
+	t.Run("carries shard routing facts", func(t *testing.T) {
+		shardInfos := []*schemapb.CollectionShardInfo{{
+			VchannelName: "by-dev-rootcoord-dml_2_2v0",
+			State:        schemapb.ShardState_ShardNormal,
+			Routing: &schemapb.CollectionShardInfo_HashRouting{
+				HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 1}},
+			},
+		}}
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 2,
+			Schema: &schemapb.CollectionSchema{
+				Name:   "split",
+				Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk"}},
+			},
+			ShardsNum:            1,
+			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_2"},
+			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_2_2v0"},
+			ShardInfos:           shardInfos,
+			RoutingModulus:       2,
+			ShardBy:              "hash($namespace_id)",
+		}, nil).Once()
+		c, err := cache.GetCollectionInfo(ctx, "foo", "split", 2)
+		assert.NoError(t, err)
+		assert.Len(t, c.ShardInfos, 1)
+		assert.Equal(t, "by-dev-rootcoord-dml_2_2v0", c.ShardInfos[0].GetVchannelName())
+		assert.Equal(t, []uint64{0, 1}, c.ShardInfos[0].GetHashRouting().GetBuckets())
+		assert.Equal(t, uint64(2), c.RoutingModulus)
+		assert.Equal(t, "hash($namespace_id)", c.ShardBy)
 	})
 }
 
