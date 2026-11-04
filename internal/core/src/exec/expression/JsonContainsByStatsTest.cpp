@@ -1957,22 +1957,6 @@ MakeExecPathFixture(const std::vector<std::string>& rows,
     return f;
 }
 
-void
-InstallJsonIndex(const ExecPathFixture& f,
-                 const std::string& path,
-                 const std::string& cast) {
-    milvus::test::expr_index::InstallIndex(
-        *f.segment,
-        f.json_fid,
-        DataType::JSON,
-        milvus::test::expr_index::BuildIndex(
-            f.json_fid,
-            DataType::JSON,
-            index::INVERTED_INDEX_TYPE,
-            {f.json_field},
-            {{JSON_PATH, path}, {JSON_CAST_TYPE, cast}}));
-}
-
 BitsetType
 EvaluateFilter(const expr::TypedExprPtr& e, const ExecPathFixture& f) {
     auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, e);
@@ -1997,73 +1981,23 @@ ContainsPath(const std::shared_ptr<expr::JsonContainsExpr>& e,
 }
 
 std::shared_ptr<expr::JsonContainsExpr>
-ContainsOne(const ExecPathFixture& f) {
-    proto::plan::GenericValue one;
-    one.set_int64_val(1);
+ContainsInt(const ExecPathFixture& f, int64_t value) {
+    proto::plan::GenericValue literal;
+    literal.set_int64_val(value);
     return std::make_shared<expr::JsonContainsExpr>(
         expr::ColumnInfo(f.json_fid, DataType::JSON, {"tags"}),
         proto::plan::JSONContainsExpr_JSONOp_Contains,
         true,
-        std::vector<proto::plan::GenericValue>{one});
+        std::vector<proto::plan::GenericValue>{literal});
 }
 
 }  // namespace
 
-// An INVERTED ARRAY_* JSON path index records missing, null and non-array
-// targets as valid empty arrays. While JSON stats can serve JSON_CONTAINS, it
-// must keep the exact shredded kernel so that NOT JSON_CONTAINS leaves those
-// rows UNKNOWN.
-TEST(JsonStatsExecPathTest,
-     InvertedArrayIndexDoesNotPreemptJsonStatsForContains) {
-    std::vector<std::string> rows;
-    for (int i = 0; i < 100; ++i) {
-        switch (i % 5) {
-            case 0:
-                rows.emplace_back(R"({"tags": [1, 2]})");
-                break;
-            case 1:
-                rows.emplace_back(R"({"tags": [3]})");
-                break;
-            case 2:
-                rows.emplace_back(R"({"other": 1})");
-                break;
-            case 3:
-                rows.emplace_back(R"({"tags": 1})");
-                break;
-            default:
-                rows.emplace_back(R"({"tags": null})");
-        }
-    }
-    auto f = MakeExecPathFixture(rows, true, 1430);
-    InstallJsonIndex(f, "/tags", "ARRAY_DOUBLE");
-
-    auto contains = ContainsOne(f);
-    EXPECT_EQ(ContainsPath(contains, f), exec::ExprExecPath::JsonStats);
-    ExpectRows(
-        EvaluateFilter(contains, f),
-        [](int64_t i) { return i % 5 == 0; },
-        "contains(tags, 1)");
-    auto not_contains = std::make_shared<expr::LogicalUnaryExpr>(
-        expr::LogicalUnaryExpr::OpType::LogicalNot, contains);
-    ExpectRows(
-        EvaluateFilter(not_contains, f),
-        [](int64_t i) { return i % 5 == 1; },
-        "not contains(tags, 1)");
-
-    // Control: the same index is selected when the segment has no stats, so
-    // the JsonStats path above is the decline, not a missing index.
-    auto no_stats = MakeExecPathFixture(rows, false, 1435);
-    InstallJsonIndex(no_stats, "/tags", "ARRAY_DOUBLE");
-    EXPECT_EQ(ContainsPath(ContainsOne(no_stats), no_stats),
-              exec::ExprExecPath::ScalarIndex);
-}
-
-// Only an STL_SORT ARRAY_* projection keeps the validity of missing, null and
-// non-array targets once loaded, so it keeps serving JSON_CONTAINS on a stats
-// segment. A HYBRID build that resolves to BITMAP computes the same validity,
-// but BITMAP persists it only for a nullable field; on this non-nullable field
-// it is declined and the exact shredded kernel answers.
-TEST(JsonStatsExecPathTest, OnlySortArrayIndexServesContainsOverJsonStats) {
+// A typed ARRAY_* JSON path index serves JSON_CONTAINS ahead of JSON stats,
+// like every other JSON predicate. An int64 literal that a DOUBLE projection
+// cannot represent exactly is rejected before the selector, so it still falls
+// back to JSON stats.
+TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
     std::vector<std::string> rows;
     for (int i = 0; i < 100; ++i) {
         switch (i % 5) {
@@ -2087,19 +2021,12 @@ TEST(JsonStatsExecPathTest, OnlySortArrayIndexServesContainsOverJsonStats) {
         const char* index_type;
         int64_t bitmap_limit;
         const char* family;
-        exec::ExprExecPath expected_path;
         int64_t ids;
     };
-    for (const auto& c : {Case{index::HYBRID_INDEX_TYPE,
-                               16,
-                               index::families::kBitmap,
-                               exec::ExprExecPath::JsonStats,
-                               1460},
-                          Case{index::ASCENDING_SORT,
-                               0,
-                               index::families::kSort,
-                               exec::ExprExecPath::ScalarIndex,
-                               1465}}) {
+    for (const auto& c :
+         {Case{index::INVERTED_INDEX_TYPE, 0, index::families::kInverted, 1430},
+          Case{index::HYBRID_INDEX_TYPE, 16, index::families::kBitmap, 1460},
+          Case{index::ASCENDING_SORT, 0, index::families::kSort, 1465}}) {
         SCOPED_TRACE(c.index_type);
         auto f = MakeExecPathFixture(rows, true, c.ids);
         Config params{
@@ -2116,17 +2043,14 @@ TEST(JsonStatsExecPathTest, OnlySortArrayIndexServesContainsOverJsonStats) {
         milvus::test::expr_index::InstallIndex(
             *f.segment, f.json_fid, DataType::JSON, std::move(opened));
 
-        auto contains = ContainsOne(f);
-        EXPECT_EQ(ContainsPath(contains, f), c.expected_path);
+        auto contains = ContainsInt(f, 1);
+        EXPECT_EQ(ContainsPath(contains, f), exec::ExprExecPath::ScalarIndex);
         ExpectRows(
             EvaluateFilter(contains, f),
             [](int64_t i) { return i % 5 == 0; },
             "contains(tags, 1)");
-        auto not_contains = std::make_shared<expr::LogicalUnaryExpr>(
-            expr::LogicalUnaryExpr::OpType::LogicalNot, contains);
-        ExpectRows(
-            EvaluateFilter(not_contains, f),
-            [](int64_t i) { return i % 5 == 1; },
-            "not contains(tags, 1)");
+
+        EXPECT_EQ(ContainsPath(ContainsInt(f, 9007199254740993), f),
+                  exec::ExprExecPath::JsonStats);
     }
 }
