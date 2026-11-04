@@ -27,6 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
@@ -146,6 +149,27 @@ func normalizeImportVersion(jobVersion internalpb.ImportVersion) (internalpb.Imp
 	}
 }
 
+// normalizeImportJobAutoCommit restores auto_commit for jobs persisted before
+// the field existed. Every job created by the current code sets AutoCommit from
+// IsAutoCommit(options), and manual-commit jobs carry auto_commit=false in
+// options. A job written by an older release (e.g. 2.6, before 2PC import) has
+// no auto_commit field, so it decodes as false and would otherwise sit in
+// Uncommitted forever waiting for a CommitImport that its caller never sends.
+// Terminal jobs are skipped: the unsupported-version envelope job is created
+// Failed without persisting options, and AutoCommit no longer drives progress
+// once a job is Completed or Failed.
+func normalizeImportJobAutoCommit(ctx context.Context, job *datapb.ImportJob) {
+	if job.GetAutoCommit() ||
+		job.GetState() == internalpb.ImportJobState_Completed ||
+		job.GetState() == internalpb.ImportJobState_Failed ||
+		!importutilv2.IsAutoCommit(job.GetOptions()) {
+		return
+	}
+	job.AutoCommit = true
+	mlog.Info(ctx, "restored auto_commit for import job persisted without it",
+		mlog.FieldJobID(job.GetJobID()), mlog.String("state", job.GetState().String()))
+}
+
 func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, alloc allocator.Allocator, meta *meta) (ImportMeta, error) {
 	tasks := newImportTasks()
 
@@ -216,6 +240,7 @@ func NewImportMeta(ctx context.Context, catalog metastore.DataCoordCatalog, allo
 			return nil, err
 		}
 		job.Version = jobVersion
+		normalizeImportJobAutoCommit(ctx, job)
 		jobs[job.GetJobID()] = &importJob{
 			ImportJob: job,
 			tr:        timerecord.NewTimeRecorder("import job"),
