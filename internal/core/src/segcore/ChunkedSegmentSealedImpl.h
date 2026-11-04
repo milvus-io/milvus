@@ -514,7 +514,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    search_pks(BitsetType& bitset, const std::vector<PkType>& pks) const;
+    search_pks(BitsetType& bitset,
+               const std::vector<PkType>& pks,
+               milvus::OpContext* op_ctx) const;
 
     void
     search_batch_pks(
@@ -1444,7 +1446,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     class StagedStateCommitter;
 
