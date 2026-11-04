@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -73,7 +74,7 @@ func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportT
 		}
 		task = newPreImportTaskV3(&datapb.PreImportTaskV3{
 			JobId: job.GetJobID(), TaskId: 31, CollectionId: job.GetCollectionID(),
-			NodeId: NullNodeID, State: datapb.ImportTaskStateV2_Pending, FileStats: stats,
+			NodeId: meta.NullNodeID, State: datapb.ImportTaskStateV2_Pending, FileStats: stats,
 		}, im)
 	} else {
 		stats := make([]*datapb.ImportFileStats, 0, len(job.GetFiles()))
@@ -83,7 +84,7 @@ func newPreImportWriterContextTask(t *testing.T, job *datapb.ImportJob) (ImportT
 		p := &PreImportTask{ImportMeta: im, Tr: timerecord.NewTimeRecorder("preimport key test"), times: taskcommon.NewTimes()}
 		p.Task.Store(&datapb.PreImportTask{
 			JobID: job.GetJobID(), TaskID: 31, CollectionID: job.GetCollectionID(),
-			NodeID: NullNodeID, State: datapb.ImportTaskStateV2_Pending, FileStats: stats,
+			NodeID: meta.NullNodeID, State: datapb.ImportTaskStateV2_Pending, FileStats: stats,
 		})
 		task = p
 	}
@@ -126,7 +127,7 @@ func TestPreImportWriterContext(t *testing.T) {
 						failed := im.GetJob(context.Background(), job.GetJobID())
 						require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
 						require.Contains(t, failed.GetReason(), tc.wantError)
-						require.Equal(t, int64(NullNodeID), task.GetNodeID())
+						require.Equal(t, int64(meta.NullNodeID), task.GetNodeID())
 						cluster.AssertNotCalled(t, "CreatePreImport", mock.Anything, mock.Anything, mock.Anything)
 						cluster.AssertNotCalled(t, "CreatePreImportV3", mock.Anything, mock.Anything, mock.Anything)
 						return
