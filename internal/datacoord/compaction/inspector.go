@@ -108,22 +108,11 @@ func (c *Inspector) SetCopySegmentMeta(provider any) {
 }
 
 func (c *Inspector) segmentChangeL0Exclusions() typeutil.Set[string] {
-	channels := typeutil.NewSet[string]()
-	m, ok := c.meta.(*meta.Meta)
-	if !ok {
-		return channels
-	}
+	var copyCollectionIDs []int64
 	if paramtable.Get().DataCoordCfg.SegmentChangeEnabled.GetAsBool() && c.copySegmentMeta != nil {
-		for _, id := range c.copySegmentMeta.ActiveCopyCollectionIDs() {
-			if coll := m.GetCollection(id); coll != nil {
-				channels.Insert(coll.VChannelNames...)
-			}
-		}
+		copyCollectionIDs = c.copySegmentMeta.ActiveCopyCollectionIDs()
 	}
-	for channel := range m.SegmentChangeL0Channels() {
-		channels.Insert(channel)
-	}
-	return channels
+	return c.meta.SegmentChangeL0Channels(copyCollectionIDs)
 }
 
 func (c *Inspector) GetCompactionInfo(ctx context.Context, triggerID int64) *policy.CompactionInfo {

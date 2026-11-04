@@ -34,6 +34,25 @@ func GroupHasCommittedImportFence(g *model.SegmentChangeGroup) bool {
 	return groupHasCommittedImportFence(g)
 }
 
+func (m *Meta) GetProducerChangeGroup(source model.SegmentChangeSource, jobID int64, channel string) *model.SegmentChangeGroup {
+	return m.ProducerChangeGroup(source, jobID, channel)
+}
+
+func (m *Meta) RecomputeCompactionDataView(ctx context.Context, collectionID int64) {
+	m.RecomputeDataView(ctx, collectionID)
+}
+
+func (m *Meta) CompactionContext() context.Context {
+	if m.Ctx != nil {
+		return m.Ctx
+	}
+	return context.TODO()
+}
+
+func (m *Meta) CompactionStorageRoot() string {
+	return m.ChunkManager.RootPath()
+}
+
 func (m *Meta) ProducerChangeGroup(source model.SegmentChangeSource, jobID int64, channel string) *model.SegmentChangeGroup {
 	m.SegMu.RLock()
 	defer m.SegMu.RUnlock()

@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -27,7 +28,16 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
+
+// Retry transient recovery failures, but fail fast on a durable integrity
+// violation instead of retrying it or projecting potentially partial data.
+func RetrySegmentChangeRecovery(ctx context.Context, reconcile func() error) error {
+	return retry.Do(ctx, reconcile, retry.Attempts(100), retry.RetryErr(func(err error) bool {
+		return !errors.Is(err, merr.ErrDataIntegrity)
+	}))
+}
 
 // reconcileSegmentChangeGroups runs with no RPCs, task workers, GC, or DataView
 // manager active. It must finish before RecoverManager projects SegmentMeta:

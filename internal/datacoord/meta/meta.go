@@ -63,6 +63,21 @@ import (
 )
 
 type CompactionMeta interface {
+	GetProducerChangeGroup(source model.SegmentChangeSource, jobID int64, channel string) *model.SegmentChangeGroup
+	StageAdmittedChange(ctx context.Context, group *model.SegmentChangeGroup, admitted bool, operators ...UpdateOperator) (*model.SegmentChangeGroup, bool, error)
+	AbortProducerChange(ctx context.Context, group *model.SegmentChangeGroup, reason string) error
+	RecomputeCompactionDataView(ctx context.Context, collectionID int64)
+	GetCompactionChangeGroup(task *datapb.CompactionTask) (*model.SegmentChangeGroup, error)
+	ReserveGroupSort(task *datapb.CompactionTask) bool
+	UnpublishedSegmentMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet
+	GetSegmentChangeGroupBySegmentID(ctx context.Context, segmentID int64) *model.SegmentChangeGroup
+	SegmentChangeL0Channels(copyCollectionIDs []int64) typeutil.Set[string]
+	CompactionContext() context.Context
+	CommitSegmentManifests(context.Context, []SegmentManifestCommit, ...UpdateOperator) error
+	CommitSegmentManifest(context.Context, SegmentManifestCommit) error
+	GetCollection(collectionID UniqueID) *CollectionInfo
+	GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool)
+	CompactionStorageRoot() string
 	GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo
 	GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo
 	SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo

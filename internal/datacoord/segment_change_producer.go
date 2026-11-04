@@ -67,6 +67,9 @@ func (s *Server) prepareImportPublication(ctx context.Context, job bulkimport.Im
 				inspector.evaluateStaged(ctx, g)
 			}
 			current := s.meta.GetSegmentChangeGroup(ctx, g.CollectionID, g.GroupID)
+			if current == nil {
+				return merr.WrapErrServiceUnavailableMsg("import group %d disappeared before WAL commit", g.GroupID)
+			}
 			if current.State != model.SegmentChangeStateReady {
 				return merr.WrapErrServiceUnavailableMsg("import group %d is not ready before WAL commit", g.GroupID)
 			}
@@ -88,6 +91,12 @@ func (s *Server) stageImportChangeFromSource(ctx context.Context, job bulkimport
 	defer inspector.Stop()
 	for _, g := range groups {
 		current := s.meta.GetSegmentChangeGroup(ctx, g.CollectionID, g.GroupID)
+		if current != nil && current.State == model.SegmentChangeStateStaged && source == model.SegmentChangeSourceCDCReplicated {
+			// A secondary did not run primary-side preparation. Evaluate it
+			// now so ready groups do not wait for the periodic inspector tick.
+			inspector.evaluateStaged(ctx, current)
+			current = s.meta.GetSegmentChangeGroup(ctx, g.CollectionID, g.GroupID)
+		}
 		if current != nil && current.State == model.SegmentChangeStateReady {
 			inspector.tryPublish(ctx, current)
 		}

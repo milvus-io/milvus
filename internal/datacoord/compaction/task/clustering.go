@@ -594,8 +594,16 @@ func (t *ClusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 }
 
 func (t *ClusteringCompactionTask) processIndexing() error {
-	if m, ok := t.meta.(*meta.Meta); ok && (Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() || m.ProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil) {
-		return t.completeTask()
+	if m, ok := t.meta.(*meta.Meta); ok {
+		if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
+			if _, _, err := m.StageAdmittedChange(context.TODO(), meta.ClusteringPublicationGroup(t.GetTaskProto()), true); err != nil {
+				return err
+			}
+			return t.completeTask()
+		}
+		if m.ProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+			return t.completeTask()
+		}
 	}
 	// wait for segment indexed
 	collectionIndexes := t.indexMeta.GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")

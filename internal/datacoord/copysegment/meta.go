@@ -80,6 +80,7 @@ import (
 //   - GetTask/GetTaskBy: Query tasks by ID or filters
 //   - RemoveTask: Delete task from metadata (garbage collection)
 type CopySegmentMeta interface {
+	ActiveCopyCollectionIDs() []int64
 	// Job operations
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error

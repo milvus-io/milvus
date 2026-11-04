@@ -41,6 +41,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func TestRetrySegmentChangeRecovery(t *testing.T) {
+	attempts := 0
+	require.NoError(t, retrySegmentChangeRecovery(t.Context(), func() error {
+		attempts++
+		if attempts < 3 {
+			return merr.WrapErrServiceUnavailableMsg("temporary recovery failure")
+		}
+		return nil
+	}))
+	require.Equal(t, 3, attempts)
+	attempts = 0
+	require.ErrorIs(t, retrySegmentChangeRecovery(t.Context(), func() error {
+		attempts++
+		return merr.WrapErrDataIntegrityMsg("missing committed member")
+	}), merr.ErrDataIntegrity)
+	require.Equal(t, 1, attempts)
+}
+
 // Exercise the real catalog encoder and ordered transaction fallback. Fail
 // either during the member chunks or before/after the final commit marker.
 type segmentChangeCrashKV struct {

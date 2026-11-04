@@ -191,6 +191,9 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 	callbacks.meta = m
 	job := callbacks.importMeta.GetJob(t.Context(), 1)
 	require.NoError(t, callbacks.prepareImportPublication(t.Context(), job))
+	missing := mockey.Mock((*meta).GetSegmentChangeGroup).Return((*model.SegmentChangeGroup)(nil)).Build()
+	require.ErrorIs(t, callbacks.prepareImportPublication(t.Context(), job), merr.ErrServiceUnavailable)
+	missing.UnPatch()
 	for _, g := range m.GetSegmentChangeGroupsByCollection(t.Context(), 100) {
 		require.True(t, g.AwaitCommitFence)
 		require.Zero(t, g.CommitTS)
@@ -203,6 +206,45 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 		require.Equal(t, ts, m.GetSegment(t.Context(), id).GetCommitTimestamp())
 		require.False(t, m.GetSegment(t.Context(), id).GetIsInvisible())
 	}
+}
+
+func TestSegmentChangeCDCImportPublishesReadyGroupWithoutInspectorTick(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	m, _, _ := seedMixProducer(t)
+	m.dataViewManager = nil
+	m.AddCollection(&collectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
+	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+		IsImporting: true, IsSorted: true, NumOfRows: 10,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
+	})))
+	s := &Server{meta: m, allocator: newMockAllocator(t)}
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
+	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Equal(t, model.SegmentChangeStateCommitted, m.producerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
+	require.False(t, m.GetSegment(t.Context(), 10).GetIsInvisible())
+}
+
+func TestSegmentChangeCDCImportWaitsForUnreadyGroup(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	m, _, _ := seedMixProducer(t)
+	m.dataViewManager = nil
+	m.AddCollection(&collectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
+	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+		IsImporting: true, NumOfRows: 10,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
+	})))
+	s := &Server{meta: m, allocator: newMockAllocator(t)}
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
+	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
+	require.True(t, handled)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, model.SegmentChangeStateStaged, m.producerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
+	require.True(t, m.GetSegment(t.Context(), 10).GetIsInvisible())
 }
 
 func TestSegmentChangeSchemaBumpReplacement(t *testing.T) {

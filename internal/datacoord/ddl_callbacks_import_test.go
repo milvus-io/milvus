@@ -1440,6 +1440,30 @@ func TestBroadcastCommitImportMarksStartedAfterPreparation(t *testing.T) {
 	require.True(t, restored.GetJob(ctx, 7).GetCommitBroadcastStarted())
 }
 
+func TestBroadcastCommitImportClearsOnlyProvenUnsentFence(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	for _, tc := range []struct {
+		name       string
+		priorFence bool
+		err        error
+		wantFence  bool
+	}{
+		{"not_created", false, broadcaster.ErrBroadcastTaskNotCreated, false},
+		{"ambiguous", false, merr.ErrServiceUnavailable, true},
+		{"prior_attempt", true, broadcaster.ErrBroadcastTaskNotCreated, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := &importJob{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: tc.priorFence}}
+			server := newBroadcastImportTestServer(t, job)
+			capture := &captureBroadcastAPI{err: tc.err}
+			patch := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(capture, nil).Build()
+			defer patch.UnPatch()
+			require.ErrorIs(t, server.broadcastCommitImportMessage(t.Context(), job), tc.err)
+			require.Equal(t, tc.wantFence, server.importMeta.GetJob(t.Context(), 7).GetCommitBroadcastStarted())
+		})
+	}
+}
+
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
 // RollbackImport WAL message is broadcast to the job's data vchannels and CChannel,
 // matching the CommitImport routing.

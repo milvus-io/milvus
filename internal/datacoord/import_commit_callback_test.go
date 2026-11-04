@@ -78,6 +78,12 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 	return server, catalog, result
 }
 
+func newLegacyImportCommitCallbackTest(t *testing.T) (*DDLCallbacks, *datacoordkv.Catalog, message.BroadcastResultCommitImportMessageV2) {
+	t.Helper()
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
+	return newImportCommitCallbackTest(t)
+}
+
 func TestImportCommitCallbackPublishesPerChannelVisibility(t *testing.T) {
 	server, catalog, result := newImportCommitCallbackTest(t)
 	ctx := context.Background()
@@ -304,6 +310,7 @@ func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
 // ImportTaskV3 records, and the same visibility fence (per-channel commit
 // timestamp + is_importing clear) and Completed transition apply.
 func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ctx := context.Background()
 	catalog := &datacoordkv.Catalog{MetaKv: meta.NewMetaMemoryKV()}
 	imports, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)

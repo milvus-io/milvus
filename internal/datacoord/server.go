@@ -889,7 +889,9 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 	// Resolve interrupted group writes before RecoverManager projects any
 	// SegmentMeta or starts its asynchronous recompute worker.
-	if err := recoveredMeta.ReconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator); err != nil {
+	if err := meta.RetrySegmentChangeRecovery(s.ctx, func() error {
+		return recoveredMeta.ReconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator)
+	}); err != nil {
 		return err
 	}
 

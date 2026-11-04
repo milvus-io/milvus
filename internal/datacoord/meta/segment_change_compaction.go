@@ -29,10 +29,15 @@ import (
 )
 
 // SegmentChangeL0Channels returns channels protected by nonterminal groups.
-func (m *Meta) SegmentChangeL0Channels() typeutil.Set[string] {
+func (m *Meta) SegmentChangeL0Channels(copyCollectionIDs []int64) typeutil.Set[string] {
+	channels := typeutil.NewSet[string]()
+	for _, id := range copyCollectionIDs {
+		if coll := m.GetCollection(id); coll != nil {
+			channels.Insert(coll.VChannelNames...)
+		}
+	}
 	m.SegMu.RLock()
 	defer m.SegMu.RUnlock()
-	channels := typeutil.NewSet[string]()
 	for _, g := range m.segmentChangeGroups {
 		if g.IsTerminal() {
 			continue

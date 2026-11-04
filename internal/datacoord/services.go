@@ -3353,6 +3353,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
+	isNotCreated := broadcaster.IsBroadcastTaskNotCreated
 	broadcaster, err := s.ddl.StartBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3361,13 +3362,17 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 	if err := s.prepareImportPublication(ctx, job); err != nil {
 		return err
 	}
+	markedByAttempt := false
 	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
 		(s.meta != nil && len(s.meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
 		// Preparation may have registered groups long before they became READY.
 		// Persist the point of no return immediately before starting the WAL
 		// broadcast. Timeout and other failure updates share importMeta's lock
 		// with this action and cannot reclaim a possibly durable commit.
-		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), bulkimport.UpdateJobCommitBroadcastStarted); err != nil {
+		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			markedByAttempt = current.GetState() == internalpb.ImportJobState_Uncommitted && !current.GetCommitBroadcastStarted()
+			bulkimport.UpdateJobCommitBroadcastStarted(current)
+		}); err != nil {
 			return err
 		}
 		current := s.importMeta.GetJob(ctx, job.GetJobID())
@@ -3393,6 +3398,20 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
+	if err != nil && markedByAttempt && isNotCreated(err) {
+		// Only the broadcaster's explicit pre-registration result proves that
+		// this attempt cannot have reached the WAL. A prior attempt or an
+		// ambiguous error must keep the fence for recovery.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if clearErr := s.importMeta.UpdateJob(cleanupCtx, job.GetJobID(), func(current bulkimport.ImportJob) {
+			if current.GetState() == internalpb.ImportJobState_Uncommitted {
+				current.(*bulkimport.Job).CommitBroadcastStarted = false
+			}
+		}); clearErr != nil {
+			mlog.Warn(ctx, "failed to clear import broadcast marker after rejected task", mlog.FieldJobID(job.GetJobID()), mlog.Err(clearErr))
+		}
+	}
 	return err
 }
 

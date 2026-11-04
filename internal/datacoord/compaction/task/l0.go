@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*L0CompactionTask)(nil)
@@ -317,10 +316,7 @@ func (t *L0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	excluded := typeutil.NewUniqueSet()
-	if m, ok := t.meta.(*meta.Meta); ok {
-		excluded = m.UnpublishedSegmentMembers(context.TODO(), taskProto.GetCollectionID())
-	}
+	excluded := t.meta.UnpublishedSegmentMembers(context.TODO(), taskProto.GetCollectionID())
 	// Select flushed L1/L2 segments for LevelZero compaction that meets the condition:
 	// dmlPos < triggerInfo.pos
 	flushedSegments := t.meta.SelectSegments(context.TODO(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
@@ -572,16 +568,10 @@ func (t *L0CompactionTask) commitL0V3DeltalogsBatch(ctx context.Context, deltalo
 			commits = append(commits, *commit)
 		}
 	}
-	manifestMeta, ok := t.meta.(interface {
-		CommitSegmentManifests(context.Context, []meta.SegmentManifestCommit, ...meta.UpdateOperator) error
-	})
-	if !ok {
-		return merr.WrapErrServiceInternalMsg("L0 StorageV3 batch manifest commit requires DataCoord meta implementation")
-	}
 	// Delegate even when commits is empty: CommitSegmentManifests still publishes
 	// extraOperators through a plain UpdateSegmentsInfo, so the input retirement
 	// lands when every target was skipped mid-plan.
-	return manifestMeta.CommitSegmentManifests(ctx, commits, extraOperators...)
+	return t.meta.CommitSegmentManifests(ctx, commits, extraOperators...)
 }
 
 // buildL0V3ManifestCommit assembles one target's manifest commit, or returns a nil
