@@ -238,6 +238,15 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	return collectionSchemaVersion, nil
 }
 
+func (m *shardManagerImpl) GetCollectionSchemaSnapshot(collectionID int64) *schemapb.CollectionSchema {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if collection := m.collections[collectionID]; collection != nil {
+		return collection.Schema.GetSchema()
+	}
+	return nil
+}
+
 func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -295,6 +304,8 @@ func (m *shardManagerImpl) GetPrimaryKeyDescriptor(collectionID int64, schemaVer
 	return primaryKeyDescriptorFromSchema(collectionInfo.Schema.GetSchema())
 }
 
+// GetAllCollectionSchemaInfos returns a new map containing immutable schema
+// snapshots. Callers must not mutate the schemas or their nested values.
 func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSchemaInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -306,7 +317,7 @@ func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSch
 		}
 		infos[collectionID] = CollectionSchemaInfo{
 			VChannel: collectionInfo.VChannel,
-			Schema:   proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema),
+			Schema:   collectionInfo.Schema.GetSchema(),
 		}
 	}
 	return infos
