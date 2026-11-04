@@ -156,6 +156,11 @@ func (t *ClusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	defer func() {
 		t.retryOnError(err)
 	}()
+	mlog.Info(context.TODO(), "QueryTaskOnWorker ", mlog.String("state", t.GetTaskProto().GetState().String()))
+	if t.GetTaskProto().State != datapb.CompactionTaskState_executing {
+		t.Process()
+		return
+	}
 
 	var result *datapb.CompactionPlanResult
 	result, err = cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
@@ -364,7 +369,6 @@ func (t *ClusteringCompactionTask) retryableProcess(ctx context.Context) error {
 		t.GetTaskProto().State == datapb.CompactionTaskState_timeout {
 		return nil
 	}
-
 	coll, err := t.handler.GetCollection(ctx, t.GetTaskProto().GetCollectionID())
 	if err != nil {
 		// retryable
@@ -704,6 +708,9 @@ func (t *ClusteringCompactionTask) processAnalyzing() error {
 	case indexpb.JobState_JobStateFailed:
 		mlog.Warn(context.TODO(), "analyze task fail", mlog.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
 		return merr.WrapErrServiceInternalMsg(analyzeTask.FailReason)
+	case indexpb.JobState_JobStateNone:
+		mlog.Warn(context.TODO(), "analyze task state none failure", mlog.Int64("analyzeID", t.GetTaskProto().GetAnalyzeTaskID()))
+		return merr.WrapErrServiceInternalMsg("State none")
 	default:
 	}
 	return nil
@@ -829,10 +836,12 @@ func (t *ClusteringCompactionTask) doAnalyze() error {
 		mlog.Warn(context.TODO(), "failed to create analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
 		return err
 	}
+	task := analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta.Meta), t.analyzeMeta)
+	t.analyzeScheduler.Enqueue(task)
 
-	t.analyzeScheduler.Enqueue(analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta.Meta), t.analyzeMeta))
-
-	mlog.Info(context.TODO(), "submit analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()), mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
+	mlog.Info(context.TODO(), "submit analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Int64s("SegmentIDs:", task.SegmentIDs),
+		mlog.Int64s("analyzeTask.SegmentIDs:", analyzeTask.SegmentIDs),
+		mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()), mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 	return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_analyzing))
 }
 

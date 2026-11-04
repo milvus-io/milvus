@@ -203,7 +203,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Equal(true, s.task.memoryLimit > 0)
 	s.Equal(8, s.task.getWorkerPoolSize())
 	s.Equal(8, s.task.mappingPool.Cap())
-	s.Equal(8, s.task.flushPool.Cap())
+	s.Equal(16, s.task.flushPool.Cap())
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionInitRejectsMissingPrimaryKey() {
@@ -835,6 +835,12 @@ func (s *ClusteringCompactionTaskSuite) checkMappingRecords(vector bool, ttlCuto
 		s.task.binlogIO = &clusteringOffsetReader{BinlogIO: s.mockBinlogIO, offsets: encoded}
 		s.task.isVectorClusteringKey = true
 		s.task.segmentIDOffsetMapping = map[int64]string{s.plan.SegmentBinlogs[0].SegmentID: "offsets"}
+		// Vector clustering reads the centroid-id mapping from mappingStatsCache,
+		// which production populates during preparation (see loadMappingStats).
+		// Mirror that here so mappingSegment finds the per-segment stats.
+		s.task.mappingStatsCache = map[int64]*clusteringpb.ClusteringCentroidIdMappingStats{
+			s.plan.SegmentBinlogs[0].SegmentID: {CentroidIdMapping: ids},
+		}
 		nextOffset := int64(0)
 		s.task.offsetToBufferFunc = func(offset int64, mapping []uint32) *ClusterBuffer {
 			if nextOffset == 100 {
@@ -939,7 +945,7 @@ func newClusteringTestBuffer(t *testing.T, schema *schemapb.CollectionSchema, ba
 		return nil
 	}).Maybe()
 	task := &clusteringCompactionTask{bufferSize: int64(batchBytes), compactionParams: params}
-	opts := append(task.getWriterOpts(), storage.WithColumnGroups([]storagecommon.ColumnGroup{
+	opts := append(task.getWriterOpts(packed.DefaultMultiPartUploadSize), storage.WithColumnGroups([]storagecommon.ColumnGroup{
 		{GroupID: 0, Fields: []int64{0, 1, 100, 101, 102}, Columns: []int{0, 1, 2, 3, 4}},
 		{GroupID: 103, Fields: []int64{103}, Columns: []int{5}},
 		{GroupID: 104, Fields: []int64{104, 105, 106, 107, 108, 109, 110, 111}, Columns: []int{6, 7, 8, 9, 10, 11, 12, 13}},
