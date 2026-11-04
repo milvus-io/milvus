@@ -1878,6 +1878,14 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	loadInfos []*querypb.SegmentLoadInfo,
 ) error {
+	// Reopen hands binlog paths to segcore the same way Load does, so storage
+	// v2 paths need the bucket name prefix here as well. Without it the
+	// column group reader resolves "<rootPath>/insert_log/..." with rootPath
+	// as the bucket and fails with "Path does not exist".
+	for _, info := range loadInfos {
+		addBucketNameStorageV2(info)
+	}
+
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)

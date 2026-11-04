@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
@@ -956,6 +957,66 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			suite.NoError(<-results)
 		}
 	})
+}
+
+func (suite *SegmentLoaderDetailSuite) TestReopenSegmentsAddsBucketNameForStorageV2() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "remote")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+	bucket := paramtable.Get().MinioCfg.BucketName.GetValue()
+
+	newInfo := func(segmentID int64, storageVersion int64) *querypb.SegmentLoadInfo {
+		return &querypb.SegmentLoadInfo{
+			SegmentID:      segmentID,
+			CollectionID:   suite.collectionID,
+			PartitionID:    suite.partitionID,
+			StorageVersion: storageVersion,
+			NumOfRows:      10,
+			InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID:     1,
+					ChildFields: []int64{102, 103},
+					Binlogs: []*datapb.Binlog{
+						{LogID: 1, LogPath: fmt.Sprintf("root/insert_log/%d/%d/%d/1/1", suite.collectionID, suite.partitionID, segmentID), LogSize: 10, MemorySize: 10, EntriesNum: 10},
+					},
+				},
+			},
+		}
+	}
+
+	cases := []struct {
+		name           string
+		storageVersion int64
+		wantPrefix     bool
+	}{
+		{"storage_v2", 2, true},
+		{"storage_v1", 0, false},
+	}
+	for i, tc := range cases {
+		suite.Run(tc.name, func() {
+			segmentID := suite.segmentID + int64(i) + 1
+			info := newInfo(segmentID, tc.storageVersion)
+			origin := info.GetBinlogPaths()[0].GetBinlogs()[0].GetLogPath()
+
+			seg := NewMockSegment(suite.T())
+			var reopened *querypb.SegmentLoadInfo
+			seg.EXPECT().Reopen(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, li *querypb.SegmentLoadInfo) error {
+				reopened = li
+				return nil
+			}).Once()
+			suite.segmentManager.EXPECT().Exist(segmentID, mock.Anything).Return(false).Maybe()
+			suite.segmentManager.EXPECT().GetSealed(segmentID).Return(seg).Once()
+
+			suite.NoError(suite.loader.ReopenSegments(context.Background(), []*querypb.SegmentLoadInfo{info}))
+			suite.Require().NotNil(reopened)
+			got := reopened.GetBinlogPaths()[0].GetBinlogs()[0].GetLogPath()
+			if tc.wantPrefix {
+				suite.Equal(path.Join(bucket, origin), got)
+			} else {
+				suite.Equal(origin, got)
+			}
+		})
+	}
 }
 
 func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
