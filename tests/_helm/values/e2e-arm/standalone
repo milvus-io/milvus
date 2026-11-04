@@ -23,6 +23,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    etcd:
+      # The isolated etcd pod and its DNS may need more than 5s to become ready.
+      # Keep the initial config connection alive so runtime config updates work.
+      dialTimeout: 60000
     grpc:
       client:
         compressionEnabled: true
