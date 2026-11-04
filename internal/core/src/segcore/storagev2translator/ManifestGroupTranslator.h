@@ -66,6 +66,9 @@ FetchColumnSizeEstimates(milvus_storage::api::ChunkReader& chunk_reader);
  */
 class ManifestGroupTranslator
     : public milvus::cachinglayer::Translator<milvus::GroupChunk> {
+    using CellResults = std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<value_type>>>;
+
  public:
     /**
      * @brief Construct a translator for a column group
@@ -174,6 +177,12 @@ class ManifestGroupTranslator
     get_cells(milvus::OpContext* ctx,
               const std::vector<milvus::cachinglayer::cid_t>& cids) override;
 
+    // Borrows ctx/cids and this translator until all issued loading work drains.
+    // Synchronous transport may still block; async transport suspends on I/O.
+    folly::coro::Task<CellResults>
+    get_cells_async(milvus::OpContext* ctx,
+                    const std::vector<cachinglayer::cid_t>& cids) override;
+
     /**
      * @brief Get the metadata object for this translator
      *
@@ -208,6 +217,11 @@ class ManifestGroupTranslator
     }
 
  private:
+    // Shared operation for synchronous callers and the asynchronous cache path.
+    folly::coro::Task<CellResults>
+    load_cells(milvus::OpContext* ctx,
+               const std::vector<cachinglayer::cid_t>& cids);
+
     using CellResult = std::pair<milvus::cachinglayer::cid_t,
                                  std::unique_ptr<milvus::GroupChunk>>;
 
@@ -218,7 +232,7 @@ class ManifestGroupTranslator
                      std::vector<milvus::segcore::CellSpec> cell_specs) const;
 
     // Loads cells through the Storage V3 coroutine pipeline.
-    std::vector<CellResult>
+    folly::coro::Task<CellResults>
     get_cells_via_async_pipeline(
         milvus::OpContext* ctx,
         std::vector<milvus::segcore::CellSpec> cell_specs) const;
