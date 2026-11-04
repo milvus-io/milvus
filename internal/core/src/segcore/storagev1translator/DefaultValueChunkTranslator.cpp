@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "storage/LocalFileIOPool.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -388,6 +389,25 @@ std::vector<
 DefaultValueChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    return load_cells(cids);
+}
+
+folly::coro::Task<DefaultValueChunkTranslator::CellResults>
+DefaultValueChunkTranslator::get_cells_async(
+    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
+    if (struct_offsets_ && use_mmap_ && !mmap_dir_path_.empty()) {
+        CellResults result;
+        co_await storage::RunLocalFileIOAsync(
+            [&] { result = load_cells(cids); },
+            proto::common::LoadPriority::HIGH);
+        co_return result;
+    }
+    co_return load_cells(cids);
+}
+
+DefaultValueChunkTranslator::CellResults
+DefaultValueChunkTranslator::load_cells(
+    const std::vector<cachinglayer::cid_t>& cids) {
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         res;
