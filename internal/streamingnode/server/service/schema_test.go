@@ -40,7 +40,7 @@ func TestSchemaNativeTransport(t *testing.T) {
 			if req.GetCurrentWrite() {
 				version = 5
 			}
-			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{Version: version}, EffectiveTimeTick: 100}, nil
+			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{Version: version}}, nil
 		}).Build()
 		listener := bufconn.Listen(1024 * 1024)
 		server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))

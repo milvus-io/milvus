@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -514,6 +515,7 @@ func TestProxyFunctionEdit(t *testing.T) {
 }
 
 func TestProxy_ResourceGroup(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 
@@ -599,6 +601,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 }
 
 func TestProxy_InvalidResourceGroupName(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 
@@ -1388,6 +1391,7 @@ func TestProxyDescribeDatabase(t *testing.T) {
 }
 
 func TestProxyDescribeCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 	ctx := context.Background()
@@ -1541,6 +1545,7 @@ func TestProxy_AllocTimestamp(t *testing.T) {
 }
 
 func TestProxy_Delete(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	collectionName := "test_delete"
 	collectionID := int64(111)
 	partitionName := "default"
@@ -1634,6 +1639,7 @@ func TestProxy_Delete(t *testing.T) {
 }
 
 func TestProxy_ImportV2(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 
@@ -2652,6 +2658,7 @@ func searchByPKRequest(ids []int64) *milvuspb.SearchRequest {
 // treats the Nq dimension positionally: result block N belongs to ids[N]. The
 // rewritten placeholder group must therefore follow the request's ID order.
 func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrder", t, func() {
 		paramtable.Init()
 
@@ -2693,6 +2700,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 // the value the query result's PK column yields, and looked up with the value
 // the request's IDs yield; both must be the same Go type for a string key.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK", t, func() {
 		paramtable.Init()
 
@@ -2746,6 +2754,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 // validData is consumed positionally by adjustSearchResultsForNullVectors, so
 // it must follow the request's ID order too, not the query result's PK order.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForValidData", t, func() {
 		paramtable.Init()
 
@@ -2789,6 +2798,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 // block per requested ID. Reordering the fetched rows must not lose the
 // typed-but-empty vector payload that carries this case.
 func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch", t, func() {
 		paramtable.Init()
 
@@ -2892,6 +2902,7 @@ func searchByPKBM25QueryResult(pks []int64, texts []string, validData []bool) *m
 // so that Nq equals the number of true entries in validData -- the contract
 // adjustSearchResultsForNullVectors re-expands the result blocks from.
 func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_CompactsNullableBM25Text", t, func() {
 		paramtable.Init()
 
@@ -2928,6 +2939,7 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 }
 
 func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch", t, func() {
 		paramtable.Init()
 
@@ -3019,6 +3031,7 @@ func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
 }
 
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	cache := &MetaCache{}
 
 	// Create external collection schema
@@ -3947,6 +3960,7 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 }
 
 func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	node, err := NewProxy(ctx, factory)
@@ -4056,6 +4070,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
 }
 
 func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	ctx := context.Background()
 	node := &Proxy{mixCoord: &MixCoordMock{}}

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -40,6 +41,7 @@ import (
 )
 
 func TestDescribeCollectionCachedVisibility(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	require.NoError(t, Params.Save(Params.ProxyCfg.EnableCachedServiceProvider.Key, "true"))
 	t.Cleanup(func() {

@@ -9372,6 +9372,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
 	// WAL payload chunking rollout switch.
@@ -9497,6 +9498,9 @@ type streamingConfig struct {
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
+	p.SchemaCacheTTL = ParamItem{Key: "streaming.schemaCacheTTL", Version: "3.0.5", DefaultValue: "900", Doc: "Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.", Export: true}
+	p.SchemaCacheTTL.Init(base.mgr)
+
 	p.SplitChunkSN = ParamItem{
 		Key:          "streaming.splitChunkSN",
 		Version:      "3.0.2",

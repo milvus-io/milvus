@@ -331,7 +331,9 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		if pchannel == "" || assign != nil {
 			createResult, err := create(callCtx, assign)
 			if err == nil {
-				logger.Info(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				if mlog.LevelEnabled(mlog.DebugLevel) {
+					logger.Debug(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				}
 				return createResult, nil
 			}
 			logger.Warn(ctx, "create handler failed", mlog.Any("assignment", assign), mlog.Err(err))

@@ -1183,9 +1183,6 @@ message StreamingNodeGetCollectionSchemaRequest {
 
 message StreamingNodeGetCollectionSchemaResponse {
     schema.CollectionSchema schema = 1;
-    // Zero means the exact effective boundary is unknown for a legacy schema
-    // baseline, not proof that the channel has crossed a schema boundary.
-    uint64 effective_time_tick = 2;
 }
 
 // Analyzer validation is collection-independent. Business failures use Status;
