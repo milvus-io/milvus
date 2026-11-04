@@ -473,6 +473,11 @@ class ArrayEqualityCountingIndex final
 
     std::shared_ptr<size_t> callback_calls;
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();

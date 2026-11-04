@@ -11374,7 +11374,7 @@ ChunkedSegmentSealedImpl::prefetch_vector(milvus::OpContext* op_ctx,
         const auto* vector =
             dynamic_cast<const index::IVectorReader*>(index_reader.get());
         AssertInfo(vector != nullptr, "invalid vector reader");
-        vector->Prefetch();
+        index_reader->Prefetch();
     } else {
         this->prefetch_chunks_locked(op_ctx, field_id);
     }

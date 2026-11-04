@@ -1412,7 +1412,7 @@ TEST(SealedLazyIndexSlot, CardinalMissingArtifactRetriesAtFirstPin) {
             const auto* reader =
                 dynamic_cast<const index::IVectorReader*>(failed.get());
             ASSERT_NE(reader, nullptr);
-            reader->Prefetch();
+            failed->Prefetch();
         },
         std::exception);
     // Metadata may already be resolved; the engine load must remain retryable.

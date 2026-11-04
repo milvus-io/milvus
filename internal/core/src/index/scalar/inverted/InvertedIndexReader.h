@@ -164,6 +164,11 @@ class InvertedIndexReader final
 
     ~InvertedIndexReader() override;
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 

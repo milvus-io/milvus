@@ -4419,6 +4419,9 @@ class SegmentExpr : public Expr {
             return;
         }
         EnsureExecPathDetermined();
+        if (exec_path_ != ExprExecPath::RawData && selected_reader_ != nullptr) {
+            selected_reader_->Prefetch();
+        }
         if (exec_path_ == ExprExecPath::RawData) {
             auto column = CaptureDataScanResources().first;
             if (!UsesLegacyChunkPrefetch(column.get())) {

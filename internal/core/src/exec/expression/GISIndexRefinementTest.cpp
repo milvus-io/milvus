@@ -68,6 +68,11 @@ class InterceptedSpatialCandidates final : public index::IIndexReaderBase,
         : reader_(std::move(reader)), hook_(std::move(hook)) {
     }
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();

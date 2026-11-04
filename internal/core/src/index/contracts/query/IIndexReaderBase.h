@@ -44,6 +44,13 @@ class IIndexReaderBase {
  public:
     virtual ~IIndexReaderBase() = default;
 
+    // Explicitly prepare query storage using the bound context. Synchronous;
+    // callers schedule overlap. Single-cell readers retain the loaded cell for
+    // subsequent operations. Already-resident views need no preparation.
+    virtual void
+    Prefetch() const {
+    }
+
     // Reader self-description for consistency checks. Execution-path selection
     // uses the inventory's metadata-derived copy before creating the reader.
     virtual ReaderCaps

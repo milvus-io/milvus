@@ -50,6 +50,8 @@
 #include "exec/expression/LikeConjunctExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/scalar/sort/SortedIndexReader.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
@@ -782,6 +784,109 @@ TEST_F(RawExprCacheAdapterTest, CacheMissPrefetchUsesSinglePoolTask) {
 
     EXPECT_EQ(input->prefetch_count, 1);
     EXPECT_EQ(pool->submitted_tasks(), 1);
+}
+
+TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {
+    ExprResCacheManager::SetEnabled(false);
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    int load_count = 0;
+    using Storage = index::SortedIndexStorage<std::string_view>;
+    auto load = [&](OpContext*) -> folly::coro::Task<std::unique_ptr<Storage>> {
+        ++load_count;
+        auto offsets = std::make_shared<const std::vector<int32_t>>(
+            std::initializer_list<int32_t>{0, 1, 0});
+        Storage::OpenArgs args;
+        args.state.valid_bitset = std::make_shared<TargetBitmap>(3, true);
+        args.state.idx_to_offsets = offsets->data();
+        args.state.idx_to_offsets_size = offsets->size();
+        args.state.idx_to_offsets_owner = std::move(offsets);
+        args.state.total_num_rows = 3;
+        args.storage.layout = index::SortedStringLayout::FromHeap(
+            {"apple", "banana"}, {{0, 2}, {1}}, 3);
+        co_return std::make_unique<Storage>(std::move(args));
+    };
+    index::IndexCacheConfig cache{
+        "scalar-expression-prefetch",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        128};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<Storage>>(
+        std::make_unique<index::SingleCellIndexStorageTranslator<Storage>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    const index::ReaderCaps caps{.predicate = true,
+                                 .pattern_match = true,
+                                 .value_lookup = true,
+                                 .cheap_value_lookup = true};
+    auto owner = std::make_shared<index::SortedIndex<std::string_view>>(
+        slot,
+        index::IndexMetadata{caps, index::Domain::Row, DataType::VARCHAR, 3});
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    auto field =
+        milvus::test::expr_index::StringField({"apple", "banana", "apple"});
+    milvus::test::expr_index::RawFieldFiles raw_files;
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    milvus::test::expr_index::InstallIndex(*segment,
+                                           field_id,
+                                           DataType::VARCHAR,
+                                           {owner,
+                                            owner->CreateReader(nullptr),
+                                            std::string(index::families::kSort),
+                                            Config::object(),
+                                            caps});
+
+    proto::plan::GenericValue value;
+    value.set_string_val("apple");
+    auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR),
+        proto::plan::OpType::Equal,
+        value);
+    OpContext op_ctx;
+    QueryContext query_context(
+        "scalar_index_prefetch", segment.get(), 3, MAX_TIMESTAMP);
+    query_context.set_op_context(&op_ctx);
+    ExecContext exec_context(&query_context);
+    auto compiled = CompileExpressions({logical}, &exec_context, {}, false);
+    ASSERT_EQ(compiled.size(), 1);
+    auto expression = std::dynamic_pointer_cast<SegmentExpr>(compiled[0]);
+    ASSERT_NE(expression, nullptr);
+    ASSERT_EQ(load_count, 0);
+    auto pool = std::make_shared<CountingCPUThreadPoolExecutor>(1);
+    compiled[0]->PrefetchAsync(pool);
+    compiled[0]->WaitPrefetch();
+    ASSERT_EQ(expression->GetExecPath(), ExprExecPath::ScalarIndex);
+    ASSERT_EQ(load_count, 1);
+    const auto scanned_bytes = op_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+
+    EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    compiled[0]->Eval(eval_context, result);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), 3);
+    TargetBitmapView matches(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    EXPECT_TRUE(valid.all());
+    EXPECT_EQ(matches.count(), 2);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[2]);
+    EXPECT_EQ(load_count, 1);
+    EXPECT_EQ(op_ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
 }
 
 TEST_F(RawExprCacheAdapterTest, RawPrefetchContributesToLatencyAdmission) {

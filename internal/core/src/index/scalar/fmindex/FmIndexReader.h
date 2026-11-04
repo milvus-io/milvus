@@ -184,6 +184,11 @@ class FmIndexReader final : public IIndexReaderBase,
 
     // ---- IIndexReaderBase ----------------------------------------
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 

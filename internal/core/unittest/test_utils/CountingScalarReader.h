@@ -45,6 +45,11 @@ class CountingScalarReader final : public index::IIndexReaderBase,
           lookup_calls_(lookup_calls) {
     }
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();

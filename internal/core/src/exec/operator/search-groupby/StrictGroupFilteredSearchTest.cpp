@@ -113,6 +113,11 @@ class CountingScalarReader final
             "readers");
     }
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();
@@ -205,11 +210,6 @@ class FailingIteratorReader final : public index::IVectorReader {
     ErrorCode error = ErrorCode::FollyCancel;
     bool unsupported_status = false;
     mutable knowhere::Json received;
-
-    void
-    Prefetch() const override {
-        reader_->Prefetch();
-    }
 
     void
     Search(const DatasetPtr& dataset,

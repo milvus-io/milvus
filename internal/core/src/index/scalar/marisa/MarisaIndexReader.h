@@ -164,6 +164,11 @@ class MarisaIndexReader final : public IIndexReaderBase,
 
     ~MarisaIndexReader() override;
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 

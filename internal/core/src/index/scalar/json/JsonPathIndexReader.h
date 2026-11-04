@@ -139,6 +139,11 @@ class JsonPathIndexReader final : public IIndexReaderBase,
  public:
     ~JsonPathIndexReader() override;
 
+    void
+    Prefetch() const override {
+        inner_->Prefetch();
+    }
+
     ReaderCaps
     Caps() const override;
 

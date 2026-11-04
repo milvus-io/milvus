@@ -57,6 +57,12 @@ AssertInfo(predicates != nullptr, "selected index has no integer predicates");
 auto matches = predicates->In(values.size(), values.data());
 ```
 
+`IIndexReaderBase::Prefetch()` explicitly prepares query storage using the bound context.
+It is synchronous; the execution layer schedules it concurrently with other work. Single-cell
+readers retain that same storage or engine pin for subsequent operations until destruction.
+Already-resident views need no preparation. Loading failures propagate to the caller and a later
+access may retry; creating a Reader alone still does not load storage.
+
 `IIndex::CancelWarmup()` requests background prefetch cancellation without invalidating existing
 readers or cancelling demand loads. It does not wait for all outstanding I/O to drain. Retirement
 calls it after publication of the replacement; waiting for the Index destructor could leave an old

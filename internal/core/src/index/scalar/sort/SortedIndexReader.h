@@ -330,6 +330,11 @@ class SortedIndexReader final
 
     ~SortedIndexReader() override;
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 

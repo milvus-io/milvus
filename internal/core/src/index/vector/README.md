@@ -36,7 +36,7 @@ query-only mixin `IVectorReader`. The first operation that needs the engine acqu
 the bound context; the reader retains and reuses that pin until destruction. Returned iterators
 retain the exact engine pin independently of the reader.
 
-`IVectorReader::Prefetch()` synchronously initializes the same retained engine pin. The search
+`IIndexReaderBase::Prefetch()` synchronously initializes the same retained engine pin. The search
 operator schedules prefetch concurrently with filtering; merely creating a Reader does not load
 the engine. The temporary prefetch Reader releases its pin at destruction, after which residency
 follows the cache policy.

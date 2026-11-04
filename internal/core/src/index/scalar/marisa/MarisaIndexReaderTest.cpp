@@ -259,6 +259,38 @@ TEST_F(MarisaIndexCacheTest, LookupRetainsStorageAndFailedLoadCanRetry) {
     EXPECT_EQ(observer->loads, 1);
 }
 
+TEST_F(MarisaIndexCacheTest, PrefetchRetriesAndRetainsStorageForQueries) {
+    auto index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
+    OpContext ctx;
+    auto reader = index->CreateReader(&ctx);
+    EXPECT_EQ(reader->Count(), 2);
+    EXPECT_EQ(observer->loads, 0);
+    observer->fail_next_load = true;
+    EXPECT_THROW(reader->Prefetch(), std::runtime_error);
+    EXPECT_EQ(observer->loads, 1);
+    reader->Prefetch();
+    EXPECT_EQ(observer->loads, 2);
+    EXPECT_EQ(observer->last_context, &ctx);
+    const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    reader->Prefetch();
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            reader.get());
+    ASSERT_NE(predicate, nullptr);
+    const std::string_view key = "apple";
+    EXPECT_EQ(predicate->In(1, &key).count(), 1);
+    EXPECT_EQ(predicate->NotIn(1, &key).count(), 0);
+    EXPECT_EQ(observer->loads, 2);
+    EXPECT_EQ(ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
+    std::weak_ptr slot_lifetime = slot;
+    index.reset();
+    slot.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    reader.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
 TEST_F(MarisaIndexCacheTest, MetadataStaysColdAndOperationsUseRequestContext) {
     auto index = std::make_shared<MarisaIndex>(slot, DataType::VARCHAR, 2);
     OpContext first_ctx;
@@ -314,6 +346,8 @@ TEST_F(MarisaIndexCacheTest, JsonExistenceAndPredicatesRetainTheSameStorage) {
     auto resolved = json->Resolve("/a", JsonCastType::FromString("VARCHAR"));
     ASSERT_TRUE(resolved);
     EXPECT_EQ(observer->loads, 0);
+    reader->Prefetch();
+    EXPECT_EQ(observer->loads, 1);
     auto exists = json->Exists("/a");
     EXPECT_TRUE(exists[0]);
     EXPECT_FALSE(exists[1]);
@@ -396,6 +430,7 @@ TEST_F(MarisaIndexCacheTest,
     cancellation.requestCancellation();
     OpContext cancelled(cancellation.getToken());
     auto first = index->CreateReader(&cancelled);
+    EXPECT_ANY_THROW(first->Prefetch());
     EXPECT_ANY_THROW(first->Count());
     index->CancelWarmup();
     OpContext next;

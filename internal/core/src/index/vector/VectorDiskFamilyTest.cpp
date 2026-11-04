@@ -758,13 +758,13 @@ TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
     ctx.cancellation_token = cancelled.getToken();
-    EXPECT_THROW(vector->Prefetch(), SegcoreError);
+    EXPECT_THROW(opened.base->Prefetch(), SegcoreError);
     EXPECT_EQ(resident.Value(), resident_before);
     EXPECT_EQ(resident_disk.Value(), resident_disk_before);
     EXPECT_EQ(loading.Value(), loading_before);
     EXPECT_EQ(loading_disk.Value(), loading_disk_before);
     ctx.cancellation_token = {};
-    vector->Prefetch();
+    opened.base->Prefetch();
     EXPECT_EQ(opened.base->Count(), kRows);
     EXPECT_EQ(resident.Value(),
               resident_before + config.loaded_usage.memory_bytes);
@@ -772,7 +772,7 @@ TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
               resident_disk_before + config.loaded_usage.file_bytes);
     EXPECT_EQ(loading.Value(), loading_before);
     EXPECT_EQ(loading_disk.Value(), loading_disk_before);
-    vector->Prefetch();
+    opened.base->Prefetch();
     opened.base.reset();
     EXPECT_EQ(resident.Value(), resident_before);
     EXPECT_EQ(resident_disk.Value(), resident_disk_before);
@@ -788,7 +788,7 @@ TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
     vector = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(vector, nullptr);
     try {
-        vector->Prefetch();
+        opened.base->Prefetch();
         FAIL() << "native lazy load bypassed resource admission";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), InsufficientResource);

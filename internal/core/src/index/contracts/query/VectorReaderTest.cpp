@@ -175,11 +175,11 @@ TEST(VectorIndexCacheTest, IteratorPinsExactEngineUntilReleased) {
     reader = index->CreateReader(&ctx);
     const auto* vector = dynamic_cast<const IVectorReader*>(reader.get());
     ASSERT_NE(vector, nullptr);
-    vector->Prefetch();
+    reader->Prefetch();
     EXPECT_EQ(loads, 2);
     const auto scanned_bytes = ctx.storage_usage.scanned_total_bytes.load();
     ASSERT_GT(scanned_bytes, 0);
-    vector->Prefetch();
+    reader->Prefetch();
     EXPECT_EQ(loads, 2);
     const std::array<float, 2> query{0, 0};
     auto iterators = vector->Iterators(GenDataset(1, kDim, query.data()),

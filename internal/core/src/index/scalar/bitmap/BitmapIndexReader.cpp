@@ -205,6 +205,11 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         : index_(std::move(index)), op_ctx_(op_ctx) {
     }
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override {
         return index_->Metadata().caps;
