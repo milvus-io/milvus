@@ -75,6 +75,7 @@ def snapshot_identity(client, snapshot, collection):
 
 def assert_restore_identity(upstream, downstream, collection):
     """Compare physical DDL IDs, independently of schemas and local segment layout."""
+
     def identity(client):
         description = client.describe_collection(collection, timeout=10)
         partitions = rpc(client, "ShowPartitions", milvus_pb2.ShowPartitionsRequest(collection_name=collection))
