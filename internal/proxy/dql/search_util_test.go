@@ -39,7 +39,9 @@ func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
 			name = "hybrid search"
 		}
 		t.Run(name, func(t *testing.T) {
-			request := &milvuspb.SearchRequest{PlaceholderGroup: []byte{0xff}}
+			request := &milvuspb.SearchRequest{
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}},
+			}
 			if advanced {
 				request = ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
 					Requests: []*milvuspb.SearchRequest{request},
@@ -80,7 +82,10 @@ func TestSearchTaskCheckNqCompatibility(t *testing.T) {
 		{name: "hybrid explicit nq", advanced: true, nq: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := &milvuspb.SearchRequest{Nq: tc.nq, PlaceholderGroup: placeholder}
+			request := &milvuspb.SearchRequest{
+				Nq:          tc.nq,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+			}
 			if tc.advanced {
 				request = ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
 					Requests: []*milvuspb.SearchRequest{request},
