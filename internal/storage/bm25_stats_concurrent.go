@@ -92,22 +92,7 @@ func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
 	// the row count goes first, see the type comment
 	c.numRow.Add(other.numRow.Load())
 	c.numToken.Add(other.numToken.Load())
-	applyBM25StatsShards(other.rowsWithToken.len(), func(i int) {
-		other.shardLocks[i].RLock()
-		defer other.shardLocks[i].RUnlock()
-		source := other.rowsWithToken[i]
-		if len(source) == 0 {
-			return
-		}
-		c.shardLocks[i].Lock()
-		defer c.shardLocks[i].Unlock()
-		if c.rowsWithToken[i] == nil {
-			c.rowsWithToken[i] = make(map[uint32]int32, len(source))
-		}
-		for token, count := range source {
-			addTokenCount(c.rowsWithToken[i], token, count)
-		}
-	})
+	c.apply(&other.rowsWithToken, 1, true)
 }
 
 func (c *ConcurrentBM25Stats) NumRow() int64 {
