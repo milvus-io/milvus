@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -820,6 +821,197 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.False(s.dist.Serviceable())
 	_, _, _, _, err = s.dist.PinReadableSegments(1.0, 1)
 	s.Error(err)
+}
+
+// A release decided by QueryCoord from an earlier heartbeat must not drop a segment that has since
+// been pulled back into the delegator's readable snapshot -- the holder refuses, and the checker
+// retries once the segment has genuinely left it.
+func (s *DistributionSuite) TestRemoveDistributionsIfNotServed() {
+	syncReadable := func(version int64, segmentIDs ...int64) {
+		rowCount := make(map[int64]int64, len(segmentIDs))
+		for _, id := range segmentIDs {
+			rowCount[id] = 100
+		}
+		s.dist.SyncTargetVersion(&querypb.SyncAction{
+			TargetVersion:         version,
+			SealedInTarget:        segmentIDs,
+			SealedSegmentRowCount: rowCount,
+		}, []int64{1})
+	}
+	sealedIDs := func() []int64 {
+		sealed, _ := s.dist.PeekSegments(false)
+		ids := make([]int64, 0)
+		for _, item := range sealed {
+			for _, seg := range item.Segments {
+				ids = append(ids, seg.SegmentID)
+			}
+		}
+		return ids
+	}
+
+	s.Run("refuses_a_served_segment_and_removes_nothing", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1}, SegmentEntry{NodeID: 1, SegmentID: 2})
+		syncReadable(1000, 1)
+
+		served, signal := s.dist.RemoveDistributionsIfNotServed(
+			[]SegmentEntry{{NodeID: 1, SegmentID: 1}, {NodeID: 1, SegmentID: 2}}, nil)
+		s.Equal([]int64{1}, served)
+		s.Nil(signal)
+		s.ElementsMatch([]int64{1, 2}, sealedIDs(), "a refused batch removes nothing, not even its releasable part")
+		s.True(s.dist.Serviceable())
+	})
+
+	s.Run("removes_a_segment_outside_the_readable_set", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1}, SegmentEntry{NodeID: 1, SegmentID: 2})
+		syncReadable(1000, 1)
+
+		served, signal := s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 2}}, nil)
+		s.Empty(served)
+		s.NotNil(signal)
+		<-signal
+		s.ElementsMatch([]int64{1}, sealedIDs())
+		s.True(s.dist.Serviceable())
+	})
+
+	s.Run("balance_move_releases_the_old_copy", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1})
+		syncReadable(1000, 1)
+		// a move loads the segment on node 2 first; the distribution now points there
+		s.dist.AddDistributions(SegmentEntry{NodeID: 2, SegmentID: 1, Version: 2})
+
+		served, _ := s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 2, SegmentID: 1}}, nil)
+		s.Equal([]int64{1}, served, "node 2 now serves it")
+
+		served, signal := s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 1}}, nil)
+		s.Empty(served, "the copy on node 1 is no longer the one being served: the move may release it")
+		<-signal
+		s.ElementsMatch([]int64{1}, sealedIDs(), "the entry on node 2 stays")
+		s.True(s.dist.Serviceable())
+	})
+
+	// The check and the removal are one critical section: a SyncTargetVersion that would pull the
+	// segment back into the readable snapshot cannot land between them. The hook runs right after
+	// the check passed, with the lock still held, and starts such a sync; the sync must not complete
+	// until the removal is done, and it then sees the segment already gone.
+	s.Run("target_sync_cannot_interleave_check_and_removal", func() {
+		s.SetupTest()
+		defer s.TearDownTest()
+
+		s.dist.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1}, SegmentEntry{NodeID: 1, SegmentID: 2})
+		syncReadable(1000, 1)
+
+		syncDone := make(chan struct{})
+		removalReturned := make(chan struct{})
+		var syncFinishedBeforeRemoval bool
+		s.dist.afterServingCheckHook = func() {
+			go func() {
+				syncReadable(1001, 1, 2)
+				close(syncDone)
+			}()
+			select {
+			case <-syncDone:
+				syncFinishedBeforeRemoval = true
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+
+		var served []int64
+		var signal chan struct{}
+		go func() {
+			served, signal = s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 2}}, nil)
+			close(removalReturned)
+		}()
+		<-removalReturned
+		<-syncDone
+		s.dist.afterServingCheckHook = nil
+
+		s.False(syncFinishedBeforeRemoval, "the sync must wait for the removal to finish")
+		s.Empty(served)
+		<-signal
+		s.ElementsMatch([]int64{1}, sealedIDs())
+		// The sync ran after the removal, so the readable snapshot now lists a segment the
+		// distribution no longer has: QueryCoord only syncs to targets whose segments it saw loaded,
+		// and the next heartbeat shows segment 2 gone. What must never happen is the reverse order
+		// -- the removal deleting a segment the already-synced snapshot serves -- which the first
+		// subtest covers.
+		s.False(s.dist.Serviceable())
+	})
+}
+
+// A partition release takes the partition's segments out of the distribution and out of the
+// readable view in one step: the shard stays serviceable on what is left, the released segments
+// are neither readable nor refused on a later release, and releasing again removes nothing.
+func (s *DistributionSuite) TestRemovePartitions() {
+	s.dist.AddDistributions(
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 1},
+		SegmentEntry{NodeID: 2, SegmentID: 1001, PartitionID: 2},
+	)
+	s.dist.AddGrowing(
+		SegmentEntry{NodeID: 1, SegmentID: 2000, PartitionID: 1},
+		SegmentEntry{NodeID: 1, SegmentID: 2001, PartitionID: 2},
+	)
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2000,
+		GrowingInTarget:       []int64{2000, 2001},
+		SealedInTarget:        []int64{1000, 1001},
+		SealedSegmentRowCount: map[int64]int64{1000: 100, 1001: 100},
+	}, []int64{1, 2})
+	s.Require().True(s.dist.Serviceable())
+	segmentIDs := func(entries []SegmentEntry) []int64 {
+		return lo.Map(entries, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	}
+
+	sealed, growing, signal := s.dist.RemovePartitions(1)
+	s.Equal([]int64{1000}, segmentIDs(sealed))
+	s.Equal(int64(1), sealed[0].NodeID)
+	s.Equal([]int64{2000}, segmentIDs(growing))
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		s.FailNow("no read pins the old snapshot, the signal must close")
+	}
+
+	s.True(s.dist.Serviceable())
+	view := s.dist.GetQueryView()
+	s.False(view.partitions.Contain(1))
+	s.True(view.partitions.Contain(2))
+	_, readable := view.sealedSegmentRowCount[1000]
+	s.False(readable)
+	s.False(view.growingSegments.Contain(2000))
+	s.True(view.growingSegments.Contain(2001))
+	s.Equal(int64(2000), view.GetVersion())
+
+	readSealed, readGrowing, _, version, err := s.dist.PinReadableSegments(1.0)
+	s.Require().NoError(err)
+	s.Equal([]int64{1001}, lo.FlatMap(readSealed, func(item SnapshotItem, _ int) []int64 { return segmentIDs(item.Segments) }))
+	s.Equal([]int64{2001}, segmentIDs(readGrowing))
+	s.dist.Unpin(version)
+	_, _, _, _, err = s.dist.PinReadableSegments(1.0, 1)
+	s.ErrorIs(err, merr.ErrPartitionNotLoaded)
+
+	// no longer served, so a release of it is not refused
+	stillServing, _ := s.dist.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 1000}}, nil)
+	s.Empty(stillServing)
+
+	// idempotent
+	sealed, growing, signal = s.dist.RemovePartitions(1)
+	s.Empty(sealed)
+	s.Empty(growing)
+	select {
+	case <-signal:
+	default:
+		s.FailNow("nothing removed, the signal must be closed already")
+	}
+	s.True(s.dist.Serviceable())
 }
 
 func TestDistributionSuite(t *testing.T) {

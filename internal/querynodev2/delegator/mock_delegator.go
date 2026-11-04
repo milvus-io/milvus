@@ -949,6 +949,53 @@ func (_c *MockShardDelegator_QueryStream_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ReleasePartitions provides a mock function with given fields: ctx, partitionIDs
+func (_m *MockShardDelegator) ReleasePartitions(ctx context.Context, partitionIDs []int64) error {
+	ret := _m.Called(ctx, partitionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReleasePartitions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
+		r0 = rf(ctx, partitionIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ReleasePartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleasePartitions'
+type MockShardDelegator_ReleasePartitions_Call struct {
+	*mock.Call
+}
+
+// ReleasePartitions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - partitionIDs []int64
+func (_e *MockShardDelegator_Expecter) ReleasePartitions(ctx interface{}, partitionIDs interface{}) *MockShardDelegator_ReleasePartitions_Call {
+	return &MockShardDelegator_ReleasePartitions_Call{Call: _e.mock.On("ReleasePartitions", ctx, partitionIDs)}
+}
+
+func (_c *MockShardDelegator_ReleasePartitions_Call) Run(run func(ctx context.Context, partitionIDs []int64)) *MockShardDelegator_ReleasePartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ReleasePartitions_Call) Return(_a0 error) *MockShardDelegator_ReleasePartitions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ReleasePartitions_Call) RunAndReturn(run func(context.Context, []int64) error) *MockShardDelegator_ReleasePartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ReleaseSegments provides a mock function with given fields: ctx, req, force
 func (_m *MockShardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	ret := _m.Called(ctx, req, force)

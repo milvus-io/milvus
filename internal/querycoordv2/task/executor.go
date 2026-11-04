@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -343,6 +344,11 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		req.Checkpoint = channel.GetSeekPosition()
 	}
 
+	if task.IsForceRelease() && action.Scope != querypb.DataScope_Streaming {
+		err = ex.forceReleaseSegment(ctx, task, action, req)
+		return
+	}
+
 	if action.Scope == querypb.DataScope_Streaming {
 		// Any modification to the segment distribution have to set NeedTransfer true,
 		// to protect the version, which serves search/query
@@ -389,6 +395,69 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	}
 	elapsed := time.Since(startTs)
 	mlog.Info(context.TODO(), "release segment done", mlog.Int64("taskID", task.ID()), mlog.Duration("time taken", elapsed))
+}
+
+// forceReleaseSegment releases a sealed segment whose release the delegator keeps refusing. The
+// delegator is first told through SyncDistribution to drop the segment from its distribution,
+// which also waits for the reads on the snapshots that still hold it; the worker is then released
+// directly, since the delegator's own release path would refuse again, and its force path skips
+// the worker. The segment checker asks for this only once the refusal has lasted and the replica
+// cannot make progress otherwise (see SegmentChecker.forceReleaseCandidates). If the direct
+// release fails after the distribution update, the segment is no longer in the delegator's
+// readable set, so the next ordinary release is not refused and the system recovers on its own.
+func (ex *Executor) forceReleaseSegment(ctx context.Context, task *SegmentTask, action *SegmentAction, req *querypb.ReleaseSegmentsRequest) error {
+	log := mlog.With(
+		mlog.Int64("taskID", task.ID()),
+		mlog.Int64("collectionID", task.CollectionID()),
+		mlog.Int64("replicaID", task.ReplicaID()),
+		mlog.Int64("segmentID", task.SegmentID()),
+		mlog.String("shard", task.Shard()),
+		mlog.Int64("node", action.Node()),
+	)
+	replica := ex.meta.Get(ctx, task.ReplicaID())
+	if replica == nil {
+		err := merr.WrapErrReplicaNotFound(task.ReplicaID(), "force release needs the replica's delegator")
+		log.Warn(ctx, "node doesn't belong to any replica, cannot force release", mlog.Err(err))
+		return err
+	}
+	leader := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
+	if leader == nil {
+		err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+		log.Warn(ctx, "no shard leader for the segment to force release", mlog.Err(err))
+		return err
+	}
+
+	startTs := time.Now()
+	log.Warn(ctx, "force release: removing the segment from the delegator's distribution", mlog.Int64("leader", leader.Node))
+	status, err := ex.cluster.SyncDistribution(ctx, leader.Node, &querypb.SyncDistributionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		CollectionID: task.CollectionID(),
+		Channel:      task.Shard(),
+		ReplicaID:    task.ReplicaID(),
+		Actions: []*querypb.SyncAction{{
+			Type:      querypb.SyncType_Remove,
+			SegmentID: action.GetSegmentID(),
+			NodeID:    action.Node(),
+		}},
+	})
+	if err := merr.CheckRPCCall(status, err); err != nil {
+		log.Warn(ctx, "force release: failed to remove the segment from the delegator's distribution", mlog.Err(err))
+		return err
+	}
+
+	req.Shard = task.Shard()
+	req.NeedTransfer = false
+	status, err = ex.cluster.ReleaseSegments(ctx, action.Node(), req)
+	if err := merr.CheckRPCCall(status, err); err != nil {
+		log.Warn(ctx, "force release: the worker failed to release the segment, the next ordinary release is no longer refused", mlog.Err(err))
+		return err
+	}
+	metrics.QueryCoordForceReleaseNum.WithLabelValues(fmt.Sprint(task.CollectionID())).Inc()
+	log.Warn(ctx, "force release done", mlog.Duration("time taken", time.Since(startTs)))
+	return nil
 }
 
 func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {

@@ -59,6 +59,9 @@ type IDFOracle interface {
 	UpdateGrowing(segmentID int64, stats bm25Stats)
 	// mark growing segment remove target version
 	LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64)
+	// RemoveSegments drops the stats of segments that left the distribution without a target
+	// change (a partition release): sealed stats are deactivated and deleted, growing stats removed.
+	RemoveSegments(sealedIDs []int64, growingIDs []int64) error
 
 	RegisterGrowing(segmentID int64, stats bm25Stats)
 	// LoadSealed loads BM25 stats for a sealed segment from remote storage.
@@ -1082,6 +1085,101 @@ func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64)
 			stats.droppedVersion = targetVersion
 		}
 	}
+}
+
+// RemoveSegments takes the given segments out of current at once. SyncDistribution only moves a
+// segment out when a newer target no longer lists it, and a partition release changes no target
+// version on the delegator; without this, a released partition's documents would keep weighing
+// on the IDF until the next target sync.
+//
+// The stats of the active sealed segments are read from disk outside the oracle lock, as
+// SyncDistribution reads them; a segment whose version moved in between (a reopen or a
+// SyncFunctions) is read again under the lock, so the amount subtracted is what the segment
+// contributes at that moment. Segments the oracle does not know are skipped.
+func (o *idfOracle) RemoveSegments(sealedIDs []int64, growingIDs []int64) error {
+	// serialize with SyncDistribution: both move segments in and out of current
+	o.syncMu.Lock()
+	defer o.syncMu.Unlock()
+
+	type sealedRemoval struct {
+		seg     *sealedBm25Stats
+		stats   bm25Stats
+		version uint64
+	}
+	removals := make([]sealedRemoval, 0, len(sealedIDs))
+	for _, segmentID := range sealedIDs {
+		seg, ok := o.sealed.Get(segmentID)
+		if !ok {
+			continue
+		}
+		removal := sealedRemoval{seg: seg}
+		if seg.activate.Load() {
+			stats, version, _, err := seg.fetchSnapshot()
+			if err != nil {
+				return merr.Wrap(err, "fetch sealed bm25 stats for removal failed")
+			}
+			removal.stats, removal.version = stats, version
+		}
+		removals = append(removals, removal)
+	}
+
+	diff := newStatsTable(nil)
+	o.Lock()
+	for _, removal := range removals {
+		seg := removal.seg
+		seg.Lock()
+		if seg.removed {
+			seg.Unlock()
+			continue
+		}
+		if seg.activate.Load() {
+			stats := removal.stats
+			if stats == nil || seg.version != removal.version {
+				latest, err := seg.fetchFieldsLocked(seg.fieldList)
+				if err != nil {
+					seg.Unlock()
+					o.Unlock()
+					return merr.Wrap(err, "fetch sealed bm25 stats for removal failed")
+				}
+				stats = latest
+			}
+			diff.Minus(stats)
+			seg.activate.Store(false)
+			seg.version++
+		}
+		diskSize := seg.diskSize
+		seg.Unlock()
+
+		o.sealedDiskSize.Add(-diskSize)
+		seg.Remove()
+		o.sealed.Remove(seg.segmentID)
+	}
+	for _, segmentID := range growingIDs {
+		stats, ok := o.growing[segmentID]
+		if !ok {
+			continue
+		}
+		if stats.activate {
+			o.current.MinusExclusive(stats.bm25Stats)
+		}
+		delete(o.growing, segmentID)
+	}
+	// still under the write lock, so no reader sees current between the deactivations and this merge
+	o.current.MergeTable(diff)
+	numRow := o.current.NumRow()
+	growingLen := len(o.growing)
+	sealedLen := o.sealed.Len()
+	o.Unlock()
+
+	o.syncResource()
+	mlog.Info(context.TODO(), "removed segments from idf oracle",
+		mlog.String("channel", o.channel),
+		mlog.Int64s("sealed", sealedIDs),
+		mlog.Int64s("growing", growingIDs),
+		mlog.Int64("numrow", numRow),
+		mlog.Int("growingLeft", growingLen),
+		mlog.Int("sealedLeft", sealedLen))
+	return nil
 }
 
 // memSize estimates total in-memory size of current + all growing stats.

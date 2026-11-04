@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -35,10 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const initialTargetVersion = int64(0)
@@ -230,9 +233,19 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	redundancies = c.filterOutSegmentInUse(ctx, replica, redundancies, ch2DelegatorList)
+	forced, redundancies := c.forceReleaseCandidates(ctx, replica, redundancies, lacks, replicaSegmentDist)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
+	ret = append(ret, tasks...)
+
+	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), forced, replica, querypb.DataScope_Historical)
+	for _, t := range tasks {
+		t.(*task.SegmentTask).SetForceRelease()
+	}
+	task.SetReason("delegator refused to release the segment for too long while the replica cannot load", tasks...)
+	// high priority so that it replaces the ordinary release task the delegator keeps refusing
+	task.SetPriority(task.TaskPriorityHigh, tasks...)
 	ret = append(ret, tasks...)
 
 	// compare inner dists to find repeated loaded segments
@@ -252,6 +265,110 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	return ret
+}
+
+// forceReleaseCandidates splits the sealed segments to release into the ones to release by force
+// and the rest. The delegator refuses to release a sealed segment it still serves, and the refusal
+// clears on its own once the delegator is synced to a newer target -- which needs the replacement
+// segments loaded. When the node is out of memory and the refused segments are what holds it, that
+// never happens: the replica is stuck, and each next-target refresh adds to what it has to load.
+// This is the way out, taken only when all of the following hold:
+//
+//   - the delegator has refused the segment for at least forceReleaseRefusedSegmentAfter,
+//     counted from the first refusal under the current target (a target change restarts it);
+//   - the replica has made no progress since: no segment loaded, current target unchanged;
+//   - segments are waiting to be loaded, and every RW node of the replica is marked resource
+//     exhausted -- the segment checker assigns loads round-robin and bypasses the exhaustion
+//     filter, so a replica that cannot load anywhere has every node marked within a few rounds.
+//     A load failing for another reason (a corrupt file, object storage down) marks nothing and
+//     the fallback does not fire; freeing memory would not help there.
+//
+// When one segment of a channel qualifies, every segment of that channel in the list is forced
+// with it: the delegator is unserviceable after the first one anyway, and this frees the most at
+// once. The list is what the diff computed this round -- segments in neither the current nor the
+// next target -- so the victims are revalidated at force time. Refusals of segments that left the
+// distribution some other way are dropped here as well.
+func (c *SegmentChecker) forceReleaseCandidates(ctx context.Context, replica *meta.Replica, toRelease []*meta.Segment,
+	lacks []*datapb.SegmentInfo, dist []*meta.Segment,
+) (forced, rest []*meta.Segment) {
+	tracker := c.dist.ReleaseRefusals
+	if tracker == nil {
+		return nil, toRelease
+	}
+	distSegments := typeutil.NewUniqueSet(lo.Map(dist, func(s *meta.Segment, _ int) int64 { return s.GetID() })...)
+	tracker.Prune(replica.GetID(), func(segmentID int64) bool { return distSegments.Contain(segmentID) })
+	c.reportReleaseRefusals(replica.GetCollectionID())
+
+	after := Params.QueryCoordCfg.ForceReleaseRefusedSegmentAfter.GetAsDuration(time.Second)
+	if after <= 0 || len(toRelease) == 0 {
+		return nil, toRelease
+	}
+
+	log := mlog.With(
+		mlog.FieldCollectionID(replica.GetCollectionID()),
+		mlog.Int64("replicaID", replica.GetID()))
+	now := time.Now()
+	currentVersion := c.targetMgr.GetCollectionTargetVersion(ctx, replica.GetCollectionID(), meta.CurrentTarget)
+	lastLoad, _ := tracker.LastLoadSucceeded(replica.GetID())
+	expiredChannels := typeutil.NewSet[string]()
+	for _, s := range toRelease {
+		refusal, ok := tracker.Get(replica.GetID(), s.GetID())
+		if !ok || refusal.TargetVersion != currentVersion || now.Sub(refusal.Since) < after || lastLoad.After(refusal.Since) {
+			continue
+		}
+		expiredChannels.Insert(s.GetInsertChannel())
+	}
+	if expiredChannels.Len() == 0 {
+		return nil, toRelease
+	}
+	if len(lacks) == 0 {
+		log.RatedInfo(ctx, rate.Limit(1.0/60.0), "release refused for too long but no segment waits to be loaded, not forcing",
+			mlog.Strings("channels", expiredChannels.Collect()))
+		return nil, toRelease
+	}
+	rwNodes := replica.GetRWNodes()
+	if len(rwNodes) == 0 || !lo.EveryBy(rwNodes, c.nodeMgr.IsResourceExhausted) {
+		log.RatedInfo(ctx, rate.Limit(1.0/60.0), "release refused for too long but some node of the replica can still load, not forcing",
+			mlog.Strings("channels", expiredChannels.Collect()),
+			mlog.Int64s("rwNodes", rwNodes))
+		return nil, toRelease
+	}
+
+	for _, s := range toRelease {
+		if expiredChannels.Contain(s.GetInsertChannel()) {
+			forced = append(forced, s)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	log.Warn(ctx, "forcing the release of segments the delegator refuses to release: the replica cannot load and every node is out of resources",
+		mlog.Strings("channels", expiredChannels.Collect()),
+		mlog.Int64s("segments", lo.Map(forced, func(s *meta.Segment, _ int) int64 { return s.GetID() })),
+		mlog.Int64s("nodes", lo.Uniq(lo.Map(forced, func(s *meta.Segment, _ int) int64 { return s.Node }))),
+		mlog.Int("waitingToLoad", len(lacks)),
+		mlog.Duration("refusedAtLeast", after))
+	return forced, rest
+}
+
+// reportReleaseRefusals publishes how many sealed segments of the collection the delegators refuse to
+// release and for how long the longest refusal has lasted.
+func (c *SegmentChecker) reportReleaseRefusals(collectionID int64) {
+	refusals := c.dist.ReleaseRefusals.ListByCollection(collectionID)
+	label := fmt.Sprint(collectionID)
+	if len(refusals) == 0 {
+		metrics.QueryCoordReleaseRefusedSegmentNum.DeleteLabelValues(label)
+		metrics.QueryCoordReleaseRefusedMaxSeconds.DeleteLabelValues(label)
+		return
+	}
+	now := time.Now()
+	longest := time.Duration(0)
+	for _, refusal := range refusals {
+		if d := now.Sub(refusal.Since); d > longest {
+			longest = d
+		}
+	}
+	metrics.QueryCoordReleaseRefusedSegmentNum.WithLabelValues(label).Set(float64(len(refusals)))
+	metrics.QueryCoordReleaseRefusedMaxSeconds.WithLabelValues(label).Set(longest.Seconds())
 }
 
 // GetGrowingSegmentDiff get streaming segment diff between leader view and target

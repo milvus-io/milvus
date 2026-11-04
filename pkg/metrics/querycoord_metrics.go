@@ -193,6 +193,30 @@ var (
 			Name:      "last_heartbeat_timestamp",
 			Help:      "heartbeat timestamp of query node",
 		}, []string{nodeIDLabelName})
+
+	QueryCoordReleaseRefusedSegmentNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "release_refused_segment_num",
+			Help:      "number of sealed segments whose release the delegators are refusing because they still serve them",
+		}, []string{collectionIDLabelName})
+
+	QueryCoordReleaseRefusedMaxSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "release_refused_max_seconds",
+			Help:      "how long the longest ongoing release refusal of the collection has lasted, in seconds",
+		}, []string{collectionIDLabelName})
+
+	QueryCoordForceReleaseNum = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "force_release_total",
+			Help:      "number of sealed segments released by force after the delegator refused to release them for too long",
+		}, []string{collectionIDLabelName})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -217,10 +241,16 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
+	registry.MustRegister(QueryCoordReleaseRefusedSegmentNum)
+	registry.MustRegister(QueryCoordReleaseRefusedMaxSeconds)
+	registry.MustRegister(QueryCoordForceReleaseNum)
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
 	QueryCoordTaskLatency.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
+	QueryCoordReleaseRefusedSegmentNum.DeleteLabelValues(fmt.Sprint(collectionID))
+	QueryCoordReleaseRefusedMaxSeconds.DeleteLabelValues(fmt.Sprint(collectionID))
+	QueryCoordForceReleaseNum.DeleteLabelValues(fmt.Sprint(collectionID))
 }

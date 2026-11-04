@@ -1876,6 +1876,156 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.NoError(err)
 }
 
+// A release of a sealed segment the delegator still serves is refused before anything changes: the
+// distribution keeps the segment, the shard stays serviceable and no worker is asked to release it.
+// A force release (collection drop, node cleanup) is not refused.
+func (s *DelegatorDataSuite) TestReleaseSegmentsRefusesServedSegment() {
+	ctx := context.Background()
+	s.delegator.distribution.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 500})
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2000,
+		SealedInTarget:        []int64{1000},
+		SealedSegmentRowCount: map[int64]int64{1000: 100},
+	}, []int64{500})
+	s.Require().True(s.delegator.distribution.Serviceable())
+
+	// no GetWorker / ReleaseSegments expectation: the mocks fail the test if the refusal reaches them
+	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_All} {
+		err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+			Base:       commonpbutil.NewMsgBase(),
+			NodeID:     1,
+			SegmentIDs: []int64{1000},
+			Scope:      scope,
+		}, false)
+		s.ErrorIs(err, merr.ErrSegmentReleaseRefused, scope.String())
+		s.False(merr.IsRetryableErr(err), scope.String())
+		sealed, _ := s.delegator.GetSegmentInfo(false)
+		s.Require().Len(sealed, 1)
+		s.Len(sealed[0].Segments, 1)
+		s.True(s.delegator.distribution.Serviceable())
+	}
+
+	err := s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     1,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_Historical,
+	}, true)
+	s.NoError(err)
+	sealed, _ := s.delegator.GetSegmentInfo(false)
+	s.Empty(sealed)
+}
+
+// A partition release drops the partition's segments from the view and the distribution first,
+// so the shard stays serviceable on the rest, then releases them on their workers: the sealed
+// ones on the node holding them, the growing ones on this node. A later release of one of them
+// is not refused, and releasing the partition again calls no worker.
+func (s *DelegatorDataSuite) TestReleasePartitions() {
+	ctx := context.Background()
+	// the sealed segment lives on another node than the delegator, which holds the growing one
+	remote := paramtable.GetNodeID() + 100
+	s.delegator.distribution.AddDistributions(
+		SegmentEntry{NodeID: remote, SegmentID: 1000, PartitionID: 500},
+		SegmentEntry{NodeID: 2, SegmentID: 1001, PartitionID: 501},
+	)
+	s.delegator.distribution.AddGrowing(SegmentEntry{NodeID: paramtable.GetNodeID(), SegmentID: 2000, PartitionID: 500})
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2000,
+		GrowingInTarget:       []int64{2000},
+		SealedInTarget:        []int64{1000, 1001},
+		SealedSegmentRowCount: map[int64]int64{1000: 100, 1001: 100},
+	}, []int64{500, 501})
+	s.Require().True(s.delegator.distribution.Serviceable())
+
+	var mu sync.Mutex
+	released := make(map[int64]*querypb.ReleaseSegmentsRequest)
+	workers := make(map[int64]*cluster.MockWorker)
+	for _, nodeID := range []int64{remote, paramtable.GetNodeID()} {
+		worker := &cluster.MockWorker{}
+		worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).
+			RunAndReturn(func(_ context.Context, req *querypb.ReleaseSegmentsRequest) error {
+				mu.Lock()
+				defer mu.Unlock()
+				released[req.GetNodeID()] = req
+				return nil
+			}).Once()
+		workers[nodeID] = worker
+	}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).
+		RunAndReturn(func(_ context.Context, nodeID int64) (cluster.Worker, error) {
+			worker, ok := workers[nodeID]
+			if !ok {
+				return nil, merr.WrapErrNodeNotFound(nodeID)
+			}
+			return worker, nil
+		})
+
+	s.Require().NoError(s.delegator.ReleasePartitions(ctx, []int64{500}))
+
+	s.Require().Len(released, 2)
+	s.Equal([]int64{1000}, released[remote].GetSegmentIDs())
+	s.Equal(querypb.DataScope_Historical, released[remote].GetScope())
+	s.Equal(s.collectionID, released[remote].GetCollectionID())
+	s.Equal(s.vchannelName, released[remote].GetShard())
+	s.False(released[remote].GetNeedTransfer())
+	s.Equal([]int64{2000}, released[paramtable.GetNodeID()].GetSegmentIDs())
+	s.Equal(querypb.DataScope_Streaming, released[paramtable.GetNodeID()].GetScope())
+
+	s.True(s.delegator.distribution.Serviceable())
+	sealed, growing := s.delegator.GetSegmentInfo(true)
+	s.Equal([]int64{1001}, lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
+		return lo.Map(item.Segments, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	}))
+	s.Empty(growing)
+
+	// the released sealed segment is no longer served, so a release of it goes through
+	workers[remote].EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).Return(nil).Once()
+	s.NoError(s.delegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+		Base:       commonpbutil.NewMsgBase(),
+		NodeID:     remote,
+		SegmentIDs: []int64{1000},
+		Scope:      querypb.DataScope_Historical,
+	}, false))
+
+	// idempotent: nothing of the partition is left, no worker is called (an extra call fails the mocks)
+	s.NoError(s.delegator.ReleasePartitions(ctx, []int64{500}))
+	s.True(s.delegator.distribution.Serviceable())
+	sealed, _ = s.delegator.GetSegmentInfo(true)
+	s.Len(sealed, 1)
+}
+
+// A worker that fails to release leaves its segment out of the view all the same: the error is
+// reported, the shard stays serviceable, and the next release of the segment is not refused.
+func (s *DelegatorDataSuite) TestReleasePartitionsWorkerFails() {
+	ctx := context.Background()
+	s.delegator.distribution.AddDistributions(
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 500},
+		SegmentEntry{NodeID: 2, SegmentID: 1001, PartitionID: 501},
+	)
+	s.delegator.distribution.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2000,
+		SealedInTarget:        []int64{1000, 1001},
+		SealedSegmentRowCount: map[int64]int64{1000: 100, 1001: 100},
+	}, []int64{500, 501})
+	s.Require().True(s.delegator.distribution.Serviceable())
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest")).
+		Return(merr.WrapErrServiceUnavailable("worker down")).Once()
+	s.workerManager.EXPECT().GetWorker(mock.Anything, int64(1)).Return(worker, nil)
+
+	err := s.delegator.ReleasePartitions(ctx, []int64{500})
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+
+	s.True(s.delegator.distribution.Serviceable())
+	sealed, _ := s.delegator.GetSegmentInfo(true)
+	s.Equal([]int64{1001}, lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
+		return lo.Map(item.Segments, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })
+	}))
+	stillServing, _ := s.delegator.distribution.RemoveDistributionsIfNotServed([]SegmentEntry{{NodeID: 1, SegmentID: 1000}}, nil)
+	s.Empty(stillServing)
+}
+
 func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
 	ctx := context.Background()
 	// the target worker is offline/unhealthy, GetWorker returns no worker

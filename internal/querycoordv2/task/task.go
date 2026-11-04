@@ -448,6 +448,10 @@ type SegmentTask struct {
 	loadPriority commonpb.LoadPriority
 	// for balance segment task, expected load and release execution on the same shard leader
 	shardLeaderID int64
+	// forceRelease marks a reduce task that bypasses the delegator's serving guard: the segment
+	// is removed from the delegator's distribution through SyncDistribution and the worker is
+	// released directly. Set by the segment checker once a refusal has lasted too long.
+	forceRelease bool
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -520,6 +524,15 @@ func (task *SegmentTask) ShardLeaderID() int64 {
 
 func (task *SegmentTask) SetShardLeaderID(id int64) {
 	task.shardLeaderID = id
+}
+
+// SetForceRelease marks the task as a forced release, see forceRelease.
+func (task *SegmentTask) SetForceRelease() {
+	task.forceRelease = true
+}
+
+func (task *SegmentTask) IsForceRelease() bool {
+	return task.forceRelease
 }
 
 type ChannelTask struct {
