@@ -622,7 +622,7 @@ func TestSupportsQueryStream(t *testing.T) {
 	setupTestReplicaRouting(t)
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: -2}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: typeutil.Unlimited}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{

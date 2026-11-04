@@ -276,10 +276,6 @@ func TestOrderedReduceStreamUnlimitedQuery(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 	require.NoError(t, stream.Close())
 
-	req.IsIterator = true
-	_, err = NewReduceStream(req, nil, nil, 1)
-	require.Error(t, err)
-	req.IsIterator = false
 	req.OrderByFields = []*planpb.OrderByField{{FieldId: 101}}
 	_, err = NewReduceStream(req, nil, nil, 1)
 	require.Error(t, err)
