@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -383,4 +385,18 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 	params.KnowhereConfig.MergeIndexParams(indexParams[common.IndexTypeKey], paramtable.LoadStage, indexParams)
 
 	return nil
+}
+
+// JSONFlatIndexDeprecationReason is returned on successful logical index creation.
+const JSONFlatIndexDeprecationReason = "JSON flat indexes are deprecated; the index definition is retained, but no physical index is built"
+
+// IsJSONFlatIndex identifies logical-only JSON flat definitions, independently
+// of the resolved index type or whether the path covers a root or subtree.
+// The field type must come from a schema; non-JSON indexes may carry ignored JSON params.
+func IsJSONFlatIndex(dataType schemapb.DataType, params []*commonpb.KeyValuePair) bool {
+	if dataType != schemapb.DataType_JSON {
+		return false
+	}
+	cast := strings.TrimSpace(GetIndexParams(params, common.JSONCastTypeKey))
+	return strings.EqualFold(cast, "JSON") || cast == strconv.Itoa(int(schemapb.DataType_JSON))
 }

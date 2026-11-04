@@ -3404,3 +3404,17 @@ func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestWithoutJSONFlatIndexes(t *testing.T) {
+	input := &querypb.SegmentLoadInfo{IndexInfos: []*querypb.FieldIndexInfo{
+		{IndexID: 1, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "JSON"}}, IndexSize: 1 << 40},
+		{IndexID: 2, FieldID: 101, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "VARCHAR"}}},
+		{IndexID: 3, IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}},
+		{IndexID: 4, FieldID: 102, IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: "JSON"}}},
+	}}
+	prepared := withoutJSONFlatIndexes(input, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_JSON}, {FieldID: 102, DataType: schemapb.DataType_Int64}}})
+	require.Len(t, prepared.GetIndexInfos(), 3)
+	assert.EqualValues(t, 2, prepared.GetIndexInfos()[0].GetIndexID())
+	assert.EqualValues(t, 4, prepared.GetIndexInfos()[2].GetIndexID())
+	assert.Len(t, input.GetIndexInfos(), 4)
+}

@@ -429,40 +429,14 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                        bool any_type,
                                        bool is_array) const {
     auto runtime = CaptureRuntimeResourceState();
-    int path_len_diff = std::numeric_limits<int>::max();
     index::CacheIndexBasePtr best_match = nullptr;
-    std::string_view path_view = path;
     for (const auto& index : runtime->json_indices) {
-        if (index.field_id != field_id) {
+        if (index.field_id != field_id || index.nested_path != path) {
             continue;
         }
-        switch (index.cast_type.data_type()) {
-            case JsonCastType::DataType::JSON:
-                if (path_view.length() < index.nested_path.length()) {
-                    continue;
-                }
-                if (path_view.substr(0, index.nested_path.length()) ==
-                    index.nested_path) {
-                    int current_len_diff =
-                        path_view.length() - index.nested_path.length();
-                    if (current_len_diff < path_len_diff) {
-                        path_len_diff = current_len_diff;
-                        best_match = index.index;
-                    }
-                    if (path_len_diff == 0) {
-                        break;
-                    }
-                }
-                break;
-            default:
-                if (index.nested_path != path) {
-                    continue;
-                }
-                if (any_type || milvus::index::json::IsDataTypeSupported(
-                                    index.cast_type, data_type, is_array)) {
-                    best_match = index.index;
-                }
-                break;
+        if (any_type || milvus::index::json::IsDataTypeSupported(
+                            index.cast_type, data_type, is_array)) {
+            best_match = index.index;
         }
     }
     if (best_match == nullptr) {
@@ -472,32 +446,6 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
     auto pinned_index = ca->get_cell_of(0);
     return {cachinglayer::PinWrapper<const index::IndexBase*>(std::move(ca),
                                                               pinned_index)};
-}
-
-std::string
-ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
-    FieldId field_id, std::string_view query_path) const {
-    auto runtime = CaptureRuntimeResourceState();
-    std::string best_path;
-    int path_len_diff = std::numeric_limits<int>::max();
-    for (const auto& index : runtime->json_indices) {
-        if (index.field_id != field_id ||
-            index.cast_type.data_type() != JsonCastType::DataType::JSON ||
-            query_path.length() < index.nested_path.length() ||
-            query_path.substr(0, index.nested_path.length()) !=
-                index.nested_path) {
-            continue;
-        }
-        int current_len_diff = query_path.length() - index.nested_path.length();
-        if (current_len_diff < path_len_diff) {
-            path_len_diff = current_len_diff;
-            best_path = index.nested_path;
-        }
-        if (path_len_diff == 0) {
-            break;
-        }
-    }
-    return best_path;
 }
 
 bool
@@ -6524,7 +6472,7 @@ ChunkedSegmentSealedImpl::HasIndex(FieldId field_id) const {
 
 bool
 ChunkedSegmentSealedImpl::HasJsonIndex(FieldId field_id) const {
-    // JSON indexes (JsonFlatIndex + JSON-cast) remain distinct from the
+    // Typed JSON-path indexes remain distinct from the
     // scalar/vector/binlog readiness bitsets, but their ownership now follows
     // the published runtime snapshot.
     auto runtime = CaptureRuntimeResourceState();

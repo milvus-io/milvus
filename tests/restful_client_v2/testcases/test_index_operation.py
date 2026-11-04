@@ -36,6 +36,60 @@ index_param_map = {
 
 @pytest.mark.tags(CaseLabel.L0)
 class TestCreateIndex(TestBase):
+    def test_json_flat_index_deprecation_batch(self):
+        """A successful batch identifies each deprecated JSON definition."""
+        name = gen_collection_name()
+        response = self.collection_client.collection_create(
+            {
+                "collectionName": name,
+                "schema": {
+                    "enableDynamicField": True,
+                    "fields": [
+                        {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                        {"fieldName": "j", "dataType": "JSON", "elementTypeParams": {}},
+                        {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                    ],
+                },
+            }
+        )
+        assert response["code"] == 0, response
+        payload = {
+            "collectionName": name,
+            "indexParams": [
+                {"fieldName": "vector", "indexName": "vector", "indexType": "FLAT", "metricType": "L2"},
+                {
+                    "fieldName": "j",
+                    "indexName": "deprecated_root",
+                    "indexType": "INVERTED",
+                    "params": {"json_cast_type": "JSON", "json_path": "j"},
+                },
+                {
+                    "fieldName": "dyn",
+                    "indexName": "deprecated_dynamic",
+                    "indexType": "AUTOINDEX",
+                    "params": {"json_cast_type": "json", "json_path": 'dyn["payload"]'},
+                },
+            ],
+        }
+        for _ in range(2):
+            response = self.index_client.index_create(payload)
+            assert response["code"] == 0, response
+            message = response["message"]
+            assert message.lower().count("json flat indexes are deprecated") == 2, message
+            assert 'field "j", index "deprecated_root"' in message, message
+            assert 'field "dyn", index "deprecated_dynamic"' in message, message
+            assert 'index "vector"' not in message, message
+        response = self.index_client.index_list(collection_name=name)
+        assert response["code"] == 0, response
+        assert set(response["data"]) == {"vector", "deprecated_root", "deprecated_dynamic"}
+        for index_name in ["deprecated_root", "deprecated_dynamic"]:
+            response = self.index_client.index_describe(collection_name=name, index_name=index_name)
+            assert response["code"] == 0, response
+            assert len(response["data"]) == 1, response
+            info = response["data"][0]
+            assert info["indexState"] == "Finished", info
+            assert info["totalRows"] == info["indexedRows"] == info["pendingRows"] == 0, info
+
     @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
     @pytest.mark.parametrize("index_type", ["AUTOINDEX", "IVF_SQ8", "HNSW"])
     @pytest.mark.parametrize("dim", [128])

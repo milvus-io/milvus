@@ -8,14 +8,4 @@ pub enum TantivyDataType {
     I64,
     F64,
     Bool,
-    JSON,
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JsonExistValueType {
-    Any,
-    Numeric,
-    String,
-    Bool,
 }

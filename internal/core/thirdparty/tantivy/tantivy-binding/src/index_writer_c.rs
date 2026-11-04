@@ -450,45 +450,6 @@ pub extern "C" fn tantivy_index_add_json_key_stats_data_by_batch(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn tantivy_index_add_json(
-    ptr: *mut c_void,
-    s: *const c_char,
-    offset: i64,
-) -> RustResult {
-    let real = ptr as *mut IndexWriterWrapper;
-    let s = cstr_to_str!(s);
-    unsafe { (*real).add_json(s, Some(offset)).into() }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_index_add_json_batch(
-    ptr: *mut c_void,
-    array: *const *const c_char,
-    len: usize,
-    offset_begin: i64,
-) -> RustResult {
-    let real = ptr as *mut IndexWriterWrapper;
-    unsafe {
-        let arr = convert_to_rust_slice!(array, len);
-        (*real).add_json_batch(arr, offset_begin).into()
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_index_add_array_json(
-    ptr: *mut c_void,
-    array: *const *const c_char,
-    len: usize,
-    offset: i64,
-) -> RustResult {
-    let real = ptr as *mut IndexWriterWrapper;
-    unsafe {
-        let arr = convert_to_rust_slice!(array, len);
-        (*real).add_array_json(arr, Some(offset)).into()
-    }
-}
-
 // --------------------------------------------- array ------------------------------------------
 
 #[no_mangle]

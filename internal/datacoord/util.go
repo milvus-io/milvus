@@ -113,7 +113,7 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 
 		// include all scalar fields with index
 		if paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			indices := mt.indexMeta.GetIndexesForCollection(collection, "")
+			indices := mt.indexMeta.GetPhysicalIndexesForCollection(collection)
 			for _, index := range indices {
 				targetFieldIds = append(targetFieldIds, index.FieldID)
 			}
