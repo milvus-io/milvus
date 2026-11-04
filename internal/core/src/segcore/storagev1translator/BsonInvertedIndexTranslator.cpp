@@ -126,9 +126,11 @@ BsonInvertedIndexTranslator::estimated_loading_usage(
     }
     if (async_load_resource_) {
         const auto& request = *async_load_resource_;
-        return {{request.final_memory_cost, request.final_disk_cost},
-                {request.max_memory_cost - request.final_memory_cost,
-                 request.max_disk_cost - request.final_disk_cost}};
+        return {milvus::cachinglayer::ResourceUsage(request.final_memory_cost,
+                                                    request.final_disk_cost),
+                milvus::cachinglayer::ResourceUsage(
+                    request.max_memory_cost - request.final_memory_cost,
+                    request.max_disk_cost - request.final_disk_cost)};
     }
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
