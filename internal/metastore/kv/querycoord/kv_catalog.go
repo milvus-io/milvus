@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/klauspost/compress/zstd"
@@ -17,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/compressor"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -38,16 +39,12 @@ const (
 type Catalog struct {
 	cli            kv.MetaKv
 	paginationSize int
-
-	pool *conc.Pool[any]
 }
 
 func NewCatalog(cli kv.MetaKv) Catalog {
-	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
 	return Catalog{
 		cli:            cli,
 		paginationSize: paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(),
-		pool:           ioPool,
 	}
 }
 
@@ -153,38 +150,44 @@ func (s Catalog) GetCollections(ctx context.Context) ([]*querypb.CollectionLoadI
 	return ret, nil
 }
 
+// GetPartitions walks the partition prefix once instead of reading the prefix
+// of each collection. A key belongs to a requested collection exactly when
+// that collection's prefix matches it; other keys are skipped undecoded. Every
+// requested collection gets an entry, and the error is that of the first
+// requested collection with a value that does not decode.
 func (s Catalog) GetPartitions(ctx context.Context, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error) {
-	collectionPartitions := make([][]*querypb.PartitionLoadInfo, len(collectionIDs))
-	futures := make([]*conc.Future[any], 0, len(collectionIDs))
-	for i, collectionID := range collectionIDs {
-		i := i
-		collectionID := collectionID
-		futures = append(futures, s.pool.Submit(func() (any, error) {
-			prefix := EncodePartitionLoadInfoPrefix(collectionID)
-			_, values, err := s.cli.LoadWithPrefix(ctx, prefix)
-			if err != nil {
-				return nil, err
-			}
-			ret := make([]*querypb.PartitionLoadInfo, 0, len(values))
-			for _, v := range values {
-				info := querypb.PartitionLoadInfo{}
-				if err = proto.Unmarshal([]byte(v), &info); err != nil {
-					return nil, err
-				}
-				ret = append(ret, &info)
-			}
-			collectionPartitions[i] = ret
-			return nil, nil
-		}))
+	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
+	if len(collectionIDs) == 0 {
+		return result, nil
 	}
-	err := conc.AwaitAll(futures...)
+	requested := make(map[string]int64, len(collectionIDs))
+	for _, collectionID := range collectionIDs {
+		requested[strconv.FormatInt(collectionID, 10)] = collectionID
+		result[collectionID] = make([]*querypb.PartitionLoadInfo, 0)
+	}
+	invalid := make(map[int64]error)
+	prefix := s.cli.GetPath(PartitionLoadInfoPrefix + "/")
+	err := s.cli.WalkWithPrefix(ctx, PartitionLoadInfoPrefix+"/", s.paginationSize, func(key []byte, value []byte) error {
+		segment, _, ok := strings.Cut(strings.TrimPrefix(string(key), prefix), "/")
+		collectionID, found := requested[segment]
+		if !ok || !found || invalid[collectionID] != nil {
+			return nil
+		}
+		info := &querypb.PartitionLoadInfo{}
+		if err := proto.Unmarshal(value, info); err != nil {
+			invalid[collectionID] = err
+			return nil
+		}
+		result[collectionID] = append(result[collectionID], info)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
-	for i, partitions := range collectionPartitions {
-		result[collectionIDs[i]] = partitions //nolint:gosec // collectionPartitions and collectionIDs have same length
+	for _, collectionID := range collectionIDs {
+		if err := invalid[collectionID]; err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

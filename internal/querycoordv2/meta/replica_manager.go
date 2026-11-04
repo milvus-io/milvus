@@ -115,7 +115,11 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 	if err != nil {
 		return merr.Wrap(err, "failed to recover replicas")
 	}
+	return m.RecoverFrom(ctx, collections, replicas)
+}
 
+// RecoverFrom is Recover with the replicas already read from the meta store.
+func (m *ReplicaManager) RecoverFrom(ctx context.Context, collections []int64, replicas []*querypb.Replica) error {
 	collectionSet := typeutil.NewUniqueSet(collections...)
 	grouped := make(map[int64][]*Replica)
 	for _, replica := range replicas {

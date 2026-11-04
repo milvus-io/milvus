@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -401,7 +402,15 @@ func (s *Server) initMeta() error {
 	)
 
 	mlog.Info(s.ctx, "recover meta...")
+	// Collection recovery never writes replica keys, so read them meanwhile.
+	var replicas []*querypb.Replica
+	var replicasRead errgroup.Group
+	replicasRead.Go(func() (err error) {
+		replicas, err = s.store.GetReplicas(s.ctx)
+		return err
+	})
 	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
+	replicasErr := replicasRead.Wait()
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover collections", mlog.Err(err))
 		return err
@@ -414,7 +423,11 @@ func (s *Server) initMeta() error {
 
 	metrics.QueryCoordNumPartitions.WithLabelValues().Set(float64(len(s.meta.GetAllPartitions(s.ctx))))
 
-	err = s.meta.ReplicaManager.Recover(s.ctx, collections)
+	if replicasErr != nil {
+		err = merr.Wrap(replicasErr, "failed to recover replicas")
+	} else {
+		err = s.meta.RecoverFrom(s.ctx, collections, replicas)
+	}
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover replicas", mlog.Err(err))
 		return err
