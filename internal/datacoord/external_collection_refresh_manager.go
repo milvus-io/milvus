@@ -1082,6 +1082,13 @@ func normalizeRefreshJobProgress(job *datapb.ExternalCollectionRefreshJob, state
 		return
 	}
 
+	if state == indexpb.JobState_JobStateFailed {
+		// The checker publishes State, FailReason and EndTime together. Keep
+		// the job snapshot until that write succeeds so clients cannot observe
+		// a terminal failure without its details and stop polling too early.
+		return
+	}
+
 	if state == indexpb.JobState_JobStateFinished {
 		job.State = indexpb.JobState_JobStateInProgress
 		// A job in the index wait has every task Finished, so the task

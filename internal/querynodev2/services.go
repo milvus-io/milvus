@@ -1009,6 +1009,11 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		}
 	}()
 
+	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
 	log.Debug(ctx, "start do query segments", mlog.Int64s("segmentIDs", req.GetSegmentIDs()))
 	// add cancel when error occurs
 	queryCtx, cancel := context.WithCancel(ctx)
@@ -1074,6 +1079,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	defer node.lifetime.Done()
+	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
+		return &internalpb.RetrieveResults{
+			Status: merr.Status(err),
+		}, nil
+	}
 	if !node.manager.Collection.Ref(req.GetReq().GetCollectionID(), 1) {
 		err := merr.WrapErrCollectionNotLoaded(req.GetReq().GetCollectionID())
 		log.Warn(ctx, "failed to query collection", mlog.Err(err))
@@ -1131,6 +1141,11 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 		return nil
 	}
 	defer node.lifetime.Done()
+
+	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
+		concurrentSrv.Send(&internalpb.RetrieveResults{Status: merr.Status(err)})
+		return nil
+	}
 
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 
@@ -1197,6 +1212,12 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		return nil
 	}
 	defer node.lifetime.Done()
+
+	if err := upgradeLegacyCountRequest(ctx, req.GetReq()); err != nil {
+		resp.Status = merr.Status(err)
+		concurrentSrv.Send(resp)
+		return nil
+	}
 
 	log.Debug(ctx, "start do query with channel", mlog.Int64s("segmentIDs", req.GetSegmentIDs()))
 

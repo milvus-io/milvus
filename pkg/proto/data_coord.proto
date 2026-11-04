@@ -1702,6 +1702,9 @@ message CompactionTask{
   repeated int64 tmpSegments = 27;
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
+  // Preserve the task outcome after state advances to cleaned. Older cleaned
+  // tasks leave this as unknown and are treated as successfully completed.
+  CompactionTaskState terminal_state = 31;
 }
 
 message PartitionStatsInfo {
@@ -1881,6 +1884,8 @@ message ListSnapshotsRequest {
 message ListSnapshotsResponse {
   common.Status status = 1;
   repeated string snapshots = 2;
+  // Ordered by create_ts descending, then name ascending; aligned with snapshots.
+  repeated SnapshotSummary snapshot_summaries = 3;
 }
 
 message ExportSnapshotRequest {
@@ -2207,4 +2212,12 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// SnapshotSummary contains list metadata without loading snapshot files.
+message SnapshotSummary {
+  string name = 1;
+  // Same Milvus timestamp and semantics as DescribeSnapshot.create_ts.
+  int64 create_ts = 2;
+  string description = 3;
 }

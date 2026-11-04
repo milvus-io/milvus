@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
@@ -196,6 +197,33 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 		assert.Equal(t, DefaultStorageIopsInitialRate, initialRate.GetAsUint32())
 		assert.NoError(t, params.Save(maxRate.Key, invalid))
 		assert.Equal(t, DefaultStorageIopsMaxRate, maxRate.GetAsUint32())
+	}
+}
+
+func TestExprCacheConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	params := proxyConfig{}
+	params.init(base)
+	require.True(t, params.ExprParseCacheEnabled.GetAsBool())
+	require.NoError(t, base.Save(params.ExprParseCacheEnabled.Key, "false"))
+	require.False(t, params.ExprParseCacheEnabled.GetAsBool())
+
+	for _, tc := range []struct {
+		item     *ParamItem
+		fallback int
+	}{
+		{&params.ExprParseCacheMaxEntries, 1024},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			require.Equal(t, tc.fallback, tc.item.GetAsInt())
+			require.NoError(t, base.Save(tc.item.Key, "2"))
+			require.Equal(t, 2, tc.item.GetAsInt())
+			for _, invalid := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+				require.NoError(t, base.Save(tc.item.Key, invalid))
+				require.Equal(t, tc.fallback, tc.item.GetAsInt(), invalid)
+			}
+		})
 	}
 }
 
@@ -1340,6 +1368,48 @@ func TestComponentParam(t *testing.T) {
 	})
 }
 
+func TestDataCoordForceMergeMemoryFactorConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true))
+	var cfg dataCoordConfig
+	cfg.init(base)
+	for _, value := range []string{"NaN", "+Inf", "-Inf", "invalid"} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, value)
+		assert.Equal(t, 4.0, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), value)
+		assert.Equal(t, 4.0, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), value)
+
+		_, err := metricsinfo.MarshalComponentInfos(metricsinfo.DataCoordInfos{
+			SystemConfigurations: metricsinfo.DataCoordConfiguration{
+				ForceMergeDataNodeMemoryFactor:  cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(),
+				ForceMergeQueryNodeMemoryFactor: cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(),
+			},
+		})
+		assert.NoError(t, err, value)
+	}
+
+	for _, value := range []string{"-1", "0", "0.5", "0.9999"} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, value)
+		assert.Equal(t, 1.0, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), value)
+		assert.Equal(t, 1.0, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), value)
+	}
+
+	for _, test := range []struct {
+		value    string
+		expected float64
+	}{
+		{value: "1.0", expected: 1.0},
+		{value: "1.0001", expected: 1.0001},
+		{value: "2.5", expected: 2.5},
+		{value: "8", expected: 8.0},
+	} {
+		base.Save(cfg.CompactionForceMergeDataNodeMemoryFactor.Key, test.value)
+		base.Save(cfg.CompactionForceMergeQueryNodeMemoryFactor.Key, test.value)
+		assert.Equal(t, test.expected, cfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(), test.value)
+		assert.Equal(t, test.expected, cfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(), test.value)
+	}
+}
+
 func TestForbiddenItem(t *testing.T) {
 	Init()
 	params := Get()
@@ -1455,4 +1525,21 @@ func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
 	assert.Equal(t, time.Duration(0), item.GetAsDurationByParse())
 	assert.NoError(t, params.Reset(item.Key))
 	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
+}
+
+func TestSnapshotDescriptionLengthConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	limit := &params.ProxyCfg.MaxSnapshotDescriptionLength
+	assert.Equal(t, "proxy.maxSnapshotDescriptionLength", limit.Key)
+	assert.Equal(t, "3.0.5", limit.Version)
+	assert.False(t, limit.Export)
+	assert.Equal(t, 1024, limit.GetAsInt())
+	require.NoError(t, params.Save(limit.Key, "2048"))
+	assert.Equal(t, 2048, limit.GetAsInt())
+	require.NoError(t, params.Reset(limit.Key))
+	assert.Equal(t, 1024, limit.GetAsInt())
+	field, ok := reflect.TypeOf(&params.ProxyCfg).Elem().FieldByName("MaxSnapshotDescriptionLength")
+	require.True(t, ok)
+	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }

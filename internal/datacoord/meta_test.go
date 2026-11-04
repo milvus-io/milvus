@@ -65,6 +65,89 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestGetCompactableSegmentGroupByCollection(t *testing.T) {
+	m := &meta{segments: NewSegmentsInfo()}
+	cases := []struct {
+		id, collectionID int64
+		level            datapb.SegmentLevel
+		state            commonpb.SegmentState
+		importing        bool
+		compacting       bool
+	}{
+		{1, 100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, false},
+		{2, 100, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, false},
+		{3, 100, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, false, false},
+		{4, 200, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, false},
+		{5, 300, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, false, false},
+		{6, 400, datapb.SegmentLevel_L0, commonpb.SegmentState_Growing, false, false},
+		{7, 500, datapb.SegmentLevel_L0, commonpb.SegmentState_Dropped, false, false},
+		{8, 600, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, true, false},
+		{9, 700, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, true},
+		{10, 100, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushed, false, false},
+		{11, 800, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed, false, true},
+		{12, 900, datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, true, false},
+		{13, 1000, datapb.SegmentLevel_L0, commonpb.SegmentState_Flushing, false, false},
+	}
+	for _, tc := range cases {
+		m.segments.SetSegment(tc.id, &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID: tc.id, CollectionID: tc.collectionID, Level: tc.level,
+				State: tc.state, IsImporting: tc.importing,
+			},
+			isCompacting: tc.compacting,
+		})
+	}
+	m.snapshotMeta = createTestSnapshotMetaLoaded(t)
+	t.Cleanup(m.snapshotMeta.loaderCancel)
+	m.snapshotMeta.SetSnapshotPending(100)
+
+	groups := m.GetCompactableSegmentGroupByCollection()
+	require.Len(t, groups, 3)
+	assert.Contains(t, groups, int64(200))
+	assert.Empty(t, groups[200])
+	assert.Contains(t, groups, int64(300))
+	assert.Empty(t, groups[300])
+	require.Len(t, groups[100], 2)
+	assert.ElementsMatch(t, []int64{1, 10}, lo.Map(groups[100], func(segment *SegmentInfo, _ int) int64 {
+		assert.Equal(t, datapb.SegmentLevel_L0, segment.GetLevel())
+		return segment.GetID()
+	}))
+
+	// The selected L0 segments retain their distinct entries from the 3.0 map.
+	assert.NotSame(t, groups[100][0], groups[100][1])
+	for _, segment := range groups[100] {
+		assert.Same(t, m.segments.GetSegment(segment.GetID()), segment)
+	}
+}
+
+func TestGetCompactableSegmentGroupByCollectionNonL0AllocatedBytes(t *testing.T) {
+	allocatedBytes := func(nonL0Count int) int64 {
+		m := &meta{segments: NewSegmentsInfo()}
+		for i := 0; i <= nonL0Count; i++ {
+			level := datapb.SegmentLevel_L1
+			if i == 0 {
+				level = datapb.SegmentLevel_L0
+			}
+			m.segments.SetSegment(int64(i+1), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: int64(i + 1), CollectionID: 100, Level: level, State: commonpb.SegmentState_Flushed,
+			}})
+		}
+		var groups map[int64][]*SegmentInfo
+		result := testing.Benchmark(func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				groups = m.GetCompactableSegmentGroupByCollection()
+			}
+		})
+		require.NotEmpty(t, groups[100])
+		return result.AllocedBytesPerOp()
+	}
+
+	small := allocatedBytes(1)
+	large := allocatedBytes(1000)
+	t.Logf("allocated bytes with 1/1000 non-L0 segments: %d / %d", small, large)
+	assert.LessOrEqual(t, large, small+1024, "non-L0 metadata must be filtered before allocating result slices")
+}
+
 // MetaReloadSuite tests meta reload & meta creation related logic
 type MetaReloadSuite struct {
 	testutils.PromMetricsSuite

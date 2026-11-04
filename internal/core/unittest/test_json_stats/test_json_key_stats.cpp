@@ -136,8 +136,8 @@ TEST(JsonStatsTranslatorTest, AggregatesWarmupAndUsesZeroOuterBudget) {
     EXPECT_EQ(explicit_policy.meta()->cache_warmup_policy, sync);
     EXPECT_FALSE(explicit_policy.meta()->support_eviction);
     EXPECT_EQ(explicit_policy.num_cells(), 1);
-    const auto [payload, overhead] =
-        explicit_policy.estimated_byte_size_of_cell(0);
+    const auto [payload, overhead, shared_overhead] =
+        explicit_policy.estimated_loading_usage({0});
     EXPECT_EQ(payload, cachinglayer::ResourceUsage(0, 0));
     EXPECT_EQ(overhead, cachinglayer::ResourceUsage(0, 0));
     EXPECT_EQ(explicit_policy.cells_storage_bytes({0}), 0);
