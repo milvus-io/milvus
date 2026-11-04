@@ -31,6 +31,10 @@ import (
 // make build-failpoint-fixture and set MILVUS_FAILPOINT_WORK_DIR. Direct go test
 // (including the Dev CLI runner) uses the same build script once per package.
 func Run(m *testing.M) int {
+	return run(m.Run)
+}
+
+func run(runTests func() int) int {
 	fixture := os.Getenv("MILVUS_FAILPOINT_WORK_DIR")
 	if fixture == "" {
 		root := os.Getenv("MILVUS_WORK_DIR")
@@ -64,5 +68,5 @@ func Run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	return m.Run()
+	return runTests()
 }
