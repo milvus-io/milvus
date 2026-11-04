@@ -255,6 +255,9 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 }
 
 func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
+	router.Use(func(c *gin.Context) {
+		c.Set(ContextMetaCache, h.metaCache)
+	})
 	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listCollections))))
 	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.hasCollection))))
 	// todo review the return data
@@ -494,6 +497,7 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 		if !ok {
 			return
 		}
+		dbName, collectionName = proxy.CollectionMetricLabels(metaCacheFromContext(gCtx), methodTag, dbName, collectionName, resp, err)
 		metrics.ProxyFunctionCall.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			methodTag,
@@ -574,12 +578,32 @@ func (*jsonArrayMarker) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// metaCacheFromContext returns the proxy meta cache RegisterRoutesToV2 put into
+// the gin context, or nil.
+func metaCacheFromContext(c *gin.Context) proxy.Cache {
+	value, ok := c.Get(ContextMetaCache)
+	if !ok {
+		return nil
+	}
+	if getMetaCache, ok := value.(func() proxy.Cache); ok && getMetaCache != nil {
+		return getMetaCache()
+	}
+	return nil
+}
+
 // restfulSizeMiddleware is the middleware fetchs metrics stats from gin struct.
 func restfulSizeMiddleware(handler gin.HandlerFunc, observeOutbound bool) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		h := metrics.WrapRestfulContext(ctx.Request.Context(), ctx.Request.ContentLength)
 		ctx.Request = ctx.Request.WithContext(h)
 		handler(ctx)
+		// The handler put the request's names into the stats; keep them only
+		// while they denote an existing database and collection, as the
+		// request count does.
+		if stats := metrics.GetStats(h); stats != nil && (stats.DatabaseName() != "" || stats.CollectionName() != "") {
+			dbName, collectionName := proxy.CollectionMetricLabels(metaCacheFromContext(ctx), "", stats.DatabaseName(), stats.CollectionName(), nil, nil)
+			stats.SetDatabaseName(dbName).SetCollectionName(collectionName)
+		}
 		metrics.RecordRestfulMetrics(h, int64(ctx.Writer.Size()), observeOutbound)
 	}
 }

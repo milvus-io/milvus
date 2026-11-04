@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -75,7 +76,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 		updateMask.Paths = append(updateMask.Paths, message.FieldMaskCollectionName)
 	}
 
-	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetOldName())
+	cacheExpirations, err := c.getCacheExpireForCollectionWithMsgType(ctx, req.GetDbName(), req.GetOldName(), commonpb.MsgType_RenameCollection)
 	if err != nil {
 		return err
 	}

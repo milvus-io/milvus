@@ -55,6 +55,22 @@ func (s *RPCStats) SetCollectionName(collName string) *RPCStats {
 	return s
 }
 
+// DatabaseName returns the database name the received bytes are recorded under.
+func (s *RPCStats) DatabaseName() string {
+	if s == nil {
+		return ""
+	}
+	return s.databaseName
+}
+
+// CollectionName returns the collection name the received bytes are recorded under.
+func (s *RPCStats) CollectionName() string {
+	if s == nil {
+		return ""
+	}
+	return s.collectionName
+}
+
 func (s *RPCStats) SetInboundLabel(label string) *RPCStats {
 	if s == nil {
 		return s

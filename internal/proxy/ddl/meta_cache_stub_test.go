@@ -196,6 +196,20 @@ func (m *MetaCache) RemoveDatabaseInfo(ctx context.Context, database string) {
 	}
 }
 
+func (m *MetaCache) HasCachedCollection(database, collectionName string) bool {
+	if m.pad(len(database)+len(collectionName)) > 0 {
+		return false
+	}
+	return false
+}
+
+func (m *MetaCache) HasCachedDatabase(database string) bool {
+	if m.pad(len(database)) > 0 {
+		return false
+	}
+	return false
+}
+
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	if m.pad(len(database)) > 0 {
 		return false

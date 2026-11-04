@@ -173,6 +173,8 @@ func TestDescribeCollectionVisibilityFailsClosed(t *testing.T) {
 			cache := NewMockCache(t)
 			cache.EXPECT().GetCollectionID(mock.Anything, "tenant_b", "orders").Return(int64(77), nil).Once()
 			cache.EXPECT().GetCollectionInfo(mock.Anything, "tenant_b", "orders", int64(77)).Return(collection, nil).Once()
+			// the request count's labels ask whether the collection is cached
+			cache.EXPECT().HasCachedCollection("tenant_b", "orders").Return(true).Maybe()
 			node := &Proxy{mixCoord: mix, metaCache: cache}
 			node.UpdateStateCode(commonpb.StateCode_Healthy)
 			resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{DbName: "tenant_b", CollectionName: "orders"})

@@ -679,6 +679,17 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 	ProxyReportValue.DeletePartialMatch(labels)
 }
 
+// CleanupProxyUserMetrics deletes the series labeled with a dropped user.
+func CleanupProxyUserMetrics(nodeID int64, username string) {
+	UserRPCCounter.DeletePartialMatch(prometheus.Labels{
+		usernameLabelName: username,
+	})
+	ProxyReportValue.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		usernameLabelName: username,
+	})
+}
+
 func CleanupProxyCollectionMetrics(nodeID int64, dbName string, collection string) {
 	labels := prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),

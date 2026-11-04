@@ -110,6 +110,7 @@ const (
 	ContextResponse               = "response"
 	ContextUsername               = "username"
 	ContextToken                  = "token"
+	ContextMetaCache              = "metaCache" // func() proxy.Cache, for the metric labels a route records
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"

@@ -112,8 +112,7 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	dbName := request.GetDbName()
 	collectionName := request.GetCollectionName()
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.TotalLabel, metrics.CauseNA, dbName, collectionName).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(i.proxy.functionCallLabels(i.method, metrics.TotalLabel, metrics.CauseNA, dbName, collectionName)...).Inc()
 	defer func() {
 		metrics.ProxyReqLatency.WithLabelValues(nodeID, i.method).
 			Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -122,29 +121,25 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
 		status, cause := serviceCallMetricLabel(err)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(i.proxy.functionCallLabels(i.method, status, cause, dbName, collectionName)...).Inc()
 		return i.onError(err)
 	}
 
 	if i.onResponse != nil && merr.Ok(resp.GetStatus()) {
 		if err := i.onResponse(resp); err != nil {
 			status, cause := serviceCallMetricLabel(err)
-			metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-				status, cause, dbName, collectionName).Inc()
+			metrics.ProxyFunctionCall.WithLabelValues(i.proxy.functionCallLabels(i.method, status, cause, dbName, collectionName)...).Inc()
 			return i.onError(err)
 		}
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
 		status, cause := failMetricLabel(merr.Error(resp.GetStatus()))
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(i.proxy.functionCallLabels(i.method, status, cause, dbName, collectionName)...).Inc()
 		return resp, nil
 	}
 
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.SuccessLabel, metrics.CauseNA, dbName, collectionName).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(i.proxy.functionCallLabels(i.method, metrics.SuccessLabel, metrics.CauseNA, dbName, collectionName)...).Inc()
 
 	return resp, nil
 }

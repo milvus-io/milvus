@@ -347,7 +347,7 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
 			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
+			UnaryRequestStatsInterceptor(getMetaCache),
 			accesslog.UnaryAccessLogInterceptor,
 			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
