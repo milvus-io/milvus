@@ -805,7 +805,9 @@ class SegmentInternalInterface : public SegmentInterface {
      * so no need timestamp parameter, mvcc node prove the timestamp is already filtered.
      */
     virtual void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const = 0;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const = 0;
 
     /**
      * Sort all candidates in ascending order, and then return the limit smallest.
