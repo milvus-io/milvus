@@ -1393,6 +1393,11 @@ common:
     # default password for root user. The maximum length is 72 characters. 
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
+    # Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+    # pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+    # Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+    # Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.
+    passwordHashAlgorithm: bcrypt
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
     # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy

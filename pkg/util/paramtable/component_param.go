@@ -394,6 +394,7 @@ type commonConfig struct {
 	AdminAuthEnabled            ParamItem `refreshable:"true"`
 	SuperUsers                  ParamItem `refreshable:"true"`
 	DefaultRootPassword         ParamItem `refreshable:"false"`
+	PasswordHashAlgorithm       ParamItem `refreshable:"true"`
 	RootShouldBindRole          ParamItem `refreshable:"true"`
 	EnablePublicPrivilege       ParamItem `refreshable:"false"`
 	FeatureUsageEnabled         ParamItem `refreshable:"false"`
@@ -1252,6 +1253,19 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Sensitivity: Sensitive,
 	}
 	p.DefaultRootPassword.Init(base.mgr)
+
+	p.PasswordHashAlgorithm = ParamItem{
+		Key:     "common.security.passwordHashAlgorithm",
+		Version: "3.1.0",
+		Doc: `Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
+pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
+Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.`,
+		DefaultValue: "bcrypt",
+		Export:       true,
+		Sensitivity:  NonSensitive,
+	}
+	p.PasswordHashAlgorithm.Init(base.mgr)
 
 	p.RootShouldBindRole = ParamItem{
 		Key:          "common.security.rootShouldBindRole",
