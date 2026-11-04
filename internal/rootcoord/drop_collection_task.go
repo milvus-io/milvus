@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -47,12 +48,15 @@ func (t *dropCollectionTask) validate(ctx context.Context) error {
 	// we cannot handle case that
 	// dropping collection with `ts1` but a collection exists in catalog with newer ts which is bigger than `ts1`.
 	// fortunately, if ddls are promised to execute in sequence, then everything is OK. The `ts1` will always be latest.
-	collMeta, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
+	collMeta, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, true)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
 			return errIgnoredDropCollection
 		}
 		return err
+	}
+	if collMeta.State == etcdpb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %s is being restored", collMeta.Name)
 	}
 
 	// meta cache of all aliases should also be cleaned.

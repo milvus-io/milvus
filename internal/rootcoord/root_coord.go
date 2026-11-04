@@ -218,6 +218,27 @@ func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
 }
 
+// IsCollectionDropped checks authoritative lifecycle metadata, including during
+// recovery. Creating/Restoring collections are unavailable to public Describe
+// but still own pending publication obligations.
+func (c *Core) IsCollectionDropped(ctx context.Context, collectionID int64) (bool, error) {
+	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch collection.State {
+	case pb.CollectionState_CollectionDropping, pb.CollectionState_CollectionDropped:
+		return true, nil
+	case pb.CollectionState_CollectionCreating, pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
+		return false, nil
+	default:
+		return false, merr.WrapErrDataIntegrityMsg("collection %d has unknown state %d", collectionID, collection.State)
+	}
+}
+
 func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collectionID int64) (bool, error) {
 	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -227,7 +248,7 @@ func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collec
 		return false, err
 	}
 	switch collection.State {
-	case pb.CollectionState_CollectionCreated:
+	case pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
 		return true, nil
 	case pb.CollectionState_CollectionCreating,
 		pb.CollectionState_CollectionDropping,
@@ -1255,7 +1276,23 @@ func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	if in.GetCollectionName() != "" {
 		return c.meta.GetCollectionByName(ctx, in.GetDbName(), in.GetCollectionName(), ts, false)
 	}
-	return c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
+	coll, err := c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, allowUnavailable)
+	if !allowUnavailable && isMaxTs(ts) && errors.Is(err, merr.ErrCollectionNotFound) && contextutil.IsIntraClusterRequest(ctx) {
+		// A replicated Load can arrive before the local Restore finishes. It
+		// must retry rather than acknowledge the collection as already dropped.
+		pending, lookupErr := c.meta.GetCollectionByID(ctx, in.GetDbName(), in.GetCollectionID(), ts, true)
+		if lookupErr != nil && !errors.Is(lookupErr, merr.ErrCollectionNotFound) {
+			return nil, lookupErr
+		}
+		if lookupErr == nil && pending.State == pb.CollectionState_CollectionRestoring {
+			return nil, merr.WrapErrServiceNotReadyMsg("collection %d is being restored", in.GetCollectionID())
+		}
+		if lookupErr == nil && pending.Available() {
+			// Publication may have completed between the two metadata reads.
+			return filterUnavailablePartition(pending), nil
+		}
+	}
+	return coll, err
 }
 
 func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName string) *milvuspb.DescribeCollectionResponse {

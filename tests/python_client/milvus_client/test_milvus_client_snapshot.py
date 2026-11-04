@@ -156,6 +156,47 @@ class TestMilvusClientSnapshotDefault(TestMilvusClientSnapshotBase):
         self.drop_snapshot(client, snapshot_name, collection_name)
         self.drop_collection(client, restored_collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_snapshot_restore_preserves_shard_routing(self):
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        blocker = cf.gen_unique_str(prefix + "_channel_load")
+        target = cf.gen_unique_str(prefix + "_routing_restored")
+        snapshot_name = cf.gen_unique_str(prefix)
+        # Offset physical channel loads so source and target allocations can
+        # have different name orders. PK routing must still use the same shard.
+        self.create_collection(client, blocker, default_dim, shards_num=1)
+        self.create_collection(client, collection_name, default_dim, shards_num=2, consistency_level="Strong")
+        rng = np.random.default_rng(seed=19530)
+        rows = [{"id": i, "vector": list(rng.random(default_dim))} for i in range(512)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.create_snapshot(client, snapshot_name, collection_name)
+        job_id, _ = self.restore_snapshot(client, snapshot_name, collection_name, target)
+        wait_for_restore_complete(self, client, job_id)
+        self.load_collection(client, target)
+        assert (
+            client.query(target, filter="id >= 0", output_fields=["count(*)"], consistency_level="Strong")[0][
+                "count(*)"
+            ]
+            == 512
+        )
+        client.delete(target, ids=list(range(256)))
+        assert (
+            client.query(target, filter="id < 256", output_fields=["count(*)"], consistency_level="Strong")[0][
+                "count(*)"
+            ]
+            == 0
+        )
+        client.upsert(target, rows[256:])
+        assert (
+            client.query(target, filter="id >= 0", output_fields=["count(*)"], consistency_level="Strong")[0][
+                "count(*)"
+            ]
+            == 256
+        )
+        self.drop_snapshot(client, snapshot_name, collection_name)
+
 
 class TestMilvusClientSnapshotCreateInvalid(TestMilvusClientSnapshotBase):
     """Test create_snapshot with invalid parameters - L1"""
@@ -345,7 +386,7 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientSnapshotBase):
         """
         target: test drop snapshot while restore job is still in progress
         method: create snapshot -> start restore -> immediately drop snapshot
-        expected: drop should fail with error about active restore operations
+        expected: active restores reject drop; a completed restore permits it
         verified: https://github.com/milvus-io/milvus/issues/47578
         """
         client = self._client()
@@ -372,21 +413,18 @@ class TestMilvusClientSnapshotDropInvalid(TestMilvusClientSnapshotBase):
         # 3. Start restore (creates CopySegment jobs referencing the snapshot)
         job_id, _ = self.restore_snapshot(client, snapshot_name, collection_name, restored_collection_name)
 
-        # 4. Wait until restore is actively in progress (ref count registered)
-        #    before attempting drop, to avoid timing-dependent flakiness
-        start = time.time()
-        while time.time() - start < 30:
+        # 4. A small restore may complete before the next RPC. Successful
+        # deletion is valid only after completion; an active restore remains pinned.
+        try:
+            client.drop_snapshot(snapshot_name=snapshot_name, collection_name=collection_name)
+        except MilvusException as exc:
+            assert exc.code == 2601
+            assert "active pins exist" in exc.message
+        else:
             state, _ = self.get_restore_snapshot_state(client, job_id)
-            if state.state not in ("RestoreSnapshotPending",):
-                break
-            time.sleep(0.5)
-        log.info(f"Restore state before drop attempt: {state.state}")
-
-        # 5. Attempt to drop the snapshot while restore is in progress.
-        # PR #48143 introduced pin-based protection: restore jobs pin the snapshot
-        # and Drop fails with "active pins exist, unpin before dropping".
-        error = {ct.err_code: 2601, ct.err_msg: "active pins exist"}
-        self.drop_snapshot(client, snapshot_name, collection_name, check_task=CheckTasks.err_res, check_items=error)
+            assert state.state == "RestoreSnapshotCompleted", (
+                f"Snapshot was dropped before restore completed: {state.state}"
+            )
 
         # 6. Wait for restore to complete
         wait_for_restore_complete(self, client, job_id)

@@ -138,8 +138,9 @@ type Server struct {
 	copySegmentInspector CopySegmentInspector
 	copySegmentChecker   CopySegmentChecker
 
-	snapshotManager       SnapshotManager
-	snapshotExportManager *snapshotExportManager
+	snapshotManager          SnapshotManager
+	restoreCollectionManager RestoreCollectionManager
+	snapshotExportManager    *snapshotExportManager
 
 	compactionTrigger        trigger
 	compactionInspector      CompactionInspector
@@ -370,6 +371,12 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+	// Load copy jobs before compaction tasks so recovery can derive restore targets.
+	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
+	if err != nil {
+		return err
+	}
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -416,12 +423,6 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.fileResourceObserver.InitDataCoord(s.nodeManager)
 	}
 
-	// Initialize copy segment meta and components
-	s.copySegmentMeta, err = NewCopySegmentMeta(s.ctx, s.meta.catalog, s.meta, s.meta.snapshotMeta, s.allocator)
-	if err != nil {
-		return err
-	}
-
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
 		s.ctx,
@@ -450,6 +451,9 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	snapshotManager.collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := newSnapshotExportMeta(s.ctx, s.meta.catalog)
 	if err != nil {
@@ -816,6 +820,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.restoreJobs = s.copySegmentMeta
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
@@ -1343,14 +1348,8 @@ func (s *Server) registerMetricsRequest() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
+	// Internal metadata loading must include a Restoring collection. Public
+	// HasCollection hides it until its copy job publishes the restored data.
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

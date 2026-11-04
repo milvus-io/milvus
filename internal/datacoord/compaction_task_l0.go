@@ -45,8 +45,9 @@ var _ CompactionTask = (*l0CompactionTask)(nil)
 type l0CompactionTask struct {
 	taskProto atomic.Value // *datapb.CompactionTask
 
-	allocator allocator.Allocator
-	meta      CompactionMeta
+	allocator   allocator.Allocator
+	meta        CompactionMeta
+	restoreJobs CopySegmentMeta
 
 	times                *taskcommon.Times
 	committedV3Manifests map[int64]string
@@ -88,6 +89,12 @@ func (t *l0CompactionTask) GetTaskVersion() int64 {
 
 func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
+	if t.restoreMutationApplied() {
+		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn(t.context(), "retrying restored delete completion metadata", mlog.Err(err))
+		}
+		return
+	}
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to build compaction request", mlog.Err(err))
@@ -313,16 +320,24 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	// Select flushed L1/L2 segments for LevelZero compaction that meets the condition:
-	// dmlPos < triggerInfo.pos
-	flushedSegments := t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
-			info.GetInsertChannel() == taskProto.GetChannel() &&
-			(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
-			!info.GetIsImporting() &&
-			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
-	}))
+	var flushedSegments []*SegmentInfo
+	if taskProto.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
+		var err error
+		flushedSegments, err = t.restoreTargets()
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		// Ordinary L0 compaction selects bases older than the trigger position.
+		flushedSegments = t.meta.SelectSegments(t.context(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+				info.GetInsertChannel() == taskProto.GetChannel() &&
+				(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
+				!info.GetIsImporting() &&
+				info.GetLevel() != datapb.SegmentLevel_L0 &&
+				segmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
+		}))
+	}
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}
 	for _, info := range flushedSegments {
@@ -357,7 +372,7 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	plan := &datapb.CompactionPlan{
 		PlanID:        taskProto.GetPlanID(),
 		StartTime:     taskProto.GetStartTime(),
-		Type:          taskProto.GetType(),
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		Channel:       taskProto.GetChannel(),
 		CollectionTtl: taskProto.GetCollectionTtl(),
 		TotalRows:     taskProto.GetTotalRows(),
@@ -477,6 +492,24 @@ func buildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 
 func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
+	if t.GetTaskProto().GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
+		if t.restoreMutationApplied() {
+			return nil
+		}
+		targets, err := t.restoreTargets()
+		if err != nil {
+			return err
+		}
+		allowed := make(map[int64]struct{}, len(targets))
+		for _, segment := range targets {
+			allowed[segment.GetID()] = struct{}{}
+		}
+		for _, output := range outputSegs {
+			if _, ok := allowed[output.GetSegmentID()]; !ok {
+				return merr.WrapErrDataIntegrityMsg("restore compaction returned unexpected segment %d", output.GetSegmentID())
+			}
+		}
+	}
 	var operators []UpdateOperator
 	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {
@@ -513,13 +546,10 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
-	// Retire the compacted L0 input segments in the same catalog transaction that
-	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
-	// either every target gains its deltalogs and every input turns
-	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
-	// one CommitSegmentManifests call (manifest pointer advance + these operators
-	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
-	// through UpdateSegmentsInfo.
+	// Retire inputs in the same catalog mutation as target deltalogs. Within
+	// the transaction limit the mutation is atomic; oversized results persist
+	// deltalogs and target records before retiring inputs. Restore recovery
+	// relies on this ordering to recognize an already-installed result.
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), UpdateCompactedOperator(segID))
 	}
@@ -554,15 +584,13 @@ func (t *l0CompactionTask) saveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 }
 
 // commitL0V3DeltalogsBatch publishes every V3 target's deltalogs together with
-// extraOperators — the L0 input-segment retirement — in ONE catalog transaction.
+// extraOperators — the L0 input-segment retirement — in one catalog mutation.
 // CommitSegmentManifests acquires all targets' manifest locks as a single atomic
 // operation, runs the loon transactions in parallel outside segMu (from the same
 // dataCoord.manifestCommitConcurrency executor), and lands every pointer
-// advance plus extraOperators in one catalog transaction (a single UpdateSegmentsInfo).
-// Folding the input drops in makes the whole L0 result atomic — the targets gain their
-// merged deltalogs and the inputs turn Dropped/Compacted together, or nothing does —
-// while also collapsing the former per-segment CommitSegmentManifest fan-out that issued
-// one catalog.Update each.
+// advance plus extraOperators through a single UpdateSegmentsInfo. The catalog
+// commits atomically within its transaction limit; larger mutations persist all
+// targets before input retirement.
 // A target dropped during the plan is skipped by the primitive itself as a benign
 // terminal outcome, so no ErrSegmentNotFound reaches here; only a real failure (stale
 // manifest, manifest I/O error) is returned, failing the save so the scheduler retries.

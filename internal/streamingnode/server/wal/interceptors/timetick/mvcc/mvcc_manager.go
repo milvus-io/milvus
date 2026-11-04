@@ -86,6 +86,12 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsControlChannel(vchannel) {
 		return
 	}
+	// A restore carrying its creation recipe establishes the same live shard
+	// identity as CreateCollection. Legacy restore messages keep updating only
+	// an existing identity, just like other data mutations.
+	if msgType == message.MessageTypeRestoreSnapshot && message.MustAsMutableRestoreSnapshotMessageV2(msg).MustBody().GetCollection() != nil {
+		msgType = message.MessageTypeCreateCollection
+	}
 	switch msgType {
 	case message.MessageTypeCreateSegment, message.MessageTypeFlush:
 		// These storage operations do not change query-visible data and are not

@@ -787,6 +787,8 @@ enum CompactionType {
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
   BumpSchemaVersionCompaction = 12;
+  // Coordinator restore task; workers execute the ordinary L0 delete plan.
+  RestoreLevel0DeleteCompaction = 13;
 }
 
 message CompactionStateRequest {
@@ -1326,6 +1328,8 @@ message QueryCopySegmentResponse {
   string reason = 4;
   repeated CopySegmentResult segment_results = 5;  // Complete segment and index metadata
   int64 slots = 6;
+  // Execution error, separate from the Query RPC status. Absent on older workers.
+  common.Status failure_status = 7;
 }
 
 message DropCopySegmentRequest {
@@ -1501,6 +1505,15 @@ message CopySegmentJob {
   string snapshot_s3_location = 20;
   string external_spec = 21;
   string snapshot_fingerprint = 22;
+  // Per-target-VChannel RestoreSnapshot positions. These belong to the target
+  // WAL, never the source snapshot's time domain.
+  map<string, uint64> transform_start_after_timeticks = 23;
+  // The RestoreSnapshot broadcast also creates this target collection.
+  bool creates_collection = 24;
+  map<string, string> channel_mapping = 25; // Source -> target channels for idempotent segment registration.
+  // Stable plan identities for restore-owned L0 materialization, keyed by channel/partition.
+  map<string, int64> restore_compaction_plans = 26;
+  int64 snapshot_id = 27; // Source snapshot identity, retained across asynchronous job recovery.
 }
 
 message ImportJob {

@@ -142,6 +142,25 @@ is not the snapshot cut. Snapshot generation receives these positions explicitly
 it neither calls Flush RPC nor waits for cp_updater to publish them. Existing
 compaction protection and snapshot publication remain in the snapshot manager.
 
+New CreateSnapshot messages carry a primary-allocated SnapshotID; callback replay
+reuses a committed matching identity. Replicas build snapshots from their own
+acknowledged business-channel cuts. The callback waits for the collection to
+be available, including completion of an earlier asynchronous Restore. Restore
+creation carries the primary's collection/partition/index/Job IDs, with channel
+placement remapped on receipt. Each receiver owns its local source pin and copy
+Job. Replicated DropSnapshot may retry until that Job releases its pin; the
+checker releases it without acquiring the callback's resource keys. Old messages
+carrying `_ur` retain their local-only behavior.
+
+New RestoreSnapshot and DropSnapshot headers also carry the source SnapshotID.
+Callbacks resolve that exact generation and never substitute a newer snapshot
+with the same name. Restore jobs persist the ID for asynchronous recovery; local
+pin installation and snapshot reads use it, and external bundles must match it.
+A missing generation is logged at Error level and does not hold the DDL callback
+open. Restore retains a Failed Job for diagnosis, while Drop is a no-op. Transient
+storage or catalog failures still retry, as does Drop while the matching snapshot
+is pinned. Zero-ID historical messages retain their legacy name lookup.
+
 ## Truncate API Completion
 
 TruncateCollection broadcasts with `AckSyncUp` to all collection VChannels and
@@ -224,3 +243,17 @@ Growing/Transforming MVCC frontiers are not introduced here.
 Validation covers per-channel timestamps including a higher CChannel tick,
 empty channels, readiness retries, segment/job persistence failures, callback
 replay, timeout during a partial commit, and initial/commit/rollback routing.
+
+A Restore creation recipe that reads a local snapshot also carries a shared
+source-snapshot resource key. This orders a replicated Restore after the
+CreateSnapshot callback that publishes its source, including when that callback
+is retrying behind an earlier asynchronous Restore. The same dependency orders
+DropSnapshot after source pin admission. External restores read their immutable
+external bundle and do not acquire this local source key.
+
+A callback blocked on one resource key retains its ordering dependency on all
+its other keys for that scheduling pass. Later conflicting callbacks wait behind
+it, including transitive dependencies; independent keys and compatible shared
+readers can still run concurrently. Control-channel order therefore also covers
+a Snapshot blocked behind Load and a Restore waiting for that Snapshot, even
+before their business-channel ACKs have all arrived.

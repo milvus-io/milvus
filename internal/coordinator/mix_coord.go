@@ -201,6 +201,7 @@ func (s *mixCoordImpl) initInternal() error {
 	// Create DC server with MetaStore injected via constructor option.
 	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog),
 		datacoord.WithPKIndexService(s.pkindexService))
+	s.datacoordServer.SetRestoreCollectionManager(s.rootcoordServer)
 	s.datacoordServer.SetDataViewCollectionRecoveryValidator(s.rootcoordServer.ValidateDataViewCollectionForRecovery)
 	s.datacoordServer.SetSession(s.session)
 	s.datacoordServer.SetAddress(s.address)

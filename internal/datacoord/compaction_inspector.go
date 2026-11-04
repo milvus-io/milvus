@@ -42,11 +42,12 @@ import (
 )
 
 var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration{
-	datapb.CompactionType_MixCompaction:               30 * time.Minute,
-	datapb.CompactionType_Level0DeleteCompaction:      30 * time.Minute,
-	datapb.CompactionType_ClusteringCompaction:        60 * time.Minute,
-	datapb.CompactionType_SortCompaction:              20 * time.Minute,
-	datapb.CompactionType_BumpSchemaVersionCompaction: 30 * time.Minute,
+	datapb.CompactionType_RestoreLevel0DeleteCompaction: 30 * time.Minute,
+	datapb.CompactionType_MixCompaction:                 30 * time.Minute,
+	datapb.CompactionType_Level0DeleteCompaction:        30 * time.Minute,
+	datapb.CompactionType_ClusteringCompaction:          60 * time.Minute,
+	datapb.CompactionType_SortCompaction:                20 * time.Minute,
+	datapb.CompactionType_BumpSchemaVersionCompaction:   30 * time.Minute,
 }
 
 type CompactionInspector interface {
@@ -81,7 +82,8 @@ type compactionTargetMetaProvider interface {
 }
 
 type compactionInspector struct {
-	queueTasks *CompactionQueue
+	restoreJobs CopySegmentMeta
+	queueTasks  *CompactionQueue
 
 	executingGuard lock.RWMutex
 	executingTasks map[int64]CompactionTask // planID -> task
@@ -297,7 +299,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
 		switch t.GetTaskProto().GetType() {
-		case datapb.CompactionType_Level0DeleteCompaction:
+		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
@@ -327,7 +329,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		}
 
 		switch t.GetTaskProto().GetType() {
-		case datapb.CompactionType_Level0DeleteCompaction:
+		case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 			if mixChannelExcludes.Contain(t.GetTaskProto().GetChannel()) ||
 				clusterChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
@@ -524,6 +526,12 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
+				if task.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction && c.restoreJobs != nil {
+					job := c.restoreJobs.GetJob(context.TODO(), task.GetTriggerID())
+					if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
+						continue // The restore owner still needs the durable completion proof.
+					}
+				}
 				retentionStart := task.GetEndTime()
 				if retentionStart == 0 {
 					// Tasks persisted before end_time was populated retain the
@@ -713,8 +721,10 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
-	case datapb.CompactionType_Level0DeleteCompaction:
-		task = newL0CompactionTask(t, c.allocator, c.meta)
+	case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
+		l0 := newL0CompactionTask(t, c.allocator, c.meta)
+		l0.restoreJobs = c.restoreJobs
+		task = l0
 	case datapb.CompactionType_ClusteringCompaction:
 		task = newClusteringCompactionTask(t, c.allocator, c.meta, c.handler, c.analyzeScheduler, c.ievm)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
@@ -882,7 +892,7 @@ func CollectionIDCompactionTaskFilter(collectionID int64) compactionTaskFilter {
 
 func L0CompactionCompactionTaskFilter() compactionTaskFilter {
 	return func(task CompactionTask) bool {
-		return task.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction
+		return isL0Compaction(task.GetTaskProto().GetType())
 	}
 }
 

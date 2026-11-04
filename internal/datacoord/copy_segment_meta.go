@@ -83,6 +83,8 @@ type CopySegmentMeta interface {
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	// FailJobForDroppedCollection requires authoritative confirmation that the target is dropped.
+	FailJobForDroppedCollection(ctx context.Context, jobID int64) error
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -331,7 +333,8 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// Note: no ref-count rebuild is needed on restart. Restore protection is provided
 	// by pins persisted on SnapshotInfo (see createRestoreJob / RestoreSnapshot phase 0),
 	// which survive restart automatically via snapshotMeta reload. Terminal jobs have
-	// already released their pin; active jobs still hold theirs.
+	// normally released their pin; terminal cleanup resumes an interrupted release.
+	// Active collection-creating restores retain non-expiring pins.
 	//
 	// Upgrade caveat: CopySegmentJob rows persisted by pre-pin-refactor datacoord carry
 	// PinId=0 (proto default). The terminal-transition guard at UpdateJobStateAndReleaseRef
@@ -342,7 +345,8 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 	// Rollback caveat: if post-pin-refactor data is read by a pre-refactor binary, the
 	// old code ignores CopySegmentJob.PinId and uses its in-memory ref counter. Pins
 	// persisted on SnapshotInfo remain but are never unpinned → orphan pins. The pin
-	// TTL (dataCoord.snapshot.restorePinTTLSeconds) caps the blast radius.
+	// TTL caps legacy orphan pins; new durable Restore pins need terminal cleanup
+	// or manual unpin.
 
 	return copySegmentMeta, nil
 }
@@ -500,7 +504,43 @@ func (m *copySegmentMeta) CountJobBy(ctx context.Context, filters ...CopySegment
 // prevented because only one caller observes the `!wasTerminal → isTerminal`
 // transition under m.mu; every subsequent caller sees wasTerminal=true.
 func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+	return m.updateJobStateAndReleaseRef(ctx, jobID, false, actions...)
+}
+
+// FailJobForDroppedCollection ends the publication obligation after the target's
+// authoritative metadata confirms deletion. Unlike a timeout or task failure,
+// deletion also terminates a fully copied restore. The existing terminal guard
+// prevents stale checks from changing Completed jobs or releasing pins twice.
+func (m *copySegmentMeta) FailJobForDroppedCollection(ctx context.Context, jobID int64) error {
+	return m.updateJobStateAndReleaseRef(ctx, jobID, true,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("restore target collection dropped"))
+}
+
+func (m *copySegmentMeta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, targetDropped bool, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
+	current := m.jobs[jobID]
+	if current != nil {
+		state := current.GetState()
+		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			m.mu.Unlock()
+			return nil
+		}
+		// Completed copy tasks are the durable publication prerequisite. Once
+		// every expected segment is copied, publication retries cannot fail the
+		// job or release its data, even after a crash between publishing the
+		// collection and persisting the job's Completed state.
+		if !targetDropped && current.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.tasks.getByJobID(jobID)) {
+			next := current.Clone()
+			for _, action := range actions {
+				action(next)
+			}
+			if next.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted {
+				m.mu.Unlock()
+				return nil
+			}
+		}
+	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
@@ -534,11 +574,14 @@ func (m *copySegmentMeta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID
 
 	unpinCollID, unpinName, remaining, unpinErr := m.snapshotMeta.UnpinSnapshot(ctx, pinID)
 	if unpinErr != nil {
-		// Unpin failure is non-fatal for the state transition (already persisted).
-		// Pins carry a TTL (dataCoord.snapshot.restorePinTTLSeconds) so an orphan
-		// left here will self-heal; we still log loudly so operators can detect
-		// a broken unpin path early instead of waiting for TTL expiry.
-		mlog.Warn(ctx, "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
+		// The state transition is already durable. Terminal Restore cleanup
+		// retries permanent-pin release before removing the job; legacy pins
+		// retain their configured TTL fallback.
+		reason := "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL"
+		if isForwardRetryRestore(updatedJob) {
+			reason = "failed to unpin source snapshot on job terminal transition, restore cleanup will retry"
+		}
+		mlog.Warn(ctx, reason,
 			mlog.FieldJobID(jobID),
 			mlog.Int64("pinID", pinID),
 			mlog.Int64("sourceCollectionID", sourceCollectionID),
@@ -657,6 +700,9 @@ func (m *copySegmentMeta) UpdateTask(ctx context.Context, taskID int64, actions 
 		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
+		}
+		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted && updatedTask.GetState() != task.GetState() {
+			return nil // A late worker response cannot revoke installed copy data.
 		}
 		err := m.catalog.SaveCopySegmentTask(ctx, updatedTask.(*copySegmentTask).task.Load())
 		if err != nil {

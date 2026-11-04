@@ -544,6 +544,28 @@ func TestSnapshotRestoreWithoutExplicitFlush(t *testing.T) {
 		expected[i] = int64(i + 3)
 	}
 	require.ElementsMatch(t, expected, ids)
+
+	// Restore creates a live collection with the same Strong read-after-write
+	// contract as CreateCollection, without reopening the WAL or flushing.
+	restored, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(restoredName))
+	require.NoError(t, err)
+	for round := 0; round < 10; round++ {
+		start := 1000 + round*10
+		hp.CollPrepare.InsertData(ctx, t, mc, hp.NewInsertParams(restored.Schema),
+			hp.TNewDataOption().TWithNb(10).TWithStart(start))
+		result, err := mc.Query(ctx, client.NewQueryOption(restoredName).
+			WithFilter(fmt.Sprintf("id >= %d and id < %d", start, start+10)).
+			WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, 10, result.ResultCount)
+		_, err = mc.Delete(ctx, client.NewDeleteOption(restoredName).WithInt64IDs("id", []int64{int64(start)}))
+		require.NoError(t, err)
+		result, err = mc.Query(ctx, client.NewQueryOption(restoredName).
+			WithFilter(fmt.Sprintf("id >= %d and id < %d", start, start+10)).
+			WithOutputFields("id").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, 9, result.ResultCount)
+	}
 }
 
 // TestSnapshotRestoreExternalReferenced restores directly from CreateSnapshot metadata.

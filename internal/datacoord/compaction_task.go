@@ -49,6 +49,10 @@ type CompactionTask interface {
 	SaveTaskMeta() error
 }
 
+func isL0Compaction(typ datapb.CompactionType) bool {
+	return typ == datapb.CompactionType_Level0DeleteCompaction || typ == datapb.CompactionType_RestoreLevel0DeleteCompaction
+}
+
 type compactionTaskOpt func(task *datapb.CompactionTask)
 
 func setNodeID(nodeID int64) compactionTaskOpt {

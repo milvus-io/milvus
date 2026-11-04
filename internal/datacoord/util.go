@@ -326,7 +326,12 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	if len(task.GetResultSegments()) > 0 {
 		target = task.GetResultSegments()[0]
 	}
-	// Public and internal compaction enums share the same wire values.
+	// Restore is a Coordinator execution mode; expose the shared L0 operation
+	// through the existing public enum.
+	typ := task.GetType()
+	if typ == datapb.CompactionType_RestoreLevel0DeleteCompaction {
+		typ = datapb.CompactionType_Level0DeleteCompaction
+	}
 	return &milvuspb.CompactionMergeInfo{
 		Sources:       task.GetInputSegments(),
 		Target:        target,
@@ -335,7 +340,7 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 		CollectionId:  task.GetCollectionID(),
 		PartitionId:   task.GetPartitionID(),
 		Channel:       task.GetChannel(),
-		Type:          commonpb.CompactionType(task.GetType()),
+		Type:          commonpb.CompactionType(typ),
 		State:         commonpb.CompactionTaskState(task.GetState()),
 		FailureReason: task.GetFailReason(),
 		Targets:       task.GetResultSegments(),

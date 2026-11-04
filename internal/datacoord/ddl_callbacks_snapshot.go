@@ -20,6 +20,8 @@ import (
 	"context"
 	"sort"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -27,10 +29,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
-// ID allocation happens inside SnapshotManager.CreateSnapshot.
+// New messages carry the primary's snapshot ID. Old local messages retain
+// allocation in SnapshotManager.CreateSnapshot.
 func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultCreateSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
@@ -39,7 +43,6 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	)
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
-	// Create snapshot - ID is allocated inside CreateSnapshot
 	positions := make([]*msgpb.MsgPosition, 0, len(result.Results))
 	for channel, fence := range result.Results {
 		if funcutil.IsControlChannel(channel) {
@@ -53,7 +56,14 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 		})
 	}
 	sort.Slice(positions, func(i, j int) bool { return positions[i].GetChannelName() < positions[j].GetChannelName() })
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
+	var snapshotID int64
+	var err error
+	if header.GetSnapshotId() != 0 {
+		snapshotID, err = s.snapshotManager.(*snapshotManager).createSnapshot(ctx, header.CollectionId,
+			header.Name, header.Description, header.CompactionProtectionSeconds, positions, header.GetSnapshotId())
+	} else {
+		snapshotID, err = s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
+	}
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err
@@ -69,19 +79,35 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 // exclusive resource key lock and does a pin check under that lock before broadcasting.
 // PinSnapshotData also takes the same key (shared mode), so no concurrent Pin can add
 // pins while this callback runs. Therefore snapshotManager.DropSnapshot is guaranteed
-// never to return ErrSnapshotPinned on this path — the only remaining failure modes are
-// transient (etcd/network), which are correctly retried by the ack scheduler loop.
+// never to return ErrSnapshotPinned on the originating cluster. On a replica,
+// an earlier Restore may still be copying and holding its local source pin.
+// Its asynchronous checker releases the pin independently of these resource
+// keys, after which the ack scheduler can retry this drop successfully.
 func (s *DDLCallbacks) dropSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultDropSnapshotMessageV2) error {
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.String("snapshotName", header.Name),
 		mlog.FieldCollectionID(header.CollectionId),
+		mlog.Int64("snapshotID", header.GetSnapshotId()),
 	)
 	log.Info(ctx, "dropSnapshotV2AckCallback received")
 
-	// Delete snapshot using SnapshotManager interface (idempotent)
-	if err := s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name); err != nil {
+	var err error
+	if header.GetSnapshotId() != 0 {
+		err = s.snapshotManager.(*snapshotManager).snapshotMeta.dropSnapshot(ctx, header.CollectionId, header.Name, header.GetSnapshotId())
+		if err == nil {
+			deleteSnapshotActivePinsGauge(header.CollectionId, header.Name)
+		}
+	} else {
+		// Persisted messages without an ID retain their legacy name lookup.
+		err = s.snapshotManager.DropSnapshot(ctx, header.CollectionId, header.Name)
+	}
+	if err != nil {
 		log.Error(ctx, "failed to drop snapshot via DDL callback", mlog.Err(err))
+		if errors.Is(err, merr.ErrSnapshotNotFound) {
+			// A missing generation must not delete a newer namesake or block DDL.
+			return nil
+		}
 		return err
 	}
 
@@ -108,10 +134,20 @@ func (s *DDLCallbacks) dropSnapshotsByCollectionV2AckCallback(ctx context.Contex
 }
 
 // restoreSnapshotV2AckCallback handles the callback for RestoreSnapshot DDL message.
-// It creates copy segment jobs for data restoration.
-// NOTE: RestoreIndexes is now called synchronously in services.go before broadcast.
+// New messages create collection/index metadata and the asynchronous copy job.
+// Legacy messages restore data into an already-created collection.
 // NOTE: jobID is pre-allocated in RestoreSnapshot and passed via WAL message for idempotency.
 func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+	if result.Message.MustBody().GetCollection() != nil {
+		if err := s.snapshotManager.(*snapshotManager).applyRestoreCollection(ctx, result); err != nil {
+			return err
+		}
+		select {
+		case s.notifyIndexChan <- result.Message.Header().GetCollectionId():
+		default:
+		}
+		return nil
+	}
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.String("snapshotName", header.SnapshotName),
@@ -129,7 +165,12 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 		jobID int64
 		err   error
 	)
-	if header.GetExternal() {
+	if header.GetSnapshotId() != 0 {
+		jobID, err = s.snapshotManager.(*snapshotManager).restoreData(ctx,
+			header.SourceCollectionId, header.SnapshotName, header.GetSnapshotS3Location(), header.CollectionId,
+			header.JobId, header.PinId, header.GetExternal(), header.GetExternalSpec(), header.GetSnapshotFingerprint(),
+			&restorePublication{snapshotID: header.GetSnapshotId()})
+	} else if header.GetExternal() {
 		// External restores do not have a local snapshot catalog entry or pin.
 		// The WAL header carries the metadata URI and external_spec needed to
 		// recreate the source storage in the async copy job.
@@ -155,6 +196,9 @@ func (s *DDLCallbacks) restoreSnapshotV2AckCallback(ctx context.Context, result 
 	}
 	if err != nil {
 		log.Error(ctx, "failed to restore data", mlog.Err(err))
+		if errors.Is(err, merr.ErrSnapshotNotFound) {
+			return nil
+		}
 		return err
 	}
 

@@ -140,6 +140,7 @@ type CopySegmentJob interface {
 	GetCopiedSegments() int64
 	GetTotalRows() int64
 	GetSnapshotName() string
+	GetSnapshotId() int64
 	GetSourceCollectionId() int64
 	GetPinId() int64
 	GetExternal() bool
@@ -166,4 +167,24 @@ func (j *copySegmentJob) Clone() CopySegmentJob {
 		tr:             j.tr,
 		snapshotCache:  j.snapshotCache,
 	}
+}
+
+// allRestoreSegmentsCopied proves coverage from durable task records, including
+// empty snapshots. Counting only existing tasks could accept a partial dispatch.
+func allRestoreSegmentsCopied(job CopySegmentJob, tasks []CopySegmentTask) bool {
+	copied := make(map[int64]int64)
+	for _, task := range tasks {
+		if task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+			return false
+		}
+		for _, mapping := range task.GetIdMappings() {
+			copied[mapping.GetTargetSegmentId()] = mapping.GetSourceSegmentId()
+		}
+	}
+	for _, mapping := range job.GetIdMappings() {
+		if source, ok := copied[mapping.GetTargetSegmentId()]; !ok || source != mapping.GetSourceSegmentId() {
+			return false
+		}
+	}
+	return true
 }

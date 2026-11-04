@@ -721,7 +721,9 @@ func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCop
 
 	// Collect segment results from CopySegmentTask
 	var segmentResults []*datapb.CopySegmentResult
+	var failureStatus *commonpb.Status
 	if copyTask, ok := task.(*importv2.CopySegmentTask); ok {
+		failureStatus = copyTask.GetFailureStatus()
 		for _, result := range copyTask.GetSegmentResults() {
 			segmentResults = append(segmentResults, result)
 		}
@@ -734,6 +736,7 @@ func (node *DataNode) QueryCopySegment(ctx context.Context, req *datapb.QueryCop
 		Reason:         task.GetReason(),
 		SegmentResults: segmentResults,
 		Slots:          task.GetSlots(),
+		FailureStatus:  failureStatus,
 	}, nil
 }
 

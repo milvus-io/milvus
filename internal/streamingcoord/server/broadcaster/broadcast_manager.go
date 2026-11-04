@@ -516,7 +516,7 @@ func (bm *broadcastTaskManager) GetPendingSchemaFileResources() map[int64][]int6
 	result := make(map[int64][]int64)
 	for _, task := range bm.snapshotBroadcastTasks() {
 		typ := task.MessageTypeWithVersion()
-		if typ != message.MessageTypeCreateCollectionV1 && typ != message.MessageTypeAlterCollectionV2 {
+		if typ != message.MessageTypeCreateCollectionV1 && typ != message.MessageTypeAlterCollectionV2 && typ != message.MessageTypeRestoreSnapshotV2 {
 			continue
 		}
 		collectionID, ids, ok := task.PendingSchemaFileResourceSnapshot()

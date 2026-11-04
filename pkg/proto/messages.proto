@@ -10,6 +10,7 @@ import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not
 import "index_coord.proto";
 import "internal.proto";
 import "milvus.proto";
+import "msg.proto";
 import "rg.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -666,12 +667,13 @@ message DropIndexMessageBody {}
 
 // CreateSnapshotMessageHeader is the header of create snapshot message.
 // Contains all fields from CreateSnapshotRequest (except base).
-// snapshot_id is allocated in the callback.
+// snapshot_id is allocated before broadcasting new messages.
 message CreateSnapshotMessageHeader {
     int64 collection_id = 1;
     string name         = 2;
     string description  = 3;
     int64 compaction_protection_seconds = 4; // duration in seconds to protect referenced segments from compaction
+    int64 snapshot_id = 5; // Allocated by the primary before broadcast; zero retains legacy local allocation.
 }
 
 // CreateSnapshotMessageBody is the body of create snapshot message.
@@ -683,6 +685,7 @@ message CreateSnapshotMessageBody {}
 message DropSnapshotMessageHeader {
     string name = 1;
     int64 collection_id = 2; // collection id for per-collection name uniqueness
+    int64 snapshot_id = 3; // Exact snapshot generation; zero retains legacy name lookup.
 }
 
 // DropSnapshotMessageBody is the body of drop snapshot message.
@@ -700,10 +703,10 @@ message DropSnapshotsByCollectionMessageHeader {
 message DropSnapshotsByCollectionMessageBody {}
 
 // RestoreSnapshotMessageHeader is the header of restore snapshot message.
-// Used by DDL callback to restore indexes and data after collection is created.
+// Carries the identity of a restore; new messages include target creation in the body.
 message RestoreSnapshotMessageHeader {
     string snapshot_name = 1;    // Name of the snapshot to restore
-    int64 collection_id = 2;     // Target collection ID (already created)
+    int64 collection_id = 2;     // Pre-allocated target collection ID
     int64 job_id = 3;            // Pre-allocated job ID for idempotency
     int64 source_collection_id = 4; // Source collection ID for per-collection snapshot name lookup
     int64 pin_id = 5;            // Pin ID claimed on source snapshot at phase 0, transferred to the copy segment job
@@ -711,11 +714,17 @@ message RestoreSnapshotMessageHeader {
     string snapshot_s3_location = 7; // Metadata file path for external snapshot restore
     string external_spec = 8; // Optional external storage spec for external snapshot restore
     string snapshot_fingerprint = 9; // SHA-256 of validated external snapshot metadata
+    int64 snapshot_id = 10; // Source snapshot identity; zero retains legacy name lookup.
 }
 
 // RestoreSnapshotMessageBody is the body of restore snapshot message.
-// Empty - all info is read from snapshot by snapshot_name.
-message RestoreSnapshotMessageBody {}
+// A non-empty collection payload creates the target as part of this broadcast.
+// An absent payload is the legacy restore-into-an-already-created-target recipe.
+message RestoreSnapshotMessageBody {
+    CreateCollectionMessageHeader collection_header = 1;
+    msg.CreateCollectionRequest collection = 2;
+    repeated index.FieldIndex indexes = 3;
+}
 
 message AlterWALMessageHeader {
     common.WALName target_wal_name = 1; // Specifies the target WALName for the alter operation.

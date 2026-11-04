@@ -86,6 +86,7 @@ type IMetaTable interface {
 	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
+	CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error
 	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
@@ -185,7 +186,8 @@ type MetaTable struct {
 	fileResourceRefHolds  map[int64]map[int64]int                 // collection id -> file resource id -> pending alter reservation count
 	fileResourceVersion   uint64
 
-	generalCnt                   int // sum of product of partition number and shard number
+	generalCnt int // sum of product of partition number and shard number
+	// Admission counts include Created and Restoring collections, independently of public visibility.
 	availableCollectionCount     int
 	availableCollectionCountByDB map[int64]int
 
@@ -294,7 +296,7 @@ func (mt *MetaTable) reload() error {
 					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
 				}
 			}
-			if collection.Available() {
+			if collection.Available() || collection.State == pb.CollectionState_CollectionRestoring {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				for _, fileResourceID := range collection.FileResourceIds {
 					mt.fileResourceRefCnt[fileResourceID]++
@@ -332,7 +334,7 @@ func (mt *MetaTable) reload() error {
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
-		if coll.Available() {
+		if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 			vchannels = append(vchannels, coll.VirtualChannelNames...)
 		}
 	}
@@ -494,6 +496,11 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 		return err
 	}
 
+	for _, collection := range mt.collID2Meta {
+		if collection.DBName == dbName && collection.State == pb.CollectionState_CollectionRestoring {
+			return merr.WrapErrParameterInvalidMsg("database:%s contains a restoring collection", dbName)
+		}
+	}
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
 	if err != nil {
 		return err
@@ -574,7 +581,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
-	if coll.State != pb.CollectionState_CollectionCreated {
+	if coll.State != pb.CollectionState_CollectionCreated && coll.State != pb.CollectionState_CollectionRestoring {
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
@@ -629,6 +636,30 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		mlog.Int64("id", coll.CollectionID),
 		mlog.Uint64("ts", coll.CreateTime),
 	)
+	return nil
+}
+
+// CompleteRestoreCollection makes an already-published snapshot accessible.
+func (mt *MetaTable) CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if coll.Available() {
+		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %d is no longer restoring", collectionID)
+	}
+	clone := coll.Clone()
+	clone.State = pb.CollectionState_CollectionCreated
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx, coll, clone, metastore.MODIFY, clone.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[collectionID] = clone
 	return nil
 }
 
@@ -688,7 +719,7 @@ func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID Un
 	pn := coll.GetPartitionNum(true)
 
 	mt.generalCnt -= pn * int(coll.ShardsNum)
-	if coll.Available() {
+	if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 		mt.decreaseAvailableCollectionCountLocked(coll.DBID)
 	}
 	channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(coll.VirtualChannelNames...)
@@ -713,6 +744,11 @@ func (mt *MetaTable) persistCollectionDropping(ctx context.Context, collectionID
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok || coll.State == pb.CollectionState_CollectionDropping {
 		return "", false, nil
+	}
+	// Check again when replaying a previously admitted Drop broadcast. Holding
+	// ddLock also serializes this decision with restore completion.
+	if coll.State == pb.CollectionState_CollectionRestoring {
+		return "", false, merr.WrapErrServiceNotReadyMsg("collection %s is being restored", coll.Name)
 	}
 
 	// Resolve the database before persistence so a lookup failure remains
@@ -1278,9 +1314,9 @@ func (mt *MetaTable) CheckIfCollectionRenamable(ctx context.Context, dbName stri
 		return merr.WrapErrAsInputError(merr.WrapErrAliasCollectionNameConflict(newDBName, newName))
 	}
 
-	// check new collection already exists
-	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, false)
-	if coll != nil {
+	// Restoring reserves the name too; Dropping/Dropped names remain reusable.
+	coll, err := mt.getCollectionByNameInternal(ctx, newDBName, newName, typeutil.MaxTimestamp, true)
+	if coll != nil && (coll.Available() || coll.State == pb.CollectionState_CollectionRestoring) {
 		mlog.Warn(context.TODO(), "duplicated new collection name, already taken by another collection or alias.")
 		return merr.WrapErrParameterInvalidMsg("duplicated new collection name %s:%s with other collection name or alias", newDBName, newName)
 	}
@@ -1800,7 +1836,7 @@ func (mt *MetaTable) rebuildAvailableCollectionCountLocked() {
 		mt.availableCollectionCountByDB[db.ID] = 0
 	}
 	for _, coll := range mt.collID2Meta {
-		if !coll.Available() {
+		if !coll.Available() && coll.State != pb.CollectionState_CollectionRestoring {
 			continue
 		}
 		mt.increaseAvailableCollectionCountLocked(coll.DBID)
@@ -1836,6 +1872,8 @@ func (mt *MetaTable) moveAvailableCollectionCountLocked(fromDBID int64, toDBID i
 	mt.increaseAvailableCollectionCountLocked(toDBID)
 }
 
+// GetAvailableCollectionCount returns collection-count admission usage. Restoring
+// collections reserve capacity even though public lookups hide them.
 func (mt *MetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (dbCount int, totalCount int, dbExists bool) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
