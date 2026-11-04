@@ -509,42 +509,6 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets,
-                    int64_t count) const override {
-        if constexpr (!std::is_same_v<T, std::string>) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "BulkRawStringAt only supported for "
-                      "ChunkedVariableColumn<std::string>");
-        }
-        if (offsets == nullptr) {
-            auto ca = SemiInlineGet(slot_->PinAllCells(op_ctx));
-            for (int64_t i = 0; i < num_rows_; i++) {
-                auto [cid, offset_in_chunk] = GetChunkIDByOffset(i);
-                auto chunk = ca->get_cell_of(cid);
-                auto valid = nullable_ ? chunk->isValid(offset_in_chunk) : true;
-                fn(static_cast<StringChunk*>(chunk)->operator[](
-                       offset_in_chunk),
-                   i,
-                   valid);
-            }
-        } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-            for (int64_t i = 0; i < count; i++) {
-                auto chunk = ca->get_cell_of(cids[i]);
-                auto valid =
-                    nullable_ ? chunk->isValid(offsets_in_chunk[i]) : true;
-                fn(static_cast<StringChunk*>(chunk)->operator[](
-                       offsets_in_chunk[i]),
-                   i,
-                   valid);
-            }
-        }
-    }
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,

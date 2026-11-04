@@ -1341,14 +1341,19 @@ TEST(VortexColumnTest, ScanAndTake) {
                                column_group);
 
     std::vector<std::string> strings(offsets.size());
-    string_column.BulkRawStringAt(
-        nullptr,
-        [&](std::string_view value, size_t index, bool valid) {
-            EXPECT_TRUE(valid);
-            strings[index] = std::string(value);
-        },
-        offsets.data(),
-        offsets.size());
+    auto string_take =
+        string_column.Take(nullptr,
+                           {OffsetView::From(offsets.data(), offsets.size()),
+                            TargetType::StringView});
+    ASSERT_NE(string_take, nullptr);
+    ASSERT_EQ(string_take->Size(), offsets.size());
+    const auto string_items = string_take->Access<std::string_view>();
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const auto item = string_items[i];
+        EXPECT_TRUE(item.is_valid);
+        ASSERT_TRUE(item.value);
+        strings[i] = *item.value;
+    }
     EXPECT_EQ(strings, (std::vector<std::string>{"v7", "v1", "v7", "v15"}));
 
     take_result =
@@ -1405,6 +1410,110 @@ TEST(VortexColumnTest, UnsupportedInt32FilteredScanThrows) {
     EXPECT_THROW(CollectFilteredRowIdPayload(int_column, range_options, 10),
                  std::exception);
 
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, DataScanIsBoundedAndHonorsCursorPinPolicy) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir = std::filesystem::temp_directory_path() /
+               ("milvus_vortex_full_scan_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto schema = MakeNullableSchema();
+    auto first = WriteNullableVortexFile(
+        (dir / "first.vx").string(), schema, *properties);
+    auto second = WriteNullableVortexFile(
+        (dir / "second.vx").string(), schema, *properties, kNullableRows);
+    const auto types = NullableLocalVortexTypes();
+    const auto string_type =
+        std::find(types.begin(), types.end(), DataType::VARCHAR);
+    ASSERT_NE(string_type, types.end());
+    const FieldId field_id(kNullableFieldIdBase +
+                           std::distance(types.begin(), string_type));
+    auto group = MakeColumnGroup(
+        {first, second}, properties, {std::to_string(field_id.get())});
+    VortexColumn column(field_id,
+                        MakeNullableFieldMeta(field_id, DataType::VARCHAR),
+                        std::to_string(field_id.get()),
+                        properties,
+                        group);
+    const auto unsupported = ScanOptions::ForUnary(0,
+                                                   proto::plan::OpType::Equal,
+                                                   StringValue("v0"),
+                                                   ScanPinPolicy::AllCells);
+    EXPECT_FALSE(column.SupportsScanPushdown(unsupported));
+    EXPECT_EQ(column.Scan(nullptr, unsupported), nullptr);
+    const int64_t first_offset[]{0};
+    const int64_t second_offset[]{kNullableRows};
+    for (const auto policy :
+         {ScanPinPolicy::CursorOwned, ScanPinPolicy::AllCells}) {
+        const auto all_cells = policy == ScanPinPolicy::AllCells;
+        const auto options =
+            ScanOptions::ForData(0, TargetType::StringView, policy);
+        auto cursor = column.Scan(nullptr, options);
+        ASSERT_NE(cursor, nullptr);
+        EXPECT_EQ(column.CellsLoaded(first_offset, 1), all_cells);
+        EXPECT_EQ(column.CellsLoaded(second_offset, 1), all_cells);
+        ScanBatch batch;
+        int64_t position = 0;
+        while (cursor->Next(3, ScanReadMode::DataAndValidity, &batch)) {
+            ASSERT_EQ(batch.row_id_start, position);
+            ASSERT_GT(batch.size, 0);
+            ASSERT_LE(batch.size, 3);
+            const auto file_end =
+                position < kNullableRows ? kNullableRows : 2 * kNullableRows;
+            ASSERT_LE(position + batch.size, file_end);
+            for (int64_t i = 0; i < batch.size; ++i) {
+                EXPECT_EQ(IsScanRowValid(batch, i),
+                          ExpectedValid(position + i));
+                if (ExpectedValid(position + i)) {
+                    EXPECT_EQ(batch.values.data_as<std::string_view>()[i],
+                              ExpectedString(DataType::VARCHAR, position + i));
+                }
+            }
+            group->ManualEvictCache();
+            EXPECT_EQ(column.CellsLoaded(first_offset, 1),
+                      all_cells || position < kNullableRows);
+            EXPECT_EQ(column.CellsLoaded(second_offset, 1),
+                      all_cells || position >= kNullableRows);
+            position += batch.size;
+        }
+        EXPECT_EQ(position, 2 * kNullableRows);
+        group->ManualEvictCache();
+        EXPECT_EQ(column.CellsLoaded(first_offset, 1), all_cells);
+        EXPECT_EQ(column.CellsLoaded(second_offset, 1), all_cells);
+        cursor.reset();
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(first_offset, 1));
+        EXPECT_FALSE(column.CellsLoaded(second_offset, 1));
+
+        cursor = column.Scan(nullptr, options);
+        ASSERT_TRUE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+        cursor->Seek(7);
+        ASSERT_TRUE(cursor->Next(2, ScanReadMode::ValidityOnly, &batch));
+        EXPECT_EQ(batch.row_id_start, 7);
+        EXPECT_EQ(batch.size, 2);
+        EXPECT_TRUE(batch.values.empty());
+        EXPECT_EQ(IsScanRowValid(batch, 0), ExpectedValid(7));
+        EXPECT_EQ(IsScanRowValid(batch, 1), ExpectedValid(8));
+        ASSERT_TRUE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+        EXPECT_EQ(batch.row_id_start, 9);
+        EXPECT_EQ(batch.size, 1);
+        EXPECT_EQ(IsScanRowValid(batch, 0), ExpectedValid(9));
+        cursor.reset();
+        group->ManualEvictCache();
+    }
+
+    int64_t visited = 0;
+    column.BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t offset) {
+            EXPECT_EQ(offset, visited++);
+            EXPECT_EQ(valid, ExpectedValid(offset));
+        },
+        nullptr,
+        0);
+    EXPECT_EQ(visited, 2 * kNullableRows);
     std::filesystem::remove_all(dir);
 }
 
@@ -2058,15 +2167,20 @@ TEST(VortexColumnTest, PreservesNormalizationForDataScan) {
               Geometry(ctx, geometry_wkt[0].c_str()).to_wkb_string());
 
     std::vector<std::string> bulk_geometry_values;
-    geometry_column.BulkRawStringAt(
+    auto geometry_cursor = geometry_column.Scan(
         nullptr,
-        [&](std::string_view value, size_t index, bool valid) {
-            ASSERT_EQ(index, bulk_geometry_values.size());
-            ASSERT_TRUE(valid);
-            bulk_geometry_values.emplace_back(value);
-        },
-        nullptr,
-        geometry_wkt.size());
+        ScanOptions::ForData(
+            0, TargetType::StringView, ScanPinPolicy::CursorOwned));
+    ASSERT_NE(geometry_cursor, nullptr);
+    ScanBatch geometry_batch;
+    while (geometry_cursor->Next(
+        1, ScanReadMode::DataAndValidity, &geometry_batch)) {
+        ASSERT_EQ(geometry_batch.row_id_start, bulk_geometry_values.size());
+        ASSERT_EQ(geometry_batch.size, 1);
+        ASSERT_TRUE(IsScanRowValid(geometry_batch, 0));
+        bulk_geometry_values.emplace_back(
+            geometry_batch.values.data_as<std::string_view>()[0]);
+    }
     ASSERT_EQ(bulk_geometry_values.size(), geometry_wkt.size());
     for (size_t i = 0; i < bulk_geometry_values.size(); ++i) {
         EXPECT_EQ(bulk_geometry_values[i],
@@ -2075,15 +2189,20 @@ TEST(VortexColumnTest, PreservesNormalizationForDataScan) {
 
     const std::vector<int64_t> taken_geometry_offsets{1, 0};
     bulk_geometry_values.clear();
-    geometry_column.BulkRawStringAt(
-        nullptr,
-        [&](std::string_view value, size_t index, bool valid) {
-            ASSERT_EQ(index, bulk_geometry_values.size());
-            ASSERT_TRUE(valid);
-            bulk_geometry_values.emplace_back(value);
-        },
-        taken_geometry_offsets.data(),
-        taken_geometry_offsets.size());
+    auto bulk_geometry_take =
+        geometry_column.Take(nullptr,
+                             {OffsetView::From(taken_geometry_offsets.data(),
+                                               taken_geometry_offsets.size()),
+                              TargetType::StringView});
+    ASSERT_NE(bulk_geometry_take, nullptr);
+    ASSERT_EQ(bulk_geometry_take->Size(), taken_geometry_offsets.size());
+    const auto geometry_items = bulk_geometry_take->Access<std::string_view>();
+    for (size_t i = 0; i < taken_geometry_offsets.size(); ++i) {
+        const auto item = geometry_items[i];
+        ASSERT_TRUE(item.is_valid);
+        ASSERT_TRUE(item.value);
+        bulk_geometry_values.emplace_back(*item.value);
+    }
     EXPECT_EQ(bulk_geometry_values,
               (std::vector<std::string>{
                   Geometry(ctx, geometry_wkt[1].c_str()).to_wkb_string(),

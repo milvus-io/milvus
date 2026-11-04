@@ -201,12 +201,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                       int64_t dim) override;
 
     void
-    BulkRawStringAt(milvus::OpContext* op_ctx,
-                    std::function<void(std::string_view, size_t, bool)> fn,
-                    const int64_t* offsets = nullptr,
-                    int64_t count = 0) const override;
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
@@ -359,13 +353,6 @@ class VortexColumn final : public ChunkedColumnInterface {
         const std::shared_ptr<arrow::Table>& table,
         const std::vector<int64_t>& original_positions,
         const std::vector<int64_t>& original_position_ends) const;
-
-    void
-    BulkStringLikeAt(
-        milvus::OpContext* op_ctx,
-        const std::function<void(std::string_view, size_t, bool)>& fn,
-        const int64_t* offsets,
-        int64_t count) const;
 
     FieldId field_id_;
     FieldMeta field_meta_;
