@@ -10196,8 +10196,9 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                 }
 
                 if (CanLazyCreateSealedIndexSlot(*load_index_info_ptr)) {
-                    PrepareLazySealedIndexSlot(*load_index_info_ptr,
-                                              std::move(vector_data_view_scope));
+                    PrepareLazySealedIndexSlot(
+                        *load_index_info_ptr,
+                        std::move(vector_data_view_scope));
                 } else {
                     LoadIndexData(trace_ctx,
                                   load_index_info_ptr,

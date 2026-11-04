@@ -201,8 +201,7 @@ ReadSidecars(bool use_async,
                    "disk vector sidecar {} exceeds BinarySet size",
                    name);
         const auto size = static_cast<int64_t>(bytes.size());
-        auto owner =
-            std::make_shared<std::vector<uint8_t>>(std::move(bytes));
+        auto owner = std::make_shared<std::vector<uint8_t>>(std::move(bytes));
         std::shared_ptr<uint8_t[]> data(owner, owner->data());
         entries.Append(name, std::move(data), size);
     }
@@ -501,14 +500,14 @@ OpenIndex(bool use_async,
         }
 
         auto config = params.knowhere_config;
-        auto sidecars = co_await ReadSidecars(
-            use_async, source, plan.sidecar_names);
+        auto sidecars =
+            co_await ReadSidecars(use_async, source, plan.sidecar_names);
         PrepareCommonLoadConfig(
             config, params, open_options, prefix, stream_backend, enable_mmap);
         {
             auto local_io = [&] {
-                const auto status = engine.native_index.Deserialize(
-                    sidecars, config, input);
+                const auto status =
+                    engine.native_index.Deserialize(sidecars, config, input);
                 selected_handle->RethrowFirstFailure();
                 // The knowhere deserialize API has no OpContext entrance. FileSource
                 // observes its captured cancellation/priority while materializing

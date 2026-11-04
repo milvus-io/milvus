@@ -375,9 +375,7 @@ BuildDisk(const std::string& raw_path,
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
     options.vector_data_view_scope =
-        [view_data = build.view_data](milvus::OpContext*) {
-            return view_data;
-        };
+        [view_data = build.view_data](milvus::OpContext*) { return view_data; };
     opened.base =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
@@ -738,12 +736,10 @@ TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
     std::copy_n(values.data(), kDim / 2, values.data() + kDim);
     WriteRaw(raw_path, values, kRows, kDim);
     OpenedDiskIndex<float> opened;
-    BuildDisk(raw_path,
-              files->Path(),
-              opened,
-              {.view_data = [&values](size_t id) {
-                   return static_cast<const void*>(values.data() + id * kDim);
-               }});
+    BuildDisk(
+        raw_path, files->Path(), opened, {.view_data = [&values](size_t id) {
+            return static_cast<const void*>(values.data() + id * kDim);
+        }});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);

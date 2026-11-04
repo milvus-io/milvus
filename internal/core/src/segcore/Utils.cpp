@@ -1569,7 +1569,8 @@ PrepareLazySealedIndexSlot(
     load_index_info.cache_index.reset();
     load_index_info.lazy_index_factory =
         [metadata = std::move(metadata),
-         vector_data_view_scope = std::move(vector_data_view_scope)](milvus::OpContext* op_ctx) {
+         vector_data_view_scope =
+             std::move(vector_data_view_scope)](milvus::OpContext* op_ctx) {
             CheckCancellation(op_ctx,
                               metadata->segment_id,
                               metadata->field_id,

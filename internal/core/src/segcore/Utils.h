@@ -12,7 +12,6 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <functional>
 #include <cstdlib>
