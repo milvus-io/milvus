@@ -274,6 +274,156 @@ func TestSegmentReadiness_IndexTerm_VectorIndex(t *testing.T) {
 	})
 }
 
+// readinessStructVectorField is a struct whose element-nullable vector
+// sub-field (FieldID 102) is a vector index target next to a scalar sub-field.
+func readinessStructVectorField() *schemapb.StructArrayFieldSchema {
+	return &schemapb.StructArrayFieldSchema{FieldID: 101, Name: "items", Fields: []*schemapb.FieldSchema{
+		{FieldID: 102, Name: "items[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true},
+		{FieldID: 103, Name: "items[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+}
+
+func readinessSegmentIndexes(segID int64, states map[int64]commonpb.IndexState) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
+	mm := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	for indexID, state := range states {
+		mm.Insert(indexID, segmentIndex(segID, indexID, state))
+	}
+	return mm
+}
+
+// TestSegmentReadiness_IndexTerm_StructVectorSubField: the index term waits on
+// struct vector sub-field indexes as well as top-level vector indexes, the same
+// target set as FilterInIndexedSegments.
+func TestSegmentReadiness_IndexTerm_StructVectorSubField(t *testing.T) {
+	const (
+		topVecFieldID = int64(2)
+		subVecFieldID = int64(102)
+		topVecIndexID = int64(10)
+		subVecIndexID = int64(11)
+	)
+	coll := readinessCollection(readinessCollID, &schemapb.CollectionSchema{
+		Name: "readiness_struct_vector",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: topVecFieldID, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{readinessStructVectorField()},
+	})
+	im := newReadinessIndexMeta(readinessCollID,
+		map[int64]*model.Index{
+			topVecIndexID: vectorIndex(topVecFieldID, topVecIndexID),
+			subVecIndexID: vectorIndex(subVecFieldID, subVecIndexID),
+		},
+		nil,
+	)
+	r := readinessMeta(coll, im).prepareReadiness(coll)
+	require.NotNil(t, r)
+	require.True(t, r.hasIndex)
+	require.ElementsMatch(t, []int64{topVecFieldID, subVecFieldID}, r.targetFieldIDs)
+
+	for _, state := range []commonpb.IndexState{commonpb.IndexState_Unissued, commonpb.IndexState_InProgress, commonpb.IndexState_Failed} {
+		t.Run("sub-field index "+state.String()+" not ready", func(t *testing.T) {
+			seg := readyFlushedSegment(int64(10 + state))
+			im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+				topVecIndexID: commonpb.IndexState_Finished,
+				subVecIndexID: state,
+			}))
+			require.False(t, r.indexReady(seg), "a finished top-level index must not cover an unfinished sub-field index")
+		})
+	}
+
+	t.Run("sub-field segment index missing not ready", func(t *testing.T) {
+		seg := readyFlushedSegment(1)
+		im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			topVecIndexID: commonpb.IndexState_Finished,
+		}))
+		require.False(t, r.indexReady(seg))
+	})
+
+	t.Run("top-level index unfinished not ready", func(t *testing.T) {
+		seg := readyFlushedSegment(2)
+		im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			topVecIndexID: commonpb.IndexState_InProgress,
+			subVecIndexID: commonpb.IndexState_Finished,
+		}))
+		require.False(t, r.indexReady(seg))
+	})
+
+	t.Run("all vector indexes finished ready", func(t *testing.T) {
+		seg := readyFlushedSegment(3)
+		im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			topVecIndexID: commonpb.IndexState_Finished,
+			subVecIndexID: commonpb.IndexState_Finished,
+		}))
+		require.True(t, r.indexReady(seg))
+	})
+
+	t.Run("sub-field without index never ready", func(t *testing.T) {
+		// Like FilterInIndexedSegments: a vector field without an index makes
+		// the target set unsatisfiable (load rejects such a collection too).
+		topOnly := newReadinessIndexMeta(readinessCollID,
+			map[int64]*model.Index{topVecIndexID: vectorIndex(topVecFieldID, topVecIndexID)},
+			nil,
+		)
+		r := readinessMeta(coll, topOnly).prepareReadiness(coll)
+		require.ElementsMatch(t, []int64{topVecFieldID, subVecFieldID}, r.targetFieldIDs)
+		seg := readyFlushedSegment(4)
+		topOnly.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			topVecIndexID: commonpb.IndexState_Finished,
+		}))
+		require.False(t, r.indexReady(seg))
+	})
+}
+
+// TestSegmentReadiness_IndexTerm_StructVectorSubFieldOnly: a collection whose
+// only vector is a struct vector sub-field takes the normal vector path, not
+// the pure-scalar degradation, so an unfinished scalar index does not block it.
+func TestSegmentReadiness_IndexTerm_StructVectorSubFieldOnly(t *testing.T) {
+	const (
+		scalarFieldID = int64(2)
+		subVecFieldID = int64(102)
+		scalarIndexID = int64(10)
+		subVecIndexID = int64(11)
+	)
+	coll := readinessCollection(readinessCollID, &schemapb.CollectionSchema{
+		Name: "readiness_struct_vector_only",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: scalarFieldID, Name: "title", DataType: schemapb.DataType_VarChar},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{readinessStructVectorField()},
+	})
+	im := newReadinessIndexMeta(readinessCollID,
+		map[int64]*model.Index{
+			scalarIndexID: {CollectionID: readinessCollID, FieldID: scalarFieldID, IndexID: scalarIndexID, IndexName: "scalar_index"},
+			subVecIndexID: vectorIndex(subVecFieldID, subVecIndexID),
+		},
+		nil,
+	)
+	r := readinessMeta(coll, im).prepareReadiness(coll)
+	require.NotNil(t, r)
+	require.True(t, r.hasIndex)
+	require.Equal(t, []int64{subVecFieldID}, r.targetFieldIDs)
+
+	t.Run("sub-field index unissued not ready", func(t *testing.T) {
+		seg := readyFlushedSegment(1)
+		im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			scalarIndexID: commonpb.IndexState_Finished,
+			subVecIndexID: commonpb.IndexState_Unissued,
+		}))
+		require.False(t, r.indexReady(seg))
+	})
+
+	t.Run("sub-field index finished ready", func(t *testing.T) {
+		seg := readyFlushedSegment(2)
+		im.segmentIndexes.Insert(seg.GetID(), readinessSegmentIndexes(seg.GetID(), map[int64]commonpb.IndexState{
+			scalarIndexID: commonpb.IndexState_Unissued,
+			subVecIndexID: commonpb.IndexState_Finished,
+		}))
+		require.True(t, r.indexReady(seg))
+	})
+}
+
 func TestSegmentReadiness_IndexTerm_PureScalarDegradation(t *testing.T) {
 	// Pure-scalar collection: no vector field, so targetFieldIDs would be empty
 	// and the term vacuously satisfied; the predicate must degrade to "every

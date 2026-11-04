@@ -1223,6 +1223,8 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 }
 
 type requeryOperator struct {
+	readSchema *schemaInfo
+
 	traceCtx         context.Context
 	outputFieldNames []string
 
@@ -1284,6 +1286,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 		dbName = t.request.GetDbName()
 	}
 	return &requeryOperator{
+		readSchema:         t.schema,
 		traceCtx:           t.TraceCtx(),
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
@@ -1380,6 +1383,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		internalTask:   true,
 		chMgr:          op.node.ChMgr(),
 	}
+	qt.BindReadSchema(op.collectionID, op.readSchema)
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)
 	if !ok {
 		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")

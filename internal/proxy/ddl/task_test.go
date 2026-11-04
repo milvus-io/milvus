@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -535,6 +536,7 @@ func constructCollectionSchemaWithAllType(
 }
 
 func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 
 	buildRoot := func(autoID bool) *mocks.MockMixCoordClient {
@@ -1926,6 +1928,7 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 }
 
 func TestHasCollectionTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
@@ -2025,6 +2028,7 @@ func TestHasCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
 	ctx := context.Background()
@@ -2085,6 +2089,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 
 	ctx := context.Background()
@@ -2146,6 +2151,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, mix)
@@ -2207,6 +2213,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_FilterNamespaceField(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, mix)
@@ -2345,6 +2352,7 @@ func TestDescribeCollectionTask_FillsNameFromResultWhenQueriedByID(t *testing.T)
 // be able to read another tenant's object-storage credentials out of the
 // persisted collection metadata.
 func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, mix)
@@ -2404,6 +2412,7 @@ func TestDescribeCollectionTask_RedactsExternalSpecCredentials(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, mix)
@@ -3196,6 +3205,7 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_truncateCollectionTask_PreExecute(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mix := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, mix)
@@ -3305,6 +3315,7 @@ func Test_truncateCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_loadCollectionTask_Execute(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := NewMixCoordMock()
 
 	dbName := funcutil.GenRandomStr()
@@ -3530,6 +3541,7 @@ func TestLoadCollectionTaskPostExecuteSkipsFailedStatus(t *testing.T) {
 }
 
 func Test_loadPartitionTask_Execute(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 
 	dbName := funcutil.GenRandomStr()
@@ -3621,6 +3633,7 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 }
 
 func TestCreateResourceGroupTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mixc := NewMixCoordMock()
 
 	defer mixc.Close()
@@ -3659,6 +3672,7 @@ func TestCreateResourceGroupTask(t *testing.T) {
 }
 
 func TestDropResourceGroupTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mixc := NewMixCoordMock()
 
 	defer mixc.Close()
@@ -3697,6 +3711,7 @@ func TestDropResourceGroupTask(t *testing.T) {
 }
 
 func TestTransferNodeTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	mixc := NewMixCoordMock()
 
 	defer mixc.Close()
@@ -3736,6 +3751,7 @@ func TestTransferNodeTask(t *testing.T) {
 }
 
 func TestTransferReplicaTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := &MockMixCoordClientInterface{}
 
 	ctx := context.Background()
@@ -3779,6 +3795,7 @@ func TestTransferReplicaTask(t *testing.T) {
 }
 
 func TestListResourceGroupsTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := &MockMixCoordClientInterface{}
 
 	rc.listResourceGroups = func(ctx context.Context, request *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
@@ -3824,6 +3841,7 @@ func TestListResourceGroupsTask(t *testing.T) {
 }
 
 func TestDescribeResourceGroupTask(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := &MockMixCoordClientInterface{}
 	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
 		return &querypb.DescribeResourceGroupResponse{
@@ -3883,6 +3901,7 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 }
 
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := &MockMixCoordClientInterface{}
 
 	rc.describeResourceGroup = func(ctx context.Context, request *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
@@ -3949,6 +3968,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 }
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rc := NewMixCoordMock()
 	paramtable.Init()
 
@@ -4221,6 +4241,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 }
 
 func TestClusteringKey(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 
 	ctx := context.Background()
@@ -4604,6 +4625,7 @@ func TestClusteringKey(t *testing.T) {
 }
 
 func TestAlterCollectionCheckLoaded(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
@@ -4649,6 +4671,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 }
 
 func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, qc)
@@ -4779,6 +4802,7 @@ func TestAlterCollectionTaskValidateTTLAndTTLField(t *testing.T) {
 }
 
 func TestAlterCollectionTaskValidateDescription(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, qc)
@@ -4905,6 +4929,7 @@ func mockVectorIndexForCollection(t *testing.T, ctx context.Context, qc *MixCoor
 }
 
 func TestTaskPartitionKeyIsolation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, qc)
@@ -5157,6 +5182,7 @@ func TestTaskPartitionKeyIsolation(t *testing.T) {
 }
 
 func TestAlterCollectionQueryMode(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	cache, err := initMetaCache(ctx, qc)
@@ -5298,6 +5324,7 @@ func TestAlterCollectionQueryMode(t *testing.T) {
 }
 
 func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	ctx := context.Background()
 	_, err := initMetaCache(ctx, qc)
@@ -5402,6 +5429,7 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 }
 
 func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
@@ -5457,6 +5485,7 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 }
 
 func TestAlterCollectionFieldOnStruct(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 
 	qc := NewMixCoordMock()
@@ -5519,6 +5548,7 @@ func TestAlterCollectionFieldOnStruct(t *testing.T) {
 }
 
 func TestAlterCollectionField(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 
 	qc := NewMixCoordMock()
@@ -6345,6 +6375,7 @@ func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
 }
 
 func TestAlterCollection_AllowInsertAutoID_AutoIDFalse(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	qc := NewMixCoordMock()
 	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)

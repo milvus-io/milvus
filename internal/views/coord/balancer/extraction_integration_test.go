@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -62,7 +63,7 @@ func TestCoordinatorComponentsSixQNAndTwoSN(t *testing.T) {
 	}
 	refs, err := dataview.RecoverManager(ctx, datacatalog.NewCatalog(nil, "", ""), func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
 	require.NoError(t, err)
-	store, err := loadmgr.RecoverLoadConfigStore(ctx, catalogkv.NewCatalog(nil))
+	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
 	var mu sync.Mutex

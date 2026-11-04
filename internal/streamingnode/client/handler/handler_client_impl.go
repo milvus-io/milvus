@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -330,7 +331,9 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		if pchannel == "" || assign != nil {
 			createResult, err := create(callCtx, assign)
 			if err == nil {
-				logger.Info(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				if mlog.LevelEnabled(mlog.DebugLevel) {
+					logger.Debug(ctx, "create handler success", mlog.Any("assignment", assign), mlog.Bool("isLocal", registry.IsLocal(createResult)))
+				}
 				return createResult, nil
 			}
 			logger.Warn(ctx, "create handler failed", mlog.Any("assignment", assign), mlog.Err(err))
@@ -339,8 +342,9 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 			// a secondary cluster) won't change by retrying the same WAL role. Surface
 			// them immediately so callers get a typed error within RTT instead of
 			// retrying until their context deadline. Unsupported RPCs on older nodes
-			// must also return immediately.
-			if status.AsStreamingError(err).IsUnrecoverable() || grpcstatus.Code(err) == codes.Unimplemented {
+			// must also return immediately. A gRPC message-size failure is deterministic
+			// for this payload and limit, so retrying cannot make progress.
+			if status.AsStreamingError(err).IsUnrecoverable() || grpcstatus.Code(err) == codes.Unimplemented || isGRPCMessageSizeError(err) {
 				logger.Warn(ctx, "create handler failed with unrecoverable error, stop retrying", mlog.Err(err))
 				return nil, err
 			}
@@ -372,6 +376,22 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		}
 		logger.Info(ctx, "wait for next backoff done", mlog.Bool("isAssignmentChange", isAssignemtChange), mlog.Duration("cost", cost))
 	}
+}
+
+// isGRPCMessageSizeError recognizes grpc-go's transport size checks. gRPC uses
+// ResourceExhausted for both size limits and transient pressure, with no typed
+// size detail, so the code alone must not disable retries (e.g. rate limiting).
+func isGRPCMessageSizeError(err error) bool {
+	st := grpcstatus.Convert(err)
+	if st.Code() != codes.ResourceExhausted {
+		return false
+	}
+	message := st.Message()
+	return strings.HasPrefix(message, "trying to send message larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message larger than max length allowed on current machine (") ||
+		strings.HasPrefix(message, "grpc: message after decompression larger than max (") ||
+		strings.HasPrefix(message, "grpc: received message after decompression larger than max ")
 }
 
 // waitForNextBackoff waits for next backoff.

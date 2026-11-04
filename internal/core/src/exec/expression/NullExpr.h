@@ -89,6 +89,11 @@ class PhyNullExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
  private:
     ColumnVectorPtr
     PreCheckNullable(OffsetVector* input);
@@ -98,6 +103,9 @@ class PhyNullExpr : public SegmentExpr {
 
     VectorPtr
     ExecVectorNull(OffsetVector* input);
+
+    VectorPtr
+    ExecElementLevelNull(OffsetVector* input);
 
     template <typename T>
     VectorPtr

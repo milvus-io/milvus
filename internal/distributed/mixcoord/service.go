@@ -243,6 +243,7 @@ func (s *Server) initGrpcServer() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+	s.mixCoord.RegisterPKIndexCoordGRPCService(s.grpcServer)
 }
 
 func (s *Server) startGrpc() error {

@@ -323,6 +323,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
+	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
@@ -902,6 +903,8 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
+
 	return nil
 }
 
@@ -1300,6 +1303,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.

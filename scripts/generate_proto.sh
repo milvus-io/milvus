@@ -105,6 +105,7 @@ mkdir -p ./workerpb
 mkdir -p ./pyudfpb
 mkdir -p ./messagespb
 mkdir -p ./streamingpb
+mkdir -p ./pkindexpb
 mkdir -p ./viewpb
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
@@ -128,6 +129,7 @@ ${protoc_opt} --go_out=paths=source_relative:./segcorepb --go-grpc_out=require_u
 ${protoc_opt} --go_out=paths=source_relative:./clusteringpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./clusteringpb clustering.proto|| { echo 'generate clustering.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./messagespb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./messagespb messages.proto || { echo 'generate messages.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./streamingpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./streamingpb streaming.proto || { echo 'generate streamingpb.proto failed'; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./pkindexpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./pkindexpb pkindex.proto || { echo 'generate pkindex.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./viewpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./viewpb view.proto || { echo 'generate view.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./workerpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./workerpb worker.proto|| { echo 'generate worker.proto failed'; exit 1; }
 

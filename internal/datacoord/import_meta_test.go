@@ -28,8 +28,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -92,6 +94,39 @@ func TestImportMeta_Restore(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
+}
+
+func TestImportMeta_RestoreLegacyJobAutoCommit(t *testing.T) {
+	manualCommit := []*commonpb.KeyValuePair{{Key: importutilv2.AutoCommitKey, Value: "false"}}
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{
+		// Written by a release without auto_commit (e.g. 2.6): the field decodes as false.
+		{JobID: 1, State: internalpb.ImportJobState_Importing},
+		{JobID: 2, State: internalpb.ImportJobState_IndexBuilding},
+		{JobID: 3, State: internalpb.ImportJobState_Uncommitted, Version: internalpb.ImportVersion_ImportVersionV2},
+		// Explicit manual-commit jobs keep waiting for CommitImport.
+		{JobID: 4, State: internalpb.ImportJobState_Uncommitted, Options: manualCommit},
+		// Terminal jobs are left untouched.
+		{JobID: 5, State: internalpb.ImportJobState_Failed},
+		{JobID: 6, State: internalpb.ImportJobState_Completed},
+		{JobID: 7, State: internalpb.ImportJobState_Uncommitted, AutoCommit: true},
+	}, nil)
+
+	ctx := context.TODO()
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
+	assert.NoError(t, err)
+
+	expected := map[int64]bool{1: true, 2: true, 3: true, 4: false, 5: false, 6: false, 7: true}
+	for jobID, autoCommit := range expected {
+		job := im.GetJob(ctx, jobID)
+		assert.NotNil(t, job)
+		assert.Equal(t, autoCommit, job.GetAutoCommit(), "jobID=%d", jobID)
+	}
 }
 
 func TestImportMetaRejectsUnsupportedJobVersion(t *testing.T) {

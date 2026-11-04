@@ -2003,15 +2003,13 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	var err error
 	var vectorField *schemapb.FieldSchema
 	if len(fieldName) == 0 {
-		for _, field := range collSchema.Fields {
-			if typeutil.IsVectorType(field.DataType) {
-				if len(fieldName) == 0 {
-					fieldName = field.Name
-					vectorField = field
-				} else {
-					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
-				}
+		// Same candidates as the proxy's default anns_field: top-level vectors
+		// and struct vector sub-fields.
+		for _, field := range typeutil.GetVectorFieldSchemas(collSchema) {
+			if vectorField != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", vectorField.GetName(), field.GetName())
 			}
+			vectorField = field
 		}
 	} else {
 		for _, field := range collSchema.Fields {

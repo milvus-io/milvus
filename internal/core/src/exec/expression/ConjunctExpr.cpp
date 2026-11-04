@@ -16,6 +16,7 @@
 
 #include "ConjunctExpr.h"
 
+#include <folly/ScopeGuard.h>
 #include <algorithm>
 
 #include "LikeConjunctExpr.h"
@@ -94,6 +95,15 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("is_and", is_and_);
 
+    TargetBitmap inherited_bitmap;
+    bool has_result = false;
+    auto restore_bitmap =
+        folly::makeGuard([&context, &inherited_bitmap, &has_result] {
+            if (has_result) {
+                context.set_bitmap_input(std::move(inherited_bitmap));
+            }
+        });
+
     if (input_order_.empty()) {
         input_order_.resize(inputs_.size());
         for (size_t i = 0; i < inputs_.size(); i++) {
@@ -168,7 +178,6 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    bool has_result = false;
     for (size_t i = 0; i < input_order_.size(); ++i) {
         size_t idx = input_order_[i];
 
@@ -182,8 +191,11 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
         ColumnVectorPtr all_flat_result;
         if (!has_result) {
-            result = input_result;
+            // The first input needs the parent's mask in context. Take it only
+            // after that input succeeds, then restore its storage on every exit.
+            inherited_bitmap = context.take_bitmap_input();
             has_result = true;
+            result = input_result;
             all_flat_result = GetColumnVector(result);
         } else {
             auto input_flat_result = GetColumnVector(input_result);
@@ -207,14 +219,17 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // batch-level early exit, and the same bitmap becomes the row-level
         // input of the next expression.
         auto active_rows = BuildActiveBitmap(all_flat_result);
+        // Local results outside the parent's candidates are unspecified and
+        // must neither reactivate rows nor prevent a batch-level early exit.
+        if (!inherited_bitmap.empty()) {
+            active_rows.inplace_and(inherited_bitmap, active_rows.size());
+        }
         if (active_rows.none()) {
             SkipFollowingExprs(i + 1);
-            ClearBitmapInput(context);
             return;
         }
         context.set_bitmap_input(std::move(active_rows));
     }
-    ClearBitmapInput(context);
 }
 
 }  //namespace exec

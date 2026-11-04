@@ -263,6 +263,65 @@ class ArrayValueView {
             *type_, *child_, static_cast<size_t>(begin_ + index));
     }
 
+    // Whether this scalar Array equals the literal. Null is an ordinary value
+    // and a literal cannot spell it, so a value holding a null element never
+    // equals one. Mirrors ArrayView::is_same_array.
+    bool
+    is_same_array(const proto::plan::Array& literal) const {
+        const auto length = size();
+        if (static_cast<size_t>(literal.array_size()) != length) {
+            return false;
+        }
+        if (length == 0) {
+            return true;
+        }
+        if (!literal.same_type()) {
+            return false;
+        }
+        const auto type = element_type();
+        const auto expected_val_case =
+            array_detail::ExpectedLiteralValCase(type);
+        if (expected_val_case ==
+            proto::plan::GenericValue::ValCase::VAL_NOT_SET) {
+            return false;
+        }
+        for (size_t i = 0; i < length; ++i) {
+            const auto& expected = literal.array(static_cast<int>(i));
+            if (!is_valid(i) || expected.val_case() != expected_val_case) {
+                return false;
+            }
+            bool same = false;
+            switch (type) {
+                case DataType::BOOL:
+                    same = get_data_unchecked<bool>(i) == expected.bool_val();
+                    break;
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32:
+                case DataType::INT64:
+                    same =
+                        get_data_unchecked<int64_t>(i) == expected.int64_val();
+                    break;
+                case DataType::FLOAT:
+                    same = get_data_unchecked<float>(i) ==
+                           static_cast<float>(expected.float_val());
+                    break;
+                case DataType::DOUBLE:
+                    same =
+                        get_data_unchecked<double>(i) == expected.float_val();
+                    break;
+                default:
+                    same = get_data_unchecked<std::string_view>(i) ==
+                           expected.string_val();
+                    break;
+            }
+            if (!same) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     void
     output_data(ScalarFieldProto& output) const {
         assert(type_ != nullptr && child_ != nullptr);
