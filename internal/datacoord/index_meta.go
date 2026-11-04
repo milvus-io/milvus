@@ -75,8 +75,9 @@ type indexMeta struct {
 
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
-	fieldIndexLock sync.RWMutex
-	indexes        map[UniqueID]map[UniqueID]*model.Index
+	fieldIndexLock      sync.RWMutex
+	indexes             map[UniqueID]map[UniqueID]*model.Index
+	getCollectionSchema func(UniqueID) *schemapb.CollectionSchema
 
 	// buildID2Meta records building index meta information of the segment
 	segmentBuildInfo *segmentBuildInfo
@@ -565,6 +566,12 @@ func (m *indexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta flo
 
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
 func (m *indexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
+	if !m.jsonFlatSchemaReady(segIndex.CollectionID) {
+		return merr.WrapErrServiceNotReadyMsg("collection schema is not ready for index classification")
+	}
+	if m.isJSONFlatIndexByID(segIndex.CollectionID, segIndex.IndexID) {
+		return nil
+	}
 	buildID := segIndex.BuildID
 
 	m.keyLock.Lock(buildID)
@@ -643,6 +650,12 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 	m.fieldIndexLock.RUnlock()
 
+	if index := fieldIndexes[indexID]; index != nil && !index.IsDeleted && m.jsonFlatIndexFilter(collID)(index) {
+		state.IndexName = index.IndexName
+		state.State = commonpb.IndexState_Finished
+		return state
+	}
+
 	indexes, ok := m.segmentIndexes.Get(segmentID)
 	if !ok {
 		state.State = commonpb.IndexState_Unissued
@@ -666,6 +679,7 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 }
 
 func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs []UniqueID) []int64 {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
@@ -683,10 +697,14 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	matchedFields := typeutil.NewUniqueSet()
 
 	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
-		return fieldIDSet.Contain(index.FieldID) && !index.IsDeleted
+		return fieldIDSet.Contain(index.FieldID) && !index.IsDeleted && !isFlat(index)
 	})
 	for _, index := range targetIndices {
 		matchedFields.Insert(index.FieldID)
+	}
+
+	if len(fieldIDSet) == 0 {
+		return append([]int64(nil), segmentIDs...)
 	}
 
 	// some field has no index on it
@@ -732,6 +750,50 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 		}
 	}
 	return indexInfos
+}
+
+// jsonFlatIndexFilter captures one authoritative schema per collection/batch.
+func (m *indexMeta) jsonFlatIndexFilter(collectionID UniqueID) func(*model.Index) bool {
+	var schema *schemapb.CollectionSchema
+	if m.getCollectionSchema != nil {
+		schema = m.getCollectionSchema(collectionID)
+	}
+	jsonFields := typeutil.NewUniqueSet()
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_JSON {
+			jsonFields.Insert(field.GetFieldID())
+		}
+	}
+	return func(index *model.Index) bool {
+		return jsonFields.Contain(index.FieldID) && indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, index.IndexParams)
+	}
+}
+
+func (m *indexMeta) isJSONFlatIndexByID(collectionID, indexID UniqueID) bool {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	index := m.indexes[collectionID][indexID]
+	return index != nil && isFlat(index)
+}
+
+// jsonFlatSchemaReady avoids classifying candidates from their params alone
+// while the existing asynchronous collection reload is still catching up.
+func (m *indexMeta) jsonFlatSchemaReady(collectionID UniqueID) bool {
+	if m.getCollectionSchema != nil && m.getCollectionSchema(collectionID) != nil {
+		return true
+	}
+	for _, index := range m.GetIndexesForCollection(collectionID, "") {
+		if indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, index.IndexParams) {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *indexMeta) GetPhysicalIndexesForCollection(collectionID UniqueID) []*model.Index {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
+	return lo.Filter(m.GetIndexesForCollection(collectionID, ""), func(index *model.Index, _ int) bool { return !isFlat(index) })
 }
 
 func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
@@ -821,43 +883,29 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 }
 
 func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bool {
-	m.fieldIndexLock.RLock()
-	fieldIndexesMap, ok := m.indexes[collectionID]
-	if !ok {
-		m.fieldIndexLock.RUnlock()
+	indexes := m.GetPhysicalIndexesForCollection(collectionID)
+	if len(indexes) == 0 {
 		return false
 	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
-	}
-	m.fieldIndexLock.RUnlock()
-
-	// the segment should be unindexed status if the fieldIndexes is not nil
-	segIndexInfos, ok := m.segmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
+	records, ok := m.segmentIndexes.Get(segID)
+	if !ok {
 		return true
 	}
-
-	for _, index := range fieldIndexes {
-		if !index.IsDeleted {
-			if _, ok := segIndexInfos.Get(index.IndexID); !ok {
-				// the segment should be unindexed status if the segment index is not found within field indexes
-				return true
-			}
+	for _, index := range indexes {
+		if _, ok := records.Get(index.IndexID); !ok {
+			return true
 		}
 	}
-
 	return false
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
 	for _, segmentID := range segIDs {
-		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID)
+		segmentsIndexes[segmentID] = m.getSegmentIndexes(collectionID, segmentID, isFlat)
 	}
 	return segmentsIndexes
 }
@@ -865,7 +913,7 @@ func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID)
 func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
-	return m.getSegmentIndexes(collectionID, segID)
+	return m.getSegmentIndexes(collectionID, segID, m.jsonFlatIndexFilter(collectionID))
 }
 
 // GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
@@ -892,7 +940,7 @@ func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 }
 
 // Note: thread-unsafe, don't call it outside indexMeta
-func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
+func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID, isFlat func(*model.Index) bool) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
 	segIndexInfos, ok := m.segmentIndexes.Get(segID)
 	if !ok || segIndexInfos.Len() == 0 {
@@ -905,7 +953,7 @@ func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	}
 
 	for _, segIdx := range segIndexInfos.Values() {
-		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
+		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted && !isFlat(index) {
 			ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
 		}
 	}
@@ -1055,6 +1103,13 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 	segIdx, ok := m.segmentBuildInfo.Get(taskInfo.GetBuildID())
 	if !ok {
 		mlog.Warn(m.ctx, "there is no index with buildID", mlog.Int64("buildID", taskInfo.GetBuildID()))
+		return nil
+	}
+
+	if !m.jsonFlatSchemaReady(segIdx.CollectionID) {
+		return merr.WrapErrServiceNotReadyMsg("collection schema is not ready for index classification")
+	}
+	if m.isJSONFlatIndexByID(segIdx.CollectionID, segIdx.IndexID) {
 		return nil
 	}
 
@@ -1258,6 +1313,7 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 }
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
 	ret := make(map[int64]map[int64]*indexpb.SegmentIndexState, 0)
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
@@ -1284,7 +1340,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
 		for _, segIdx := range segIndexInfos.Values() {
-			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
+			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted && !isFlat(index) {
 				indexVersion := segIdx.CurrentIndexVersion
 				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
 					indexVersion = segIdx.CurrentScalarIndexVersion
@@ -1304,7 +1360,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 }
 
 func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64) []int64 {
-	indexes := m.GetIndexesForCollection(collectionID, "")
+	indexes := m.GetPhysicalIndexesForCollection(collectionID)
 	if len(indexes) == 0 {
 		// doesn't have index
 		return nil
@@ -1340,13 +1396,14 @@ func (m *indexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.C
 }
 
 func (m *indexMeta) HasIndex(collectionID int64) bool {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 
 	indexes, ok := m.indexes[collectionID]
 	if ok {
 		for _, index := range indexes {
-			if !index.IsDeleted {
+			if !index.IsDeleted && !isFlat(index) {
 				return true
 			}
 		}
@@ -1395,6 +1452,7 @@ func (m *indexMeta) GetIndexJSON(collectionID int64) string {
 }
 
 func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID UniqueID) (bool, []*metricsinfo.IndexedField) {
+	isFlat := m.jsonFlatIndexFilter(collectionID)
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
@@ -1418,7 +1476,7 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	isIndexed := true
 	var segmentIndexes []*metricsinfo.IndexedField
 	for _, index := range fieldIndexes {
-		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted {
+		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted && !isFlat(index) {
 			buildID := int64(-1)
 			serializedSize := int64(0)
 			if !ok || si == nil {

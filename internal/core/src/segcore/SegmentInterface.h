@@ -304,18 +304,6 @@ class SegmentInterface {
         return {};
     }
 
-    // Returns the nested path of the JsonFlatIndex that would match
-    // query_path for field_id, or empty string if no JsonFlatIndex covers
-    // this path. Reads segment-level JSON index metadata directly -- does
-    // NOT pin the index cell. Used by expression DetermineExecPath() to
-    // check path compatibility without triggering a tiered-storage cold
-    // fetch when the decision is going to be RawData anyway.
-    virtual std::string
-    GetJsonFlatIndexNestedPath(FieldId field_id,
-                               std::string_view query_path) const {
-        return "";
-    }
-
     virtual std::vector<PinWrapper<const index::IndexBase*>>
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
@@ -678,7 +666,7 @@ class SegmentInternalInterface : public SegmentInterface {
         return true;
     }
 
-    // JSON indexes (JsonFlatIndex + JSON-cast scalar) live in a separate
+    // Typed JSON-path indexes live in a separate
     // per-segment container from the scalar/vector/binlog index bitsets, so
     // they are checked via this dedicated API rather than widening HasIndex().
     // Default returns false for segment types that never build JSON indexes

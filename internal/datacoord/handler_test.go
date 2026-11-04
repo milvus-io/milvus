@@ -1830,7 +1830,7 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mock7 := mockey.Mock((*indexMeta).GetSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{}
 	}).Build()
 	defer mock7.UnPatch()
@@ -2025,7 +2025,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+	mockSegmentIndexes := mockey.Mock((*indexMeta).GetSegmentIndexes).To(
 		func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
@@ -2226,7 +2226,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(
+	mockSegmentIndexes := mockey.Mock((*indexMeta).GetSegmentIndexes).To(
 		func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
@@ -2357,7 +2357,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 		},
 	}
 
-	mockGetSegmentIndexes := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mockGetSegmentIndexes := mockey.Mock((*indexMeta).GetSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{
 			10: {
 				CollectionID:          collectionID,
@@ -2532,7 +2532,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m4)
 
-		m5 := mockey.Mock((*indexMeta).getSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		m5 := mockey.Mock((*indexMeta).GetSegmentIndexes).To(func(im *indexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 		mockers = append(mockers, m5)

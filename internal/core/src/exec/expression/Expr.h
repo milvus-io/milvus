@@ -38,7 +38,6 @@
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
-#include "index/JsonFlatIndex.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealed.h"
@@ -2235,17 +2234,11 @@ class SegmentExpr : public Expr {
         return processed_size;
     }
 
-    enum class IndexValidityMode {
-        Default,
-        JsonExactPath,
-    };
-
     // ProcessIndexChunks: execute index query and batch results
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
     ProcessIndexChunks(FUNC func, const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(
-            func, false, IndexValidityMode::Default, values...);
+        return ProcessIndexChunksImpl<T>(func, false, values...);
     }
 
     // ProcessIndexChunks with func_returns_row_level flag
@@ -2253,10 +2246,8 @@ class SegmentExpr : public Expr {
     //   (used when func already handles element-to-row conversion internally)
     template <typename T, typename FUNC, typename... ValTypes>
     VectorPtr
-    ProcessIndexChunksWithRowLevel(FUNC func,
-                                   IndexValidityMode validity_mode,
-                                   const ValTypes&... values) {
-        return ProcessIndexChunksImpl<T>(func, true, validity_mode, values...);
+    ProcessIndexChunksWithRowLevel(FUNC func, const ValTypes&... values) {
+        return ProcessIndexChunksImpl<T>(func, true, values...);
     }
 
     TargetBitmap
@@ -2308,7 +2299,6 @@ class SegmentExpr : public Expr {
     VectorPtr
     ProcessIndexChunksImpl(FUNC func,
                            bool func_returns_row_level,
-                           IndexValidityMode validity_mode,
                            const ValTypes&... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
@@ -2321,42 +2311,9 @@ class SegmentExpr : public Expr {
 
         // Cache index result (execute only once)
         if (cached_index_chunk_id_ != 0) {
-            Index* index_ptr = nullptr;
-            PinWrapper<const index::IndexBase*> json_pw;
-            std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
-                executor;
-            const auto json_pointer = field_type_ == DataType::JSON
-                                          ? milvus::Json::pointer(nested_path_)
-                                          : std::string();
-            auto prepare_index = [&]() {
-                if (index_ptr != nullptr) {
-                    return;
-                }
-                if (field_type_ == DataType::JSON) {
-                    json_pw = pinned_index_[0];
-                    auto json_flat_index =
-                        dynamic_cast<const index::JsonFlatIndex*>(
-                            json_pw.get());
-
-                    if (json_flat_index) {
-                        auto index_path = json_flat_index->GetNestedPath();
-                        executor =
-                            json_flat_index
-                                ->template create_executor<IndexInnerType>(
-                                    json_pointer.substr(index_path.size()));
-                        index_ptr = executor.get();
-                    } else {
-                        auto json_index =
-                            const_cast<index::IndexBase*>(json_pw.get());
-                        index_ptr = dynamic_cast<Index*>(json_index);
-                    }
-                } else {
-                    auto scalar_index =
-                        dynamic_cast<const Index*>(pinned_index_[0].get());
-                    index_ptr = const_cast<Index*>(scalar_index);
-                }
-            };
-            prepare_index();
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[0].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
             cached_is_nested_index_ = index_ptr->IsNestedIndex();
 
             auto cached = ExprCacheHelper::GetOrCompute(
@@ -2364,51 +2321,10 @@ class SegmentExpr : public Expr {
                 this->ToString(),
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
-                    prepare_index();
                     TargetBitmap res = func(index_ptr, values...);
 
                     TargetBitmap valid_res;
-                    std::optional<index::JsonValueType> json_value_type;
-                    if (executor != nullptr) {
-                        if (validity_mode == IndexValidityMode::JsonExactPath) {
-                            json_value_type = index::JsonValueType::Any;
-                        } else if constexpr (std::is_same_v<IndexInnerType,
-                                                            bool>) {
-                            json_value_type = index::JsonValueType::Bool;
-                        } else if constexpr (std::is_integral_v<
-                                                 IndexInnerType> ||
-                                             std::is_floating_point_v<
-                                                 IndexInnerType>) {
-                            json_value_type = index::JsonValueType::Numeric;
-                        } else if constexpr (std::is_same_v<IndexInnerType,
-                                                            std::string>) {
-                            json_value_type = index::JsonValueType::String;
-                        }
-                    }
-
-                    if (json_value_type.has_value()) {
-                        const auto family =
-                            static_cast<unsigned int>(json_value_type.value());
-                        const auto signature = fmt::format(
-                            "json-flat-validity:v1:field={}:path-length={}:"
-                            "path={}:family={}",
-                            field_id_.get(),
-                            json_pointer.size(),
-                            json_pointer,
-                            family);
-                        if (ExprResCacheManager::IsEnabled()) {
-                            auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_, signature, active_count_, [&]() {
-                                    return executor->ExactPathExists(
-                                        json_value_type.value());
-                                });
-                            valid_res = std::move(*validity);
-                        } else {
-                            valid_res = executor->ExactPathExists(
-                                json_value_type.value());
-                        }
-                    } else if (cached_is_nested_index_ &&
-                               func_returns_row_level) {
+                    if (cached_is_nested_index_ && func_returns_row_level) {
                         valid_res = GetFieldRowValidity(active_count_);
                     } else {
                         valid_res = index_ptr->IsNotNull();
@@ -2702,35 +2618,9 @@ class SegmentExpr : public Expr {
 
         // Cache valid result (execute only once)
         if (cached_index_chunk_id_ != 0) {
-            Index* index_ptr = nullptr;
-            PinWrapper<const index::IndexBase*> json_pw;
-            // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
-            std::shared_ptr<index::JsonFlatIndexQueryExecutor<IndexInnerType>>
-                executor;
-
-            if (field_type_ == DataType::JSON) {
-                auto pointer = milvus::Json::pointer(nested_path_);
-                json_pw = pinned_index_[0];
-                auto json_flat_index =
-                    dynamic_cast<const index::JsonFlatIndex*>(json_pw.get());
-
-                if (json_flat_index) {
-                    auto index_path = json_flat_index->GetNestedPath();
-                    executor =
-                        json_flat_index
-                            ->template create_executor<IndexInnerType>(
-                                pointer.substr(index_path.size()), false);
-                    index_ptr = executor.get();
-                } else {
-                    auto json_index =
-                        const_cast<index::IndexBase*>(json_pw.get());
-                    index_ptr = dynamic_cast<Index*>(json_index);
-                }
-            } else {
-                auto scalar_index =
-                    dynamic_cast<const Index*>(pinned_index_[0].get());
-                index_ptr = const_cast<Index*>(scalar_index);
-            }
+            auto scalar_index =
+                dynamic_cast<const Index*>(pinned_index_[0].get());
+            auto* index_ptr = const_cast<Index*>(scalar_index);
 
             cached_index_chunk_valid_res_ =
                 std::make_shared<TargetBitmap>(index_ptr->IsNotNull());
@@ -2787,8 +2677,6 @@ class SegmentExpr : public Expr {
     HasCompatibleScalarIndex() const {
         // Queries segment metadata directly -- no pin required, so short-
         // circuit exec paths and the RawData fallback skip the cold fetch.
-        // JSON-specific path compatibility is handled by the separate
-        // IsJsonPathCompatible() helper, which also avoids pinning.
         // Ngram index should be used in specific execution path (CanUseNgramIndex -> ExecNgramMatch).
         //
         // JSON indexes are tracked separately from scalar/vector/binlog
@@ -2799,75 +2687,6 @@ class SegmentExpr : public Expr {
                        ? segment_->HasJsonIndex(field_id_)
                        : segment_->HasIndex(field_id_);
         return has && !CanUseNgramIndex();
-    }
-
-    // JSON fields only: verify that a JsonFlatIndex exists for the expr's
-    // nested path and that prefix matching is valid. Reads segment-level
-    // JSON index metadata via GetJsonFlatIndexNestedPath() -- does NOT pin
-    // the index cell, so callers can use this to skip ScalarIndex
-    // commitment (and its associated cold fetch) before paying for
-    // EnsurePinnedIndex(). Returns true for non-JSON fields and for JSON
-    // fields without a JsonFlatIndex covering the query path.
-    bool
-    IsJsonPathCompatible() const {
-        // For JSON fields with JsonFlatIndex, check if prefix matching is valid.
-        // Tantivy JSON index can handle nested object paths (e.g., "a.b") but NOT
-        // numeric array indices (e.g., "a.0"). Per RFC 6901, JSON Pointer doesn't
-        // distinguish between array indices and object keys syntactically. Since
-        // Tantivy doesn't store array index information, we must fall back to
-        // brute-force search when the relative path contains numeric segments.
-        if (field_type_ != DataType::JSON) {
-            return true;
-        }
-
-        auto query_path = milvus::Json::pointer(nested_path_);
-        auto index_path =
-            segment_->GetJsonFlatIndexNestedPath(field_id_, query_path);
-        if (index_path.empty()) {
-            // No JsonFlatIndex covers this path; nothing JSON-specific to
-            // reject here. The caller will decide between ScalarIndex and
-            // RawData based on HasCompatibleScalarIndex() alone.
-            return true;
-        }
-
-        // Exact match - safe to use index
-        if (index_path == query_path) {
-            return true;
-        }
-
-        // GetJsonFlatIndexNestedPath guarantees index_path is a prefix of
-        // query_path.
-
-        // Get relative path (e.g., if index_path="/a" and query_path="/a/0/b",
-        // relative_path="/0/b")
-        auto relative_path = query_path.substr(index_path.length());
-
-        // Check if any path segment is numeric (potential array index)
-        size_t pos = 0;
-        while (pos < relative_path.length()) {
-            if (relative_path[pos] == '/') {
-                pos++;
-                continue;
-            }
-            size_t end = relative_path.find('/', pos);
-            if (end == std::string::npos) {
-                end = relative_path.length();
-            }
-            auto segment = relative_path.substr(pos, end - pos);
-            if (!segment.empty() && milvus::IsInteger(segment)) {
-                return false;
-            }
-            pos = end;
-        }
-
-        return true;
-    }
-
-    bool
-    PinnedJsonIndexIsFlat() const {
-        return field_type_ == DataType::JSON && !pinned_index_.empty() &&
-               dynamic_cast<const index::JsonFlatIndex*>(
-                   pinned_index_[0].get()) != nullptr;
     }
 
     static bool
@@ -3004,14 +2823,11 @@ class SegmentExpr : public Expr {
     // call paths that do not prefetch before evaluating expressions.
     // Subclasses should override to implement operator-specific logic.
     // The scalar index is pinned only when we commit to the ScalarIndex
-    // path. JSON path compatibility is checked via segment-level metadata
-    // (GetJsonFlatIndexNestedPath) before any pin, so an incompatible
-    // nested path falls back to RawData without ever touching the cache
-    // slot. Short-circuit subclass paths (TextIndex/PkIndex/JsonStats)
+    // path. Short-circuit subclass paths (TextIndex/PkIndex/JsonStats)
     // bypass this method entirely and never pin either.
     virtual void
     DetermineExecPath() {
-        if (!HasCompatibleScalarIndex() || !IsJsonPathCompatible()) {
+        if (!HasCompatibleScalarIndex()) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }

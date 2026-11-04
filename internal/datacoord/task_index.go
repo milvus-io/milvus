@@ -150,6 +150,15 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
+	flat, err := it.jsonFlatTarget(context.TODO())
+	if err != nil {
+		return err
+	}
+	if flat {
+		it.SetState(indexpb.JobState_JobStateNone, indexparams.JSONFlatIndexDeprecationReason)
+		return nil
+	}
+
 	if err := it.meta.indexMeta.FinishTask(result); err != nil {
 		return err
 	}
@@ -177,6 +186,16 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if !exist || segIndex == nil {
 		log.Info(ctx, "index task has not exist in meta table, removing task")
 		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
+		return
+	}
+
+	flat, err := it.jsonFlatTarget(ctx)
+	if err != nil {
+		log.Warn(ctx, "defer index task until collection schema is ready", mlog.Err(err))
+		return
+	}
+	if flat {
+		it.abortForDroppedTarget(ctx, indexparams.JSONFlatIndexDeprecationReason)
 		return
 	}
 
@@ -634,6 +653,16 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	flat, err := it.jsonFlatTarget(ctx)
+	if err != nil {
+		log.Warn(ctx, "defer index task until collection schema is ready", mlog.Err(err))
+		return
+	}
+	if flat {
+		it.abortInflightTask(ctx, cluster, indexparams.JSONFlatIndexDeprecationReason)
+		return
+	}
+
 	// The index or the segment may have been dropped while the task is in
 	// flight. Abort it now instead of letting the worker finish useless work.
 	if reason, dropped := it.droppedTargetReason(it.meta.GetSegment(ctx, segIndex.SegmentID), segIndex); dropped {
@@ -660,7 +689,10 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
 					mlog.String("failReason", info.GetFailReason()))
-				it.setJobInfo(info)
+				if err := it.setJobInfo(info); err != nil {
+					log.Warn(ctx, "failed to record index task result, will retry", mlog.Err(err))
+					return
+				}
 			case commonpb.IndexState_Retry, commonpb.IndexState_IndexStateNone:
 				log.Info(ctx, "query task index info successfully",
 					mlog.Int64("taskID", it.BuildID), mlog.String("result state", info.GetState().String()),
@@ -673,6 +705,31 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	it.UpdateStateWithMeta(indexpb.JobState_JobStateInit, "index is not in info response")
 	// Task not found in results will be return error
+}
+
+func (it *indexBuildTask) jsonFlatTarget(ctx context.Context) (bool, error) {
+	params := it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
+	if !indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, params) {
+		return false, nil
+	}
+	var schema *schemapb.CollectionSchema
+	if it.meta.indexMeta.getCollectionSchema != nil {
+		schema = it.meta.indexMeta.getCollectionSchema(it.CollectionID)
+	}
+	if schema == nil {
+		if it.handler == nil {
+			return false, merr.WrapErrServiceNotReadyMsg("collection schema is not ready for index classification")
+		}
+		collection, err := it.handler.GetCollection(ctx, it.CollectionID)
+		if err != nil {
+			return false, err
+		}
+		if collection == nil || collection.Schema == nil {
+			return false, merr.WrapErrServiceNotReadyMsg("collection schema is not ready for index classification")
+		}
+		schema = collection.Schema
+	}
+	return indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(schema, it.meta.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)).GetDataType(), params), nil
 }
 
 const (

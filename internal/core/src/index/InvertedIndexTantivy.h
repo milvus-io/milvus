@@ -76,10 +76,6 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
             return TantivyDataType::Text;
         }
 
-        case proto::schema::DataType::JSON: {
-            return TantivyDataType::JSON;
-        }
-
         default:
             ThrowInfo(ErrorCode::NotImplemented,
                       fmt::format("not implemented data type: {}", data_type));

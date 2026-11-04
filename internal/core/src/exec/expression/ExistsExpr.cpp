@@ -33,7 +33,6 @@
 #include "folly/FBVector.h"
 #include "monitor/Monitor.h"
 #include "index/Index.h"
-#include "index/JsonFlatIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "index/json_stats/utils.h"
@@ -102,21 +101,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto* index = pinned_index_[cached_index_chunk_id_].get();
                 AssertInfo(index != nullptr,
                            "Cannot find json index with path: " + pointer);
-                TargetBitmap res;
-                if (index->GetCastType().data_type() ==
-                    JsonCastType::DataType::JSON) {
-                    // JsonFlatIndex needs special handling via executor.
-                    auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
-                        dynamic_cast<const index::JsonFlatIndex*>(index));
-                    auto executor =
-                        json_flat_index->create_executor<double>(pointer);
-                    res = executor->Exists();
-                } else {
-                    // All other JSON path indexes (Inverted, Sort, Bitmap,
-                    // Hybrid) return a fresh clone from Exists().
-                    auto* mutable_index = const_cast<index::IndexBase*>(index);
-                    res = mutable_index->Exists();
-                }
+                auto* mutable_index = const_cast<index::IndexBase*>(index);
+                auto res = mutable_index->Exists();
                 TargetBitmap valid(res.size(), true);
                 return {std::move(res), std::move(valid)};
             });
