@@ -427,8 +427,8 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		s.mu.Unlock()
 	}
 	// Publish exactly this stable pack before exposing its recovery snapshot
-	// or releasing the Insert handles. QueryView's checkpoint-bounded Transform
-	// frontier requires the first StartPosition registration in this ordering.
+	// or releasing the Insert handles. QueryView's W/A Transform coverage
+	// requires the first StartPosition registration in this ordering.
 	appendPersistedStorage(result.PersistedStorage, pack.Meta)
 	var start *msgpb.MsgPosition
 	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {

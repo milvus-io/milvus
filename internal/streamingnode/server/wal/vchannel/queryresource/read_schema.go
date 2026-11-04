@@ -122,16 +122,16 @@ func (p *readSchemaPool) acquire(ctx context.Context, view walview.VChannelWALVi
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	key := collectionSchemaKey{view.CollectionID, view.Schema.GetVersion(), version}
+	if schema := p.resources[key]; schema != nil {
+		schema.owners++
+		return schema, nil
+	}
 	req := &segcore.CreateCCollectionRequest{CollectionID: view.CollectionID, Schema: view.Schema, ShareSchema: true}
 	if len(view.IndexInfos) > 0 {
 		index := segcore.ComposeCollectionIndexMeta(ctx, view.IndexInfos, view.Schema)
 		if len(index.GetIndexMetas()) > 0 && index.GetMaxIndexRowCount() > 0 {
 			req.IndexMeta = index
 		}
-	}
-	if schema := p.resources[key]; schema != nil {
-		schema.owners++
-		return schema, nil
 	}
 	collection, err := segcore.CreateCCollection(req)
 	if err != nil {
