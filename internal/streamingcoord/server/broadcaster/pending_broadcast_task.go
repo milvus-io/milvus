@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -55,19 +56,33 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// The append-first replica lands, and is persisted, before anything else. A
+	// shard split puts its source vchannel here: the fence must be in the WAL
+	// before any target replica takes its time tick.
+	first, rest := b.splitAppendFirst()
+	if first != nil {
+		results, pending := b.appendGroup(ctx, []message.MutableMessage{first})
+		if len(pending) > 0 {
+			// Nothing landed, so there is nothing to persist: retry the same
+			// replica ahead of the rest.
+			b.UpdateInstantWithNextBackOff()
+			return errBroadcastTaskIsNotDone
+		}
+		if err := b.AckPartial(ctx, results); err != nil {
+			b.Logger().Warn(ctx, "broadcast task persist the append-first replica failed", mlog.Err(err))
+			return err
+		}
+		b.Logger().Info(ctx, "broadcast task landed the append-first replica", mlog.FieldVChannel(first.VChannel()))
+		b.pendingMessages = rest
+	}
+
 	if len(b.pendingMessages) > 0 {
 		b.Logger().Debug(ctx, "broadcast task is polling to make sent...", mlog.Int("pendingMessages", len(b.pendingMessages)))
-		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
-		newPendings := make([]message.MutableMessage, 0)
-		for idx, resp := range resps.Responses {
-			if resp.Error != nil {
-				b.Logger().Warn(ctx, "broadcast task append message failed", mlog.Int("idx", idx), mlog.Err(resp.Error))
-				newPendings = append(newPendings, b.pendingMessages[idx])
-				continue
-			}
-			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
+		results, pending := b.appendGroup(ctx, b.pendingMessages)
+		for vchannel, result := range results {
+			b.appendResult[vchannel] = result
 		}
-		b.pendingMessages = newPendings
+		b.pendingMessages = pending
 		b.Logger().Info(ctx, "broadcast task make a new broadcast done", mlog.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
@@ -80,6 +95,98 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	}
 	b.UpdateInstantWithNextBackOff()
 	return errBroadcastTaskIsNotDone
+}
+
+// splitAppendFirst partitions the still-pending replicas into the append-first
+// replica named by the broadcast header and the rest. Already-acked replicas are
+// not pending, so after a restart that persisted the first replica this returns
+// nil and the task proceeds to the rest.
+//
+// A header names at most one append-first vchannel (OptBuildBroadcastAppendFirst
+// takes exactly one); a header naming more is an invariant violation, not a
+// shape to persist partially.
+//
+// A SECONDARY cluster's liveness depends on how Execute uses this split, not
+// merely on the tick ordering it gives this cluster: the append-first replica
+// must be appended (and AckPartial-persisted) BEFORE the rest is appended, so
+// that its tick is strictly below every other replica's. That is
+// premise (a) of the append gate's progress argument in
+// internal/distributed/streaming/replicate_service.go
+// (waitAppendFirstReplicas). Appending the rest concurrently with this replica
+// would keep every test in this package green and wedge a secondary's replicate
+// streams.
+func (b *pendingBroadcastTask) splitAppendFirst() (first message.MutableMessage, rest []message.MutableMessage) {
+	appendFirst := b.header().AppendFirstVChannels
+	if len(appendFirst) > 1 {
+		panic("broadcast task invariant violated: a broadcast names at most one append-first vchannel")
+	}
+	if len(appendFirst) == 0 {
+		return nil, b.pendingMessages
+	}
+	rest = make([]message.MutableMessage, 0, len(b.pendingMessages))
+	for _, msg := range b.pendingMessages {
+		if msg.VChannel() == appendFirst[0] {
+			first = msg
+			continue
+		}
+		rest = append(rest, msg)
+	}
+	return first, rest
+}
+
+// appendGroup appends one group of replicas and returns the results of the ones
+// that landed and the ones to retry.
+func (b *pendingBroadcastTask) appendGroup(ctx context.Context, msgs []message.MutableMessage) (map[string]*types.AppendResult, []message.MutableMessage) {
+	resps := streaming.WAL().AppendMessages(ctx, msgs...)
+	results := make(map[string]*types.AppendResult, len(msgs))
+	pending := make([]message.MutableMessage, 0)
+	for idx, msg := range msgs {
+		// AppendMessages answers one response per message, in order. A message
+		// without one did not land as far as this task can tell, so it is retried
+		// rather than trusted.
+		if idx >= len(resps.Responses) {
+			b.Logger().Warn(ctx, "broadcast task append message got no response", mlog.Int("idx", idx), mlog.FieldVChannel(msg.VChannel()))
+			pending = append(pending, msg)
+			continue
+		}
+		resp := resps.Responses[idx]
+		if resp.Error != nil {
+			b.observeAppendFailure(ctx, idx, msg, resp.Error)
+			pending = append(pending, msg)
+			continue
+		}
+		results[msg.VChannel()] = resp.AppendResult
+	}
+	return results, pending
+}
+
+// observeAppendFailure logs a refused replica append and, when the refusal is
+// unrecoverable, counts it.
+//
+// Every append error is retried the same way -- with backoff, forever, the task
+// holding its resource keys throughout -- because the broadcaster has no
+// terminal state for a persisted task (that is a framework change, recorded as
+// a follow-up). An unrecoverable code (status.StreamingError.IsUnrecoverable:
+// UNRECOVERABLE, SHARD_FENCED, INVALID_ARGUMENT, ...) says the StreamingNode will
+// refuse the same replica again no matter how often it is asked: a vchannel
+// fenced by another split, a target conflicting with the collection's shard on
+// its pchannel, an unknown split role. Such a task never clears by itself, so
+// it is named as such in the log and counted separately, instead of being
+// indistinguishable from a replica whose node is merely slow to come back.
+func (b *pendingBroadcastTask) observeAppendFailure(ctx context.Context, idx int, msg message.MutableMessage, err error) {
+	streamingErr := status.AsStreamingError(err)
+	if streamingErr == nil || !streamingErr.IsUnrecoverable() {
+		b.Logger().Warn(ctx, "broadcast task append message failed", mlog.Int("idx", idx), mlog.FieldVChannel(msg.VChannel()), mlog.Err(err))
+		return
+	}
+	b.ObserveAppendUnrecoverable(streamingErr.Code)
+	b.Logger().Warn(ctx, "broadcast task append message refused as unrecoverable; the task keeps retrying it "+
+		"and holds its resource keys until the refusal clears or the task is repaired",
+		mlog.Int("idx", idx),
+		mlog.FieldVChannel(msg.VChannel()),
+		mlog.String("messageType", msg.MessageType().String()),
+		mlog.String("streamingCode", streamingErr.Code.String()),
+		mlog.Err(err))
 }
 
 // pendingBroadcastTaskArray is a heap of pendingBroadcastTask.

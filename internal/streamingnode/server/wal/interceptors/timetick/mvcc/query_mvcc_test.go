@@ -315,3 +315,25 @@ func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
 	require.True(t, ready)
 	require.Zero(t, got)
 }
+
+// TestQueryMVCCSplitShardTargetGenesis: the target replica of a SplitShard opens
+// the target's query frontier as CreateCollection would; the source replica
+// advances the source's transform frontier and opens nothing.
+func TestQueryMVCCSplitShardTargetGenesis(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("p0_1v0", 100)
+	source, target := newSplitShardTestReplicas(t, 150, 160)
+	publishQueryTestPrefix(t, cm, 160, source, target)
+
+	frontier, ok := cm.Snapshot("p1_1v1", 0)
+	require.True(t, ok, "the target replica opens the target's frontier")
+	require.Equal(t, uint64(160), frontier.GrowingTimetick)
+	require.Equal(t, uint64(160), frontier.TransformingTimetick)
+
+	frontier, ok = cm.Snapshot("p0_1v0", 0)
+	require.True(t, ok)
+	require.Equal(t, uint64(150), frontier.TransformingTimetick, "the fence is a transform barrier on the source")
+
+	frontier, _ = cm.Snapshot("p2_1v2", 0)
+	require.Equal(t, QueryVChannelMVCC{}, frontier, "a target whose replica was not appended here stays absent (zero pair)")
+}

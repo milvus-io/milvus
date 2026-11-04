@@ -70,11 +70,14 @@ message CollectionInfo {
   repeated common.KeyValuePair properties = 14;
   int64 db_id = 15;
   uint64 UpdateTimestamp = 16;
-  repeated CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
-}
-
-message CollectionShardInfo {
-  uint64 last_truncate_time_tick = 1; // the last truncate time tick of the shard, if the shard is not truncated, the value is 0.
+  repeated schema.CollectionShardInfo shard_infos = 17; // same length with virtual_channel_names, order one by one.
+  // The modulus every shard's residues in shard_infos are taken against. Zero on a
+  // collection that has never been split, which routes by hash % shards_num.
+  uint64 routing_modulus = 18;
+  // The routing-key expression, "hash(<field>)". Empty means it was never declared:
+  // the server then falls back to the legacy key choice, and a first split back-fills
+  // this field so the choice stops depending on collection properties.
+  string shard_by = 19;
 }
 
 message PartitionInfo {

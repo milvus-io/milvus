@@ -58,6 +58,13 @@ type Allocator interface {
 	// Allocate allocates a timestamp.
 	Allocate(ctx context.Context) (uint64, error)
 
+	// AllocateFresh discards the cached batch and allocates the first id of a
+	// newly fetched one. The returned id is greater than every id any node had
+	// received before the fetch, because rootcoord carves batches from one
+	// monotonic counter. It costs one remote round trip under the allocator's
+	// lock, exactly as an exhausted batch does.
+	AllocateFresh(ctx context.Context) (uint64, error)
+
 	// BarrierUtil make a barrier, next allocate call will generate id greater than barrier.
 	BarrierUntil(ctx context.Context, barrier uint64) error
 
@@ -81,6 +88,13 @@ func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
+	return ta.allocateOne(ctx)
+}
+
+func (ta *allocatorImpl) AllocateFresh(ctx context.Context) (uint64, error) {
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
+	ta.localAllocator.exhausted()
 	return ta.allocateOne(ctx)
 }
 

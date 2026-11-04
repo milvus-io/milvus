@@ -42,6 +42,7 @@ const (
 	WALNameLabelName                      = "wal_name"
 	WALTxnTypeLabelName                   = "txn_type"
 	WALVChannelLabelName                  = "vchannel"
+	StreamingErrorCodeLabelName           = "streaming_code"
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
@@ -116,6 +117,34 @@ var (
 		Help: "Current rate limit state of streaming service client",
 	}, WALChannelLabelName, WALRateLimitStateLabelName)
 
+	// StreamingServiceClientReplicateGatedAppends is the number of replicated
+	// appends currently held back on this cluster waiting for another vchannel's
+	// replica of the same broadcast to land here (the shard-split append gate).
+	//
+	// A gauge, so its name carries no _total suffix: that suffix is reserved for
+	// counters, and a query written against the name as a counter (rate,
+	// increase) would silently compute nonsense.
+	//
+	// A non-zero value that does not fall is the signal: a gated append blocks
+	// its whole pchannel's replicate stream, so a stuck gate looks like stalled
+	// replication and nothing else names the vchannel it is actually waiting on.
+	// Labeled by pchannel rather than vchannel, so the cardinality is bounded by
+	// the cluster's channel count instead of its collection count.
+	StreamingServiceClientReplicateGatedAppends = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "replicate_gated_appends",
+		Help: "Number of replicated appends currently waiting for the append-first replicas of their broadcast",
+	}, WALChannelLabelName)
+
+	// StreamingServiceClientReplicateViolations counts the replicated appends
+	// this cluster refused as a ReplicateViolation. The replicate stream retries
+	// such an append from its checkpoint forever and the refusal does not clear
+	// by itself, so a rising value means replication of every collection on the
+	// pchannel has stopped. Labeled by pchannel, like the gate's gauge.
+	StreamingServiceClientReplicateViolations = newStreamingServiceClientCounterVec(prometheus.CounterOpts{
+		Name: "replicate_violation_total",
+		Help: "Total number of replicated appends refused as a replicate violation",
+	}, WALChannelLabelName)
+
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "pchannel_info",
@@ -166,6 +195,22 @@ var (
 		Buckets: secondsBuckets,
 	}, WALMessageTypeLabelName)
 
+	// StreamingCoordBroadcasterAppendUnrecoverableTotal counts the replica
+	// appends a broadcast task had refused with an unrecoverable streaming code
+	// (UNRECOVERABLE, SHARD_FENCED, INVALID_ARGUMENT, ...). The broadcaster
+	// retries such an append exactly like a transient failure, with backoff,
+	// while the task keeps holding its resource keys: a persisted task that a
+	// StreamingNode will never accept -- a vchannel fenced by another split, a
+	// target that conflicts with the collection's shard on its pchannel, an
+	// unknown role -- therefore never clears by itself, and this counter is the
+	// only thing that distinguishes it from a slow one. A rate that does not
+	// return to zero is the signal. Labeled by message type and streaming code,
+	// both closed enums.
+	StreamingCoordBroadcasterAppendUnrecoverableTotal = newStreamingCoordCounterVec(prometheus.CounterOpts{
+		Name: "broadcaster_append_unrecoverable_total",
+		Help: "Number of broadcast replica appends refused with an unrecoverable streaming code; the task keeps retrying them",
+	}, WALMessageTypeLabelName, StreamingErrorCodeLabelName)
+
 	// StreamingNode Producer Server Metrics.
 	StreamingNodeProducerTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
 		Name: "producer_total",
@@ -208,6 +253,18 @@ var (
 		Name: "partial_update_version_index_missed_writes_total",
 		Help: "Committed writes with primary keys omitted because the partial update version index budget was exhausted",
 	})
+
+	// StreamingNodeSplitSourcesAwaitingCheckpoint is the number of retired
+	// shard split sources on this node whose final checkpoint DataCoord has not
+	// yet been read back to hold. The wait has no timeout, since releasing a
+	// source early would let its checkpoint go unstored, so a value that does
+	// not fall is the only sign of one stuck -- DataCoord dropping the
+	// vchannel's reports because it places the WAL elsewhere, or refusing the
+	// read-back. A gauge, labeled by pchannel like the node's other gauges.
+	StreamingNodeSplitSourcesAwaitingCheckpoint = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "split_sources_awaiting_checkpoint",
+		Help: "Number of retired shard split sources whose final checkpoint DataCoord has not been read back to hold",
+	}, WALChannelLabelName)
 
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
@@ -662,6 +719,8 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 		registry.MustRegister(StreamingServiceClientConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
 		registry.MustRegister(StreamingServiceClientRateLimitState)
+		registry.MustRegister(StreamingServiceClientReplicateGatedAppends)
+		registry.MustRegister(StreamingServiceClientReplicateViolations)
 	})
 }
 
@@ -676,6 +735,7 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordBroadcasterTaskBroadcastDurationSeconds)
 	registry.MustRegister(StreamingCoordBroadcasterTaskAcquireLockDurationSeconds)
 	registry.MustRegister(StreamingCoordBroadcasterTaskAckCallbackDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterAppendUnrecoverableTotal)
 }
 
 // RegisterStreamingNode registers streaming node metrics
@@ -688,6 +748,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMaxBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMissedWrites)
+	registry.MustRegister(StreamingNodeSplitSourcesAwaitingCheckpoint)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
@@ -796,6 +857,13 @@ func newStreamingCoordHistogramVec(opts prometheus.HistogramOpts, extra ...strin
 	opts.Subsystem = typeutil.StreamingCoordRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewHistogramVec(opts, labels)
+}
+
+func newStreamingCoordCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingCoordRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingServiceClientGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {
