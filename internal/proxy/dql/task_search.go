@@ -1971,14 +1971,8 @@ func (t *SearchTask) consumeResultStream(
 				"search results exceed the maxOutputSize Limit %d", paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64())
 		}
 
-		complete := true
-		for _, count := range data.GetTopks() {
-			if count < limit {
-				complete = false
-				break
-			}
-		}
-		if complete {
+		// Hits arrive in query order: earlier vectors are complete even if they had fewer hits.
+		if len(data.Topks) == 0 || data.Topks[len(data.Topks)-1] == limit {
 			break
 		}
 	}

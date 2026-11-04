@@ -448,11 +448,10 @@ func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
 		if err != nil {
 			return nil, s.fail(err)
 		}
+		s.merge(outputBuffer, oneReduceResult)
 		if chunkReady {
 			break
 		}
-
-		s.merge(outputBuffer, oneReduceResult)
 	}
 
 	if outputBuffer.isEmpty() {
@@ -623,15 +622,7 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, da
 func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
 	hitLimit := (s.topK - s.groupOffset) * s.groupSize
 	for s.currentQuery < s.nq {
-		if s.emittedPerQuery[s.currentQuery] >= hitLimit {
-			if s.currentQuery == s.nq-1 {
-				s.currentQuery++
-				clear(s.seenPKs)
-				clear(s.groups)
-				s.groupCount = 0
-				return nil, false, nil
-			}
-
+		if s.currentQuery < s.nq-1 && s.emittedPerQuery[s.currentQuery] >= hitLimit {
 			for _, buffer := range readyBuffers {
 				s.discardQuery(buffer, s.currentQuery)
 			}
@@ -746,13 +737,9 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			group.count++
 		}
 		s.emittedPerQuery[s.currentQuery]++
-		if s.emittedPerQuery[s.currentQuery] == hitLimit && s.currentQuery == s.nq-1 {
-			s.currentQuery++
-			clear(s.seenPKs)
-			clear(s.groups)
-			s.groupCount = 0
-		}
-		return &oneReduceResult, false, nil
+		// Yield the last vector's window before fetching more input. Only the caller ends the pull.
+		chunkReady := s.currentQuery == s.nq-1 && s.emittedPerQuery[s.currentQuery] == hitLimit
+		return &oneReduceResult, chunkReady, nil
 	}
 	return nil, false, nil
 }
