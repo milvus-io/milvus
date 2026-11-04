@@ -333,6 +333,20 @@ func (mp *MilvusProcess) Stop(gracefulTimeout ...time.Duration) error {
 	}
 }
 
+// PID identifies a process after it has become ready.
+func (mp *MilvusProcess) PID() int {
+	return mp.cmd.Process.Pid
+}
+
+// Kill crashes a ready process without first sending a graceful shutdown signal.
+func (mp *MilvusProcess) Kill() error {
+	if err := mp.cmd.Process.Kill(); err != nil {
+		return err
+	}
+	mp.graceful.Close()
+	return mp.notifier.BlockAndGetResult()
+}
+
 // ForceStop forcefully stops the Milvus process
 func (mp *MilvusProcess) ForceStop() error {
 	mp.Logger().Info(context.TODO(),

@@ -30,6 +30,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/gc"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -88,10 +90,10 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			defer rootPatch.UnPatch()
 			catalog := kvdatacoord.NewCatalog(kv, objectRoot, root)
 			store := metacache.NewMetaStore(catalog)
-			m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(store), metaStore: store, channelSync: newChannelSync()}
+			m := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(store), MetaStore: store, ChannelSync: meta.NewChannelSync()}
 			handler := &ServerHandler{s: &Server{ctx: ctx, meta: m}}
-			gc := newGarbageCollector(m, handler, GcOption{cli: cli, dropTolerance: 0})
-			defer gc.close()
+			gcx := gc.NewGarbageCollector(m, handler, gc.GcOption{Cli: cli, DropTolerance: 0})
+			defer gcx.Close()
 
 			const channel = "gc-channel-lookup_1v0"
 			markerKey := path.Join(kvdatacoord.ChannelRemovePrefix, channel)
@@ -101,7 +103,7 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 				channel: {ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}},
 			})
-			segment := NewSegmentInfo(&datapb.SegmentInfo{
+			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: channel,
 				State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L1,
 				DroppedAt:   uint64(time.Now().Add(-time.Hour).UnixNano()),
@@ -148,10 +150,10 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					recovered.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 						channel: {ChannelName: channel, Timestamp: tc.checkpoint, MsgID: []byte{1}},
 					})
-					m.segments = NewSegmentsInfo(recovered)
-					m.metaStore = recovered
-					m.segments.SetSegment(3, NewSegmentInfo(persisted[0]))
-					recovery := handler.GetDataVChanPositions(&channelMeta{Name: channel, CollectionID: 1}, allPartitionID)
+					m.Segments = meta.NewSegmentsInfo(recovered)
+					m.MetaStore = recovered
+					m.Segments.SetSegment(3, meta.NewSegmentInfo(persisted[0]))
+					recovery := handler.GetDataVChanPositions(&meta.ChannelMeta{Name: channel, CollectionID: 1}, allPartitionID)
 					require.Equal(t, []int64{3}, recovery.GetDroppedSegmentIds())
 				} else {
 					require.Empty(t, persisted)
@@ -159,7 +161,7 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 				}
 			}
-			gc.recycleDroppedSegments(ctx, nil)
+			gcx.RecycleDroppedSegments(ctx, nil)
 			if tc.checkpoint >= 120 {
 				require.Zero(t, markerReads, "a sufficient checkpoint must not depend on marker availability")
 			} else {
@@ -171,7 +173,7 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 			assertState(tc.wantRetained)
 			if tc.wantRetained {
 				// Retry without rewriting the marker or clearing the injected fault.
-				gc.recycleDroppedSegments(ctx, nil)
+				gcx.RecycleDroppedSegments(ctx, nil)
 				stillRetained := tc.persistentError || tc.marker == kvdatacoord.NonRemoveFlagTomestone
 				assertState(stillRetained)
 				require.Equal(t, 2, markerReads)
@@ -186,10 +188,10 @@ func TestGarbageCollector_ChannelLookup(t *testing.T) {
 					// Advance the checkpoint past the segment's DML position.
 					// Goes through m.metaStore because assertState may have
 					// swapped in the recovered store above.
-					m.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+					m.MetaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 						channel: {ChannelName: channel, Timestamp: 130, MsgID: []byte{1}},
 					})
-					gc.recycleDroppedSegments(ctx, nil)
+					gcx.RecycleDroppedSegments(ctx, nil)
 					assertState(false)
 					require.Equal(t, 2, markerReads, "checkpoint progress must unblock GC even if marker reads still fail")
 				}

@@ -62,10 +62,11 @@ func caseTimeoutFromEnvironment(getenv func(string) string) (time.Duration, erro
 type MiniClusterSuite struct {
 	suite.Suite
 
-	envConfigs map[string]string
-	Cluster    *cluster.MiniClusterV3
-	cancelFunc context.CancelFunc
-	opt        clusterSuiteOption
+	envConfigs     map[string]string
+	clusterOptions []cluster.MiniClusterV3Option
+	Cluster        *cluster.MiniClusterV3
+	cancelFunc     context.CancelFunc
+	opt            clusterSuiteOption
 }
 
 // WorkDir returns the work directory of the cluster.
@@ -95,6 +96,11 @@ func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
 	}
 }
 
+// WithClusterOptions configures subprocess fixtures before cluster creation.
+func (s *MiniClusterSuite) WithClusterOptions(options ...cluster.MiniClusterV3Option) {
+	s.clusterOptions = append(s.clusterOptions, options...)
+}
+
 // SetupSuite initializes the MiniClusterSuite by setting up the environment and starting the cluster.
 // After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
@@ -110,7 +116,7 @@ func (s *MiniClusterSuite) SetupSuite() {
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // cancel is stored and called in TearDownSuite()
 	s.cancelFunc = cancel
 
-	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))
+	s.Cluster = cluster.NewMiniClusterV3(ctx, append([]cluster.MiniClusterV3Option{cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir())}, s.clusterOptions...)...)
 	s.T().Log("Setup test success")
 }
 

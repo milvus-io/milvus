@@ -39,26 +39,36 @@ class TestCreateIndex(TestBase):
     def test_json_flat_index_deprecation_batch(self):
         """A successful batch identifies each deprecated JSON definition."""
         name = gen_collection_name()
-        response = self.collection_client.collection_create({
-            "collectionName": name,
-            "schema": {
-                "enableDynamicField": True,
-                "fields": [
-                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "j", "dataType": "JSON", "elementTypeParams": {}},
-                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
-                ],
-            },
-        })
+        response = self.collection_client.collection_create(
+            {
+                "collectionName": name,
+                "schema": {
+                    "enableDynamicField": True,
+                    "fields": [
+                        {"fieldName": "id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                        {"fieldName": "j", "dataType": "JSON", "elementTypeParams": {}},
+                        {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+                    ],
+                },
+            }
+        )
         assert response["code"] == 0, response
         payload = {
             "collectionName": name,
             "indexParams": [
                 {"fieldName": "vector", "indexName": "vector", "indexType": "FLAT", "metricType": "L2"},
-                {"fieldName": "j", "indexName": "deprecated_root", "indexType": "INVERTED",
-                 "params": {"json_cast_type": "JSON", "json_path": "j"}},
-                {"fieldName": "dyn", "indexName": "deprecated_dynamic", "indexType": "AUTOINDEX",
-                 "params": {"json_cast_type": "json", "json_path": 'dyn["payload"]'}},
+                {
+                    "fieldName": "j",
+                    "indexName": "deprecated_root",
+                    "indexType": "INVERTED",
+                    "params": {"json_cast_type": "JSON", "json_path": "j"},
+                },
+                {
+                    "fieldName": "dyn",
+                    "indexName": "deprecated_dynamic",
+                    "indexType": "AUTOINDEX",
+                    "params": {"json_cast_type": "json", "json_path": 'dyn["payload"]'},
+                },
             ],
         }
         for _ in range(2):
