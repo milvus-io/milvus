@@ -353,6 +353,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t size,
                         TargetBitmapView valid_result) const override;
 
+#ifdef MILVUS_UNIT_TEST
+    std::shared_ptr<ChunkedColumnInterface>
+    TestGetColumn(FieldId field_id) const {
+        return get_column(field_id);
+    }
+#endif
+
  protected:
     // blob and row_count
     PinWrapper<SpanBase>
@@ -710,6 +717,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             if (pk >= min_val && pk <= max_val) {
                 // pk might be in this chunk
                 target_chunk_id = mid_chunk_id;
+                if (pk == min_val && mid_chunk_id > left_chunk_id) {
+                    // pk is the first value of this chunk, so rows with the
+                    // same pk may also occupy the tail of earlier chunks (a
+                    // duplicated pk straddling a chunk boundary). Keep
+                    // searching to the left for the earliest chunk holding it;
+                    // this chunk stays recorded as the fallback.
+                    right_chunk_id = mid_chunk_id - 1;
+                    continue;
+                }
                 break;
             } else if (pk < min_val) {
                 // pk is before this chunk, could be in an earlier chunk
@@ -976,6 +992,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     generate_interim_index(const FieldId field_id,
                            int64_t num_rows,
                            milvus::OpContext* op_ctx);
+
+    std::string
+    resolve_field_data_warmup_policy(
+        FieldId field_id, const std::string& explicit_warmup_policy = "");
 
     void
     fill_empty_field(const FieldMeta& field_meta);

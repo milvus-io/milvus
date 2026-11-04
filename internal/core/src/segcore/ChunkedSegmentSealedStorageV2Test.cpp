@@ -46,6 +46,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -157,7 +158,113 @@ class RawLookupOnlyIndex : public index::ScalarIndex<int64_t> {
 
     mutable size_t last_lookup_offset = 0;
 };
+
+class StorageV2TempDirGuard {
+ public:
+    StorageV2TempDirGuard(milvus_storage::ArrowFileSystemPtr fs,
+                          std::string path)
+        : fs_(std::move(fs)), path_(std::move(path)) {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+    ~StorageV2TempDirGuard() {
+        static_cast<void>(fs_->DeleteDir(path_));
+    }
+
+ private:
+    milvus_storage::ArrowFileSystemPtr fs_;
+    std::string path_;
+};
+
+void
+AddWarmupProperty(milvus::proto::schema::CollectionSchema& schema_proto,
+                  const std::string& key,
+                  const std::string& value) {
+    auto* prop = schema_proto.add_properties();
+    prop->set_key(key);
+    prop->set_value(value);
+}
 }  // namespace
+
+TEST(ChunkedSegmentSealedStorageV2,
+     DirectLoadFieldDataUsesVectorIndexWarmupForNoIndexVector) {
+    constexpr int64_t kPkFieldId = START_USER_FIELDID;
+    constexpr int64_t kVectorFieldId = START_USER_FIELDID + 1;
+    constexpr int64_t kDim = 4;
+    constexpr int64_t kRowCount = 4;
+
+    milvus::proto::schema::CollectionSchema schema_proto;
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(kPkFieldId);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* vector_field = schema_proto.add_fields();
+    vector_field->set_fieldid(kVectorFieldId);
+    vector_field->set_name("vec");
+    vector_field->set_data_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector_field->add_type_params();
+    dim->set_key("dim");
+    dim->set_value(std::to_string(kDim));
+
+    AddWarmupProperty(schema_proto, "warmup.vectorField", "disable");
+    AddWarmupProperty(schema_proto, "warmup.vectorIndex", "sync");
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    const std::string dir = "test_data/storage_v2_direct_warmup";
+    StorageV2TempDirGuard dir_guard(fs, dir);
+    const std::string path = dir + "/vec.parquet";
+    ASSERT_TRUE(fs->CreateDir(dir).ok());
+
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    std::vector<std::string> paths{path};
+    auto storage_config = milvus_storage::StorageConfig();
+    std::vector<std::vector<int>> column_groups{{1}};
+    auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs,
+        paths,
+        arrow_schema,
+        storage_config,
+        column_groups,
+        16 * 1024 * 1024,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(writer_result.ok()) << writer_result.status().ToString();
+    auto writer = writer_result.ValueOrDie();
+    auto dataset = DataGen(schema, kRowCount);
+    auto record_batch = ConvertToArrowRecordBatch(dataset, kDim, arrow_schema);
+    ASSERT_NE(record_batch, nullptr);
+    ASSERT_TRUE(writer->Write(record_batch).ok());
+    ASSERT_TRUE(writer->Close().ok());
+
+    LoadFieldDataInfo load_info;
+    load_info.storage_version = 2;
+    FieldBinlogInfo field_info{
+        kVectorFieldId,
+        kRowCount,
+        std::vector<int64_t>{kRowCount},
+        std::vector<int64_t>{kRowCount * kDim *
+                             static_cast<int64_t>(sizeof(float))},
+        false,
+        "disable",
+        std::vector<std::string>{path},
+        std::vector<int64_t>{kVectorFieldId}};
+    load_info.field_infos.emplace(kVectorFieldId, std::move(field_info));
+
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, -1, segcore::SegcoreConfig::default_config(), true);
+    segment->LoadFieldData(load_info);
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto proxy_column = std::dynamic_pointer_cast<ProxyChunkColumn>(
+        sealed->TestGetColumn(FieldId(kVectorFieldId)));
+    ASSERT_NE(proxy_column, nullptr);
+    EXPECT_EQ(proxy_column->TestCacheWarmupPolicy(),
+              CacheWarmupPolicy::CacheWarmupPolicy_Sync);
+}
 
 class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
  protected:
@@ -176,6 +283,19 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             chunk_num = 10;
             test_data_count = 100000;
             fixed_string_width = 32;
+        }
+        if (test_name.find("DupPkAcrossChunk") != std::string::npos) {
+            // 1M rows -> several segcore chunks (storage v2: ~1MB parquet row
+            // groups, grouped into chunks by the translator). One PK is
+            // duplicated over the sorted row range [dup_begin, dup_end), which
+            // is wide enough to cover the start of the chunk the chunk-level
+            // binary search visits first and to extend into the chunk before.
+            chunk_num = 10;
+            test_data_count = 100000;
+            fixed_string_width = 32;
+            dup_pk_test = true;
+            dup_begin = 150000;
+            dup_end = 550000;
         }
 
         schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
@@ -231,6 +351,14 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             string_data.push_back(MakeStringValue(i));
         }
         std::sort(string_data.begin(), string_data.end());
+        int_pk_data.resize(RowCount());
+        std::iota(int_pk_data.begin(), int_pk_data.end(), 0);
+        if (dup_pk_test) {
+            for (int64_t i = dup_begin; i < dup_end; i++) {
+                string_data[i] = string_data[dup_begin];
+                int_pk_data[i] = int_pk_data[dup_begin];
+            }
+        }
 
         fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
                   {"pk", schema_->get_field_id(FieldName("pk"))},
@@ -250,8 +378,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 if (arrow_schema->fields()[i]->type()->id() ==
                     arrow::Type::INT64) {
                     arrow::Int64Builder builder;
-                    auto status =
-                        builder.AppendValues(test_data.data(), test_data_count);
+                    const int64_t* src = test_data.data();
+                    if (dup_pk_test &&
+                        arrow_schema->fields()[i]->name() == "pk") {
+                        src = int_pk_data.data() + start_id;
+                    }
+                    auto status = builder.AppendValues(src, test_data_count);
                     EXPECT_TRUE(status.ok());
                     std::shared_ptr<arrow::Array> array;
                     status = builder.Finish(&array);
@@ -427,8 +559,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     int test_data_count = 10000;
     size_t fixed_string_width = 0;
     bool test_data_created = false;
+    bool dup_pk_test = false;
+    int64_t dup_begin = 0;  // [dup_begin, dup_end): rows sharing one PK
+    int64_t dup_end = 0;
     std::unordered_map<std::string, FieldId> fields;
     std::vector<std::string> string_data;
+    std::vector<int64_t> int_pk_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
@@ -951,4 +1087,177 @@ TEST_P(TestChunkSegmentStorageV2, TestDropFieldDataWithColumnGroups) {
         << "int64 field data should still be ready";
     EXPECT_TRUE(segment_impl->HasFieldData(string2_fid))
         << "string2 field data should still be ready";
+}
+
+// Regression: a PK whose rows straddle a chunk boundary of a sorted sealed
+// segment must be found completely by pk == X (pk_range) and pk in [X]
+// (search_ids / TermExpr). pk_lower_bound's chunk-level binary search stops at
+// the first chunk whose [min,max] covers the pk, which is not necessarily the
+// earliest chunk containing it, so rows in the previous chunk are missed.
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundary) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    const int64_t expected = dup_end - dup_begin;
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+
+    // actual chunk layout of the pk column
+    const int64_t num_chunk = segment->num_chunk(pk_fid);
+    std::string layout;
+    std::vector<int64_t> chunk_start(num_chunk + 1);
+    for (int64_t c = 0; c < num_chunk; c++) {
+        chunk_start[c] = segment->num_rows_until_chunk(pk_fid, c);
+        layout += fmt::format("[c{} start={} rows={}]",
+                              c,
+                              chunk_start[c],
+                              segment->chunk_size(pk_fid, c));
+    }
+    chunk_start[num_chunk] = RowCount();
+    std::cout << "pk column chunks=" << num_chunk << " layout=" << layout
+              << " dup_run=[" << dup_begin << "," << dup_end << ")"
+              << std::endl;
+    ASSERT_GE(num_chunk, 3) << layout;
+    // the chunk the chunk-level binary search visits first
+    const int64_t mid = (num_chunk - 1) / 2;
+    ASSERT_GT(mid, 0) << layout;
+    // the duplicated run must start before chunk `mid` and cover its first row,
+    // so pk_lower_bound stops at chunk `mid` although earlier chunks hold the PK
+    ASSERT_LT(dup_begin, chunk_start[mid]) << layout;
+    ASSERT_GT(dup_end, chunk_start[mid]) << layout;
+
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    const int64_t b = dup_end;  // first row after the run (distinct PKs)
+
+    // 1. pk == X  (segment-level pk_range, used by UnaryExpr on sorted pk)
+    {
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, dup, view);
+        EXPECT_EQ(expected, bitset.count())
+            << "pk_range(Equal) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 2. pk in [X]  (segment-level search_ids -> search_pks)
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected, bitset.count())
+            << "search_ids missed rows of a PK run straddling a chunk boundary";
+    }
+    // 3. pk in [X, <another pk in chunk 2>]: two-pointer path with a 2nd key
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+            ids.mutable_str_id()->add_data(string_data[b + 10]);
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+            ids.mutable_int_id()->add_data(int_pk_data[b + 10]);
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected + 1, bitset.count())
+            << "search_ids (2 keys) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 4. expression path pk == X
+    {
+        proto::plan::GenericValue v;
+        if (pk_is_string) {
+            v.set_string_val(std::get<std::string>(dup));
+        } else {
+            v.set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), proto::plan::OpType::Equal, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "UnaryRangeFilterExpr(pk == X) missed straddling rows";
+    }
+    // 5. expression path pk in [X]
+    {
+        std::vector<proto::plan::GenericValue> vals(1);
+        if (pk_is_string) {
+            vals[0].set_string_val(std::get<std::string>(dup));
+        } else {
+            vals[0].set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "TermFilterExpr(pk in [X]) missed straddling rows";
+    }
+    // control: a PK fully inside chunk 2 is found
+    {
+        PkType single = pk_is_string ? PkType(string_data[b + 10])
+                                     : PkType(int_pk_data[b + 10]);
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, single, view);
+        EXPECT_EQ(1, bitset.count());
+    }
+}
+
+// Same layout as DupPkAcrossChunkBoundary; checks the four range branches of
+// pk_range on a PK whose duplicates straddle a chunk boundary.
+//   >= X : rows [dup_begin, N)      > X : rows [dup_end, N)
+//   <= X : rows [0, dup_end)        < X : rows [0, dup_begin)
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+    const int64_t n = RowCount();
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    proto::plan::GenericValue v;
+    if (pk_is_string) {
+        v.set_string_val(std::get<std::string>(dup));
+    } else {
+        v.set_int64_val(std::get<int64_t>(dup));
+    }
+    struct Case {
+        proto::plan::OpType op;
+        int64_t expected;
+        const char* name;
+    };
+    const Case cases[] = {
+        {proto::plan::OpType::GreaterEqual, n - dup_begin, ">="},
+        {proto::plan::OpType::GreaterThan, n - dup_end, ">"},
+        {proto::plan::OpType::LessEqual, dup_end, "<="},
+        {proto::plan::OpType::LessThan, dup_begin, "<"},
+    };
+    for (const auto& c : cases) {
+        BitsetType bitset(n, false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, c.op, dup, view);
+        std::cout << "pk_range(" << c.name << ") count=" << bitset.count()
+                  << " expected=" << c.expected << std::endl;
+        EXPECT_EQ(c.expected, bitset.count()) << "pk_range " << c.name;
+
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), c.op, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final =
+            query::ExecuteQueryExpr(plan, segment.get(), n, MAX_TIMESTAMP);
+        EXPECT_EQ(c.expected, final.count())
+            << "UnaryRangeFilterExpr(pk " << c.name << " X)";
+    }
 }

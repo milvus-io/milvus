@@ -287,15 +287,15 @@ type JobIDReq struct {
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
 type QueryReqV2 struct {
-	DbName           string                 `json:"dbName"`
-	CollectionName   string                 `json:"collectionName" binding:"required"`
-	PartitionNames   []string               `json:"partitionNames"`
-	OutputFields     []string               `json:"outputFields"`
-	Filter           string                 `json:"filter"`
-	Limit            int32                  `json:"limit"`
-	Offset           int32                  `json:"offset"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
-	ConsistencyLevel string                 `json:"consistencyLevel"`
+	DbName           string           `json:"dbName"`
+	CollectionName   string           `json:"collectionName" binding:"required"`
+	PartitionNames   []string         `json:"partitionNames"`
+	OutputFields     []string         `json:"outputFields"`
+	Filter           string           `json:"filter"`
+	Limit            int32            `json:"limit"`
+	Offset           int32            `json:"offset"`
+	ExprParams       ExpressionParams `json:"exprParams"`
+	ConsistencyLevel string           `json:"consistencyLevel"`
 }
 
 func (req *QueryReqV2) GetDbName() string         { return req.DbName }
@@ -315,11 +315,11 @@ func (req *CollectionIDReq) GetDbName() string         { return req.DbName }
 func (req *CollectionIDReq) GetCollectionName() string { return req.CollectionName }
 
 type CollectionFilterReq struct {
-	DbName         string                 `json:"dbName"`
-	CollectionName string                 `json:"collectionName" binding:"required"`
-	PartitionName  string                 `json:"partitionName"`
-	Filter         string                 `json:"filter" binding:"required"`
-	ExprParams     map[string]interface{} `json:"exprParams"`
+	DbName         string           `json:"dbName"`
+	CollectionName string           `json:"collectionName" binding:"required"`
+	PartitionName  string           `json:"partitionName"`
+	Filter         string           `json:"filter" binding:"required"`
+	ExprParams     ExpressionParams `json:"exprParams"`
 }
 
 func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
@@ -379,7 +379,7 @@ type SearchReqV2 struct {
 	DbName           string                 `json:"dbName"`
 	CollectionName   string                 `json:"collectionName" binding:"required"`
 	Data             []interface{}          `json:"data"`
-	Ids              []interface{}          `json:"ids"`
+	Ids              SearchIDs              `json:"ids"`
 	AnnsField        string                 `json:"annsField"`
 	PartitionNames   []string               `json:"partitionNames"`
 	Filter           string                 `json:"filter"`
@@ -391,7 +391,7 @@ type SearchReqV2 struct {
 	OutputFields     []string               `json:"outputFields"`
 	SearchParams     map[string]interface{} `json:"searchParams"`
 	ConsistencyLevel string                 `json:"consistencyLevel"`
-	ExprParams       map[string]interface{} `json:"exprParams"`
+	ExprParams       ExpressionParams       `json:"exprParams"`
 	FunctionScore    FunctionScore          `json:"functionScore"`
 	// not use Params any more, just for compatibility
 	Params map[string]float64 `json:"params"`
@@ -414,7 +414,7 @@ type SubSearchReq struct {
 	Limit        int32                  `json:"limit"`
 	Offset       int32                  `json:"offset"`
 	SearchParams map[string]interface{} `json:"params"`
-	ExprParams   map[string]interface{} `json:"exprParams"`
+	ExprParams   ExpressionParams       `json:"exprParams"`
 }
 
 type HybridSearchReq struct {
@@ -825,10 +825,6 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 
 func wrapperReturnDefault() gin.H {
 	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}}
-}
-
-func wrapperReturnDefaultWithCost(cost int) gin.H {
-	return gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
 }
 
 type ResourceGroupNodeFilter struct {

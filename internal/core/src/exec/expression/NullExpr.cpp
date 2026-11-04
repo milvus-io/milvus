@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "NullExpr.h"
+#include <algorithm>
 #include <memory>
 #include <utility>
 #include "common/Array.h"
@@ -98,6 +99,15 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
+}
+
+void
+PhyNullExpr::MoveCursor() {
+    if (!expr_->column_.nullable_ && !has_offset_input_) {
+        // Constant scalar results use a separate cursor in PreCheckNullable.
+        precheck_pos_ += std::min(batch_size_, active_count_ - precheck_pos_);
+    }
+    SegmentExpr::MoveCursor();
 }
 
 template <typename T>

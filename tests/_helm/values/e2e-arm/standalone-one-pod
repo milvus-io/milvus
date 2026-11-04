@@ -13,6 +13,9 @@ etcd:
   replicaCount: 1
 extraConfigFiles:
   user.yaml: |
+    proxy:
+      http:
+        strictValidation: true
     grpc:
       client:
         compressionEnabled: true
@@ -38,6 +41,9 @@ indexCoordinator:
     interval: 1
 extraConfigFiles:
   user.yaml: |+
+    proxy:
+      http:
+        strictValidation: true
     grpc:
       client:
         compressionEnabled: true

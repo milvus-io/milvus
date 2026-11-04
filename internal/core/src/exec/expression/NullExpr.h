@@ -54,6 +54,9 @@ class PhyNullExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    MoveCursor() override;
+
     std::string
     ToString() const {
         return fmt::format("{}", expr_->ToString());
