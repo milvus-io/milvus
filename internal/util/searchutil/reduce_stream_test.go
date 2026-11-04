@@ -308,10 +308,7 @@ func TestOrderedReduceStreamMergesANNHits(t *testing.T) {
 
 	assertSearchChunk(t, recvChunk(t, stream), []int64{1, 2}, []float32{0.95, 0.90}, []int64{2})
 	assertSearchChunk(t, recvChunk(t, stream), []int64{3, 4}, []float32{0.80, 0.70}, []int64{2})
-
-	chunk, err := stream.Recv()
-	require.Nil(t, chunk)
-	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
 
 	leftRecv, leftClose := left.calls()
 	rightRecv, rightClose := right.calls()
@@ -393,6 +390,10 @@ func TestOrderedReduceStreamMergesMultipleQueries(t *testing.T) {
 
 	assertSearchChunk(t, recvChunk(t, stream), []int64{1, 2, 11}, []float32{0.90, 0.85, 0.95}, []int64{2, 1})
 	assertSearchChunk(t, recvChunk(t, stream), []int64{10}, []float32{0.80}, []int64{0, 1})
+	// The caller normally closes here. Another pull can still read the last vector's tail.
+	assertSearchChunk(t, recvChunk(t, stream), []int64{12}, []float32{0.60}, []int64{0, 1})
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestOrderedReduceStreamBreaksScoreTiesByPK(t *testing.T) {
