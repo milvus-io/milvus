@@ -2187,6 +2187,11 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
             }
             auto reader = milvus_storage::api::Reader::create(
                 column_groups, nullptr, columns, reader_properties);
+            if (PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return KeyRetriever().GetKey(key_metadata);
+                });
+            }
             const auto parallelism =
                 milvus_storage::ThreadPoolHolder::GetParallelism();
             auto pool =
