@@ -892,17 +892,15 @@ PackedScalarIndexLoadResource(
         staging_bytes = SaturatingAdd(
             staging_bytes, directory.At("fm_index_null_bitmap").plaintext_size);
     }
-    auto request = ScalarIndexLoadResourceWithOverhead(field_type,
-                                                       index_size,
-                                                       resolved_params,
-                                                       mmap_enable,
-                                                       num_rows,
-                                                       read_peak);
+    auto request = ScalarIndexLoadResourceWithOverhead(
+        field_type, index_size, resolved_params, mmap_enable, num_rows, 0);
+    // Construction scratch survives outside the admitted download tasks.
+    auto private_memory = request.max_memory_cost - request.final_memory_cost;
     request.final_memory_cost =
         SaturatingAdd(request.final_memory_cost, bitmap_resident_bytes);
     if (type == BITMAP_INDEX_TYPE && mmap_enable) {
-        request.max_memory_cost = SaturatingAdd(
-            request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
+        private_memory =
+            SaturatingAdd(private_memory, storage::FileWriter::MAX_BUFFER_SIZE);
     }
     if (type == RTREE_INDEX_TYPE) {
         // This branch replaces the generic resident estimate; retain its
@@ -924,25 +922,17 @@ PackedScalarIndexLoadResource(
             request.final_memory_cost,
             SaturatingAdd(non_exist_bytes, ValidityBitmapBytes(num_rows)));
     }
-    request.max_memory_cost =
-        std::max(request.max_memory_cost,
-                 SaturatingAdd(request.final_memory_cost,
-                               SaturatingAdd(staging_bytes, read_peak)));
+    request.max_memory_cost = std::max(
+        request.max_memory_cost,
+        SaturatingAdd(
+            request.final_memory_cost,
+            SaturatingAdd(std::max(private_memory, staging_bytes), read_peak)));
     // The translator pins the load mode for the lifetime of this cell.
     // Non-bitmap sync plans consume slices on the downloading worker. Both
     // modes keep admission through the destination write and scratch release.
     const bool can_share =
-        bounded_load && staging_bytes == 0 && type != BITMAP_INDEX_TYPE &&
-        type != RTREE_INDEX_TYPE &&
-        request.max_memory_cost - request.final_memory_cost <= read_peak;
-    if (!bounded_load) {
-        max_task = legacy_stream.encrypted
-                       ? legacy_stream.max_task_transient_bytes
-                       : SaturatingMultiply(
-                             storage::MaxEntryStreamTaskBytes(),
-                             file_stream ? storage::kFileStreamBufferMultiplier
-                                         : size_t{1});
-    }
+        bounded_load &&
+        request.max_memory_cost - request.final_memory_cost >= read_peak;
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
     // Shared reservations require the selected route to lease all scratch.
     if (can_share) {
@@ -956,7 +946,9 @@ PackedScalarIndexLoadResource(
                 std::move(memory_group), static_cast<int64_t>(max_task)},
             std::nullopt};
     }
-    return {request, std::move(overhead)};
+    return {request,
+            std::move(overhead),
+            {can_share ? static_cast<int64_t>(read_peak) : 0, 0}};
 }
 
 }  // namespace milvus::index

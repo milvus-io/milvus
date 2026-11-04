@@ -323,6 +323,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
+	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
@@ -902,6 +903,8 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
 
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
+
 	return nil
 }
 
@@ -1300,6 +1303,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
@@ -1553,8 +1557,7 @@ func validateElementNullableVectorArraySearch(field *schemapb.FieldSchema, place
 	if isEmbeddingListPlaceholderType(placeholderType) {
 		return merr.WrapErrParameterInvalidMsg("embedding-list search is not supported for element-nullable vector array field %s", field.GetName())
 	}
-	// Temporary: element-level ANN on nullable vector arrays needs query-layer support.
-	return merr.WrapErrParameterInvalidMsg("search on element-nullable vector array field %s is not supported yet", field.GetName())
+	return nil
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {

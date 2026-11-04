@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -115,10 +116,10 @@ func TestStatisticsCollectionAggregatesAndPropagatesFailure(t *testing.T) {
 		require.EqualValues(t, 12, rows)
 		shardErr = context.DeadlineExceeded
 		rows, err = client.Statistics(t.Context(), 1, req, 99)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.True(t, errors.Is(err, context.DeadlineExceeded))
 		require.Zero(t, rows)
 		mockey.Mock((*legacyResolver).ResolveVChannels).Return(nil, context.Canceled).Build()
 		_, err = client.Statistics(t.Context(), 1, req, 99)
-		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, errors.Is(err, context.Canceled))
 	})
 }

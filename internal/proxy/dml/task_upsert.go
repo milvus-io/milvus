@@ -213,6 +213,10 @@ func (it *UpsertTask) OnEnqueue() error {
 
 func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
+	readSchema, err := t.upsertReadSchema(ctx, outputFields)
+	if err != nil {
+		return nil, segcore.StorageCost{}, err
+	}
 	// Both modes use normal Strong queries; only Partial Upsert needs the
 	// executed channel snapshots for its CAS proof.
 	var channelReadTs *typeutil.ConcurrentMap[string, uint64]
@@ -276,6 +280,7 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 		MvccTimestamp:    0,
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
+	qt.BindReadSchema(t.collectionID, readSchema)
 	qt.SetActualChannelsMvcc(channelReadTs)
 	// The user issued an upsert, not a query: this retrieval reads the rows
 	// the upsert replaces and must not move the query feature counters.
@@ -564,7 +569,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 			for _, subField := range fieldData.GetStructArrays().GetFields() {
 				if len(typeutil.GetFieldDataValidData(subField)) != 0 && subFieldHasData(subField) {
-					subFieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+					subFieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 					if err != nil {
 						log.Info(ctx, "get struct sub-field schema failed", mlog.Err(err))
 						return nil, err
@@ -582,7 +587,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 			continue
 		}
-		fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(fieldName)
+		fieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(fieldName)
 		if err != nil {
 			log.Info(ctx, "get field schema failed", mlog.Err(err))
 			return nil, err
@@ -791,7 +796,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				continue
 			}
 
-			fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(existField.GetFieldName())
+			fieldSchema, err := it.schema.SchemaHelper.GetUserFieldFromName(existField.GetFieldName())
 			if err != nil {
 				log.Info(ctx, "get field schema failed", mlog.Err(err))
 				return nil, err
@@ -892,6 +897,9 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			return field.GetFieldName(), field
 		})
 		for _, fieldSchema := range it.schema.Fields {
+			if common.IsSystemField(fieldSchema.GetFieldID()) {
+				continue
+			}
 			if fieldData, ok := upsertFieldMap[fieldSchema.Name]; !ok {
 				if fieldSchema.GetNullable() || fieldSchema.GetDefaultValue() != nil {
 					fieldData, err := GenNullableFieldData(fieldSchema, upsertIDSize)
@@ -1624,7 +1632,7 @@ func validateWholeStructFieldDataForPartialUpdate(schemaHelper *typeutil.SchemaH
 			return merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s' has different legacy and field-specific valid_data",
 				subField.GetFieldName(), fieldData.GetFieldName())
 		}
-		subFieldSchema, err := schemaHelper.GetFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
+		subFieldSchema, err := schemaHelper.GetUserFieldFromName(storedStructSubFieldName(structSchema.GetName(), subField.GetFieldName()))
 		if err != nil {
 			return err
 		}
@@ -2020,7 +2028,10 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema := colInfo.Schema
+	schema, err := colInfo.GetWriteSchema(ctx)
+	if err != nil {
+		return err
+	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
@@ -2029,7 +2040,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.
-	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema)
 	if err != nil {
 		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err

@@ -302,7 +302,6 @@ func observeProxyCollection(nodeID, db, collection string) {
 	for _, queryType := range []string{SearchLabel, HybridSearchLabel, QueryLabel, UpsertQueryLabel} {
 		ProxyReceivedNQ.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxySQLatency.WithLabelValues(nodeID, queryType, db, collection).Observe(1)
-		ProxyCollectionSQLatency.WithLabelValues(nodeID, queryType, db, collection).Observe(1)
 		ProxyRetrySearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxyRetrySearchResultInsufficientCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
 		ProxyRecallSearchCount.WithLabelValues(nodeID, queryType, db, collection).Add(1)
@@ -313,7 +312,6 @@ func observeProxyCollection(nodeID, db, collection string) {
 	ProxyResourceGroupSearchVectors.WithLabelValues(nodeID, db, collection, "rg").Add(1)
 	for _, msgType := range []string{InsertLabel, DeleteLabel, UpsertLabel, SearchLabel, HybridSearchLabel, QueryLabel} {
 		ProxyMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
-		ProxyCollectionMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
 		ProxyReceiveBytes.WithLabelValues(nodeID, msgType, db, collection).Add(1)
 		ProxyScannedRemoteMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)
 		ProxyScannedTotalMB.WithLabelValues(nodeID, msgType, db, collection).Add(1)

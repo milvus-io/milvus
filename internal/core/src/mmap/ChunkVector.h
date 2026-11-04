@@ -31,6 +31,14 @@
 
 namespace milvus {
 
+// Growing segments store these types in batches through VariableLengthChunk,
+// with or without mmap, and hand out views into the batches. A chunk holds no
+// Type object per row.
+template <typename T>
+constexpr bool IsBatchStoredType =
+    std::is_same_v<T, Array> || std::is_same_v<T, ArrayValue> ||
+    std::is_same_v<T, VectorArray>;
+
 // A pinned view of one published chunk generation.
 //
 // Acquired once per read operation and read through for that operation's whole
@@ -230,10 +238,18 @@ class ChunkSlabDirectory {
     int64_t size_ = 0;
 };
 
+// ChunkImpl is either FixedVector<Type>, one Type object per row, or, when
+// UseChunkData is true, a chunk type from mmap/ChunkData.h: it takes a
+// possibly null mmap descriptor, is written through set() and is read through
+// view(). is_mmap() tells whether the descriptor is set.
 template <typename Type,
           typename ChunkImpl = FixedVector<Type>,
-          bool IsMmap = false>
+          bool UseChunkData = false>
 class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
+    static_assert(UseChunkData || !IsBatchStoredType<Type>,
+                  "Array, ArrayValue and VectorArray are stored in batches "
+                  "through VariableLengthChunk");
+
  public:
     ThreadSafeChunkVector(
         storage::MmapChunkDescriptorPtr descriptor = nullptr) {
@@ -257,7 +273,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                       "chunk publication requires a noexcept move");
         while (this->counter_ < chunk_num) {
             ChunkImpl chunk = [&]() -> ChunkImpl {
-                if constexpr (IsMmap) {
+                if constexpr (UseChunkData) {
                     return ChunkImpl(chunk_size, mmap_descriptor_);
                 } else {
                     return ChunkImpl(chunk_size);
@@ -291,7 +307,7 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                    fmt::format("index out of range, index={}, counter_={}",
                                chunk_id,
                                counter));
-        if constexpr (!IsMmap || !IsVariableType<Type>) {
+        if constexpr (!UseChunkData || !IsVariableType<Type>) {
             auto ptr = (Type*)(*vec_)[chunk_id].data();
             AssertInfo(
                 offset + length <= (*vec_)[chunk_id].size(),
@@ -312,12 +328,13 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     }
 
     void
-    copy_array_rows_to_chunk(int64_t chunk_id,
-                             size_t offset,
-                             std::span<const ScalarFieldProto* const> rows,
-                             const proto::schema::TypeSchema& type) {
-        static_assert(std::is_same_v<Type, ArrayValue> && IsMmap,
-                      "copy_array_rows_to_chunk is only available for mmap "
+    copy_array_rows_to_chunk(
+        int64_t chunk_id,
+        size_t offset,
+        std::span<const ScalarFieldProto* const> rows,
+        const std::shared_ptr<const proto::schema::TypeSchema>& type) {
+        static_assert(std::is_same_v<Type, ArrayValue> && UseChunkData,
+                      "copy_array_rows_to_chunk is only available for "
                       "ArrayValue chunks");
         std::unique_lock<std::shared_mutex> lck(mutex_);
         const auto counter = this->counter_.load();
@@ -404,28 +421,14 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
 
     SpanBase
     get_span(const ChunkSnapshot& snap, int64_t chunk_id) const override {
-        if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type> ||
-                                 std::is_same_v<VectorArray, Type>)) {
-            return SpanBase(get_chunk_data(snap, chunk_id),
-                            get_chunk_size(snap, chunk_id),
-                            sizeof(ChunkViewType<Type>));
-        } else {
-            return SpanBase(get_chunk_data(snap, chunk_id),
-                            get_chunk_size(snap, chunk_id),
-                            sizeof(Type));
-        }
+        return SpanBase(get_chunk_data(snap, chunk_id),
+                        get_chunk_size(snap, chunk_id),
+                        element_sizeof());
     }
 
     int64_t
     get_element_size() override {
-        std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type> ||
-                                 std::is_same_v<VectorArray, Type>)) {
-            return sizeof(ChunkViewType<Type>);
-        }
-        return sizeof(Type);
+        return element_sizeof();
     }
 
     int64_t
@@ -455,17 +458,9 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     SpanBase
     get_span(int64_t chunk_id) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
-        if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type> ||
-                                 std::is_same_v<VectorArray, Type>)) {
-            return SpanBase(get_chunk_data(chunk_id),
-                            get_chunk_size(chunk_id),
-                            sizeof(ChunkViewType<Type>));
-        } else {
-            return SpanBase(get_chunk_data(chunk_id),
-                            get_chunk_size(chunk_id),
-                            sizeof(Type));
-        }
+        return SpanBase(get_chunk_data(chunk_id),
+                        get_chunk_size(chunk_id),
+                        element_sizeof());
     }
 
     bool
@@ -493,34 +488,24 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
         return index;
     }
 
+    // The size of one row slot in a chunk: a view for chunk data, which
+    // stores views to variable-length rows, otherwise the row object itself.
+    static constexpr int64_t
+    element_sizeof() {
+        if constexpr (UseChunkData) {
+            return sizeof(ChunkViewType<Type>);
+        } else {
+            return sizeof(Type);
+        }
+    }
+
     static ChunkViewType<Type>
     view_chunk_element(ChunkImpl& chunk, int64_t chunk_offset) {
-        if constexpr (IsMmap) {
+        if constexpr (UseChunkData) {
             return chunk.view(chunk_offset);
         } else if constexpr (std::is_same_v<std::string, Type>) {
             return std::string_view(chunk[chunk_offset].data(),
                                     chunk[chunk_offset].size());
-        } else if constexpr (std::is_same_v<Array, Type>) {
-            const auto& src = chunk[chunk_offset];
-            return ArrayView(const_cast<char*>(src.data()),
-                             src.length(),
-                             src.byte_size(),
-                             src.get_element_type(),
-                             src.get_offsets_data(),
-                             src.get_element_valid_data(),
-                             src.is_element_nullable(),
-                             src.has_invalid_element());
-        } else if constexpr (std::is_same_v<ArrayValue, Type>) {
-            return chunk[chunk_offset].View();
-        } else if constexpr (std::is_same_v<VectorArray, Type>) {
-            auto& src = chunk[chunk_offset];
-            return VectorArrayView(const_cast<char*>(src.data()),
-                                   src.dim(),
-                                   src.length(),
-                                   src.byte_size(),
-                                   src.get_element_type(),
-                                   src.element_validity_view(),
-                                   src.is_element_nullable());
         } else if constexpr (std::is_same_v<Json, Type>) {
             return Json(chunk[chunk_offset].c_str(),
                         chunk[chunk_offset].size());
@@ -565,7 +550,12 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
 template <typename Type>
 ChunkVectorPtr<Type>
 SelectChunkVectorPtr(storage::MmapChunkDescriptorPtr& mmap_descriptor) {
-    if constexpr (!IsVariableType<Type>) {
+    if constexpr (IsBatchStoredType<Type>) {
+        // Without a descriptor the batches are allocated on the heap.
+        return std::make_unique<
+            ThreadSafeChunkVector<Type, VariableLengthChunk<Type>, true>>(
+            mmap_descriptor);
+    } else if constexpr (!IsVariableType<Type>) {
         if (mmap_descriptor != nullptr) {
             return std::make_unique<
                 ThreadSafeChunkVector<Type, FixedLengthChunk<Type>, true>>(

@@ -178,7 +178,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1", "ch2"}
 	primary := &schemapb.FieldSchema{
-		FieldID:      1,
+		FieldID:      101,
 		Name:         "pk",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
@@ -197,8 +197,8 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 				NumRows: 6,
 				RowIDs:  []int64{1000, 1001, 1002, 1003, 1004, 1005},
 				FieldsData: []*schemapb.FieldData{
-					int64FieldData("value", 2, []int64{10, 11, 12, 13, 14, 15}),
-					int64FieldData("pk", 1, []int64{-1, -1, -1, -1, -1, -1}),
+					int64FieldData("value", 102, []int64{10, 11, 12, 13, 14, 15}),
+					int64FieldData("pk", 101, []int64{-1, -1, -1, -1, -1, -1}),
 				},
 			},
 		},
@@ -227,8 +227,8 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
-			{Name: "pk", FieldID: 1, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
-			{Name: "value", FieldID: 2, DataType: schemapb.DataType_Int64},
+			{Name: "pk", FieldID: 101, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "value", FieldID: 102, DataType: schemapb.DataType_Int64},
 		},
 	})
 	require.NoError(t, err)
@@ -268,7 +268,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 func TestInsertTaskReassignAutoIDForIdempotencySkipsNamespacePartitionKeyRouting(t *testing.T) {
 	namespace := "tenant-a"
 	primary := &schemapb.FieldSchema{
-		FieldID:      1,
+		FieldID:      101,
 		Name:         "pk",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
@@ -287,7 +287,7 @@ func TestInsertTaskReassignAutoIDForIdempotencySkipsNamespacePartitionKeyRouting
 			},
 			Fields: []*schemapb.FieldSchema{
 				primary,
-				{Name: common.NamespaceFieldName, FieldID: 2, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+				{Name: common.NamespaceFieldName, FieldID: 102, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
 			},
 		},
 		insertMsg: &BaseInsertTask{
@@ -310,7 +310,7 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1"}
 	primary := &schemapb.FieldSchema{
-		FieldID:      1,
+		FieldID:      101,
 		Name:         "pk",
 		DataType:     schemapb.DataType_Int64,
 		IsPrimaryKey: true,
@@ -333,7 +333,7 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 			},
 			Fields: []*schemapb.FieldSchema{
 				primary,
-				{Name: common.NamespaceFieldName, FieldID: 2, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+				{Name: common.NamespaceFieldName, FieldID: 102, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
 			},
 		},
 		result: &milvuspb.MutationResult{},
@@ -368,7 +368,7 @@ func requireInsertRoutesMatchDeleteRoutes(t *testing.T, ids *schemapb.IDs, vChan
 }
 
 func TestInsertTaskReassignAutoIDForStableIdempotencyErrors(t *testing.T) {
-	primary := &schemapb.FieldSchema{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, AutoID: true}
+	primary := &schemapb.FieldSchema{FieldID: 101, Name: "pk", DataType: schemapb.DataType_Int64, AutoID: true}
 	task := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{

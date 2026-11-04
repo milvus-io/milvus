@@ -17,7 +17,7 @@ import (
 
 type resourceSchedulingTestScheduler struct{ nodescheduler.Scheduler }
 
-func (*resourceSchedulingTestScheduler) Submit(nodescheduler.Task) nodescheduler.TaskHandle {
+func (*resourceSchedulingTestScheduler) Submit(nodescheduler.Task, ...nodescheduler.Option) nodescheduler.TaskHandle {
 	panic("unpatched")
 }
 
@@ -56,7 +56,7 @@ func setupResourceSchedulingTest(t *testing.T) *resourceSchedulingFixture {
 		f.timers = append(f.timers, callback)
 		return timer
 	}).Build()
-	mockey.Mock((*resourceSchedulingTestScheduler).Submit).To(func(_ *resourceSchedulingTestScheduler, task nodescheduler.Task) nodescheduler.TaskHandle {
+	mockey.Mock((*resourceSchedulingTestScheduler).Submit).To(func(_ *resourceSchedulingTestScheduler, task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 		f.queue <- task
 		return nil
 	}).Build()

@@ -12,6 +12,31 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 ## Recovery Flow
 
+Recovery magic 3 records a one-time collection schema alignment.
+After legacy-format migration and metadata validation, before module creation
+and WAL replay, older checkpoints fetch each active collection through
+`DescribeCollectionInternal`. The last retained NORMAL schema with the same
+SchemaVersion is replaced with an owned copy of the complete Coord schema,
+including fields, functions, TTL and the field-ID watermark;
+`collection.on.truncating` is excluded. Other history entries and all effective
+timestamps are retained. If no matching version exists, history is unchanged;
+WAL replay supplies newer versions. This directly repairs schema
+updates that older nodes missed, including legacy property-only TTL changes.
+Aligned snapshots are saved before the new magic; failed saves leave the old
+marker and can be retried. Fresh checkpoints start at magic 3. Ordinary
+publication and WAL switching preserve the migrated marker.
+
+This upgrade uses an ordinary Describe snapshot, without an additional
+coordinator DDL completion barrier. It does not provide an atomic snapshot of
+in-flight coordinator callbacks and the recovering WAL. Subsequent retained
+WAL messages use the normal mask application path. Alignment uses Coord as the
+authority only for the matching version; it never rolls a newer WAL version back.
+
+TODO(#40451): support mixed-version assignment and rollback after magic 3 is
+persisted. Older StreamingNodes reject this marker and cannot reopen an upgraded
+PChannel. This compatibility work is deferred; the current migration is not
+rollback-safe.
+
 1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
 2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. WALMaterializer restores its cursor and rebuilds unmaterialized Delete handles through WAL replay.
 3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders, and restore idempotency snapshots from retained Summary history plus replayed records (retrying transient object reads until recovery or cancellation, and failing WAL open on permanent errors or cancellation); pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.

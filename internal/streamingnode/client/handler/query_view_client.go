@@ -57,28 +57,28 @@ func (hc *handlerClientImpl) QueryViewClient() QueryViewClient {
 }
 
 func (qvc *queryViewClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	result, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, "QueryPlanService.GetQueryPlan", func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
+	result, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, viewpb.QueryPlanService_GetQueryPlan_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
 		return client.GetQueryPlan(ctx, req)
 	})
 	return result, err
 }
 
 func (qvc *queryViewClient) GetMVCCTimestamp(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
-	result, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, "QueryPlanService.GetMVCCTimestamp", func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetMVCCTimestampResponse, error) {
+	result, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetMVCCTimestampResponse, error) {
 		return client.GetMVCCTimestamp(ctx, req)
 	})
 	return result, err
 }
 
 func (qvc *queryViewClient) SearchOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
-	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.SearchOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.SearchOnViewResponse, error) {
+	result, err := executeViewQueryRPC(ctx, qvc, pchannel, viewpb.ViewQueryService_SearchOnView_FullMethodName, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.SearchOnViewResponse, error) {
 		return client.SearchOnView(ctx, req)
 	})
 	return result, err
 }
 
 func (qvc *queryViewClient) QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
-	result, err := executeViewQueryRPC(ctx, qvc, pchannel, "ViewQueryService.QueryOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
+	result, err := executeViewQueryRPC(ctx, qvc, pchannel, viewpb.ViewQueryService_QueryOnView_FullMethodName, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.QueryOnViewResponse, error) {
 		return client.QueryOnView(ctx, req)
 	})
 	return result, err
@@ -93,13 +93,13 @@ func executeQueryPlanRPC[T any](
 ) (T, error) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", method))
-	return executeViewRPC(ctx, qvc, logger, pchannel, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
+	return executeViewRPC(ctx, qvc, logger, pchannel, method, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
 		client, err := qvc.queryPlanService.GetService(ctx)
 		if err != nil {
 			return viewRPCResult[T]{}, err
 		}
 		resp, err := call(ctx, client)
-		return viewRPCResult[T]{resp: resp, err: viewerror.ConvertViewError(method, err)}, nil
+		return viewRPCResult[T]{resp: resp, err: err}, nil
 	})
 }
 
@@ -111,13 +111,13 @@ func executeViewQueryRPC[T any](
 	call func(context.Context, viewpb.ViewQueryServiceClient) (T, error),
 ) (T, error) {
 	logger := mlog.With(mlog.FieldPChannel(pchannel.Name), mlog.String("handler", method))
-	return executeViewRPC(ctx, qvc, logger, pchannel.Name, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
+	return executeViewRPC(ctx, qvc, logger, pchannel.Name, method, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
 		client, err := qvc.viewQueryService.GetService(ctx)
 		if err != nil {
 			return viewRPCResult[T]{}, err
 		}
 		resp, err := call(ctx, client)
-		return viewRPCResult[T]{resp: resp, err: viewerror.ConvertViewError(method, err)}, nil
+		return viewRPCResult[T]{resp: resp, err: err}, nil
 	})
 }
 
@@ -126,6 +126,7 @@ func executeViewRPC[T any](
 	qvc *queryViewClient,
 	logger *mlog.Logger,
 	pchannel string,
+	method string,
 	call func(context.Context, *types.PChannelInfoAssigned) (viewRPCResult[T], error),
 ) (T, error) {
 	var zero T

@@ -541,6 +541,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	// RootCoord skips this check when preserve_field_ids is set, as for a
+	// snapshot restore, which does not go through proxy.
+	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+		return err
+	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
 	}
@@ -1200,6 +1205,9 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *s
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), structPath)
 	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(parent, field); err != nil {
+		return err
+	}
 	if field.GetIsDynamic() {
 		return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
 	}
@@ -1731,9 +1739,10 @@ type DescribeCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *milvuspb.DescribeCollectionResponse
+	ctx              context.Context
+	mixCoord         types.MixCoordClient
+	result           *milvuspb.DescribeCollectionResponse
+	internalMetadata bool
 }
 
 func (t *DescribeCollectionTask) TraceCtx() context.Context {
@@ -1796,7 +1805,11 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = DescribeCollectionRPCContext(ctx)
+	if t.internalMetadata {
+		ctx = describeCollectionMetadataContext(ctx)
+	} else {
+		ctx = DescribeCollectionRPCContext(ctx)
+	}
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
@@ -1806,6 +1819,9 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		t.result.Status = DescribeCollectionErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
+	}
+	if t.internalMetadata && result.GetDbName() == "" {
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
 	}
 	if t.result.CollectionName == "" {
 		t.result.CollectionName = result.GetCollectionName()
@@ -2593,6 +2609,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Properties = updatePropertiesKeys(t.Properties)
+	if target := schemautil.StructAlterTarget(collSchema.CollectionSchema, t.FieldName); target != "" {
+		keys := make([]string, 0, len(t.Properties)+len(t.DeleteKeys))
+		for _, prop := range t.Properties {
+			keys = append(keys, prop.GetKey())
+		}
+		for _, key := range t.DeleteKeys {
+			keys = append(keys, updateKey(key))
+		}
+		if err := schemautil.ValidateStructFieldAlterKeys(target, t.FieldName, keys); err != nil {
+			return err
+		}
+	}
 	for _, prop := range t.Properties {
 		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -2632,16 +2660,14 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 		case common.MaxLengthKey:
 			IsStringType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", t.FieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
@@ -2654,21 +2680,19 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		case common.MaxCapacityKey:
 			IsArrayType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", t.FieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, t.FieldName)
 			}
 			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
@@ -3272,9 +3296,7 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3541,9 +3563,7 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -4224,3 +4244,7 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+// UseInternalMetadata is selected only by the trusted Proxy provider. The provider
+// must authorize the resolved result before it is returned to a user.
+func (t *DescribeCollectionTask) UseInternalMetadata() { t.internalMetadata = true }

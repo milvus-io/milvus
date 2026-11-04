@@ -541,7 +541,7 @@ type capturedNodeScheduler struct {
 	task nodescheduler.Task
 }
 
-func (s *capturedNodeScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *capturedNodeScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.task = task
 	return noopTaskHandle{}
 }

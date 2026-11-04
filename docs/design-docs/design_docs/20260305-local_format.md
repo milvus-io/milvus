@@ -330,7 +330,7 @@ duplicates are preserved. Filtered positions stay aligned and carry
 `IsValid(i)` reads validity without constructing data. `GetOwn()` materializes
 an ordered, contiguous result independent of backend pins.
 
-A caller that needs both values and validity obtains both from the same
+A Take caller that needs both values and validity obtains both from the same
 `TakeResult`; it must not issue a separate validity read. `BulkIsValid` remains
 for paths that need validity alone.
 
@@ -352,8 +352,10 @@ Vortex applies selection while building its internal sorted decode groups.
   before reading. Raw reads directly from that pinned set and retains its pins
   until `TakeResult` destruction, including across `GetOwn()`. Vortex decodes
   the selected offsets and releases all source pins when Take completes.
-  Neither backend pins unrelated Cells. JSON bulk output selects this mode to
-  preserve its previous batch-pin behavior on Raw.
+  Neither backend pins unrelated Cells. Scalar bulk output selects this mode to
+  preserve its previous batch-pin behavior on Raw. It reads values and validity
+  together and copies directly into the final output while the result is alive,
+  without first materializing another Raw owned collection.
 
 Both modes preserve input order, duplicates, and filter/validity semantics.
 Preloaded filters can omit non-nullable skipped Cells from a batch pin;
@@ -498,6 +500,14 @@ main paths. Legacy Chunk access remains only for consumers not yet migrated.
 Phase 2 removes external Chunk access from sealed columns, leaves Chunk-specific
 APIs only behind concrete Raw/Growing implementations, and renames the common
 abstraction to `ColumnInterface`.
+
+Finite-offset ordinary scalar recall uses Take. Native-list ARRAY output keeps
+its existing Raw `BulkArrayValueAt` and validity adapter; Vortex uses
+`ArrayValueView` Take, including element-nullable values.
+Full-column text-index scans, random group-by caches, and pointer-based
+vector/primary-key/system consumers retain
+their existing adapters until their pin and ownership lifetimes are migrated;
+removing the scalar bulk APIs does not imply those consumers are already unified.
 
 Known follow-ups:
 

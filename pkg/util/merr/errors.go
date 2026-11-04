@@ -124,6 +124,11 @@ var (
 	// stale shard-map at the caller (proxy). Retryable so the caller can
 	// re-resolve the shard map and dispatch to the correct node.
 	ErrChannelMisrouted = newMilvusError("channel misrouted: not owned by this node", 507, true)
+	// A primary key index flush adds an SST whose ID is not above the
+	// reclaimed SST ID of the manifest pointer: garbage collection may have
+	// deleted that SST. The flush did not take effect. A retry with the same
+	// request fails again; the caller must use new SST IDs.
+	ErrChannelPKIndexSSTReclaimed = newMilvusError("primary key index sst may be reclaimed", 508, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
@@ -277,6 +282,10 @@ var (
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
 	ErrQueryPlan           = newMilvusError("query plan failed", 2201, false, WithErrorType(InputError))
+
+	// ErrQueryViewNotReady asks the query owner to replan after its view was
+	// retired or became unavailable. It does not imply collection release.
+	ErrQueryViewNotReady = newMilvusError("query view not ready", 2202, true)
 
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)

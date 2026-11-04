@@ -125,11 +125,11 @@ func (s *handshakeServer) Consume(stream streamingpb.StreamingNodeHandlerService
 func handshakeClient(t *testing.T, serve func(streamingpb.StreamingNodeHandlerService_ConsumeServer) error) streamingpb.StreamingNodeHandlerServiceClient {
 	t.Helper()
 	listener := bufconn.Listen(1 << 20)
-	server := grpc.NewServer(grpc.StreamInterceptor(serviceinterceptor.NewStreamingServiceStreamServerInterceptor()))
+	server := grpc.NewServer(grpc.StreamInterceptor(serviceinterceptor.NewServiceStreamServerInterceptor()))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, &handshakeServer{consume: serve})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
-	conn, err := grpc.NewClient("passthrough:///handshake", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithStreamInterceptor(serviceinterceptor.NewStreamingServiceStreamClientInterceptor()))
+	conn, err := grpc.NewClient("passthrough:///handshake", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithStreamInterceptor(serviceinterceptor.NewServiceStreamClientInterceptor()))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	return streamingpb.NewStreamingNodeHandlerServiceClient(conn)
