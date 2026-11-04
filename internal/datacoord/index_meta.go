@@ -133,7 +133,7 @@ func newSegmentIndexBuildInfo() *segmentBuildInfo {
 
 func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
 	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
-	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+	m.recordTaskStats(segIdx)
 }
 
 // AddForRecovery inserts segment index during recovery. It skips the LRU write
@@ -145,6 +145,17 @@ func (m *segmentBuildInfo) AddForRecovery(segIdx *model.SegmentIndex) {
 	if m.taskStats.Len() >= taskStatsLRUCapacity && segIdx.IndexState == commonpb.IndexState_Finished {
 		return
 	}
+	m.recordTaskStats(segIdx)
+}
+
+// insertIfAbsent inserts segIdx unless its build ID is already resident, and
+// reports whether it did. It records no task stats.
+func (m *segmentBuildInfo) insertIfAbsent(segIdx *model.SegmentIndex) bool {
+	_, loaded := m.buildID2SegmentIndex.GetOrInsert(segIdx.BuildID, segIdx)
+	return !loaded
+}
+
+func (m *segmentBuildInfo) recordTaskStats(segIdx *model.SegmentIndex) {
 	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
 }
 
@@ -279,6 +290,12 @@ func (m *indexMeta) updateCollectionIndex(index *model.Index) {
 func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	old, _ := m.segmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
+	m.putSegmentIndex(segIdx)
+	m.segmentBuildInfo.Add(segIdx)
+}
+
+// putSegmentIndex makes segIdx its segment's record for its index ID.
+func (m *indexMeta) putSegmentIndex(segIdx *model.SegmentIndex) {
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -287,7 +304,71 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 		indexes.Insert(segIdx.IndexID, segIdx)
 		m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 	}
-	m.segmentBuildInfo.Add(segIdx)
+}
+
+// manifestIndexRecovery installs the SegmentIndex records startup recovers from
+// segment manifests, millions of them on a large cluster. install updates the
+// resident maps and task counts exactly as updateSegmentIndex does. The task-stats
+// LRU and the stored-size gauge, which updateSegmentIndex and
+// addStoredIndexSizeMetric would update per record, are updated once by finish
+// into the state the per-record updates leave:
+//   - The gauge receives the summed record sizes of each index. A record only
+//     adds its size if its index is active, and index DDL cannot run before the
+//     recovered meta is published.
+//   - The task-stats LRU receives the last taskStatsLRUCapacity records in
+//     install order. The fresh indexMeta's LRU holds only resident build IDs,
+//     which install skips, so every installed build ID is new to the LRU and
+//     adding them all would have evicted each earlier one.
+type manifestIndexRecovery struct {
+	meta *indexMeta
+	// sizes sums installed sizes by collectionID and indexID.
+	sizes     map[UniqueID]map[UniqueID]uint64
+	latest    [taskStatsLRUCapacity]*model.SegmentIndex
+	installed int
+	finished  bool
+}
+
+func (m *indexMeta) newManifestIndexRecovery() *manifestIndexRecovery {
+	return &manifestIndexRecovery{meta: m, sizes: make(map[UniqueID]map[UniqueID]uint64)}
+}
+
+// install adds segIdx unless a catalog row or an earlier manifest already holds
+// its build ID, which then stays authoritative.
+func (r *manifestIndexRecovery) install(segIdx *model.SegmentIndex) {
+	m := r.meta
+	if !m.segmentBuildInfo.insertIfAbsent(segIdx) {
+		return
+	}
+	m.taskCounts.replaceTask(nil, segIdx)
+	m.putSegmentIndex(segIdx)
+	sizes, ok := r.sizes[segIdx.CollectionID]
+	if !ok {
+		sizes = make(map[UniqueID]uint64)
+		r.sizes[segIdx.CollectionID] = sizes
+	}
+	sizes[segIdx.IndexID] += segIdx.IndexSerializedSize
+	r.latest[r.installed%taskStatsLRUCapacity] = segIdx
+	r.installed++
+}
+
+// finish applies the aggregates of the records installed so far. Later calls
+// do nothing.
+func (r *manifestIndexRecovery) finish() {
+	if r.finished {
+		return
+	}
+	r.finished = true
+	m := r.meta
+	m.fieldIndexLock.RLock()
+	for collectionID, sizes := range r.sizes {
+		for indexID, size := range sizes {
+			m.addStoredIndexSizeMetric(collectionID, indexID, float64(size))
+		}
+	}
+	m.fieldIndexLock.RUnlock()
+	for i := max(0, r.installed-taskStatsLRUCapacity); i < r.installed; i++ {
+		m.segmentBuildInfo.recordTaskStats(r.latest[i%taskStatsLRUCapacity])
+	}
 }
 
 // writeSegmentIndexToManifest selects manifest publication for new StorageV3

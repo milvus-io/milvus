@@ -671,16 +671,22 @@ func (s *fakeManifestStore) failReadsFrom() {
 
 // Adapt the existing fake reader to callback delivery. Production recovery
 // submits directly to the native executor; only this test stub uses a goroutine.
+// Recovery submits with prebuilt properties, which come from createStorageConfig.
 func mockManifestIndexSubmissions(t *testing.T) {
 	t.Helper()
-	mock := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, io *packed.ManifestIOContext, manifest string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+	submit := func(ctx context.Context, io *packed.ManifestIOContext, manifest string, config *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
 		go func() {
 			entries, err := packed.GetManifestIndexInfosAsync(ctx, io, manifest, config)
 			complete(entries, err)
 		}()
 		return nil
-	}).Build()
+	}
+	mock := mockey.Mock(packed.SubmitManifestIndexInfos).To(submit).Build()
 	t.Cleanup(func() { mock.UnPatch() })
+	withProperties := mockey.Mock(packed.SubmitManifestIndexInfosWithProperties).To(func(ctx context.Context, io *packed.ManifestIOContext, manifest string, _ *packed.ManifestReadProperties, complete func([]packed.ManifestIndexInfo, error)) error {
+		return submit(ctx, io, manifest, createStorageConfig(), complete)
+	}).Build()
+	t.Cleanup(func() { withProperties.UnPatch() })
 }
 
 func mockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdates) packed.ManifestUpdateResult {

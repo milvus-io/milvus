@@ -42,7 +42,7 @@ func TestManifestCommitExecutorIndependentFromRecovery(t *testing.T) {
 	require.NoError(t, err)
 	defer release()
 	assertManifestCommitCapacity(t, io, 3)
-	reader := m.newManifestIndexReader(context.Background(), []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{ID: 1}), NewSegmentInfo(&datapb.SegmentInfo{ID: 2})}, 2, nil)
+	reader := m.newManifestIndexReader(context.Background(), []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{ID: 1}), NewSegmentInfo(&datapb.SegmentInfo{ID: 2})}, 2, nil, "")
 	require.NotSame(t, io, reader.io)
 	require.Equal(t, 2, reader.limit, "use the supplied concurrency, not the global read setting")
 	reader.close()

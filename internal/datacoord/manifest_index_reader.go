@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -37,17 +38,28 @@ type manifestIndexReadResult struct {
 	request manifestIndexReadRequest
 	entries []packed.ManifestIndexInfo
 	err     error
+	// indexes and invalid hold projectManifestIndexes' verdict on a successful
+	// read. Unlike err, invalid is never retried.
+	indexes []*model.SegmentIndex
+	invalid error
 }
 
 // manifestIndexReader delivers each segment's final read result in completion
 // order. The caller alone drives scheduling through next; native reads and
 // callbacks use this reader's ManifestIOContext executor, with no extra workers.
+// Each successful read is validated and projected on the executor goroutine
+// that delivers it, so this per-manifest work runs in parallel.
 // The caller must close the reader, including after a metadata installation error.
 type manifestIndexReader struct {
-	io         *packed.ManifestIOContext
+	io *packed.ManifestIOContext
+	// properties, if built, serve every read. They depend only on the storage
+	// config, which is fixed for the reader, and on the writer format, which
+	// reads ignore.
+	properties *packed.ManifestReadProperties
 	ctx        context.Context
 	cancel     context.CancelFunc
 	submitRead func(context.Context, *SegmentInfo, func([]packed.ManifestIndexInfo, error)) error
+	rootPath   string
 	remaining  []*SegmentInfo
 	limit      int
 	// outstanding counts submitted attempts whose results have not been consumed,
@@ -58,19 +70,28 @@ type manifestIndexReader struct {
 	timer       *time.Timer
 }
 
-func (m *meta) newManifestIndexReader(ctx context.Context, segments []*SegmentInfo, concurrency int, config *indexpb.StorageConfig) *manifestIndexReader {
+func (m *meta) newManifestIndexReader(ctx context.Context, segments []*SegmentInfo, concurrency int, config *indexpb.StorageConfig, rootPath string) *manifestIndexReader {
 	ctx, cancel := context.WithCancel(ctx)
 	limit := max(1, concurrency)
 	io := packed.NewManifestIOContext(limit)
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
-	return &manifestIndexReader{
-		ctx: ctx, cancel: cancel, remaining: segments, limit: limit, io: io,
+	reader := &manifestIndexReader{
+		ctx: ctx, cancel: cancel, remaining: segments, limit: limit, io: io, rootPath: rootPath,
 		results: make(chan manifestIndexReadResult, limit), timer: timer,
 		submitRead: func(ctx context.Context, segment *SegmentInfo, complete func([]packed.ManifestIndexInfo, error)) error {
 			return m.submitManifestIndexRead(ctx, io, segment.GetManifestPath(), config, complete)
 		},
 	}
+	// Build the read properties once rather than per read. Should that fail,
+	// every read builds its own and reports the failure, as before.
+	if properties, err := packed.NewManifestReadProperties(config); err == nil {
+		reader.properties = properties
+		reader.submitRead = func(ctx context.Context, segment *SegmentInfo, complete func([]packed.ManifestIndexInfo, error)) error {
+			return m.submitManifestIndexReadWithProperties(ctx, io, segment.GetManifestPath(), properties, complete)
+		}
+	}
+	return reader
 }
 
 // next returns nil, nil at exhaustion. A result may contain a terminal read
@@ -135,7 +156,11 @@ func (r *manifestIndexReader) submit(request manifestIndexReadRequest) {
 	request.attempt++
 	r.outstanding++
 	complete := func(entries []packed.ManifestIndexInfo, err error) {
-		r.results <- manifestIndexReadResult{request, entries, err}
+		result := manifestIndexReadResult{request: request, entries: entries, err: err}
+		if err == nil {
+			result.indexes, result.invalid = projectManifestIndexes(r.rootPath, request.segment, entries)
+		}
+		r.results <- result
 	}
 	if err := r.submitRead(r.ctx, request.segment, complete); err != nil {
 		complete(nil, err) // A rejected submission never invokes its callback.
@@ -168,4 +193,8 @@ func (r *manifestIndexReader) close() {
 		r.outstanding--
 	}
 	r.io.Close()
+	if r.properties != nil {
+		r.properties.Close()
+		r.properties = nil
+	}
 }

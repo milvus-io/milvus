@@ -293,7 +293,7 @@ func TestManifestRecoveryFailureDrainsAcceptedReads(t *testing.T) {
 		complete func([]packed.ManifestIndexInfo, error)
 	}
 	pending := make(chan pendingRead, 5)
-	reader := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+	reader := mockey.Mock(packed.SubmitManifestIndexInfosWithProperties).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *packed.ManifestReadProperties, complete func([]packed.ManifestIndexInfo, error)) error {
 		pending <- pendingRead{ctx, complete}
 		return nil
 	}).Build()
