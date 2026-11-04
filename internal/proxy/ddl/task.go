@@ -379,7 +379,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse schema for collection %s", t.GetCollectionName())
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
@@ -647,7 +647,7 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 	t.fieldSchema = &schemapb.FieldSchema{}
 	if err := proto.Unmarshal(t.GetSchema(), t.fieldSchema); err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse field schema for collection %s", t.GetCollectionName())
 	}
 	if err := validateAddFieldRequest(t.oldSchema, t.fieldSchema); err != nil {
 		return err

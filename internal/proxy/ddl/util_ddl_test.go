@@ -66,6 +66,26 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestValidateDimension(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "malformed", value: "abc", cause: strconv.ErrSyntax},
+		{name: "overflow", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDimension(&schemapb.FieldSchema{
+				Name:     "embedding",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: tc.value},
+				},
+			})
+			assertParameterParseError(t, err, tc.cause, tc.value, "embedding", common.DimKey)
+		})
+	}
+
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
@@ -996,4 +1016,40 @@ func TestValidateFieldNestedArrayOfVector(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "nested ArrayOfVector is not supported")
 	})
+}
+
+func TestValidateLoadFieldsListInvalidSkipLoad(t *testing.T) {
+	for _, inStruct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("struct=%t", inStruct), func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				Name: "payload",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.FieldSkipLoadKey, Value: "invalid_bool"},
+				},
+			}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			if inStruct {
+				schema.Fields = nil
+				schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+					{Name: "items", Fields: []*schemapb.FieldSchema{field}},
+				}
+			}
+
+			require.NoError(t, transformStructFieldNames(schema))
+			err := validateLoadFieldsList(schema)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, strconv.ErrSyntax)
+			var parseErr *strconv.NumError
+			require.ErrorAs(t, err, &parseErr)
+			assert.Equal(t, "invalid_bool", parseErr.Num)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), common.FieldSkipLoadKey)
+			assert.Contains(t, status.GetReason(), field.GetName())
+			assert.Contains(t, status.GetReason(), parseErr.Error())
+			assert.Contains(t, status.GetReason(), fmt.Sprintf("of field %s must be a boolean", field.GetName()))
+		})
+	}
 }
