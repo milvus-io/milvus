@@ -315,15 +315,14 @@ func TriggerClusteringCompactionPolicy(ctx context.Context, partitionStatsMeta *
 	var compactedSegmentSize int64 = 0
 	var uncompactedSegmentSize int64 = 0
 
-	log.Debug("partitionStats segment ids", zap.Int64s("SegmentIDs", partitionStats.SegmentIDs))
+	log.Debug(ctx, "partitionStats segment ids", mlog.Int64s("SegmentIDs", partitionStats.SegmentIDs))
 	for _, seg := range segments {
 		if lo.Contains(partitionStats.SegmentIDs, seg.ID) {
 			compactedSegmentSize += seg.GetSegmentSize()
-			log.Debug("Segment already compacted", zap.Int64("segmentID", seg.ID))
+			log.Debug(ctx, "Segment already compacted", mlog.FieldSegmentID(seg.ID))
 		} else {
 			uncompactedSegmentSize += seg.GetSegmentSize()
-			log.Debug("Segment is not compacted", zap.Int64("segmentID", seg.ID), zap.Int64("segmentSize", seg.getSegmentSize()))
-		}
+			log.Debug(ctx, "Segment is not compacted", mlog.FieldSegmentID(seg.ID), mlog.Int64("segmentSize", seg.GetSegmentSize()))
 		}
 	}
 

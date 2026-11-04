@@ -1233,7 +1233,6 @@ type SyncRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
-	//
 	//	*SyncRequest_Views
 	//	*SyncRequest_Close
 	Request isSyncRequest_Request `protobuf_oneof:"request"`
@@ -1401,7 +1400,6 @@ type SyncResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
-	//
 	//	*SyncResponse_Views
 	//	*SyncResponse_Close
 	Response isSyncResponse_Response `protobuf_oneof:"response"`
@@ -1778,7 +1776,6 @@ type QueryPlanWorkNode struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Node:
-	//
 	//	*QueryPlanWorkNode_QueryNode
 	//	*QueryPlanWorkNode_StreamingNode
 	Node             isQueryPlanWorkNode_Node `protobuf_oneof:"node"`
@@ -1996,13 +1993,12 @@ type GetQueryPlanRequest struct {
 	CollectionId int64    `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
 	ShardId      *ShardID `protobuf:"bytes,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
 	// Mutually exclusive MVCC source:
-	//   - consistency_level: SN generates MVCC frontiers from WAL based on consistency level.
-	//     For Strong consistency, returns VIEW_CODE_NOT_PRIMARY if not the primary replica.
-	//   - query_plan_mvcc: Proxy provides pre-obtained MVCC frontiers (e.g., from primary replica
-	//     via GetMVCCTimestamp). SN uses it directly, skipping WAL lookup.
+	// - consistency_level: SN generates MVCC frontiers from WAL based on consistency level.
+	//   For Strong consistency, returns VIEW_CODE_NOT_PRIMARY if not the primary replica.
+	// - query_plan_mvcc: Proxy provides pre-obtained MVCC frontiers (e.g., from primary replica
+	//   via GetMVCCTimestamp). SN uses it directly, skipping WAL lookup.
 	//
 	// Types that are assignable to Mvcc:
-	//
 	//	*GetQueryPlanRequest_ConsistencyLevel
 	//	*GetQueryPlanRequest_QueryPlanMvcc
 	//	*GetQueryPlanRequest_BarrierMvcc
@@ -2013,7 +2009,6 @@ type GetQueryPlanRequest struct {
 	// TODO: replace with native view request types once legacy internal protos are removed.
 	//
 	// Types that are assignable to Request:
-	//
 	//	*GetQueryPlanRequest_LegacySearchRequest
 	//	*GetQueryPlanRequest_LegacyRetrieveRequest
 	//	*GetQueryPlanRequest_StatisticsRequest
@@ -2447,7 +2442,6 @@ type GrowingInlineResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
-	//
 	//	*GrowingInlineResponse_StatisticsResponse
 	Response isGrowingInlineResponse_Response `protobuf_oneof:"response"`
 }
@@ -2529,7 +2523,6 @@ type QueryPlan struct {
 	// TODO: replace with native view request types once legacy internal protos are removed.
 	//
 	// Types that are assignable to Request:
-	//
 	//	*QueryPlan_LegacySearchRequest
 	//	*QueryPlan_LegacyRetrieveRequest
 	//	*QueryPlan_StatisticsRequest
@@ -3393,7 +3386,6 @@ type RPCRequestContext struct {
 	// The selected target and its role-specific request context.
 	//
 	// Types that are assignable to Target:
-	//
 	//	*RPCRequestContext_QueryNode
 	//	*RPCRequestContext_StreamingNode
 	Target isRPCRequestContext_Target `protobuf_oneof:"target"`
@@ -4270,9 +4262,9 @@ func file_view_proto_rawDescGZIP() []byte {
 var file_view_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_view_proto_goTypes = []interface{}{
-	(QueryViewState)(0),                            // 0: milvus.proto.view.QueryViewState
-	(ViewCode)(0),                                  // 1: milvus.proto.view.ViewCode
-	(SegmentSelection_Mode)(0),                     // 2: milvus.proto.view.SegmentSelection.Mode
+	(QueryViewState)(0),        // 0: milvus.proto.view.QueryViewState
+	(ViewCode)(0),              // 1: milvus.proto.view.ViewCode
+	(SegmentSelection_Mode)(0), // 2: milvus.proto.view.SegmentSelection.Mode
 	(GlobalOptimizerExecutionSummary_BitOffset)(0), // 3: milvus.proto.view.GlobalOptimizerExecutionSummary.BitOffset
 	(*CollectionLoadConfig)(nil),                   // 4: milvus.proto.view.CollectionLoadConfig
 	(*LoadFieldConfig)(nil),                        // 5: milvus.proto.view.LoadFieldConfig

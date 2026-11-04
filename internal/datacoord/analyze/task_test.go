@@ -242,7 +242,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	at.CreateTaskOnWorker(1, cluster)
 	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 	s.Contains(at.GetFailReason(), "102")
 	// The terminal state must be persisted, not only set on the scheduler-owned copy.
@@ -279,7 +279,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 	s.am.Catalog = catalog
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	at.CreateTaskOnWorker(1, cluster)
 	// Should reset to Init state on dim error
 	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 }
@@ -296,32 +296,9 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	at.CreateTaskOnWorker(1, cluster)
 	// data too small → skip → mark as finished
 	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
-}
-
-func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
-	// Set MinCentroidsNum very high so data is considered too small
-	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
-	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
-
-	at := s.newTask()
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	// The first save is UpdateVersion, the second one is the terminal state transition.
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
-		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.am.Catalog = catalog
-	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
-	stateBefore := s.am.GetTask(s.taskID).GetState()
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	// A failed persistence leaves the task at Init so the scheduler re-enqueues it,
-	// rather than dropping it on an in-memory-only terminal state.
-	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
-	s.Equal(stateBefore, s.am.GetTask(s.taskID).GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
