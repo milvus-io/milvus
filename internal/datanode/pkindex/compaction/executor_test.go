@@ -316,14 +316,15 @@ func TestExecutorReapsTerminalTasks(t *testing.T) {
 	require.NoError(t, e.Create(context.Background(), req))
 	waitState(t, e, 9, taskcommon.Finished)
 	// Query refreshes the TTL, so look at the task table without it.
+	dir := filepath.Join(e.cfg.LocalRoot, "9-100")
 	require.Eventually(t, func() bool {
 		e.mu.Lock()
-		defer e.mu.Unlock()
 		_, ok := e.tasks[9]
-		return !ok
+		e.mu.Unlock()
+		// Drop removes the task before it waits and deletes the directory.
+		_, err := os.Stat(dir)
+		return !ok && os.IsNotExist(err)
 	}, 2*time.Second, 10*time.Millisecond)
-	_, err := os.Stat(filepath.Join(e.cfg.LocalRoot, "9-100"))
-	require.True(t, os.IsNotExist(err))
 }
 
 func TestExecutorReplacesARepeatedTask(t *testing.T) {
