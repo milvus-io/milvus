@@ -61,7 +61,7 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 	assert.Equal(t, "UnknownType", taskType)
 }
 
-func TestProperties_CollectionMeta(t *testing.T) {
+func TestProperties_CollectionLabels(t *testing.T) {
 	t.Run("append and get", func(t *testing.T) {
 		props := NewProperties(nil)
 		props.AppendCollectionName("docs")

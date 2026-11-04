@@ -123,33 +123,33 @@ type Cluster interface {
 
 var _ Cluster = (*cluster)(nil)
 
-// CollectionMeta names the collection a task works on, besides its ID.
-type CollectionMeta struct {
+// CollectionLabels names the collection a task works on, besides its ID.
+type CollectionLabels struct {
 	CollectionName string
 	DatabaseID     int64
 	DatabaseName   string
 }
 
-// CollectionMetaLookup resolves a collection's names for task dispatch. It
+// CollectionLabelLookup resolves a collection's names for task dispatch. It
 // reports false for a collection it does not know; it must not block, as it
 // runs on every dispatch.
-type CollectionMetaLookup func(collectionID int64) (CollectionMeta, bool)
+type CollectionLabelLookup func(collectionID int64) (CollectionLabels, bool)
 
 // ClusterOption configures a cluster.
 type ClusterOption func(*cluster)
 
-// WithCollectionMetaLookup stamps the collection and database names onto
+// WithCollectionLabels stamps the collection and database names onto
 // every task dispatched for a collection the lookup knows.
-func WithCollectionMetaLookup(lookup CollectionMetaLookup) ClusterOption {
+func WithCollectionLabels(lookup CollectionLabelLookup) ClusterOption {
 	return func(c *cluster) {
-		c.collectionMeta = lookup
+		c.lookupCollectionLabels = lookup
 	}
 }
 
 // cluster implements the Cluster interface
 type cluster struct {
-	nm             NodeManager
-	collectionMeta CollectionMetaLookup
+	nm                     NodeManager
+	lookupCollectionLabels CollectionLabelLookup
 }
 
 // NewCluster creates a new instance of cluster
@@ -167,16 +167,16 @@ func NewCluster(nm NodeManager, opts ...ClusterOption) Cluster {
 // properties: always its ID, and its names when the lookup knows them.
 func (c *cluster) appendCollection(properties taskcommon.Properties, collectionID int64) {
 	properties.AppendCollectionID(collectionID)
-	if c.collectionMeta == nil {
+	if c.lookupCollectionLabels == nil {
 		return
 	}
-	meta, ok := c.collectionMeta(collectionID)
+	labels, ok := c.lookupCollectionLabels(collectionID)
 	if !ok {
 		return
 	}
-	properties.AppendCollectionName(meta.CollectionName)
-	properties.AppendDatabaseID(meta.DatabaseID)
-	properties.AppendDatabaseName(meta.DatabaseName)
+	properties.AppendCollectionName(labels.CollectionName)
+	properties.AppendDatabaseID(labels.DatabaseID)
+	properties.AppendDatabaseName(labels.DatabaseName)
 }
 
 func (c *cluster) createTask(nodeID int64, in proto.Message, properties taskcommon.Properties) error {

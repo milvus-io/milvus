@@ -998,104 +998,16 @@ func TestCluster_CreateProperties(t *testing.T) {
 	})
 }
 
-func TestCluster_CreateProperties_CollectionID(t *testing.T) {
-	const expectedCollectionID int64 = 778899
-
-	mockNodeManager := NewMockNodeManager(t)
-	cluster := NewCluster(mockNodeManager)
-	mockClient := mocks.NewMockDataNodeClient(t)
-	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
-
-	// The expectation is intentionally shared by all sub-tests; testify/mock
-	// allows unlimited calls unless Once/Times is specified.
-	mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
-		props := taskcommon.NewProperties(req.GetProperties())
-		collectionID, err := props.GetCollectionID()
-		return assert.NoError(t, err) && assert.Equal(t, expectedCollectionID, collectionID,
-			"collection_id must be propagated into task properties")
-	})).Return(merr.Success(), nil)
-
-	t.Run("CreateCompaction", func(t *testing.T) {
-		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, expectedCollectionID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreatePreImport", func(t *testing.T) {
-		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		}, 1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateImport", func(t *testing.T) {
-		err := cluster.CreateImport(1, &datapb.ImportRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		}, 1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateIndex", func(t *testing.T) {
-		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{
-			BuildID:      1,
-			TaskSlot:     1,
-			NumRows:      1000,
-			IndexVersion: 1,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateStats", func(t *testing.T) {
-		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{
-			TaskID:       1,
-			TaskSlot:     1,
-			NumRows:      1000,
-			TaskVersion:  1,
-			SubJobType:   indexpb.StatsSubJob_Sort,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateAnalyze", func(t *testing.T) {
-		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{
-			TaskID:       1,
-			TaskSlot:     1,
-			Version:      1,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateCopySegment", func(t *testing.T) {
-		err := cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
-			TaskID:   1,
-			TaskSlot: 1,
-		}, expectedCollectionID, false)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CreateRefreshExternalCollectionTask", func(t *testing.T) {
-		err := cluster.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{
-			TaskID:       1,
-			CollectionID: expectedCollectionID,
-		})
-		assert.NoError(t, err)
-	})
-}
-
-func TestCluster_CreateProperties_CollectionMeta(t *testing.T) {
+func TestCluster_CreateProperties_CollectionLabels(t *testing.T) {
 	const (
 		knownCollectionID   int64 = 778899
 		unknownCollectionID int64 = 112233
 	)
-	lookup := func(collectionID int64) (CollectionMeta, bool) {
+	lookup := func(collectionID int64) (CollectionLabels, bool) {
 		if collectionID != knownCollectionID {
-			return CollectionMeta{}, false
+			return CollectionLabels{}, false
 		}
-		return CollectionMeta{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, true
+		return CollectionLabels{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, true
 	}
 
 	// Every task type that names a collection, so a new one that skips the
@@ -1153,7 +1065,7 @@ func TestCluster_CreateProperties_CollectionMeta(t *testing.T) {
 		require.NoError(t, create(cluster(mockNodeManager), collectionID))
 		return props
 	}
-	withLookup := func(nm NodeManager) Cluster { return NewCluster(nm, WithCollectionMetaLookup(lookup)) }
+	withLookup := func(nm NodeManager) Cluster { return NewCluster(nm, WithCollectionLabels(lookup)) }
 
 	for _, tc := range creates {
 		t.Run(tc.name+"/known collection carries its names", func(t *testing.T) {

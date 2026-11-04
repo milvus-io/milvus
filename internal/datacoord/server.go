@@ -554,23 +554,23 @@ func (s *Server) initCluster() error {
 		s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
 	}
 	if s.cluster2 == nil {
-		s.cluster2 = session.NewCluster(s.nodeManager, session.WithCollectionMetaLookup(s.collectionMetaForTask))
+		s.cluster2 = session.NewCluster(s.nodeManager, session.WithCollectionLabels(s.collectionLabelsForTask))
 	}
 	return nil
 }
 
-// collectionMetaForTask names a task's collection from the local collection
+// collectionLabelsForTask names a task's collection from the local collection
 // cache only: dispatch must not wait on RootCoord, and a task whose collection
 // is not cached is dispatched without the names, as before.
-func (s *Server) collectionMetaForTask(collectionID int64) (session.CollectionMeta, bool) {
+func (s *Server) collectionLabelsForTask(collectionID int64) (session.CollectionLabels, bool) {
 	if s.meta == nil {
-		return session.CollectionMeta{}, false
+		return session.CollectionLabels{}, false
 	}
 	collection := s.meta.GetCollection(collectionID)
 	if collection == nil {
-		return session.CollectionMeta{}, false
+		return session.CollectionLabels{}, false
 	}
-	return session.CollectionMeta{
+	return session.CollectionLabels{
 		CollectionName: collection.Schema.GetName(),
 		DatabaseID:     collection.DatabaseID,
 		DatabaseName:   collection.DatabaseName,

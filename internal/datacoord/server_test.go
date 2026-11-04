@@ -3386,9 +3386,9 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	assert.Error(t, err) // server not healthy
 }
 
-func TestServer_CollectionMetaForTask(t *testing.T) {
+func TestServer_CollectionLabelsForTask(t *testing.T) {
 	t.Run("no meta yet", func(t *testing.T) {
-		_, ok := (&Server{}).collectionMetaForTask(1)
+		_, ok := (&Server{}).collectionLabelsForTask(1)
 		assert.False(t, ok)
 	})
 
@@ -3402,13 +3402,13 @@ func TestServer_CollectionMetaForTask(t *testing.T) {
 	})
 
 	t.Run("cached collection", func(t *testing.T) {
-		got, ok := s.collectionMetaForTask(1)
+		got, ok := s.collectionLabelsForTask(1)
 		assert.True(t, ok)
-		assert.Equal(t, session.CollectionMeta{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, got)
+		assert.Equal(t, session.CollectionLabels{CollectionName: "docs", DatabaseID: 7, DatabaseName: "analytics"}, got)
 	})
 
 	t.Run("uncached collection", func(t *testing.T) {
-		_, ok := s.collectionMetaForTask(2)
+		_, ok := s.collectionLabelsForTask(2)
 		assert.False(t, ok)
 	})
 }
