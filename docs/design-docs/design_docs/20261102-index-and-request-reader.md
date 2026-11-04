@@ -57,18 +57,6 @@ Segment snapshot -> Index version -> resident Storage/Engine or internal cache
 The change moves the ownership and access boundary in Milvus. It does not change Knowhere's
 internal loading algorithms, implement block loading, or make synchronous operations asynchronous.
 
-## Future inverted-index integration
-
-The reference proposal is [倒排索引新架构](https://zilliverse.feishu.cn/page/C1iNmyb5udcrNfaonmDcPPwGnch),
-published source revision `8b8fce5141f45226e8ff5a323e7c2e615caa7e35`.
-Its long-lived `InvertedIndex<Key>` can belong to the concrete Milvus Index. A request Reader can
-delegate to the library's query methods with its bound context, while the library's storage maps
-byte ranges to cells and owns their leases.
-
-A library with its own slice cache should not receive a second evictable whole-engine cache:
-that would duplicate accounting and discard the slice cache with the outer cell. True byte-range
-access, partial integrity checks, and encryption handling remain separate work from this split.
-
 ## Verification boundaries
 
 Validation must cover cold Reader creation, cancellation and retry, shared-resource lifetimes,
