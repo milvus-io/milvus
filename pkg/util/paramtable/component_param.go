@@ -4598,6 +4598,9 @@ type queryNodeConfig struct {
 	// CGOPoolSize ratio to MaxReadConcurrency
 	CGOPoolSizeRatio ParamItem `refreshable:"true"`
 
+	// ChainPoolSizeFactor bounds native chain execution independently of SQPool.
+	ChainPoolSizeFactor ParamItem `refreshable:"true"`
+
 	// MutatePoolSizeFactor controls the size of the online-write CGO pool
 	// (segment Insert/Delete) as CPUNum * factor. The mutate pool is isolated
 	// from load/management work so segment loading cannot starve online writes.
@@ -5944,6 +5947,15 @@ user-task-polling:
 		Doc:          "cgo pool size ratio to max read concurrency",
 	}
 	p.CGOPoolSizeRatio.Init(base.mgr)
+
+	p.ChainPoolSizeFactor = ParamItem{
+		Key:          "queryNode.segcore.chainPoolSizeFactor",
+		Version:      "3.1.0",
+		DefaultValue: "1",
+		Doc:          "size factor (CPUNum * factor) of the native function-chain pool; isolated from ordinary query field retrieval; values below 1 use 1",
+		Export:       true,
+	}
+	p.ChainPoolSizeFactor.Init(base.mgr)
 
 	p.MutatePoolSizeFactor = ParamItem{
 		Key:          "queryNode.segcore.mutatePoolSizeFactor",

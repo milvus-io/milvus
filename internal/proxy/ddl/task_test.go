@@ -1224,6 +1224,44 @@ func newAddStructFieldSchema(name string) *schemapb.StructArrayFieldSchema {
 	}
 }
 
+func TestDDLTaskMalformedSchema(t *testing.T) {
+	ctx := context.Background()
+	createTask := &CreateCollectionTask{
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: "invalid_schema",
+			Schema:         []byte{0xff},
+		},
+	}
+	addFieldTask := &AddCollectionFieldTask{
+		AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{
+			CollectionName: "invalid_schema",
+			Schema:         []byte{0xff},
+		},
+		oldSchema: &schemapb.CollectionSchema{},
+	}
+	for _, tc := range []struct {
+		name       string
+		preExecute func(context.Context) error
+	}{
+		{name: "create collection", preExecute: createTask.PreExecute},
+		{name: "add field", preExecute: addFieldTask.PreExecute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.preExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, proto.Error)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), "schema")
+			assert.Contains(t, status.GetReason(), "invalid_schema")
+			assert.Contains(t, status.GetReason(), "proto:")
+		})
+	}
+}
+
 func TestCreateCollectionTask(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
@@ -5650,6 +5688,7 @@ func TestAlterCollectionField(t *testing.T) {
 		deleteKeys  []string
 		expectError bool
 		errCode     int32
+		parseCause  error
 	}{
 		{
 			name:      "update string field max_length",
@@ -5746,6 +5785,7 @@ func TestAlterCollectionField(t *testing.T) {
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrSyntax,
 		},
 		{
 			name:      "invalid max_capacity value type",
@@ -5755,6 +5795,27 @@ func TestAlterCollectionField(t *testing.T) {
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrSyntax,
+		},
+		{
+			name:      "max_length overflows int",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "9223372036854775808"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrRange,
+		},
+		{
+			name:      "max_capacity overflows int64",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "9223372036854775808"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrRange,
 		},
 		{
 			name:      "max_length exceeds limit",
@@ -5875,6 +5936,10 @@ func TestAlterCollectionField(t *testing.T) {
 				assert.Error(t, err)
 				if test.errCode != 0 {
 					assert.Equal(t, test.errCode, merr.Code(err))
+				}
+				if test.parseCause != nil {
+					prop := test.properties[0]
+					assertParameterParseError(t, err, test.parseCause, prop.Value, test.fieldName, prop.Key)
 				}
 			} else {
 				assert.NoError(t, err)

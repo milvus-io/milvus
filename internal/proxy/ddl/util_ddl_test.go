@@ -17,6 +17,7 @@
 package ddl
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -72,6 +73,26 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestValidateDimension(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "malformed", value: "abc", cause: strconv.ErrSyntax},
+		{name: "overflow", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDimension(&schemapb.FieldSchema{
+				Name:     "embedding",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: tc.value},
+				},
+			})
+			assertParameterParseError(t, err, tc.cause, tc.value, "embedding", common.DimKey)
+		})
+	}
+
 	fieldSchema := &schemapb.FieldSchema{
 		DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
@@ -171,6 +192,42 @@ func TestValidateDimension(t *testing.T) {
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
+}
+
+func TestValidateLoadFieldsListInvalidSkipLoad(t *testing.T) {
+	for _, inStruct := range []bool{false, true} {
+		t.Run(fmt.Sprintf("struct=%t", inStruct), func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				Name: "payload",
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.FieldSkipLoadKey, Value: "invalid_bool"},
+				},
+			}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+			if inStruct {
+				schema.Fields = nil
+				schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
+					{Name: "items", Fields: []*schemapb.FieldSchema{field}},
+				}
+			}
+
+			require.NoError(t, transformStructFieldNames(schema))
+			err := validateLoadFieldsList(schema)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, strconv.ErrSyntax)
+			var parseErr *strconv.NumError
+			require.ErrorAs(t, err, &parseErr)
+			assert.Equal(t, "invalid_bool", parseErr.Num)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), common.FieldSkipLoadKey)
+			assert.Contains(t, status.GetReason(), field.GetName())
+			assert.Contains(t, status.GetReason(), parseErr.Error())
+			assert.Contains(t, status.GetReason(), fmt.Sprintf("of field %s must be a boolean", field.GetName()))
+		})
+	}
 }
 
 func TestValidateFieldAllowsAnalyzerParamsWithoutEnableAnalyzer(t *testing.T) {
@@ -463,21 +520,28 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("max capacity not int", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "six",
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "max capacity not int", value: "six", cause: strconv.ErrSyntax},
+		{name: "max capacity overflows int64", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arrayField := &schemapb.FieldSchema{
+				Name:        "arr",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: tc.value},
 				},
-			},
-		}
+			}
 
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.Error(t, err)
-	})
+			err := validateMaxCapacityPerRow("collection", arrayField)
+			assertParameterParseError(t, err, tc.cause, tc.value, "arr", common.MaxCapacityKey)
+		})
+	}
 
 	t.Run("max capacity exceed max", func(t *testing.T) {
 		arrayField := &schemapb.FieldSchema{
@@ -530,24 +594,46 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("max length not int", func(t *testing.T) {
-		err := validateMaxLengthPerRow("collection", "arr", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
-			{
-				Key:   common.MaxLengthKey,
-				Value: "()",
-			},
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "max length not int", value: "()", cause: strconv.ErrSyntax},
+		{name: "max length overflows int64", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateMaxLengthPerRow("collection", "arr", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: tc.value},
+			})
+			assertParameterParseError(t, err, tc.cause, tc.value, "arr", common.MaxLengthKey)
 		})
-		// A malformed max_length must surface as an invalid-parameter error (1100)
-		// that names the field and the parameter, not a raw strconv error (65535).
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "max_length")
-		assert.Contains(t, err.Error(), "arr")
-	})
+	}
 
 	t.Run("no max length", func(t *testing.T) {
 		err := validateMaxLengthPerRow("collection", "field", schemapb.DataType_VarChar, nil)
 		assert.Error(t, err)
 	})
+}
+
+func assertParameterParseError(t *testing.T, err, cause error, value, fieldName, paramKey string) {
+	t.Helper()
+	// Keep the input-error classification and field context while preserving
+	// the original parse failure for callers inspecting the error chain.
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorIs(t, err, cause)
+	var parseErr *strconv.NumError
+	require.ErrorAs(t, err, &parseErr)
+	assert.Equal(t, value, parseErr.Num)
+	status := merr.Status(err)
+	assert.Equal(t, int32(1100), status.GetCode())
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+	assert.False(t, merr.IsRetryableErr(err))
+	assert.False(t, status.GetRetriable())
+	expectedReason := fmt.Sprintf("the value for %s of field %s must be an integer: %s", paramKey, fieldName, parseErr.Error())
+	assert.Equal(t, expectedReason, status.GetReason())
+	assert.Equal(t, expectedReason, status.GetDetail())
 }
 
 func TestValidateFieldsInStruct(t *testing.T) {
