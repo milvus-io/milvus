@@ -191,16 +191,14 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	return nil
 }
 
-// OrderedReduceStream performs the bounded Query ordered merge.
+// OrderedReduceStream merges Query rows in order until its input is exhausted or closed.
 type OrderedReduceStream struct {
 	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []orderedChildBuffer
 
-	limit          int64
 	chunkBytes     int
 	reduceType     reduce.IReduceType
-	emitted        int64
 	orderByFields  []*planpb.OrderByField
 	hasLastPK      bool
 	lastPK         any
@@ -236,8 +234,9 @@ func NewReduceStream(
 	if request.GetIsCount() || len(request.GetAggregates()) > 0 {
 		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support global aggregation"))
 	}
-	if request.GetLimit() <= 0 {
-		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive limit, got %d", request.GetLimit())
+	unlimited := request.GetLimit() == typeutil.Unlimited && !request.GetIsIterator() && len(request.GetOrderByFields()) == 0
+	if request.GetLimit() <= 0 && !unlimited {
+		return nil, merr.WrapErrServiceInternalMsg("invalid Query ReduceStream limit %d", request.GetLimit())
 	}
 	if chunkBytes <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires positive Chunk bytes, got %d", chunkBytes)
@@ -251,7 +250,6 @@ func NewReduceStream(
 	return &OrderedReduceStream{
 		childStreams:  reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
 		childBuffers:  make([]orderedChildBuffer, len(childStreams)),
-		limit:         request.GetLimit(),
 		chunkBytes:    chunkBytes,
 		reduceType:    reduce.ToReduceType(request.GetReduceType()),
 		orderByFields: request.GetOrderByFields(),
@@ -288,10 +286,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	for _, unit := range outputBuffer {
 		outputBytes += unit.byteSize
 	}
-	for s.deduplicatePKs || (outputBytes < s.chunkBytes && s.emitted < s.limit) {
-		if len(outputBuffer) == 0 && s.emitted >= s.limit {
-			break
-		}
+	for s.deduplicatePKs || outputBytes < s.chunkBytes {
 		readyBuffers, err := s.getReadyBuffers()
 		if err != nil {
 			return nil, s.fail(err)
@@ -312,7 +307,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		}
 
 		selected := winner.front()
-		// Resolve the trailing PK even after the byte threshold or row limit is reached.
+		// Resolve the trailing PK even after the byte threshold is reached.
 		// Returning its Chunk first would make a newer row in the next input Chunk too late.
 		if s.deduplicatePKs && len(outputBuffer) > 0 && comparePK(selected.pk(), s.lastPK) == 0 {
 			unit := winner.pop()
@@ -323,16 +318,11 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 					return nil, s.fail(err)
 				}
 				outputBytes += unit.byteSize - outputBuffer[last].byteSize
-				if unit.result.GetElementLevel() {
-					// The winning document version also determines its matched-element count.
-					s.emitted += int64(len(unit.result.GetElementIndices()[unit.rowIndex].GetIndices())) -
-						int64(len(outputBuffer[last].result.GetElementIndices()[outputBuffer[last].rowIndex].GetIndices()))
-				}
 				outputBuffer[last] = unit
 			}
 			continue
 		}
-		if outputBytes >= s.chunkBytes || s.emitted >= s.limit {
+		if outputBytes >= s.chunkBytes {
 			break
 		}
 		unitBytes, err := selected.reducibleByteSize()
@@ -356,12 +346,6 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		}
 		s.lastPK = unit.pk()
 		s.hasLastPK = true
-		// A Unit remains a complete row, but element-level limits count its matches.
-		if unit.result.GetElementLevel() {
-			s.emitted += int64(len(unit.result.GetElementIndices()[unit.rowIndex].GetIndices()))
-		} else {
-			s.emitted++
-		}
 		outputBuffer = append(outputBuffer, unit)
 		outputBytes += unitBytes
 	}

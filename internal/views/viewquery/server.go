@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Server implements ViewQueryService as a thin provider+scheduler adapter.
@@ -222,9 +223,10 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 	}
 	legacyRequest := request.GetLegacyReq()
 	hasGroupBy := legacyRequest != nil && len(legacyRequest.GetGroupByFieldIds()) > 0
+	unlimited := legacyRequest.GetLimit() == typeutil.Unlimited && !legacyRequest.GetIsIterator() && len(legacyRequest.GetOrderByFields()) == 0
 	if legacyRequest == nil || legacyRequest.GetIsCount() ||
-		(!hasGroupBy && (legacyRequest.GetLimit() <= 0 || len(legacyRequest.GetAggregates()) > 0)) {
-		return status.Error(codes.InvalidArgument, "QueryOnViewStream supports bounded Plain Query or Query Group By")
+		(!hasGroupBy && ((legacyRequest.GetLimit() <= 0 && !unlimited) || len(legacyRequest.GetAggregates()) > 0)) {
+		return status.Error(codes.InvalidArgument, "unsupported QueryOnViewStream request or limit")
 	}
 
 	response, err := s.queryOnView(stream.Context(), request)

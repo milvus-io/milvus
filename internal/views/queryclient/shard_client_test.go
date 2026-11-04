@@ -288,7 +288,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	require.Equal(t, []int64{20, 20}, chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData())
 	chunk, err = stream.Recv()
 	require.NoError(t, err)
-	require.Equal(t, []int64{3}, chunk.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{3, 4}, chunk.GetIds().GetIntId().GetData())
 	chunk, err = stream.Recv()
 	require.Nil(t, chunk)
 	require.ErrorIs(t, err, io.EOF)
