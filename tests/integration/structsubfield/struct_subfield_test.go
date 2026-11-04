@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -129,6 +130,16 @@ func (s *StructSubFieldSuite) TestAddedVectorAndNestedArrayWithMmap() {
 			s.Require().NoError(s.insert(ctx, name, 3, true, baseChildren()...))
 			s.assertBackfilled(ctx, name, 3, tc.child, 2, true)
 			s.flush(ctx, name)
+			if tc.field.GetDataType() == schemapb.DataType_ArrayOfVector {
+				// An element-nullable vector array needs an index before it is loaded again.
+				field := structName + "[" + tc.child + "]"
+				status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+					CollectionName: name, FieldName: field, IndexName: "idx_" + tc.child,
+					ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+				})
+				s.Require().NoError(merr.CheckRPCCall(status, err))
+				s.WaitForIndexBuilt(ctx, name, field)
+			}
 			s.release(ctx, name)
 			s.load(ctx, name)
 			s.assertBackfilled(ctx, name, 1, tc.child, 0, false)
@@ -159,10 +170,12 @@ func (s *StructSubFieldSuite) TestDropProviderMiddleAndLastGuards() {
 	s.Require().Equal([]int64{11, 12}, s.child(ctx, name, 1, "mid").GetScalars().GetArrayData().GetData()[0].GetLongData().GetData())
 	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 1, "tail").GetScalars().GetArrayData().GetData()[0].GetValidData())
 	s.assertDirectChild(ctx, name, 1, "tail")
+	// tail is [21, NULL]: the null element is UNKNOWN, the first one matches.
 	for _, expression := range []string{"element_filter(S, $[tail] > 0)", "MATCH_ANY(S, $[tail] > 0)"} {
 		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{CollectionName: name, Expr: expression, OutputFields: []string{"pk"}})
-		s.Require().NoError(err)
-		s.Require().ErrorContains(merr.Error(resp.GetStatus()), "not supported")
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expression)
+		s.Require().NotEmpty(resp.GetFieldsData(), expression)
+		s.Require().Equal([]int64{1}, resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), expression)
 	}
 	s.Require().ErrorContains(s.insert(ctx, name, 2, true, children...), `sub-field "vec" does not exist in struct field "S"`)
 	s.Require().NoError(s.insert(ctx, name, 2, true, children[1:]...))

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -159,7 +160,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 				SegmentStatuses:   sortStatuses(statuses),
 			}, nil
 		}
-		operators := make([]UpdateOperator, 0, len(batch))
+		operators := make([]meta.UpdateOperator, 0, len(batch))
 		for _, unit := range batch {
 			operators = append(operators, unit.operator)
 		}
@@ -255,7 +256,7 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			break
 		}
 
-		commits := make([]SegmentManifestCommit, 0, len(batch))
+		commits := make([]meta.SegmentManifestCommit, 0, len(batch))
 		for _, unit := range batch {
 			commits = append(commits, unit.commit)
 		}
@@ -305,9 +306,9 @@ type backfillCommitUnit struct {
 	segmentID int64
 	kind      string // "v2" | "v3"
 	// set for v2: the column-group upsert operator
-	operator UpdateOperator
+	operator meta.UpdateOperator
 	// set for v3: the manifest commit (delta CommitUpdates or legacy Noop)
-	commit SegmentManifestCommit
+	commit meta.SegmentManifestCommit
 	// alreadyApplied is set for a V3 delta replay that the pre-validation
 	// recognized as already committed (the target column exists in the
 	// manifest with exactly the ops' descriptors). Such a segment is reported
@@ -345,14 +346,14 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 	if rawPath == "" {
 		return nil, merr.WrapErrParameterMissingMsg("result_path is required")
 	}
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
 	key, err := normalizeObjectKey(rawPath, bucket)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
 	}
 	// Pre-check the object size so an untrusted external caller cannot force
 	// an unbounded in-memory Read.
-	size, err := s.meta.chunkManager.Size(ctx, key)
+	size, err := s.meta.ChunkManager.Size(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +362,7 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 			"backfill result JSON " + strconv.FormatInt(size, 10) +
 				" bytes exceeds limit " + strconv.FormatInt(maxBackfillResultBytes, 10))
 	}
-	raw, err := s.meta.chunkManager.Read(ctx, key)
+	raw, err := s.meta.ChunkManager.Read(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +393,7 @@ func (s *Server) loadBackfillResult(ctx context.Context, rawPath string) (*Backf
 // the live collection description: op columns and V2 column-group field IDs
 // are validated against its schema (nil schema disables the check).
 func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillResult, coll *milvuspb.DescribeCollectionResponse) ([]backfillCommitUnit, []*datapb.CommitBackfillResultSegmentStatus) {
-	bucket := bucketFromChunkManager(s.meta.chunkManager)
+	bucket := bucketFromChunkManager(s.meta.ChunkManager)
 	validFields := backfillOpColumnFieldIDs(coll.GetSchema())
 
 	// Deterministic order so commit units & diagnostic output are stable.
@@ -554,7 +555,7 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		return classifySegmentResult{unit: &backfillCommitUnit{
 			segmentID: segID,
 			kind:      "v2",
-			operator:  UpdateSegmentColumnGroupsOperator(segID, groups),
+			operator:  meta.UpdateSegmentColumnGroupsOperator(segID, groups),
 		}}
 	}
 
@@ -623,11 +624,11 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		unit := backfillCommitUnit{
 			segmentID: segID,
 			kind:      "v3",
-			commit: SegmentManifestCommit{
+			commit: meta.SegmentManifestCommit{
 				SegmentID:     segID,
-				StorageConfig: createStorageConfig(),
-				Mutation: ManifestMutation{
-					Type:    ManifestMutationCommitUpdates,
+				StorageConfig: meta.CreateStorageConfig(),
+				Mutation: meta.ManifestMutation{
+					Type:    meta.ManifestMutationCommitUpdates,
 					Updates: updates,
 				},
 			},
@@ -691,12 +692,12 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 	return classifySegmentResult{unit: &backfillCommitUnit{
 		segmentID: segID,
 		kind:      "v3",
-		commit: SegmentManifestCommit{
+		commit: meta.SegmentManifestCommit{
 			SegmentID:        segID,
-			StorageConfig:    createStorageConfig(),
+			StorageConfig:    meta.CreateStorageConfig(),
 			ExpectedManifest: expectedManifest,
-			Mutation: ManifestMutation{
-				Type:         ManifestMutationNoop,
+			Mutation: meta.ManifestMutation{
+				Type:         meta.ManifestMutationNoop,
 				ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
 			},
 		},
@@ -719,8 +720,8 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 // the caller must then pin the inspected manifest pointer (InspectedManifest)
 // so the commit re-validates the omission under the manifest lock instead of
 // trusting this unlocked read.
-func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *SegmentInfo, basePath string, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
-	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), createStorageConfig())
+func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *meta.SegmentInfo, basePath string, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, omitted bool, err error) {
+	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), meta.CreateStorageConfig())
 	if err != nil {
 		return nil, false, false, merr.Wrap(err, "read segment manifest for backfill delta replay check")
 	}

@@ -14,6 +14,7 @@
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
+#include <folly/coro/BlockingWait.h>
 #include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -660,9 +661,10 @@ class CancellationObservingIndexTranslator
         return uid;
     }
 
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
-        return {{0, 0}, {0, 0}};
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        return {};
     }
 
     int64_t
@@ -5035,6 +5037,38 @@ TEST(SealedSegmentReopen, LazySchemaReopenDoesNotWaitForReopenMutex) {
     EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 300);
 }
 
+TEST(SealedSegmentReopen, ReplayedDeletesSurviveReopen) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+    schema->set_schema_version(100);
+    auto dataset = DataGen(schema, 10);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto pks = dataset.get_col<int64_t>(pk_id);
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->add_data(pks[0]);
+    std::vector<Timestamp> timestamps{1000};
+    LoadDeletedRecordInfo deletes = {timestamps.data(), ids.get(), 1};
+    segment->LoadDeletedRecord(deletes);
+    ASSERT_EQ(segment->get_deleted_count(), 1);
+
+    // A later reopen must retain deletes; retrying their application is idempotent.
+    auto next_schema = std::make_shared<Schema>();
+    auto next_pk = next_schema->AddDebugField("pk", DataType::INT64);
+    next_schema->set_primary_field_id(next_pk);
+    next_schema->set_schema_version(101);
+    EXPECT_NO_THROW(sealed->Reopen(next_schema));
+    segment->LoadDeletedRecord(deletes);
+    EXPECT_EQ(segment->get_deleted_count(), 1);
+    BitsetType mask(10, false);
+    auto view = BitsetTypeView(mask);
+    segment->mask_with_delete(view, 10, 2000);
+    EXPECT_EQ(mask.count(), 1);
+}
+
 TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->AddDebugField("pk", DataType::INT64);
@@ -6561,7 +6595,8 @@ TEST(SealedSegmentCowState,
                                               &warmup_started,
                                               warmup_dlist.get());
     auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    published_cache_index->Warmup(nullptr, warmup_pool);
+    folly::coro::blockingWait(
+        published_cache_index->Warmup(nullptr, warmup_pool));
     ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
               std::future_status::ready);
     ASSERT_FALSE(published_warmup_token.isCancellationRequested());

@@ -46,19 +46,22 @@ struct VectorDiskBuildInputs {
     std::optional<std::string> scalar_info_path;
 };
 
-// Streams one disk-vector primary column into a uniquely owned local
-// generation. FieldData and its payload pointers are borrowed only during Add.
-class VectorDiskBuildMaterializer final {
+// Prepares a disk-vector primary column and its sidecars, streaming to files by
+// default. Builders may opt into resident dense input, retained through Build.
+// FieldData is borrowed only during Add.
+class VectorDiskBuildMaterializer final : public BuildInputMaterializer {
  public:
     VectorDiskBuildMaterializer(std::string staging_parent,
                                 DataType field_type,
                                 DataType value_type,
                                 int64_t dim,
                                 bool nullable,
+                                bool element_nullable,
                                 int64_t expected_rows,
                                 const index::IndexFamily& family,
-                                const index::BuildParams& params);
-    ~VectorDiskBuildMaterializer();
+                                const index::BuildParams& params,
+                                milvus::OpContext* op_context = nullptr);
+    ~VectorDiskBuildMaterializer() override;
 
     VectorDiskBuildMaterializer(VectorDiskBuildMaterializer&&) noexcept;
     VectorDiskBuildMaterializer&
@@ -69,11 +72,20 @@ class VectorDiskBuildMaterializer final {
     operator=(const VectorDiskBuildMaterializer&) = delete;
 
     void
-    Add(const FieldDataPtr& batch);
+    Add(const FieldDataPtr& batch) override;
 
     // Ends primary input exactly once. No Add is valid after this transition.
     void
     FinishPrimary();
+
+    bool
+    TryReserveBuild() override;
+
+    uint8_t*
+    AllocateInput();
+
+    void
+    FinishInput(size_t rows);
 
     bool
     RequiresEngineBuild() const;
@@ -85,10 +97,11 @@ class VectorDiskBuildMaterializer final {
     SetScalarInfo(VectorScalarInfo scalar_info);
 
     const index::BuilderInputSpec&
-    InputSpec() const;
+    InputSpec() const override;
 
     storage::ArtifactPtr
-    Build() &&;
+        Build() &&
+        override;
 
  private:
     class OutputFile;
@@ -112,6 +125,8 @@ class VectorDiskBuildMaterializer final {
                       DataType value_type,
                       int64_t dim,
                       bool nullable,
+                      bool element_nullable,
+                      bool embedding_list,
                       int64_t expected_rows,
                       bool side_input_declared);
 
@@ -150,6 +165,14 @@ class VectorDiskBuildMaterializer final {
     WriteEmbeddingList(FieldDataBase& batch, size_t physical_parents);
 
     void
+    AppendElementValidity(const VectorArray& value, size_t row);
+
+    bool
+    ElementLevel() const {
+        return vector_array_ && !embedding_list_;
+    }
+
+    void
     Swap(VectorDiskBuildMaterializer& other) noexcept;
 
     // The generation owner is declared before open files and the typed builder
@@ -163,13 +186,19 @@ class VectorDiskBuildMaterializer final {
     bool nullable_{false};
     int64_t expected_rows_{0};
     bool side_input_declared_{false};
+    // VECTOR_ARRAY builds embedding lists only under an embedding-list
+    // metric; otherwise its elements form an ordinary vector input whose
+    // validity file, if any, is element-domain (element-nullable fields).
+    bool vector_array_{false};
     bool embedding_list_{false};
+    bool element_nullable_{false};
     bool all_null_{false};
     bool empty_embedding_list_{false};
     State state_{State::MovedFrom};
     size_t logical_rows_{0};
     size_t physical_valid_parents_{0};
     size_t physical_rows_{0};
+    size_t logical_elements_{0};
     std::optional<VectorPrimaryLayout> primary_layout_;
     std::unique_ptr<bool[]> validity_scratch_;
     size_t validity_scratch_capacity_{0};
@@ -181,6 +210,8 @@ class VectorDiskBuildMaterializer final {
     std::optional<std::string> scalar_info_path_;
     index::BuilderInputSpec input_spec_;
     Builder builder_;
+    milvus::OpContext* op_context_{nullptr};
+    std::unique_ptr<uint8_t[]> input_;
 };
 
 }  // namespace milvus::indexbuilder

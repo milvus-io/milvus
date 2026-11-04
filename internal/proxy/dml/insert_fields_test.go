@@ -59,6 +59,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:  1000,
 						Name:     "a",
 						AutoID:   false,
 						DataType: schemapb.DataType_Int64,
@@ -89,12 +90,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:  1000,
 						Name:     "a",
 						AutoID:   false,
 						DataType: schemapb.DataType_Int64,
 						Nullable: true,
 					},
 					{
+						FieldID:  1001,
 						Name:     "b",
 						AutoID:   false,
 						DataType: schemapb.DataType_Int64,
@@ -129,6 +132,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
@@ -158,6 +162,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       false,
 						IsPrimaryKey: true,
@@ -186,6 +191,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
@@ -220,6 +226,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
@@ -258,12 +265,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:      1001,
 						Name:         "b",
 						AutoID:       true,
 						IsPrimaryKey: false,
@@ -292,12 +301,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:      1001,
 						Name:         "b",
 						AutoID:       true,
 						IsPrimaryKey: true,
@@ -326,6 +337,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       false,
 						IsPrimaryKey: true,
@@ -358,12 +370,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       false,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:      1001,
 						Name:         "b",
 						AutoID:       false,
 						IsPrimaryKey: false,
@@ -400,12 +414,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:      1001,
 						Name:         "b",
 						AutoID:       false,
 						IsPrimaryKey: false,
@@ -443,12 +459,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:  1001,
 						Name:     "b",
 						AutoID:   false,
 						DataType: schemapb.DataType_Int64,
@@ -486,12 +504,14 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				AutoID:      false,
 				Fields: []*schemapb.FieldSchema{
 					{
+						FieldID:      1000,
 						Name:         "a",
 						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
+						FieldID:  1001,
 						Name:     "b",
 						AutoID:   false,
 						DataType: schemapb.DataType_Int64,
@@ -560,10 +580,12 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
 				{
+					FieldID:  1000,
 					AutoID:   false,
 					DataType: schemapb.DataType_Int64,
 				},
 				{
+					FieldID:  1001,
 					AutoID:   false,
 					DataType: schemapb.DataType_Int64,
 				},
@@ -602,10 +624,12 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
 				{
+					FieldID:  1000,
 					Name:     "int64Field",
 					DataType: schemapb.DataType_Int64,
 				},
 				{
+					FieldID:  1001,
 					Name:     "floatField",
 					DataType: schemapb.DataType_Float,
 				},
@@ -643,12 +667,12 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:     "int64Field",
-					FieldID:  1,
+					FieldID:  1001,
 					DataType: schemapb.DataType_Int64,
 				},
 				{
 					Name:     "floatField",
-					FieldID:  2,
+					FieldID:  1002,
 					DataType: schemapb.DataType_Float,
 				},
 			},
@@ -757,7 +781,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				{
 					Name:     "TestFillFieldIDBySchema",
 					DataType: schemapb.DataType_Int64,
-					FieldID:  1,
+					FieldID:  1001,
 				},
 			},
 		}
@@ -773,7 +797,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
 		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
 		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-		assert.Equal(t, int64(1), columns[0].FieldId)
+		assert.Equal(t, int64(1001), columns[0].FieldId)
 	})
 
 	t.Run("nested array fills array element type", func(t *testing.T) {
@@ -781,7 +805,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:        "nested",
-					FieldID:     2,
+					FieldID:     1002,
 					DataType:    schemapb.DataType_Array,
 					ElementType: schemapb.DataType_Array,
 					TypeSchema: &schemapb.TypeSchema{
@@ -814,7 +838,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 
 		assert.NoError(t, validateFieldDataColumns(columns, schema))
 		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
-		assert.Equal(t, int64(2), columns[0].GetFieldId())
+		assert.Equal(t, int64(1002), columns[0].GetFieldId())
 		assert.Equal(t, schemapb.DataType_Array, columns[0].GetType())
 		assert.Equal(t, schemapb.DataType_Array, columns[0].GetScalars().GetArrayData().GetElementType())
 	})
@@ -825,7 +849,7 @@ func TestFillFieldIDBySchema(t *testing.T) {
 				{
 					Name:     "FieldA",
 					DataType: schemapb.DataType_Int64,
-					FieldID:  1,
+					FieldID:  1001,
 				},
 			},
 		}

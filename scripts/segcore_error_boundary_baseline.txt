@@ -15,13 +15,13 @@ knowhere	internal/core/src/common/Types.h
 knowhere	internal/core/src/common/TypeTraits.h
 knowhere	internal/core/src/common/Utils.h
 knowhere	internal/core/src/config/ConfigKnowhere.cpp
-knowhere	internal/core/src/exec/expression/ExprTestBase.h
 knowhere	internal/core/src/exec/operator/IterativeElementFilterNode.cpp
 knowhere	internal/core/src/exec/operator/IterativeFilterNode.cpp
 knowhere	internal/core/src/exec/operator/RescoresNode.cpp
 knowhere	internal/core/src/exec/operator/search-groupby/StrictGroupFilteredSearch.cpp
 knowhere	internal/core/src/exec/operator/Utils.h
 knowhere	internal/core/src/exec/QueryContext.h
+knowhere	internal/core/src/indexbuilder/VectorBuildMaterializer.cpp
 knowhere	internal/core/src/indexbuilder/VectorDiskBuildMaterializer.cpp
 knowhere	internal/core/src/index/contracts/build/VectorBuildInput.h
 knowhere	internal/core/src/index/contracts/query/IVectorReader.h
@@ -33,6 +33,7 @@ knowhere	internal/core/src/index/vector/KnowhereEngine.h
 knowhere	internal/core/src/index/vector/RangeSearchParams.cpp
 knowhere	internal/core/src/index/vector/RangeSearchParams.h
 knowhere	internal/core/src/index/vector/VectorBuilderUtils.h
+knowhere	internal/core/src/index/vector/VectorDiskArtifact.cpp
 knowhere	internal/core/src/index/vector/VectorDiskBuilder.cpp
 knowhere	internal/core/src/index/vector/VectorDiskBuilder.h
 knowhere	internal/core/src/index/vector/VectorDiskLoader.cpp
@@ -40,6 +41,7 @@ knowhere	internal/core/src/index/vector/VectorIndexReader.cpp
 knowhere	internal/core/src/index/vector/VectorIndexReader.h
 knowhere	internal/core/src/index/vector/VectorIndexValidDataUtils.h
 knowhere	internal/core/src/index/vector/VectorLoadResource.cpp
+knowhere	internal/core/src/index/vector/VectorLoadUtils.h
 knowhere	internal/core/src/index/vector/VectorMemArtifact.cpp
 knowhere	internal/core/src/index/vector/VectorMemBuilder.cpp
 knowhere	internal/core/src/index/vector/VectorMemBuilder.h
@@ -101,14 +103,10 @@ arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
 arrow	internal/core/src/common/Types.h
 arrow	internal/core/src/indexbuilder/BuildSession.cpp
-arrow	internal/core/src/segcore/json_stats/JsonKeyStats.cpp
-arrow	internal/core/src/segcore/json_stats/JsonKeyStats.h
-arrow	internal/core/src/segcore/json_stats/parquet_writer.cpp
-arrow	internal/core/src/segcore/json_stats/parquet_writer.h
-arrow	internal/core/src/segcore/json_stats/utils.cpp
-arrow	internal/core/src/segcore/json_stats/utils.h
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
+arrow	internal/core/src/index/vector/VectorDiskBuildFileManager.cpp
+arrow	internal/core/src/index/vector/VectorDiskBuildFileManager.h
 arrow	internal/core/src/mmap/SparseVortexFileSystem.cpp
 arrow	internal/core/src/mmap/SparseVortexFileSystem.h
 arrow	internal/core/src/mmap/VortexColumn.cpp
@@ -122,6 +120,7 @@ arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.h
 arrow	internal/core/src/segcore/external_utils_c.cpp
 arrow	internal/core/src/segcore/json_stats/JsonKeyStats.cpp
+arrow	internal/core/src/segcore/json_stats/JsonKeyStats.h
 arrow	internal/core/src/segcore/json_stats/parquet_writer.cpp
 arrow	internal/core/src/segcore/json_stats/parquet_writer.h
 arrow	internal/core/src/segcore/json_stats/utils.cpp
@@ -146,6 +145,8 @@ arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
 arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
+arrow	internal/core/src/storage/artifact/FileSink.cpp
+arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp

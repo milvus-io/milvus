@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -32,7 +33,7 @@ func managementResources(t *testing.T) *Resources {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	r := &Resources{
 		LoadConfigs: store, ShardViews: &coordview.ShardViewRegistry{}, Readiness: readiness.NewNotifications(),
@@ -75,6 +76,7 @@ func TestQueryViewReplicas(t *testing.T) {
 	require.Empty(t, replicas[0].ShardReplicas[0].NodeIds)
 	// Identical content has the same config version but a new lifecycle identity.
 	r.VChannels = func(ctx context.Context, _ int64) ([]string, error) {
+		r.LoadConfigs.StopPlanning(1)
 		require.NoError(t, r.LoadConfigs.Remove(ctx, 1))
 		require.NoError(t, r.LoadConfigs.Put(ctx, cfg))
 		return []string{"v0", "v1"}, nil
@@ -115,6 +117,7 @@ func TestManualBalanceCompletion(t *testing.T) {
 	require.ErrorIs(t, r.waitMoves(t.Context(), cfg, sub, moves), merr.ErrServiceUnavailable)
 	stats = &coordview.ShardStats{UpVersion: &version, UpPlacement: &coordview.ViewPlacement{Assignments: map[int64]int64{101: 2}}}
 	duringRead = func() {
+		r.LoadConfigs.StopPlanning(1)
 		require.NoError(t, r.LoadConfigs.Remove(t.Context(), 1))
 		require.NoError(t, r.LoadConfigs.Put(t.Context(), cfg))
 	}
@@ -128,6 +131,7 @@ func TestManualBalanceAcceptanceConfigFence(t *testing.T) {
 	require.NoError(t, r.LoadConfigs.WithCurrentConfig(cfg, func() error {
 		go func() {
 			close(started)
+			r.LoadConfigs.StopPlanning(1)
 			released <- r.LoadConfigs.Remove(t.Context(), 1)
 		}()
 		<-started

@@ -125,6 +125,16 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
+CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes) {
+    try {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetS3CrtQueueSizes(crt_queue_sizes);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 void
 SetArrowFileSystemChunkManagerEnabled(bool enable) {
     milvus::storage::SetUseArrowFileSystemChunkManager(enable);

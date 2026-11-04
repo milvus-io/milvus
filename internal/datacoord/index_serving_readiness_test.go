@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -36,7 +37,7 @@ import (
 )
 
 func indexServingQueryIDs(s *Server) []int64 {
-	return newServerHandler(s).GetQueryVChanPositions(&channelMeta{
+	return newServerHandler(s).GetQueryVChanPositions(&meta.ChannelMeta{
 		Name: "lineage_channel", CollectionID: 1,
 		StartPosition: &msgpb.MsgPosition{ChannelName: "lineage_channel", Timestamp: 1},
 	}).GetFlushedSegmentIds()
@@ -45,8 +46,8 @@ func indexServingQueryIDs(s *Server) []int64 {
 func assertIndexServingState(t *testing.T, s *Server, index *model.Index, want commonpb.IndexState) {
 	t.Helper()
 	for _, realTime := range []bool{false, true} {
-		stats := s.selectSegmentIndexesStats(context.Background(), WithCollection(1), SegmentFilterFunc(func(segment *SegmentInfo) bool {
-			return segment.GetLevel() != datapb.SegmentLevel_L0 && (isFlush(segment) || segment.GetState() == commonpb.SegmentState_Dropped)
+		stats := s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1), meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
+			return segment.GetLevel() != datapb.SegmentLevel_L0 && (meta.IsFlush(segment) || segment.GetState() == commonpb.SegmentState_Dropped)
 		}))
 		info := &indexpb.IndexInfo{IndexID: index.IndexID}
 		s.completeIndexInfo(info, index, stats, realTime, 100)
@@ -72,33 +73,33 @@ func assertIndexServingState(t *testing.T, s *Server, index *model.Index, want c
 func TestIndexServingReadinessRecoverability(t *testing.T) {
 	for _, test := range []struct {
 		name     string
-		change   func(*SegmentInfo)
+		change   func(*meta.SegmentInfo)
 		selected bool
 		covered  bool
 	}{
 		{name: "raw binlogs", selected: true, covered: true},
-		{name: "metadata without data footprint", change: func(s *SegmentInfo) { s.Binlogs = nil }},
-		{name: "start position", selected: true, covered: true, change: func(s *SegmentInfo) { s.Binlogs = nil; s.StartPosition = &msgpb.MsgPosition{Timestamp: 50} }},
-		{name: "dml position", selected: true, covered: true, change: func(s *SegmentInfo) { s.Binlogs = nil; s.DmlPosition = &msgpb.MsgPosition{Timestamp: 60} }},
-		{name: "committed V3 manifest", selected: true, covered: true, change: func(s *SegmentInfo) {
+		{name: "metadata without data footprint", change: func(s *meta.SegmentInfo) { s.Binlogs = nil }},
+		{name: "start position", selected: true, covered: true, change: func(s *meta.SegmentInfo) { s.Binlogs = nil; s.StartPosition = &msgpb.MsgPosition{Timestamp: 50} }},
+		{name: "dml position", selected: true, covered: true, change: func(s *meta.SegmentInfo) { s.Binlogs = nil; s.DmlPosition = &msgpb.MsgPosition{Timestamp: 60} }},
+		{name: "committed V3 manifest", selected: true, covered: true, change: func(s *meta.SegmentInfo) {
 			s.Binlogs = nil
 			s.StorageVersion = storage.StorageV3
 			s.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/1/1", 1)
 		}},
-		{name: "earliest V3 manifest", change: func(s *SegmentInfo) {
+		{name: "earliest V3 manifest", change: func(s *meta.SegmentInfo) {
 			s.Binlogs = nil
 			s.StorageVersion = storage.StorageV3
 			s.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/1/1", packed.ManifestEarliest)
 		}},
-		{name: "earliest V3 manifest with old binlog footprint", selected: true, change: func(s *SegmentInfo) {
+		{name: "earliest V3 manifest with old binlog footprint", selected: true, change: func(s *meta.SegmentInfo) {
 			s.StorageVersion = storage.StorageV3
 			s.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/1/1", packed.ManifestEarliest)
 		}},
-		{name: "malformed V3 manifest", change: func(s *SegmentInfo) { s.StorageVersion = storage.StorageV3; s.ManifestPath = "malformed" }},
-		{name: "missing V3 manifest with old binlog footprint", selected: true, change: func(s *SegmentInfo) { s.StorageVersion = storage.StorageV3; s.ManifestPath = "" }},
-		{name: "fake segment", change: func(s *SegmentInfo) { s.IsFake = true }},
-		{name: "importing segment", change: func(s *SegmentInfo) { s.IsImporting = true }},
-		{name: "invisible parent", change: func(s *SegmentInfo) { s.IsInvisible = true }},
+		{name: "malformed V3 manifest", change: func(s *meta.SegmentInfo) { s.StorageVersion = storage.StorageV3; s.ManifestPath = "malformed" }},
+		{name: "missing V3 manifest with old binlog footprint", selected: true, change: func(s *meta.SegmentInfo) { s.StorageVersion = storage.StorageV3; s.ManifestPath = "" }},
+		{name: "fake segment", change: func(s *meta.SegmentInfo) { s.IsFake = true }},
+		{name: "importing segment", change: func(s *meta.SegmentInfo) { s.IsImporting = true }},
+		{name: "invisible parent", change: func(s *meta.SegmentInfo) { s.IsInvisible = true }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, index := newIndexReadinessTestServer([]*datapb.SegmentInfo{
@@ -106,11 +107,11 @@ func TestIndexServingReadinessRecoverability(t *testing.T) {
 				newIndexLineageSegment(2, 90, commonpb.SegmentState_Flushed, 1),
 			}, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
 			index.IndexName = "serving_index"
-			parent := s.meta.segments.GetSegment(1).Clone()
+			parent := s.meta.Segments.GetSegment(1).Clone()
 			if test.change != nil {
 				test.change(parent)
 			}
-			s.meta.segments.SetSegment(1, parent)
+			s.meta.Segments.SetSegment(1, parent)
 			if test.selected {
 				require.ElementsMatch(t, []int64{1}, indexServingQueryIDs(s))
 			} else {
@@ -122,7 +123,7 @@ func TestIndexServingReadinessRecoverability(t *testing.T) {
 			}
 			assertIndexServingState(t, s, index, want)
 			// Finished current output tasks retain their own readiness semantics.
-			outputIndexes, ok := s.meta.indexMeta.segmentIndexes.Get(2)
+			outputIndexes, ok := s.indexMeta.SegmentIndexes.Get(2)
 			require.True(t, ok)
 			output, ok := outputIndexes.Get(10)
 			require.True(t, ok)
@@ -133,10 +134,10 @@ func TestIndexServingReadinessRecoverability(t *testing.T) {
 }
 
 func addIndexServingTask(s *Server, segmentID, indexID int64, state commonpb.IndexState) {
-	indexes, ok := s.meta.indexMeta.segmentIndexes.Get(segmentID)
+	indexes, ok := s.indexMeta.SegmentIndexes.Get(segmentID)
 	if !ok {
 		indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		s.meta.indexMeta.segmentIndexes.Insert(segmentID, indexes)
+		s.indexMeta.SegmentIndexes.Insert(segmentID, indexes)
 	}
 	indexes.Insert(indexID, &model.SegmentIndex{
 		SegmentID: segmentID, CollectionID: 1, IndexID: indexID,
@@ -168,7 +169,7 @@ func TestIndexServingReadinessRequestedIndexFrontier(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(key, fmt.Sprint(test.forceAll)))
 			t.Cleanup(func() { paramtable.Get().Reset(key) })
 			index := &model.Index{CollectionID: 1, FieldID: 20, IndexID: 20, IndexName: "scalar_index", CreateTime: 100}
-			s.meta.indexMeta.indexes[1][20] = index
+			s.indexMeta.Indexes[1][20] = index
 			addIndexServingTask(s, 1, 20, commonpb.IndexState_Finished)
 			addIndexServingTask(s, 2, 20, test.parentScalar)
 			addIndexServingTask(s, 3, 20, commonpb.IndexState_InProgress)
@@ -184,7 +185,7 @@ func TestIndexServingReadinessRequestedIndexFrontier(t *testing.T) {
 		index.IndexName = "vector_index"
 		collection := s.meta.GetCollection(1)
 		collection.Schema.Fields = append(collection.Schema.Fields, &schemapb.FieldSchema{FieldID: 30, Name: "second_vector", DataType: schemapb.DataType_FloatVector})
-		s.meta.indexMeta.indexes[1][30] = &model.Index{CollectionID: 1, FieldID: 30, IndexID: 30}
+		s.indexMeta.Indexes[1][30] = &model.Index{CollectionID: 1, FieldID: 30, IndexID: 30}
 		for _, id := range []int64{1, 2} {
 			addIndexServingTask(s, id, 30, commonpb.IndexState_InProgress)
 		}
@@ -251,20 +252,20 @@ func TestIndexServingReadinessLineageFrontier(t *testing.T) {
 func TestIndexServingReadinessLineageBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name   string
-		change func(*SegmentInfo)
+		change func(*meta.SegmentInfo)
 	}{
-		{name: "parent in another channel", change: func(s *SegmentInfo) { s.InsertChannel = "another_channel" }},
-		{name: "parent in another partition", change: func(s *SegmentInfo) { s.PartitionID = 2 }},
-		{name: "parent in another collection", change: func(s *SegmentInfo) { s.CollectionID = 2 }},
+		{name: "parent in another channel", change: func(s *meta.SegmentInfo) { s.InsertChannel = "another_channel" }},
+		{name: "parent in another partition", change: func(s *meta.SegmentInfo) { s.PartitionID = 2 }},
+		{name: "parent in another collection", change: func(s *meta.SegmentInfo) { s.CollectionID = 2 }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, index := newIndexReadinessTestServer([]*datapb.SegmentInfo{
 				newIndexLineageSegment(1, 100, commonpb.SegmentState_Flushed), newIndexLineageSegment(2, 90, commonpb.SegmentState_Flushed, 1),
 			}, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})
 			index.IndexName = "boundary_index"
-			parent := s.meta.segments.GetSegment(1).Clone()
+			parent := s.meta.Segments.GetSegment(1).Clone()
 			test.change(parent)
-			s.meta.segments.SetSegment(1, parent)
+			s.meta.Segments.SetSegment(1, parent)
 			// Metadata may still select the parent's own live frontier, but
 			// it cannot establish coverage across a lineage identity boundary.
 			assertIndexServingState(t, s, index, commonpb.IndexState_InProgress)
@@ -277,7 +278,7 @@ func TestIndexServingReadinessLineageBoundary(t *testing.T) {
 		index.IndexName = "nil_handler_index"
 		s.handler = nil
 		assertIndexServingState(t, s, index, commonpb.IndexState_InProgress)
-		outputIndexes, _ := s.meta.indexMeta.segmentIndexes.Get(2)
+		outputIndexes, _ := s.indexMeta.SegmentIndexes.Get(2)
 		output, _ := outputIndexes.Get(10)
 		output.IndexState = commonpb.IndexState_Finished
 		assertIndexServingState(t, s, index, commonpb.IndexState_Finished)
@@ -291,13 +292,13 @@ func TestIndexServingReadinessCyclicAncestorCannotCoverDescendant(t *testing.T) 
 		newIndexLineageSegment(3, 90, commonpb.SegmentState_Flushed, 1),
 	}, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished})
 	index := &model.Index{CollectionID: 1, FieldID: 20, IndexID: 20, IndexName: "cyclic_scalar", CreateTime: 100}
-	s.meta.indexMeta.indexes[1][20] = index
+	s.indexMeta.Indexes[1][20] = index
 	addIndexServingTask(s, 1, 20, commonpb.IndexState_Finished)
 	addIndexServingTask(s, 3, 20, commonpb.IndexState_InProgress)
 	// A cycle may leave a live fallback candidate in a conservative query
 	// frontier. That candidate still cannot certify another segment's index.
 	assertIndexServingState(t, s, index, commonpb.IndexState_InProgress)
-	outputIndexes, _ := s.meta.indexMeta.segmentIndexes.Get(3)
+	outputIndexes, _ := s.indexMeta.SegmentIndexes.Get(3)
 	output, _ := outputIndexes.Get(20)
 	output.IndexState = commonpb.IndexState_Finished
 	assertIndexServingState(t, s, index, commonpb.IndexState_Finished)

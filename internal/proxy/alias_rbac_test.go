@@ -39,6 +39,7 @@ import (
 // Tests for ResolveCollectionAlias in MetaCache and resolveCollectionAlias helper.
 
 func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	// The interceptor guard (objectName != util.AnyWord && objectName != "") ensures
 	// that "*" and "" never reach resolveCollectionAlias. This test verifies those
 	// values are correctly guarded at the interceptor level, then checks a normal
@@ -75,6 +76,7 @@ func TestResolveCollectionAlias_WildcardAndEmptySkippedByInterceptor(t *testing.
 }
 
 func TestResolveCollectionAlias_CachedCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -89,6 +91,7 @@ func TestResolveCollectionAlias_CachedCollection(t *testing.T) {
 }
 
 func TestResolveCollectionAlias_ValidAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -124,6 +127,7 @@ func TestResolveCollectionAlias_ValidAlias(t *testing.T) {
 }
 
 func TestResolveCollectionAlias_RPCError(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -138,6 +142,7 @@ func TestResolveCollectionAlias_RPCError(t *testing.T) {
 }
 
 func TestResolveCollectionAlias_InternalServerError(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -166,6 +171,7 @@ func TestResolveCollectionAlias_NilGlobalMetaCache(t *testing.T) {
 }
 
 func TestResolveCollectionAlias_AliasCacheHit(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -188,6 +194,7 @@ func TestResolveCollectionAlias_AliasCacheHit(t *testing.T) {
 // caches NOTHING -- a not-found fill has no entry to write (no negative cache by
 // design). Every resolution of such a name re-asks rootcoord.
 func TestResolveCollectionAlias_NotAnAliasIsNotCached(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -217,6 +224,7 @@ func TestResolveCollectionAlias_NotAnAliasIsNotCached(t *testing.T) {
 }
 
 func TestRemoveAlias_InvalidatesCache(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -240,6 +248,7 @@ func TestRemoveAlias_InvalidatesCache(t *testing.T) {
 // can never lack a declaring owner — but even were one to exist it must not
 // cause a stale read: a lookup through it still misses the evicted collection.
 func TestRemoveCollectionByID_DeclaredAliasHintsCleanedStrayMisses(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -286,6 +295,7 @@ func TestRemoveCollectionByID_DeclaredAliasHintsCleanedStrayMisses(t *testing.T)
 // RemoveCollection for an ALIAS name whose target is uncached deletes just that
 // alias hint, so it cannot mis-resolve a later ResolveCollectionAlias.
 func TestRemoveCollection_DefensiveDanglingAliasBranch(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -321,6 +331,7 @@ func TestRemoveCollection_DefensiveDanglingAliasBranch(t *testing.T) {
 }
 
 func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -336,6 +347,7 @@ func TestRemoveDatabase_CleansUpAliases(t *testing.T) {
 }
 
 func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -362,6 +374,7 @@ func TestCreateAliasTask_ResolvesCollectionAlias(t *testing.T) {
 }
 
 func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -388,6 +401,7 @@ func TestAlterAliasTask_ResolvesCollectionAlias(t *testing.T) {
 }
 
 func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	// Alias resolution in CreateAlias/AlterAlias is unconditional (for correctness),
 	// independent of the RBAC feature flag.
 	ctx := context.Background()
@@ -417,6 +431,7 @@ func TestCreateAliasTask_ResolvesEvenWhenRBACFlagDisabled(t *testing.T) {
 }
 
 func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 
@@ -442,6 +457,7 @@ func TestListAliasesTask_ResolvesCollectionAlias(t *testing.T) {
 }
 
 func TestListAliasesTask_NoResolveWhenCollectionNameEmpty(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 

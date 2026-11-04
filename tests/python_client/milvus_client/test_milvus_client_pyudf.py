@@ -1538,6 +1538,52 @@ def create_udf(context):
             self._assert_pyudf_recovery(client, name, resource)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_pyudf_empty_search_across_sealed_and_growing(self, tmp_path, minio_host, minio_bucket):
+        """
+        target: return an empty PyUDF Search result across sealed and growing data
+        method: seal one row, insert one unflushed row, then filter out both rows
+        expected: empty results without missing primary-field metadata or error 1100
+        """
+        rows = [{"id": 1, "ts": 10, "vector": [0.0, 0.0]}]
+        with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None, rows=rows) as environment:
+            client, name, resource = environment
+            # Reload after flush so the first row is served from a sealed segment.
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+            segments = client.list_loaded_segments(name)
+            assert segments and all(s.state == SegmentState.Sealed for s in segments), segments
+            assert sum(s.num_rows for s in segments) == 1, segments
+            persistent_ids = {s.segment_id for s in client.list_persistent_segments(name)}
+            chain = self._pyudf_chain(resource)
+            control = self._search_with_synced_resource(client, name, chain)
+            assert [h["id"] for h in control[0]] == [1]
+            assert [h["distance"] for h in control[0]] == pytest.approx([20])
+            empty = self._search_with_synced_resource(client, name, chain, filter="ts % 10 == 1")
+            assert len(empty) == 1 and len(empty[0]) == 0
+
+            # Keep the second row growing; no delete, upsert or compaction is needed.
+            self.insert(client, name, [{"id": 2, "ts": 20, "vector": [0.01, 0.0]}])
+            control = self._search_with_synced_resource(client, name, chain)
+            assert [h["id"] for h in control[0]] == [2, 1]
+            assert [h["distance"] for h in control[0]] == pytest.approx([40, 20])
+            assert [self._hit_field(h, "ts") for h in control[0]] == [20, 10]
+            assert {s.segment_id for s in client.list_persistent_segments(name)} == persistent_ids
+            plain, _ = self.search(
+                client,
+                name,
+                data=[[0.0, 0.0]],
+                anns_field=self.vector_field,
+                search_params={"metric_type": "L2"},
+                limit=3,
+                output_fields=[self.scalar_field],
+                filter="ts % 10 == 1",
+            )
+            assert len(plain) == 1 and len(plain[0]) == 0
+            # Scalar-only output preserves the reduction path that loses PK metadata.
+            empty = self._search_with_synced_resource(client, name, chain, filter="ts % 10 == 1")
+            assert len(empty) == 1 and len(empty[0]) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("output", ["$id", "$group_size"], ids=["id", "group_size"])
     def test_pyudf_readonly_system_outputs_are_rejected(self, tmp_path, minio_host, minio_bucket, output):
         """

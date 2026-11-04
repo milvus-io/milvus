@@ -17,21 +17,20 @@
 #pragma once
 
 #include <memory>
-#include <vector>
-
-#include "index/vector/VectorDiskArtifactFile.h"
+#include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorDiskBuildFileManager.h"
 #include "storage/artifact/Artifact.h"
-#include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index {
 
-// A sealed disk-vector generation. The artifact retains completed output files
-// for serialization; persisted generations are opened through the loader.
+// A sealed disk-vector generation. Completed engine files and the built index
+// remain alive until publication. Serialization hands completed buffers and
+// local files to the sink.
 class VectorDiskArtifact final : public storage::Artifact {
  public:
     VectorDiskArtifact(
-        std::shared_ptr<storage::LocalDirectory> local_files_owner,
-        std::vector<VectorDiskArtifactFile> local_files);
+        std::unique_ptr<KnowhereEngine> engine,
+        std::shared_ptr<VectorDiskBuildFileManager> file_manager);
 
     ~VectorDiskArtifact() override = default;
 
@@ -41,8 +40,8 @@ class VectorDiskArtifact final : public storage::Artifact {
     Serialize(storage::FileSink& sink) const override;
 
  private:
-    std::shared_ptr<storage::LocalDirectory> local_files_owner_;
-    std::vector<VectorDiskArtifactFile> local_files_;
+    std::shared_ptr<VectorDiskBuildFileManager> file_manager_;
+    std::unique_ptr<KnowhereEngine> engine_;
 };
 
 }  // namespace milvus::index

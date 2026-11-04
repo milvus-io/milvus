@@ -36,6 +36,7 @@
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "indexbuilder/BuildInputMaterializer.h"
+#include "knowhere/build_scheduler.h"
 #include "simdjson/padded_string.h"
 
 namespace milvus::index::test {
@@ -89,6 +90,7 @@ BuildProjectedIndex(const std::vector<std::string>& raw,
     auto materializer = indexbuilder::MakeScalarBuildInputMaterializer(
         DataType::JSON, value_type, raw.size(), adapted.family, adapted.params);
     materializer->Add(RawJsonFieldData(raw));
+    EXPECT_TRUE(materializer->TryReserveBuild());
     auto artifact = std::move(*materializer).Build();
     EXPECT_NE(artifact, nullptr);
     if (!artifact) {
@@ -136,6 +138,8 @@ TEST(JsonProjectedHybridIndexBuilderTest, LowCardinalityStringsSelectBitmap) {
 }
 
 TEST(JsonProjectedHybridIndexBuilderTest, HighCardinalityNumbersSelectSorted) {
+    auto reservation = knowhere::BuildScheduler::Instance().TryReserve();
+    ASSERT_TRUE(reservation.has_value());
     std::vector<std::string> raw;
     raw.reserve(1000);
     for (size_t i = 0; i < 1000; ++i) {

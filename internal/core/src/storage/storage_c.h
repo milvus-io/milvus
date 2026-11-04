@@ -34,6 +34,9 @@ InitLocalChunkManagerSingleton(const char* path);
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
+CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes);
+
 // Select the remote ChunkManager backend for this process: when enabled,
 // CreateChunkManager routes remote IO through the milvus-storage
 // ArrowFileSystem instead of the legacy AWS-SDK based chunk managers.

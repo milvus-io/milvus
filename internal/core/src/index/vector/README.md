@@ -63,6 +63,9 @@ not enough to conclude that the lifetime is safe.
   and scalar category groups. The caller pre-checks against `InputSpec().side_inputs` and delivers
   the actual data; for production input the materializer owns the compact tensor, and the builder
   borrows the input during the synchronous build without keeping another raw buffer of its own.
+- VECTOR_ARRAY runs in embedding-list mode only under an embedding-list metric (MAX_SIM/DTW). Under
+  any other metric the materializer hands over ordinary input in the logical element domain: the
+  flattened non-null vectors, no offsets, and the element validity of an element-nullable field.
 - The caller keeps DiskANN's complete input files until the synchronous Build finishes; the output
   staging is owned separately. An Artifact/Reader that lives on afterwards does not borrow the input
   files or the validity metadata.

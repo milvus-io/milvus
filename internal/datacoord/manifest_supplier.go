@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -36,14 +37,14 @@ func (s *Server) GetPublishedManifestPaths(ctx context.Context) ([]string, error
 	if s.meta == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("DataCoord metadata unavailable")
 	}
-	s.meta.segMu.RLock()
-	defer s.meta.segMu.RUnlock()
+	s.meta.SegMu.RLock()
+	defer s.meta.SegMu.RUnlock()
 	manifests := make([]string, 0)
-	for _, segment := range s.meta.segments.GetSegments() {
+	for _, segment := range s.meta.Segments.GetSegments() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !isSegmentHealthy(segment) || segment.GetIsImporting() || segment.GetIsInvisible() || segment.GetManifestPath() == "" {
+		if !meta.IsSegmentHealthy(segment) || segment.GetIsImporting() || segment.GetIsInvisible() || segment.GetManifestPath() == "" {
 			continue
 		}
 		// Growing/Flushing and L0 segments can already have published manifests.

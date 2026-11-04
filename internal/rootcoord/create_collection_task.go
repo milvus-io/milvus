@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -186,6 +187,14 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
 		return err
+	}
+	// A restored collection (preserveFieldID) keeps its stored schema, whose
+	// sub-fields may carry enable_match or enable_analyzer from an earlier
+	// version, so only a new schema is checked for them.
+	if !t.preserveFieldID {
+		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
 		return err
@@ -542,6 +551,11 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	// non-runtime function validation here; DDL replay never reaches this
 	// point (it returns early above) and keeps its historical schema unjudged.
 	if err := validator.ValidateFunction(schema, "", true); err != nil {
+		return err
+	}
+	// The target schema is new input; validateSchema skips this check once
+	// preserveFieldID is set below.
+	if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
 		return err
 	}
 	t.preserveFieldID = true
