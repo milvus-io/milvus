@@ -31,6 +31,7 @@
 
 #include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/gcp/gcp_filesystem_producer.h"
+#include "milvus-storage/filesystem/s3/s3_global.h"
 #include "storage/minio/MinioChunkManager.h"
 
 namespace milvus::storage {
@@ -61,8 +62,19 @@ CheckGcpRegistration(const bool legacy_first, const bool use_iam) {
     setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
 
     MinioChunkManager manager;
+    StorageConfig init_config;
+    init_config.address = "storage.googleapis.com:443";
+    init_config.bucket_name = "registered-storage-bucket";
+    init_config.cloud_provider = "gcp";
+    init_config.region = "europe-west3";
+    init_config.useSSL = true;
+    init_config.useIAM = use_iam;
+    init_config.access_key_id = "storage-access-key";
+    init_config.access_key_value = "storage-secret-key";
+    init_config.log_level = "off";
     if (legacy_first) {
-        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, use_iam, "off");
+        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, init_config);
+        ASSERT_TRUE(milvus_storage::IsS3Initialized());
     }
 
     milvus_storage::ArrowFileSystemConfig fs_config;
@@ -78,7 +90,7 @@ CheckGcpRegistration(const bool legacy_first, const bool use_iam) {
     ASSERT_TRUE(fs.ok()) << fs.status();
 
     if (!legacy_first) {
-        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, use_iam, "off");
+        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, init_config);
     }
 
     StorageConfig storage_config;
@@ -187,6 +199,16 @@ class FakeGcpCredentialProvider : public milvus_storage::GcpCredentialProvider {
         return arrow::Status::OK();
     }
 
+    bool
+    IssuesBearerToken() const override {
+        return true;
+    }
+
+    std::string
+    Identity() const override {
+        return "fake-test-provider";
+    }
+
     int
     calls() const {
         return calls_;
@@ -240,14 +262,15 @@ CheckMilvusBucketKeepsItsProvider() {
     setenv("GOOGLE_GCLOUD_ADC_PATH_OVERRIDE", "/nonexistent/adc.json", 1);
 
     MinioChunkManager manager;
-    manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, true, "off");
-
     StorageConfig storage_config;
     storage_config.address = "storage.googleapis.com:443";
     storage_config.bucket_name = "milvus-own-bucket";
     storage_config.cloud_provider = "gcp";
     storage_config.useSSL = true;
     storage_config.useIAM = true;
+    storage_config.log_level = "off";
+    storage_config.region = "europe-west3";
+    manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, storage_config);
     Aws::Client::ClientConfiguration client_config;
     client_config.region = "europe-west3";
     client_config.endpointOverride = "storage.googleapis.com:443";

@@ -3115,32 +3115,33 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
         int retry_limit = config->retry_limit > 0 ? config->retry_limit : 1;
 
         // copy filesystem properties from global storage config
+        milvus_storage::api::Properties writer_properties;
         auto global_properties =
             milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                 .GetProperties();
         if (global_properties) {
-            writer_config.properties = *global_properties;
+            writer_properties = *global_properties;
         }
 
         // set required properties for ColumnGroupPolicy
         if (config->schema_based_pattern &&
             config->schema_based_pattern[0] != '\0') {
             milvus_storage::api::SetValue(
-                writer_config.properties,
+                writer_properties,
                 PROPERTY_WRITER_POLICY,
                 LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
-            milvus_storage::api::SetValue(writer_config.properties,
+            milvus_storage::api::SetValue(writer_properties,
                                           PROPERTY_WRITER_SCHEMA_BASE_PATTERNS,
                                           config->schema_based_pattern);
             if (config->schema_based_formats &&
                 config->schema_based_formats[0] != '\0') {
                 milvus_storage::api::SetValue(
-                    writer_config.properties,
+                    writer_properties,
                     PROPERTY_WRITER_SCHEMA_BASE_FORMATS,
                     config->schema_based_formats);
             }
         } else {
-            milvus_storage::api::SetValue(writer_config.properties,
+            milvus_storage::api::SetValue(writer_properties,
                                           PROPERTY_WRITER_POLICY,
                                           LOON_COLUMN_GROUP_POLICY_SINGLE);
         }
@@ -3148,9 +3149,12 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
             config->writer_format && config->writer_format[0] != '\0'
                 ? std::string(config->writer_format)
                 : std::string(LOON_FORMAT_PARQUET);
-        milvus_storage::api::SetValue(writer_config.properties,
-                                      PROPERTY_WRITER_FORMAT,
-                                      writer_format.c_str());
+        milvus_storage::api::SetValue(
+            writer_properties, PROPERTY_WRITER_FORMAT, writer_format.c_str());
+
+        writer_config.properties =
+            std::make_shared<const milvus_storage::api::Properties>(
+                std::move(writer_properties));
 
         // add TEXT column configs
         for (size_t i = 0; i < config->num_text_columns; i++) {

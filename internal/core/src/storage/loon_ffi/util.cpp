@@ -757,13 +757,15 @@ InjectExternalSpecProperties(
     // `options.blob_storage_authority = ".blob." + config_.address`, so the
     // address must be a bare authority (e.g. "core.windows.net"); prepending
     // a scheme would break the concatenation.
+    auto immutable_properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
     auto final_cp = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "cloud_provider").c_str());
+        immutable_properties, (extfs_prefix + "cloud_provider").c_str());
     bool is_azure = final_cp.ok() && *final_cp == "azure";
     auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "use_ssl").c_str());
+        immutable_properties, (extfs_prefix + "use_ssl").c_str());
     auto final_address = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "address").c_str());
+        immutable_properties, (extfs_prefix + "address").c_str());
     if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
         final_address->find("://") == std::string::npos) {
         const char* scheme =
@@ -963,7 +965,7 @@ GetLoonManifest(
     }
 
     auto fs_result =
-        milvus_storage::FilesystemCache::getInstance().get(*properties);
+        milvus_storage::FilesystemCache::getInstance().get(properties);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),

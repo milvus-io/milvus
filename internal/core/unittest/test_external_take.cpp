@@ -3913,7 +3913,8 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
         // Read the same typed property as IcebergFormat::explore so a stale
         // property key cannot silently fall back to the latest snapshot.
         const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
-            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
         ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
         EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
     }
@@ -3944,7 +3945,7 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
         EXPECT_STREQ(loon_properties_get(&properties,
                                          PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
                      "5320540205222981137");
-        milvus_storage::api::Properties round_tripped;
+        std::shared_ptr<const milvus_storage::api::Properties> round_tripped;
         const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
             round_tripped, &properties);
         loon_properties_free(&properties);

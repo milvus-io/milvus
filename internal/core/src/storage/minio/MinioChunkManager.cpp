@@ -32,7 +32,6 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
-#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <mutex>
@@ -59,8 +58,9 @@
 #include "fmt/core.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
-#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
+#include "milvus-storage/filesystem/gcp/gcp_filesystem_producer.h"
 #include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
@@ -71,15 +71,7 @@
 
 namespace milvus::storage {
 
-std::atomic<size_t> MinioChunkManager::init_count_(0);
-std::mutex MinioChunkManager::client_mutex_;
-
 namespace {
-
-// The options the SDK was last initialized with: Aws::ShutdownAPI undoes what
-// Aws::InitAPI set up from them.
-Aws::SDKOptions sdk_options_at_init;
-std::once_flag release_sdk_at_exit;
 
 std::mutex&
 GcsEndpointsMutex() {
@@ -178,14 +170,6 @@ AddGcsEndpointForCredentials(const std::string& address, bool use_ssl) {
     GcsEndpointHosts().insert(endpoint.host);
 }
 
-void
-ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
-    sdk_options.httpOptions.httpClientFactory_create_fn = []() {
-        return Aws::MakeShared<GoogleHttpClientFactory>(
-            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG);
-    };
-}
-
 std::shared_ptr<Aws::Http::HttpRequest>
 GoogleHttpClientFactory::CreateHttpRequest(
     const Aws::Http::URI& uri,
@@ -259,154 +243,47 @@ ConvertMinioToAwsString(const std::string& str) {
 }
 
 void
-AwsLogger::ProcessFormattedStatement(Aws::String&& statement) {
-    LOG_INFO("[AWS LOG] {}", statement);
-}
-
-void
 MinioChunkManager::InitSDKAPI(RemoteStorageType type,
-                              bool useIAM,
-                              const std::string& log_level_str,
-                              const std::string& tls_min_version) {
-    std::scoped_lock lock{client_mutex_};
-    const size_t initCount = init_count_++;
-    if (initCount == 0) {
-        // sdk_options_.httpOptions.installSigPipeHandler = true;
+                              const StorageConfig& storage_config) {
+    static std::once_flag sigpipe_flag;
+    std::call_once(sigpipe_flag, [] {
         struct sigaction psa;
         memset(&psa, 0, sizeof psa);
         psa.sa_handler = SwallowHandler;
-        psa.sa_flags = psa.sa_flags | SA_ONSTACK;
-        sigaction(SIGPIPE, &psa, 0);
-        // block multiple SIGPIPE concurrently processing
+        psa.sa_flags = SA_ONSTACK;
         sigemptyset(&psa.sa_mask);
         sigaddset(&psa.sa_mask, SIGPIPE);
-        sigaction(SIGPIPE, &psa, 0);
-        bool need_tls =
-            !tls_min_version.empty() && tls_min_version != "default";
-        if (type == RemoteStorageType::GOOGLE_CLOUD && useIAM) {
-            ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
-        } else if (need_tls) {
-            sdk_options_.httpOptions.httpClientFactory_create_fn =
-                [tls_min_version]() {
-                    return Aws::MakeShared<TlsHttpClientFactory>(
-                        TLS_FACTORY_ALLOCATION_TAG, tls_min_version);
-                };
+        sigaction(SIGPIPE, &psa, nullptr);
+    });
+
+    milvus_storage::ArrowFileSystemConfig config;
+    config.log_level = storage_config.log_level;
+    config.use_ssl = storage_config.useSSL;
+    config.tls_min_version = storage_config.tls_min_version;
+    if (type == RemoteStorageType::GOOGLE_CLOUD) {
+        config.address = storage_config.address;
+        config.bucket_name = storage_config.bucket_name;
+        config.access_key_id = storage_config.access_key_id;
+        config.access_key_value = storage_config.access_key_value;
+        config.cloud_provider = milvus_storage::kCloudProviderGCP;
+        config.region = storage_config.region;
+        config.ssl_ca_cert = storage_config.sslCACert;
+        config.use_iam = storage_config.useIAM;
+        config.use_virtual_host = storage_config.useVirtualHost;
+        config.request_timeout_ms = storage_config.requestTimeoutMs;
+        config.max_connections = storage_config.max_connections;
+        config.use_crc32c_checksum = storage_config.use_crc32c_checksum;
+        // GCP installs its HTTP factory and registers the bucket identity
+        // through the producer's existing initialization path.
+        auto result = milvus_storage::GcpFileSystemProducer(config).Make();
+        if (!result.ok()) {
+            throw milvus_storage::ToSegcoreError(result.status());
         }
-        LOG_INFO("init aws with log level:{}", log_level_str);
-        auto get_aws_log_level = [](const std::string& level_str) {
-            Aws::Utils::Logging::LogLevel level =
-                Aws::Utils::Logging::LogLevel::Off;
-            if (level_str == "fatal") {
-                level = Aws::Utils::Logging::LogLevel::Fatal;
-            } else if (level_str == "error") {
-                level = Aws::Utils::Logging::LogLevel::Error;
-            } else if (level_str == "warn") {
-                level = Aws::Utils::Logging::LogLevel::Warn;
-            } else if (level_str == "info") {
-                level = Aws::Utils::Logging::LogLevel::Info;
-            } else if (level_str == "debug") {
-                level = Aws::Utils::Logging::LogLevel::Debug;
-            } else if (level_str == "trace") {
-                level = Aws::Utils::Logging::LogLevel::Trace;
-            }
-            return level;
-        };
-        auto log_level = get_aws_log_level(log_level_str);
-        sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
-        InitSDKAPIUntilExit(sdk_options_);
-    }
-}
-
-void
-MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
-                                     const std::string& tls_min_version) {
-    std::scoped_lock lock{client_mutex_};
-    const size_t initCount = init_count_++;
-    if (initCount == 0) {
-        // sdk_options_.httpOptions.installSigPipeHandler = true;
-        struct sigaction psa;
-        memset(&psa, 0, sizeof psa);
-        psa.sa_handler = SwallowHandler;
-        psa.sa_flags = psa.sa_flags | SA_ONSTACK;
-        sigaction(SIGPIPE, &psa, 0);
-        // block multiple SIGPIPE concurrently processing
-        sigemptyset(&psa.sa_mask);
-        sigaddset(&psa.sa_mask, SIGPIPE);
-        sigaction(SIGPIPE, &psa, 0);
-        bool need_tls =
-            !tls_min_version.empty() && tls_min_version != "default";
-        if (need_tls && !sdk_options_.httpOptions.httpClientFactory_create_fn) {
-            sdk_options_.httpOptions.httpClientFactory_create_fn =
-                [tls_min_version]() {
-                    return Aws::MakeShared<TlsHttpClientFactory>(
-                        TLS_FACTORY_ALLOCATION_TAG, tls_min_version);
-                };
+    } else {
+        auto status = milvus_storage::S3FileSystemProducer(config).InitS3();
+        if (!status.ok()) {
+            throw milvus_storage::ToSegcoreError(status);
         }
-        LOG_INFO("init aws with log level:{}", log_level_str);
-        auto get_aws_log_level = [](const std::string& level_str) {
-            Aws::Utils::Logging::LogLevel level =
-                Aws::Utils::Logging::LogLevel::Off;
-            if (level_str == "fatal") {
-                level = Aws::Utils::Logging::LogLevel::Fatal;
-            } else if (level_str == "error") {
-                level = Aws::Utils::Logging::LogLevel::Error;
-            } else if (level_str == "warn") {
-                level = Aws::Utils::Logging::LogLevel::Warn;
-            } else if (level_str == "info") {
-                level = Aws::Utils::Logging::LogLevel::Info;
-            } else if (level_str == "debug") {
-                level = Aws::Utils::Logging::LogLevel::Debug;
-            } else if (level_str == "trace") {
-                level = Aws::Utils::Logging::LogLevel::Trace;
-            }
-            return level;
-        };
-        auto log_level = get_aws_log_level(log_level_str);
-        sdk_options_.loggingOptions.logLevel = log_level;
-        sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
-            return std::make_shared<AwsLogger>(log_level);
-        };
-        InitSDKAPIUntilExit(sdk_options_);
-    }
-}
-
-void
-MinioChunkManager::ShutdownSDKAPI() {
-    std::scoped_lock lock{client_mutex_};
-    const size_t initCount = --init_count_;
-    if (initCount == 0) {
-        Aws::ShutdownAPI(sdk_options_);
-    }
-}
-
-// MinioChunkManagers share one reference to the AWS SDK. The first manager
-// takes it, and managers coming and going do not release it, since the SDK
-// would then have to be initialized again for the next one (#42459). It is
-// released when the process exits instead. A Go process ends with exit_group
-// and runs no exit handlers, but a host process that runs them would
-// otherwise destroy the SDK's static objects while the SDK is still
-// initialized: the default client bootstrap then shuts down from its static
-// destructor, and the cleanup thread that starts races the destruction of the
-// SDK's log redirection (a SIGSEGV in s_aws_logger_redirect_get_log_level).
-// Aws::ShutdownAPI counts references, so whichever holder releases the SDK
-// last shuts it down, this one or milvus-storage's own release at exit.
-void
-MinioChunkManager::InitSDKAPIUntilExit(const Aws::SDKOptions& options) {
-    Aws::InitAPI(options);
-    sdk_options_at_init = options;
-    std::call_once(release_sdk_at_exit,
-                   [] { std::atexit(MinioChunkManager::ReleaseSDKAPIAtExit); });
-}
-
-void
-MinioChunkManager::ReleaseSDKAPIAtExit() {
-    std::scoped_lock lock{client_mutex_};
-    // ShutdownSDKAPI may have released the reference already.
-    if (init_count_.exchange(0) > 0) {
-        Aws::ShutdownAPI(sdk_options_at_init);
     }
 }
 
@@ -531,8 +408,8 @@ MinioChunkManager::BuildGoogleCloudClient(
     }
 
     // Storage may have installed the process-wide GCP HTTP factory first.
-    // Register both IAM and HMAC identities before PreCheck, even if our
-    // InitAPI was ignored. Building an access-key client alone is insufficient.
+    // Register both IAM and HMAC identities before PreCheck, including when
+    // another filesystem initialized the SDK first.
     milvus_storage::GcpBucketKey key{
         milvus_storage::NormalizeGcpEndpoint(storage_config.address,
                                              storage_config.useSSL),
@@ -620,10 +497,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         storageType = RemoteStorageType::S3;
     }
 
-    InitSDKAPI(storageType,
-               storage_config.useIAM,
-               storage_config.log_level,
-               storage_config.tls_min_version);
+    InitSDKAPI(storageType, storage_config);
 
     // The ClientConfiguration default constructor will take a long time.
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
@@ -688,7 +562,6 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
 MinioChunkManager::~MinioChunkManager() {
     client_.reset();
-    // The SDK reference outlives the manager: see InitSDKAPIUntilExit.
 }
 
 uint64_t

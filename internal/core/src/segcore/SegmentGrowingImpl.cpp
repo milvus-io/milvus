@@ -4189,7 +4189,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto arrow_schema =
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
-        column_groups, arrow_schema, nullptr, *properties);
+        column_groups, arrow_schema, nullptr, properties);
 
     // A column group whose fields were all dropped from the segment schema
     // has an empty read projection; opening it violates the reader contract

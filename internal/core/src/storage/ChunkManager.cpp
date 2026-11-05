@@ -84,7 +84,7 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
     remote_root_path_ = storage_config.root_path;
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
+    InitSDKAPI(RemoteStorageType::S3, storage_config);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
@@ -131,11 +131,7 @@ GcpChunkManager::GcpChunkManager(const StorageConfig& storage_config) {
     remote_root_path_ = storage_config.root_path;
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    if (storage_config.useIAM) {
-        ConfigureGoogleCloudIAMHttpClientFactory(sdk_options_);
-    }
-
-    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
+    InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, storage_config);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     ApplyChecksumConfigOverrides(config);
@@ -161,7 +157,7 @@ AliyunChunkManager::AliyunChunkManager(const StorageConfig& storage_config) {
     remote_root_path_ = storage_config.root_path;
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
+    InitSDKAPI(RemoteStorageType::S3, storage_config);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     ApplyChecksumConfigOverrides(config);
@@ -215,7 +211,7 @@ TencentCloudChunkManager::TencentCloudChunkManager(
     remote_root_path_ = storage_config.root_path;
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
 
-    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
+    InitSDKAPI(RemoteStorageType::S3, storage_config);
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     ApplyChecksumConfigOverrides(config);
@@ -268,7 +264,7 @@ HuaweiCloudChunkManager::HuaweiCloudChunkManager(
     default_bucket_name_ = storage_config.bucket_name;
     remote_root_path_ = storage_config.root_path;
     use_crc32c_checksum_ = storage_config.use_crc32c_checksum;
-    InitSDKAPIDefault(storage_config.log_level, storage_config.tls_min_version);
+    InitSDKAPI(RemoteStorageType::S3, storage_config);
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     ApplyChecksumConfigOverrides(config);
     StorageConfig mutable_config = storage_config;

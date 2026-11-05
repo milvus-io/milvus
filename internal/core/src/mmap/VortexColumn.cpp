@@ -2834,13 +2834,14 @@ VortexColumn::SupportsScanPushdown(const ScanOptions& options) const {
            BuildVortexPredicate(options).has_value();
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 VortexColumn::MakeVortexReaderProperties(
     const std::shared_ptr<milvus_storage::api::Properties>& properties) {
     auto reader_properties = *properties;
     reader_properties[PROPERTY_READER_VORTEX_SPLIT_ROW_INDICES] =
         std::string("true");
-    return reader_properties;
+    return std::make_shared<const milvus_storage::api::Properties>(
+        std::move(reader_properties));
 }
 
 std::shared_ptr<milvus_storage::vortex::VortexFormatReader>

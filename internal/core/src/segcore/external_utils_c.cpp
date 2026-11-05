@@ -167,7 +167,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
 
         // 4. Create schemaless Reader (nullptr schema → types from file)
         auto reader = milvus_storage::api::Reader::create(
-            cgs, nullptr, nullptr, *properties);
+            cgs, nullptr, nullptr, properties);
 
         // 5. Take sample rows [0, 1, ..., actual-1]
         std::vector<int64_t> indices(actual);

@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 
-FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
+FROM nvidia/cuda:13.2.0-runtime-ubuntu22.04
 
 ARG TARGETARCH
 ARG MILVUS_RUNTIME_USER=milvus:milvus

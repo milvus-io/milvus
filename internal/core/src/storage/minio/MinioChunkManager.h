@@ -37,9 +37,7 @@
 #include <google/cloud/status_or.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <atomic>
 #include <memory>
-#include <mutex>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -70,9 +68,6 @@ enum class RemoteStorageType {
     GOOGLE_CLOUD = 1,
     ALIYUN_CLOUD = 2,
 };
-
-void
-ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options);
 
 template <typename... Args>
 static std::string
@@ -136,25 +131,6 @@ IsNotFound(const Aws::S3::S3Errors& s3err) {
     return (s3err == Aws::S3::S3Errors::NO_SUCH_KEY ||
             s3err == Aws::S3::S3Errors::RESOURCE_NOT_FOUND);
 }
-
-/**
- * @brief user defined aws logger, redirect aws log to segcore log
- */
-class AwsLogger : public Aws::Utils::Logging::FormattedLogSystem {
- public:
-    AwsLogger(Aws::Utils::Logging::LogLevel log_level)
-        : Aws::Utils::Logging::FormattedLogSystem(log_level) {
-    }
-    virtual ~AwsLogger() {
-    }
-    virtual void
-    Flush() override {
-    }
-
- protected:
-    virtual void
-    ProcessFormattedStatement(Aws::String&& statement) override;
-};
 
 /**
  * @brief This MinioChunkManager is responsible for read and write file in S3.
@@ -265,20 +241,12 @@ class MinioChunkManager : public ChunkManager {
     ListObjects(const std::string& bucket_name, const std::string& prefix = "");
 
     void
-    InitSDKAPIDefault(const std::string& log_level,
-                      const std::string& tls_min_version = "");
-    void
-    InitSDKAPI(RemoteStorageType type,
-               bool useIAM,
-               const std::string& log_level,
-               const std::string& tls_min_version = "");
+    InitSDKAPI(RemoteStorageType type, const StorageConfig& storage_config);
 
     // Precheck whether client is configure ready or not.
     void
     PreCheck(const StorageConfig& storage_config);
 
-    void
-    ShutdownSDKAPI();
     void
     BuildS3Client(const StorageConfig& storage_config,
                   const Aws::Client::ClientConfiguration& config);
@@ -312,16 +280,6 @@ class MinioChunkManager : public ChunkManager {
     static bool
     NeedChecksumOverride(const std::string& cloud_provider);
 
-    // Aws::InitAPI, whose reference ReleaseSDKAPIAtExit drops when the
-    // process exits. Called with client_mutex_ held.
-    static void
-    InitSDKAPIUntilExit(const Aws::SDKOptions& options);
-    static void
-    ReleaseSDKAPIAtExit();
-
-    Aws::SDKOptions sdk_options_;
-    static std::atomic<size_t> init_count_;
-    static std::mutex client_mutex_;
     std::shared_ptr<Aws::S3::S3Client> client_;
     std::string default_bucket_name_;
     std::string remote_root_path_;
@@ -468,12 +426,9 @@ static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG =
 void
 AddGcsEndpointForCredentials(const std::string& address, bool use_ssl);
 
-// Process-wide AWS SDK HTTP factory for GCP IAM. Only the first Aws::InitAPI
-// in a process takes effect, so it also serves milvus-storage. It
-// authenticates a request for Milvus' own GCS bucket with Milvus' IAM
-// provider, and any other GCS request with the provider milvus-storage's
-// GcpCredentialRegistry holds for its endpoint and bucket, as milvus-storage's
-// own GCP factory does. Every other request is left alone.
+// Legacy GCP request factory. Production SDK initialization uses Storage's
+// factory. This factory prefers Milvus' own IAM provider for its GCS buckets
+// and otherwise consults Storage's credential registry.
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
     explicit GoogleHttpClientFactory(const std::string& tls_min_version = "")

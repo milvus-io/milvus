@@ -91,7 +91,8 @@ StorageV2FSCache::Get(const Key& key) {
         fs_root_path,
         key.storage_type);
 
-    auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
+    auto result = milvus_storage::FilesystemCache::getInstance().get(
+        std::make_shared<const milvus_storage::api::Properties>(props), "");
 
     if (!result.ok()) {
         LOG_WARN("create arrow file system failed, error: {}",
