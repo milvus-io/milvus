@@ -120,7 +120,7 @@ message ListRunningRequestsRequest {
 }
 
 message RunningRequestInfo {
-  int64 request_id = 1;
+  string request_id = 1;       // "<proxy id>-<proxy start>-<sequence>", see Request id
   int64 proxy_id = 2;
   string type = 3;             // Search | HybridSearch | Query
   string db_name = 4;
@@ -139,7 +139,7 @@ message RunningRequestInfo {
   bool cancellable = 17;       // always true for the three registered types
 }
 
-message NodeResult {
+message RunningRequestNodeResult {
   int64 node_id = 1;
   common.Status status = 2;
   bool unimplemented = 3;
@@ -148,7 +148,7 @@ message NodeResult {
 message ListRunningRequestsResponse {
   common.Status status = 1;
   repeated RunningRequestInfo requests = 2;
-  repeated NodeResult node_results = 3;
+  repeated RunningRequestNodeResult node_results = 3;
 }
 
 message CancelRequestsRequest {
@@ -158,7 +158,7 @@ message CancelRequestsRequest {
     object_name_index: -1
   };
   common.MsgBase base = 1;
-  repeated int64 request_ids = 2;
+  repeated string request_ids = 2;
   string reason = 3;
   string user = 4;             // only that user's requests; see Privileges
 }
@@ -166,9 +166,9 @@ message CancelRequestsRequest {
 message CancelRequestsResponse {
   common.Status status = 1;
   repeated RunningRequestInfo canceled = 2;   // snapshot taken at cancellation
-  repeated int64 not_found = 3;               // filled only when every proxy answered
-  repeated NodeResult node_results = 4;
-  repeated int64 undetermined = 5;            // not canceled while some proxy did not answer
+  repeated string not_found = 3;              // filled only when every proxy answered
+  repeated RunningRequestNodeResult node_results = 4;
+  repeated string undetermined = 5;           // not canceled while some proxy did not answer
 }
 ```
 
@@ -176,7 +176,15 @@ message CancelRequestsResponse {
   `db_name` and `collection_name` match exactly. Filtering happens on each
   proxy, so only matching rows travel to the coordinator.
 - `Cancel` accepts request ids only. An empty list is an `InputError`. An id
-  whose request is not cancellable is an `InputError`, not `not_found`.
+  whose request is not cancellable is an `InputError`, not `not_found`. An id
+  that is not in the form `List` reports (wrong shape, or a non-canonical
+  spelling such as a leading zero) is reported in `not_found`, so each
+  request answers to exactly one id.
+- Request ids are strings. An integer id would be read as a double by
+  JavaScript and by most JSON decoders, which is exact only below 2^53; ids
+  above that collapse together, and a REST cancel could stop a different
+  request of the same user. A string is passed back exactly as it was
+  received.
 - `canceled` carries, for each canceled request, a snapshot of its registry
   record taken at the moment of cancellation. `elapsed_ms` is therefore how
   long the request had been running when it was canceled, and the other
@@ -329,9 +337,9 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
 | Item | Decision |
 |---|---|
 | Unit | One client RPC. Not one task: a request owns several tasks, the tasks have no ctx of their own, and cancellation can only stop the whole tree. |
-| Where | The first line of `Proxy.Search`, `Proxy.HybridSearch` and `Proxy.Query`. Not in `node.search` or `node.query`: the former is called repeatedly by the retry wrapper, the latter is shared by Query, requery and search by primary key; registering there would register one request several times. |
+| Where | The first line of `Proxy.Search`, `Proxy.HybridSearch` and `Proxy.Query`, above the retry loop that waits for an automatic load or a view refresh, so a request is listable and cancelable while it waits there. Not in `node.search` or `node.query`: the former is called repeatedly by the retry wrapper, the latter is shared by Query, requery and search by primary key; registering there would register one request several times. |
 | Cancel handle | `ctx, cancel := context.WithCancelCause(ctx)`; `cancel` is stored in the record. The cause is `merr.ErrRequestCanceled` carrying the operator's user name and the reason. |
-| Request id | `MetaCache.AllocID` (`internal/proxy/metacache/meta_cache.go:1595`), backed by `rowIDAllocator`, which prefetches a batch of ids from RootCoord and hands them out locally. Cluster-unique, independent of TSO, available at registration time. |
+| Request id | `<proxy id>-<proxy start>-<sequence>`, for example `25-to03zu-rs`: the proxy's node id in decimal, the Unix second the proxy process set its identity (after its session has a node id) in base 36, and a per-process atomic counter in base 36. Generated locally, with no RPC and no allocator: the node id separates proxies, the start second separates two processes that reuse a node id (a fixed test node id, or a wiped etcd), and the counter separates requests within a process. The registry keys its map by the counter and builds the string only when it reports a row; a cancel strips this proxy's prefix and parses the rest, and any other prefix is not this proxy's. The id is opaque to clients: they pass back what `List` returned. |
 | Fields | request id, proxy id, type, db, collection, user, client address (gRPC peer), nq, topk, first 256 bytes of expr, start time, queue time of the first task, state (Queued / Running / Canceling), task ids, trace id. Elapsed time is computed at list time. |
 | Link to tasks | A pointer to the record is placed in the ctx. `Enqueue` appends the task id after allocating it; `AddActiveTask` sets the state to Running. |
 | Removal | A `defer` right after registration removes the record and calls `cancel` when the gRPC method returns. Normal return, error return, panic unwinding and a client disconnect that cancels the ctx all go through it. Between the cancel and that return the request is still listed, in state `Canceling`; the QueryNode's wind-down after the return is not reflected in the list. The ctx and any unfinished task still hold the pointer; the record is garbage collected when those tasks end. |
@@ -363,13 +371,23 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
   unchanged. Inner code (`WaitToFinish`, `retry.Handle`, `Enqueue`) keeps
   returning `ctx.Err()`; the conversion happens once at the outermost layer.
 - **Load balancer decision by ctx state**: in `ExecuteWithRetry`, after
-  `Exec` fails, check `ctx.Err() != nil` first and return without adding the
-  node to the blacklist or excluding it from the request. Once the request is
-  canceled or timed out, whatever the QueryNode returned says nothing about
-  node health. This removes the dependency on knowhere or cardinal returning a
-  dedicated canceled status.
-- `searchShard` and `queryShard` likewise skip
-  `InvalidateShardLeaderCache` when `ctx.Err() != nil`.
+  `Exec` fails, a request whose ctx is canceled (`context.Canceled`: an
+  operator cancel or a client disconnect) returns without adding the node to
+  the blacklist or excluding it from the request. Whatever the QueryNode
+  returned then says nothing about node health, and this removes the
+  dependency on knowhere or cardinal returning a dedicated canceled status. A
+  request whose ctx hit its deadline is not exempt: a client timeout can be
+  caused by a slow node, so the node is still blacklisted as before. Master
+  implements this rule in #55051.
+- `searchShard` and `queryShard` (through `shardReplyError`, shared with
+  Materialize) likewise skip `InvalidateShardLeaderCache` when the ctx is
+  canceled, and still invalidate it on a timeout.
+- These two rules apply to the legacy shard client. Since #52977 the proxy
+  sends Search and Query through the QueryView client
+  (`internal/views/queryclient`), which checks the ctx before each attempt and
+  while waiting for a replica, returns without retrying once the ctx is done,
+  and marks a node dead only on a missing session or sub-connection, so a
+  cancel does not exclude a node there either.
 - `BaseTaskQueue.Enqueue` checks `ctx.Err()` before allocating a TSO, matching
   the QueryNode scheduler.
 
@@ -415,6 +433,11 @@ The path of `ClearReadTaskQueue` is reused: `internal/proxy/impl.go` calls
   not found.
 
 ### QueryNode: cancellation inside a merged search group
+
+This section concerns the QueryNode read-task scheduler. Since #52977 the
+QueryView path runs a search directly on the selected segments
+(`internal/querynodev2/viewquery`) without that scheduler, so no merged groups
+form there; the rule below holds wherever the scheduler is still used.
 
 Queued search tasks on a QueryNode are merged into groups
 (`internal/util/searchutil/scheduler/queues.go:175`,
@@ -489,6 +512,7 @@ The names below are the ones in those repositories, which spell the status
 |---|---|
 | Existing | `CancelRequests` is an ordinary RPC and appears in the access log. `QueryNodeReadTaskExecuteDuration{status=cancel}`, `QueryNodeReadTaskQueueDuration{expired}`, and the cgo counters `internal_cgo_cancel_before_execute_total_search` / `internal_cgo_cancel_during_execute_total_search` count operator cancellations together with client timeouts. |
 | New counter | `milvus_proxy_request_canceled_total{type}`, incremented when the registry actually cancels a request. This differs from the API call count: one `CancelRequests` may carry several ids, or find none. |
+| Request metrics | The per-request proxy metrics label a request that ended with 3002 as `cancel`, like one ended by the client's own cancel, not as a failure or a system error. |
 | Audit log | One line per cancellation: operator, request id, the canceled request's user, collection and elapsed time, reason. Written by the proxy that received the public call, which is the only node that authenticated the caller: the internal calls are fresh connections carrying no user, so no other node can name the operator. That proxy sees the whole cluster's answer, so the record is complete. The canceled client is told the reason, which the operator supplied. The access log records who called `Cancel`, not whose request was canceled. |
 | Optional | Store `canceledAt` in the record; in `PopActiveTask`, if the task ctx's cause is `ErrRequestCanceled`, observe the time from cancellation to the end of that task. The record may already be removed from the table; the pointer held in the ctx stays valid. |
 
@@ -589,13 +613,20 @@ changes them. A registry keyed by task would show one user request as two or
 three rows, and canceling one task cannot stop the others because they share
 one ctx. Rejected in favour of one record per client RPC.
 
-### Encode the proxy id into the request id
+### An integer request id from the cluster ID allocator
 
-A locally generated id (`serverID << 48 | counter`) would let the coordinator
-route a cancel to a single proxy. It introduces a second id scheme for a
-benefit that does not matter at the proxy counts involved; broadcasting the
-cancel to every proxy is cheap. Rejected in favour of the existing ID
-allocator.
+The first version used `MetaCache.AllocID` and an `int64` id. Review found that
+REST clients lose precision on such ids (see Request id), so the id became a
+string. Once it is a string, a cluster-wide allocator adds an RPC dependency
+and nothing else: the node id plus process start time already make a local
+counter unique. Rejected in favour of the local three-part id.
+
+### Route a cancel to the proxy named in the id
+
+The id now names the proxy that holds the request, so the coordinator could
+send a cancel to that proxy alone. Not done: broadcasting is cheap at the proxy
+counts involved, and the broadcast is what decides between `not_found` and
+`undetermined`. It can be added later without an interface change.
 
 ### Periodic cancellation checks inside index search loops
 
