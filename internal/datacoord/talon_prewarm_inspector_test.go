@@ -119,20 +119,22 @@ func TestTalonPrewarmInspectorRounds(t *testing.T) {
 // the unchecked version, so the load uses the same identity without a stat.
 func TestTalonPrewarmInspectorRecordedSize(t *testing.T) {
 	c := &recordingTalonPrewarm{stats: map[string]int{}}
+	sizes := map[string]uint64{"sized": 4096}
 	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) {
 		return []string{"sized", "unsized"}, nil
-	}, c, func(s string) (string, uint64, error) {
-		if s == "sized" {
-			return s, 4096, nil
-		}
-		return s, 0, nil
-	}, time.Hour, 2)
+	}, c, func(s string) (string, uint64, error) { return s, sizes[s], nil }, time.Hour, 2)
 	inspector.inspect(context.Background())
 	unsized := TalonPrewarmRequest{URI: "unsized", Size: 7, Version: "etag:unsized"}
 	require.Equal(t, map[string]int{"unsized": 1}, c.stats)
 	require.Len(t, c.batches, 1)
-	require.ElementsMatch(t, []TalonPrewarmRequest{{URI: "sized", Size: 4096}, unsized}, c.batches[0])
+	require.Equal(t, []TalonPrewarmRequest{{URI: "sized", Size: 4096}, unsized}, c.batches[0])
 	require.Equal(t, map[string]TalonPrewarmRequest{"unsized": unsized}, inspector.metadata)
+	// A manifest that gains a recorded size drops its cached stat and ETag.
+	sizes["unsized"] = 4096
+	inspector.inspect(context.Background())
+	require.Len(t, c.batches, 2)
+	require.Equal(t, []TalonPrewarmRequest{{URI: "sized", Size: 4096}, {URI: "unsized", Size: 4096}}, c.batches[1])
+	require.Empty(t, inspector.metadata)
 }
 
 func TestTalonPrewarmInspectorStopPending(t *testing.T) {
