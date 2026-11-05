@@ -159,6 +159,7 @@ func (t *SearchTask) Execute() error {
 		return err
 	}
 	defer searchReq.Delete()
+	searchReq.SetTTLCutoffs(t.ttlCutoffs())
 	// Use the merged NQ and maximum requested topK as the group's output
 	// upper bound; the optimizer may lower the C++ plan topK. Keep this
 	// decision unchanged when materializing each original request's output.
@@ -431,6 +432,9 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||
 		t.req.GetReq().GetMvccTimestamp() != other.req.GetReq().GetMvccTimestamp() ||
+		// Segcore replaces an entity TTL cutoff of 0 with the MVCC timestamp,
+		// so ttlCutoffs cannot compare it with a nonzero cutoff.
+		(t.req.GetReq().GetEntityTtlPhysicalTime() == 0) != (other.req.GetReq().GetEntityTtlPhysicalTime() == 0) ||
 		t.req.GetReq().GetDslType() != other.req.GetReq().GetDslType() ||
 		t.req.GetDmlChannels()[0] != other.req.GetDmlChannels()[0] ||
 		(diffTopk && ratio > paramtable.Get().QueryNodeCfg.TopKMergeRatio.GetAsFloat()) ||
@@ -450,6 +454,22 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	other.merged = true
 
 	return true
+}
+
+// ttlCutoffs returns the collection and entity TTL cutoffs the group runs
+// with: the latest of its members'. Merged requests can carry different
+// cutoffs, since the Proxy takes them from each request's own timestamp. A
+// later cutoff only filters out more rows, so every member gets a subset of
+// what its own cutoffs allow, and its requery, which uses its own cutoffs,
+// still finds every row the search returned. canMerge keeps an entity TTL
+// cutoff of 0, which segcore replaces with the MVCC timestamp, out of groups
+// with nonzero ones.
+func (t *SearchTask) ttlCutoffs() (collectionTTL, entityTTLPhysicalTime uint64) {
+	for _, m := range append([]*SearchTask{t}, t.others...) {
+		collectionTTL = funcutil.Max(collectionTTL, m.req.GetReq().GetCollectionTtlTimestamps())
+		entityTTLPhysicalTime = funcutil.Max(entityTTLPhysicalTime, m.req.GetReq().GetEntityTtlPhysicalTime())
+	}
+	return collectionTTL, entityTTLPhysicalTime
 }
 
 func (t *SearchTask) Done(err error) {

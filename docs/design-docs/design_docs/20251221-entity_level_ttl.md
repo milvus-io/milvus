@@ -208,10 +208,11 @@ Special cases:
 
 ### 5. Query / Search Logic
 
-* Each query is executed with an MVCC timestamp assigned by Milvus.
 * When loading a collection, the system records which field is configured as the TTL field.
+* For each Search and Query, the Proxy sets the entity TTL cutoff (`EntityTtlPhysicalTime`, in microseconds) from the task timestamp: a TSO timestamp under Strong, the Proxy clock under the other levels and for legacy Strong requests that carry a guarantee timestamp. Collection-level TTL uses the same timestamp. The cutoff does not depend on the guarantee or MVCC timestamp, so expired entities are filtered under every consistency level. A search requery keeps the search's task timestamp, so the two use the same cutoff.
+* When a QueryNode merges search requests into one batch, the batch runs with the latest collection and entity TTL cutoffs among the requests.
 
-During query execution, expired data is filtered by comparing the TTL field value with the MVCC timestamp inside `mask_with_timestamps`.
+During query execution, segcore adds the filter `ttl_field IS NULL OR ttl_field > cutoff`, so entities whose TTL field is null never expire. A cutoff of 0, from a Proxy older than 3.0, falls back to the physical time of the MVCC timestamp; a QueryNode does not merge such a request with one that has a cutoff.
 
 ---
 

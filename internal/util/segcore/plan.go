@@ -185,6 +185,13 @@ func (req *SearchRequest) EnableExprCache() bool {
 	return req.enableExprCache
 }
 
+// SetTTLCutoffs replaces the collection and entity TTL cutoffs taken from the
+// request.
+func (req *SearchRequest) SetTTLCutoffs(collectionTTL, entityTTLPhysicalTime typeutil.Timestamp) {
+	req.collectionTTL = collectionTTL
+	req.entityTTLPhysicalTime = entityTTLPhysicalTime
+}
+
 func (req *SearchRequest) Delete() {
 	if req.plan != nil {
 		req.plan.delete()
