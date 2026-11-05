@@ -129,6 +129,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 TextMatchIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    auto config = config_;
+    if (ctx != nullptr && ctx->runtime_load_priority.has_value()) {
+        config[milvus::LOAD_PRIORITY] = *ctx->runtime_load_priority;
+    }
+
     // Check for cancellation before loading text match index
     CheckCancellation(
         ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
@@ -143,7 +148,7 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
+        index->Load(config);
         index->RegisterTokenizer("milvus_tokenizer",
                                  load_info_.analyzer_params.c_str());
     }

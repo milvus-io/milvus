@@ -22,6 +22,7 @@
 #include "segcore/Utils.h"
 #include "monitor/Monitor.h"
 #include "common/ScopedTimer.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -93,7 +94,7 @@ JsonStatsTranslator::get_cells(
             },
             milvus::ScopedTimer::LogLevel::Info);
 
-        stats->Load(ctx_, config_);
+        stats->Load(ctx_, config_, ctx);
 
         if (load_info_.enable_mmap) {
             stats->SetCellSize({0, load_info_.stats_size});

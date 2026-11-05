@@ -134,7 +134,8 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    milvus::OpContext* op_context) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -153,8 +154,8 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column](int64_t chunk_id) {
-            auto pw = column->DataOfChunk(nullptr, chunk_id)
+        [this, op_context, column](int64_t chunk_id) {
+            auto pw = column->DataOfChunk(op_context, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });

@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 #include "index/json_stats/JsonKeyStats.h"
+#include "storage/ThreadPools.h"
 #include "index/json_stats/bson_builder.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
@@ -1045,6 +1046,13 @@ JsonKeyStats::LoadShreddingData(const std::vector<std::string>& index_files,
 
 void
 JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
+    Load(ctx, config, nullptr);
+}
+
+void
+JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
+                   const Config& config,
+                   milvus::OpContext* op_ctx) {
     if (config.contains(ENABLE_MMAP)) {
         mmap_filepath_ =
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
@@ -1055,6 +1063,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                  mmap_filepath_);
     }
     load_priority_ = config[milvus::LOAD_PRIORITY];
+    const auto priority = milvus::ResolveLoadPriority(op_ctx, load_priority_);
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              load_priority_);
@@ -1097,7 +1106,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             field_id_);
         // cache meta file to local disk
         auto local_meta_file = disk_file_manager_->CacheJsonStatsMetaToDisk(
-            meta_files[0], load_priority_);
+            meta_files[0], priority);
         LoadMetaFile(local_meta_file);
     }
 
@@ -1106,9 +1115,8 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                       config.contains(WARMUP) ? config.at(WARMUP) : "");
 
     // load shared key index
-    bson_inverted_index_->LoadIndex(shared_key_index_files,
-                                    load_priority_,
-                                    config.contains(MMAP_FILE_PATH));
+    bson_inverted_index_->LoadIndex(
+        shared_key_index_files, priority, config.contains(MMAP_FILE_PATH));
 }
 
 IndexStatsPtr

@@ -134,6 +134,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -195,6 +197,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     query_context->set_op_context(&op_context);
 
     // Do plan fragment task work
