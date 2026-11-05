@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -68,6 +69,12 @@ func NewCompactionSignal() *CompactionSignal {
 		resultCh:   make(chan error, 1),
 		waitResult: true,
 	}
+}
+
+// isGlobal reports whether the signal spans every collection (the periodic
+// tick) rather than one collection's channel (a flush).
+func (cs *CompactionSignal) isGlobal() bool {
+	return cs.CollectionID == 0
 }
 
 func (cs *CompactionSignal) WithID(id UniqueID) *CompactionSignal {
@@ -123,10 +130,25 @@ type compactionTrigger struct {
 	manualSignals chan *CompactionSignal
 	inspector     CompactionInspector
 	globalTrigger *time.Ticker
-	closeCh       lifetime.SafeChan
-	closeWaiter   sync.WaitGroup
+	// globalLoopRunning is set while schedule() emits global signals. Without
+	// it (auto compaction disabled globally at startup) collection-scoped
+	// signals are the only rounds left and plan single compaction themselves.
+	globalLoopRunning atomic.Bool
+	// deferredRetries holds, per collection, the retry armed when one of its
+	// collection-scoped rounds deferred single compaction candidates while no
+	// global round runs: no later round would reconsider them otherwise,
+	// unless the collection happened to flush again.
+	deferredRetryMu sync.Mutex
+	deferredRetries map[int64]*time.Timer
+	closeCh         lifetime.SafeChan
+	closeWaiter     sync.WaitGroup
 
 	indexEngineVersionManager index.IndexEngineVersionManager
+
+	// ctx is the trigger's own context: it carries the admission logs and
+	// metrics of a round and ends when the trigger stops.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// A sloopy hack, so we can test with different segment row count without worrying that
 	// they are re-calculated in every compaction.
@@ -141,6 +163,7 @@ func NewCompactionTrigger(
 	handler meta.Handler,
 	indexVersionManager index.IndexEngineVersionManager,
 ) *compactionTrigger {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &compactionTrigger{
 		meta:                      mt,
 		indexMeta:                 indexMeta,
@@ -150,7 +173,10 @@ func NewCompactionTrigger(
 		inspector:                 inspector,
 		indexEngineVersionManager: indexVersionManager,
 		handler:                   handler,
+		deferredRetries:           make(map[int64]*time.Timer),
 		closeCh:                   lifetime.NewSafeChan(),
+		ctx:                       ctx,
+		cancel:                    cancel,
 	}
 }
 
@@ -176,6 +202,8 @@ func (t *compactionTrigger) schedule() {
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return
 	}
+	t.globalLoopRunning.Store(true)
+	defer t.globalLoopRunning.Store(false)
 
 	for {
 		select {
@@ -218,6 +246,75 @@ func (t *compactionTrigger) work() {
 func (t *compactionTrigger) Stop() {
 	t.closeCh.Close()
 	t.closeWaiter.Wait()
+	if t.cancel != nil {
+		t.cancel()
+	}
+	t.deferredRetryMu.Lock()
+	for collectionID, timer := range t.deferredRetries {
+		timer.Stop()
+		delete(t.deferredRetries, collectionID)
+	}
+	t.deferredRetryMu.Unlock()
+}
+
+// armDeferredRetry schedules one retry for a collection whose
+// collection-scoped round left single compaction candidates unsubmitted while
+// no global round runs, whether admission deferred them, the inspector was
+// full or the queue refused their plans. After the cadence a global round
+// would have had, the collection gets a plain signal, so its segments are
+// reconsidered once the bucket has refilled or the inspector has room, even if
+// it never flushes again. One retry per collection is pending at a time; a
+// retry round that still leaves candidates behind arms the next one.
+func (t *compactionTrigger) armDeferredRetry(collectionID int64) {
+	t.deferredRetryMu.Lock()
+	defer t.deferredRetryMu.Unlock()
+	if t.closeCh.IsClosed() {
+		return
+	}
+	if _, pending := t.deferredRetries[collectionID]; pending {
+		return
+	}
+	if t.deferredRetries == nil {
+		t.deferredRetries = make(map[int64]*time.Timer)
+	}
+	delay := Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second)
+	t.deferredRetries[collectionID] = time.AfterFunc(delay, func() { t.fireDeferredRetry(collectionID) })
+}
+
+// fireDeferredRetry sends the retry signal armed by armDeferredRetry. A
+// signal that cannot be queued is armed again rather than dropped, since
+// nothing else would reconsider the deferred segments.
+func (t *compactionTrigger) fireDeferredRetry(collectionID int64) {
+	t.deferredRetryMu.Lock()
+	delete(t.deferredRetries, collectionID)
+	t.deferredRetryMu.Unlock()
+	if t.closeCh.IsClosed() {
+		return
+	}
+	ctx := t.triggerContext()
+	_, err := t.TriggerCompaction(ctx, NewCompactionSignal().WithWaitResult(false).WithCollectionID(collectionID))
+	if err != nil {
+		mlog.Warn(ctx, "failed to retry deferred single compaction candidates, will retry later",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		t.armDeferredRetry(collectionID)
+	}
+}
+
+// plansSingleCompaction reports whether a signal's round plans single
+// compaction. Only the global round does, unless no global round runs (auto
+// compaction disabled globally while a collection enables it): then the
+// collection-scoped signals take its place.
+func (t *compactionTrigger) plansSingleCompaction(signal *CompactionSignal) bool {
+	return signal.isGlobal() || !t.globalLoopRunning.Load()
+}
+
+// triggerContext returns the trigger's component context, or a background
+// one for a trigger built without the constructor (tests).
+func (t *compactionTrigger) triggerContext() context.Context {
+	if t.ctx != nil {
+		return t.ctx
+	}
+	return context.Background()
 }
 
 func (t *compactionTrigger) getCollection(collectionID UniqueID) (*meta.CollectionInfo, error) {
@@ -328,7 +425,24 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		return true
 	}
 
+	// A collection-scoped round that runs without a global loop is the only
+	// round that reconsiders its single compaction candidates, so when it ends
+	// with candidates it could not submit, deferred by admission, held back by
+	// a full inspector, refused by the queue or left behind by an error before
+	// planning, it arms its own retry. The retry signal takes this same path,
+	// so a retry that finds the inspector full is re-armed rather than lost.
+	// A collection whose segments are gone yields no candidate group and arms
+	// nothing, so the retries end with the collection.
+	plansSingle := t.plansSingleCompaction(signal)
+	retryLater := false
+	defer func() {
+		if retryLater && plansSingle && !signal.isGlobal() && !signal.IsForce {
+			t.armDeferredRetry(signal.CollectionID)
+		}
+	}()
+
 	if inspectorFull() {
+		retryLater = true
 		return nil
 	}
 
@@ -336,6 +450,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn(context.TODO(), "handle signal failed, get candidates return error", mlog.Err(err))
+		retryLater = true
 		return err
 	}
 
@@ -344,15 +459,23 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		return nil
 	}
 
+	// Every group is prepared before any plan is made, so the single
+	// compaction candidates of the whole signal go through admission in one
+	// pass: the budget is then shared across collections instead of being
+	// drained by whichever group comes first.
+	type preparedGroup struct {
+		group        meta.ChanPartSegments
+		coll         *meta.CollectionInfo
+		compactTime  *view.CompactTime
+		expectedSize int64
+		candidates   []*policy.SingleCandidate
+	}
+	prepared := make([]*preparedGroup, 0, len(groups))
 	for _, group := range groups {
 		log := mlog.With(
 			mlog.Int64("group.partitionID", group.PartitionID),
 			mlog.String("group.channel", group.ChannelName),
 		)
-
-		if inspectorFull() {
-			return nil
-		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 			group.Segments = index.FilterInIndexedSegments(context.Background(), t.handler, t.indexMeta, signal.IsForce, group.Segments...)
@@ -362,6 +485,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		if err != nil {
 			log.Warn(context.TODO(), "get collection info failed, skip handling compaction", mlog.Err(err))
 			if signal.CollectionID != 0 {
+				retryLater = true
 				return err
 			}
 			continue
@@ -381,15 +505,79 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 		if err != nil {
 			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction", mlog.Err(err))
 			if signal.CollectionID != 0 {
+				retryLater = true
 				return err
 			}
 			continue
 		}
 
-		expectedSize := policy.GetExpectedSegmentSize(t.indexMeta, coll.ID, coll.Schema)
-		plans := t.generatePlans(group.Segments, signal, ct, expectedSize)
+		pg := &preparedGroup{group: group, coll: coll, compactTime: ct, expectedSize: policy.GetExpectedSegmentSize(t.indexMeta, coll.ID, coll.Schema)}
+		if plansSingle {
+			for _, segment := range group.Segments {
+				if reason := t.singleCompactionReason(segment, ct); reason != policy.SingleReasonNone {
+					pg.candidates = append(pg.candidates, policy.NewSingleCandidate(segment, reason))
+				}
+			}
+		}
+		prepared = append(prepared, pg)
+	}
+
+	// Admission limits how many single compaction candidates this round may
+	// submit (see policy/admission.go). Only the round that plans single
+	// compaction takes part: a manual signal expresses operator intent and
+	// bypasses admission, and while the global loop runs a collection-scoped
+	// signal (a flush) plans no single compaction at all, leaving its segments
+	// to the next global round, so a busy collection cannot drain the shared
+	// budget with its flush signals. The limit is also
+	// bounded by the room left in the inspector so no token is spent on a plan
+	// that would be dropped, and tokens of admitted segments that still do not
+	// reach the queue are given back when the signal is done.
+	var admission *singleAdmission
+	if !signal.IsForce {
+		var candidates []*policy.SingleCandidate
+		for _, pg := range prepared {
+			candidates = append(candidates, pg.candidates...)
+		}
+		admitted, deferred := 0, 0
+		if plansSingle {
+			var admittedCandidates []*policy.SingleCandidate
+			admittedCandidates, deferred = policy.GetSingleCompactionAdmitter().Admit(t.triggerContext(), policy.AdmissionSourceTrigger, candidates, t.inspector.getRemainingCapacity())
+			admission = newSingleAdmission(admittedCandidates, deferred, candidates)
+			admitted = len(admittedCandidates)
+		} else {
+			admission = newSingleAdmission(nil, 0, nil)
+		}
+		defer func() {
+			// Admitted candidates whose plan never reached the queue get
+			// their tokens back and are reconsidered by the retry.
+			if admission.settle(policy.GetSingleCompactionAdmitter()) > 0 {
+				retryLater = true
+			}
+		}()
+		if deferred > 0 {
+			log.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
+				mlog.Int("admitted", admitted),
+				mlog.Int("deferred", deferred))
+			retryLater = true
+		}
+	}
+
+	for _, pg := range prepared {
+		group, coll, ct, expectedSize := pg.group, pg.coll, pg.compactTime, pg.expectedSize
+		log := mlog.With(
+			mlog.Int64("group.PartitionID", group.PartitionID),
+			mlog.String("group.channel", group.ChannelName),
+		)
+
+		if inspectorFull() {
+			retryLater = true
+			return nil
+		}
+
+		plans := t.generatePlansWithAdmission(group.Segments, signal, ct, expectedSize, admission)
 		for _, bucket := range plans {
 			if inspectorFull() {
+				retryLater = true
 				return nil
 			}
 			inputSegmentIDs := lo.Map(bucket.segments, func(s *meta.SegmentInfo, _ int) int64 { return s.GetID() })
@@ -433,6 +621,7 @@ func (t *compactionTrigger) handleSignal(signal *CompactionSignal) error {
 					mlog.Err(err))
 				continue
 			}
+			admission.enqueued(inputSegmentIDs...)
 
 			log.Info(context.TODO(), "time cost of generating compaction",
 				mlog.Int64("planID", task.GetPlanID()),
@@ -454,13 +643,87 @@ type compactionBucket struct {
 }
 
 func (t *compactionTrigger) generatePlans(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64) []*compactionBucket {
-	if Params.DataCoordCfg.TwoTierCompaction.GetAsBool() {
-		return t.generatePlansTwoTier(segments, signal, compactTime, expectedSize)
-	}
-	return t.generatePlansLegacy(segments, signal, compactTime, expectedSize)
+	return t.generatePlansWithAdmission(segments, signal, compactTime, expectedSize, nil)
 }
 
-func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64) []*compactionBucket {
+// generatePlansWithAdmission generates plans with the single compaction
+// candidates restricted to the ones admission let through this round. A nil
+// admission plans every eligible segment, as a force signal does.
+func (t *compactionTrigger) generatePlansWithAdmission(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64, admission *singleAdmission) []*compactionBucket {
+	if Params.DataCoordCfg.TwoTierCompaction.GetAsBool() {
+		return t.generatePlansTwoTier(segments, signal, compactTime, expectedSize, admission)
+	}
+	return t.generatePlansLegacy(segments, signal, compactTime, expectedSize, admission)
+}
+
+// singleAdmission is the outcome of one admission round: which segments are
+// eligible, which of them may be planned as single compaction, and which of
+// those actually reached the queue, so the rest can be refunded. The planner
+// reads the classification from it instead of classifying again.
+type singleAdmission struct {
+	eligible map[int64]struct{}
+	admitted map[int64]struct{}
+	deferred int
+	reached  map[int64]struct{}
+}
+
+func newSingleAdmission(admitted []*policy.SingleCandidate, deferred int, eligible []*policy.SingleCandidate) *singleAdmission {
+	a := &singleAdmission{
+		eligible: make(map[int64]struct{}, len(eligible)),
+		admitted: make(map[int64]struct{}, len(admitted)),
+		deferred: deferred,
+		reached:  make(map[int64]struct{}),
+	}
+	for _, c := range eligible {
+		a.eligible[c.Segment().GetID()] = struct{}{}
+	}
+	for _, c := range admitted {
+		a.admitted[c.Segment().GetID()] = struct{}{}
+	}
+	return a
+}
+
+// single reports whether the planner should treat the segment as a single
+// compaction candidate: eligible and admitted this round. A nil admission
+// (force signal, or a planner called outside handleSignal) classifies the
+// segment itself. isSingle is the planner-side answer, heldBack says the
+// segment is eligible but deferred, so it must not be merged either.
+func (a *singleAdmission) single(t *compactionTrigger, segment *meta.SegmentInfo, compactTime *view.CompactTime) (isSingle, heldBack bool) {
+	if a == nil {
+		return t.ShouldDoSingleCompaction(segment, compactTime), false
+	}
+	id := segment.GetID()
+	if _, ok := a.admitted[id]; ok {
+		return true, false
+	}
+	_, eligible := a.eligible[id]
+	return false, eligible
+}
+
+// enqueued records that a task carrying these segments reached the queue.
+func (a *singleAdmission) enqueued(segmentIDs ...int64) {
+	if a == nil {
+		return
+	}
+	for _, id := range segmentIDs {
+		if _, ok := a.admitted[id]; ok {
+			a.reached[id] = struct{}{}
+		}
+	}
+}
+
+// settle gives back the tokens of admitted segments that never reached the
+// queue, whether the planner left them out or the enqueue failed.
+func (a *singleAdmission) settle(admitter *policy.SingleCompactionAdmitter) (refunded int) {
+	if a == nil {
+		return 0
+	}
+	refunded = len(a.admitted) - len(a.reached)
+	admitter.Refund(policy.AdmissionSourceTrigger, refunded)
+	return refunded
+}
+
+func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64, admission *singleAdmission) []*compactionBucket {
 	if len(segments) == 0 {
 		mlog.Warn(context.TODO(), "the number of candidate segments is 0, skip to generate compaction plan")
 		return nil
@@ -479,9 +742,14 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, s
 		segment := segment.ShadowClone()
 		if signal.IsForce {
 			compactable = append(compactable, segment)
-		} else if t.ShouldDoSingleCompaction(segment, compactTime) {
+			continue
+		}
+		// A candidate held back by admission is neither rewritten now nor
+		// merged as compactable: it is re-evaluated on a later round.
+		isSingle, heldBack := admission.single(t, segment, compactTime)
+		if isSingle {
 			prioritized = append(prioritized, segment)
-		} else if !isFullSegment(expectedSize, segment.GetResidualSegmentSize()) {
+		} else if !heldBack && !isFullSegment(expectedSize, segment.GetResidualSegmentSize()) {
 			compactable = append(compactable, segment)
 		}
 	}
@@ -583,7 +851,7 @@ func (t *compactionTrigger) generatePlansTwoTier(segments []*meta.SegmentInfo, s
 	return buckets
 }
 
-func (t *compactionTrigger) generatePlansLegacy(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64) []*compactionBucket {
+func (t *compactionTrigger) generatePlansLegacy(segments []*meta.SegmentInfo, signal *CompactionSignal, compactTime *view.CompactTime, expectedSize int64, admission *singleAdmission) []*compactionBucket {
 	if len(segments) == 0 {
 		mlog.Warn(context.TODO(), "the number of candidate segments is 0, skip to generate compaction plan")
 		return nil
@@ -595,11 +863,21 @@ func (t *compactionTrigger) generatePlansLegacy(segments []*meta.SegmentInfo, si
 
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
-		if signal.IsForce || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if signal.IsForce {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
-		} else if t.isSmallSegment(segment, expectedSize) {
+			continue
+		}
+		// A candidate held back by admission is neither rewritten now nor
+		// merged as a small segment: it is re-evaluated on a later round.
+		isSingle, heldBack := admission.single(t, segment, compactTime)
+		switch {
+		case isSingle:
+			prioritizedCandidates = append(prioritizedCandidates, segment)
+		case heldBack:
+			nonPlannedSegments = append(nonPlannedSegments, segment)
+		case t.isSmallSegment(segment, expectedSize):
 			smallCandidates = append(smallCandidates, segment)
-		} else {
+		default:
 			nonPlannedSegments = append(nonPlannedSegments, segment)
 		}
 	}
@@ -827,12 +1105,34 @@ func (t *compactionTrigger) ShouldCompactExpiryWithTTLField(compactTime *view.Co
 
 	idx := getExpirQuantilesIndexByRatio(ratio, len(percentiles))
 	expirationTime := percentiles[idx]
+	// The quantiles are 20% buckets, so jittering the ratio would rarely move
+	// the index. The jitter is applied in time instead: the expiration is
+	// pushed later by (multiplier-1) x the width of the neighboring quantile
+	// step, which spreads a same-aged cohort over the shape of its own TTL
+	// distribution. Quantile slots past the rows that carry a positive TTL hold
+	// the never-expire sentinel (math.MaxInt64, see calculateExpirQuantiles);
+	// they are not a real step, so the jitter never measures against them.
+	if mult := policy.SingleCompactionThresholdMultiplier(segment.ID); mult > 1 && expirationTime != math.MaxInt64 {
+		var step int64
+		if idx+1 < len(percentiles) && percentiles[idx+1] != math.MaxInt64 && percentiles[idx+1] > expirationTime {
+			step = percentiles[idx+1] - expirationTime
+		} else if idx > 0 && expirationTime > percentiles[idx-1] {
+			step = expirationTime - percentiles[idx-1]
+		}
+		expirationTime += int64(float64(step) * (mult - 1))
+	}
 	// If current time (startTime) is greater than the expiration time at this percentile, trigger compaction
 	startTs := tsoutil.PhysicalTime(compactTime.StartTime)
 	return startTs.UnixMicro() >= expirationTime && expirationTime > 0
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, compactTime *view.CompactTime) bool {
+	return t.singleCompactionReason(segment, compactTime) != policy.SingleReasonNone
+}
+
+// singleCompactionReason classifies why a segment is eligible for single
+// compaction, so the admission limiter can pace the two shapes fairly.
+func (t *compactionTrigger) singleCompactionReason(segment *meta.SegmentInfo, compactTime *view.CompactTime) policy.SingleCompactionReason {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	stats := segment.EnsureStats()
@@ -841,8 +1141,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 	// Strict-tolerance path: exact min via Stats.TimestampFrom. For import
 	// segments commit_timestamp overrides every row's effective timestamp.
 	earliestFromTs := tsoutil.EffectiveTimestamp(stats.GetTimestampFrom(), commitTs)
+	// Pure age-based TTL retention: not delete-driven, deliberately not
+	// jittered (delaying retention cleanup is a semantic change), and served
+	// in its own admission class so it cannot be starved.
 	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
-		return true
+		return policy.SingleReasonRetention
 	}
 
 	// Ratio + size path: derive an expired-row fraction from the quantile
@@ -856,7 +1159,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 	// the segment-wide average. To prevent over-triggering on segments
 	// whose precise expired-byte sum sits exactly at threshold, we shift
 	// the fraction down one 20% bucket.
-	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()
+	// The expiry thresholds share the per-segment jitter; the jittered ratio is
+	// capped at 1 so a fully expired segment always qualifies.
+	expiryMult := policy.SingleCompactionThresholdMultiplier(segment.ID)
+	ratio := min(Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*expiryMult, 1)
 	expiredFraction := 0.0
 	if commitTs > 0 {
 		if commitTs < compactTime.ExpireTime {
@@ -880,23 +1186,24 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 	}
 	expiredApproxSize := int64(expiredFraction * float64(stats.GetInsertBinlogSize()))
 	if expiredFraction >= ratio ||
-		expiredApproxSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
+		float64(expiredApproxSize) > float64(Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64())*expiryMult {
 		mlog.Info(context.TODO(), "expired entities exceed ratio/size threshold, trigger compaction",
 			mlog.Int64("segmentID", segment.ID),
 			mlog.Float64("expiredFraction", expiredFraction),
 			mlog.Int64("approxExpiredSize", expiredApproxSize),
 			mlog.Bool("createdByCompaction", segment.CreatedByCompaction),
-			mlog.Int64s("compactionFrom", segment.CompactionFrom))
-		return true
+			mlog.Int64s("compactionFrom", segment.CompactionFrom),
+			mlog.Float64("jitterMultiplier", expiryMult))
+		return policy.SingleReasonRetention
 	}
 
 	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
 	if policy.HasTooManyDeletions(segment) {
-		return true
+		return policy.SingleReasonAccumulation
 	}
 
 	if t.ShouldRebuildSegmentIndex(segment) {
-		return true
+		return policy.SingleReasonRetention
 	}
 
 	if t.ShouldCompactExpiryWithTTLField(compactTime, segment) {
@@ -904,10 +1211,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 			mlog.FieldCollectionID(segment.CollectionID),
 			mlog.FieldPartitionID(segment.PartitionID),
 			mlog.String("channel", segment.InsertChannel))
-		return true
+		return policy.SingleReasonRetention
 	}
 
-	return false
+	return policy.SingleReasonNone
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo) bool {
