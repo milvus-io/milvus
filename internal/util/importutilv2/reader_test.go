@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -640,6 +642,11 @@ func TestSnapshotSharedL0StorageAndReader(t *testing.T) {
 	require.EqualValues(t, 6, file.SnapshotSource.Version, "the persisted descriptor must remain compact")
 	_, err = factory.NewReader(ctx, schema, file, 1024, 1024, nil)
 	require.ErrorIs(t, err, merr.ErrServiceUnimplemented, "a shared descriptor cannot be read without its prepared bitmaps")
+	v2 := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
+		Version: 14, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/source.avro"},
+	}}
+	_, err = factory.NewReader(ctx, schema, v2, 1024, 1024, nil)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	_, err = factory.NewReader(ctx, schema, &internalpb.ImportFile{}, 1024, 1024, shared)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	broken := proto.Clone(file).(*internalpb.ImportFile)
@@ -1285,4 +1292,283 @@ func TestImportNewReader(t *testing.T) {
 		Paths: []string{"1.txt"},
 	}
 	checkFunc("unexpected file type", req, options)
+}
+
+func TestSnapshotV2DescriptorVersions(t *testing.T) {
+	for version := uint32(1); version <= 18; version++ {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			source := &internalpb.SnapshotImportSource{Version: version, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/data.avro", SnapshotFormatVersion: 6}}
+			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "referenced"}}
+			contract := SnapshotSourceContractVersion(source)
+			if contract == 2 || contract == 4 {
+				opts = append(opts, &commonpb.KeyValuePair{Key: ExternalSpec, Value: `{"provider":"aws","region":"us-east-1","access_key_id":"key","secret_access_key":"secret"}`})
+			}
+			if contract == 3 || contract == 4 {
+				opts = append(opts, &commonpb.KeyValuePair{Key: PartitionMapping, Value: `{"source":"target"}`})
+				source.TargetPartitionId = 100
+			}
+			if SnapshotSourceUsesSharedL0(source) {
+				source.SourceChannel, source.SourcePartitionId = "source", 10
+			}
+			file := &internalpb.ImportFile{SnapshotSource: source}
+			err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, opts)
+			if version < 10 || version > 17 {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			for _, mutate := range []func(*internalpb.SnapshotImportSource){
+				func(s *internalpb.SnapshotImportSource) { s.ManifestPath = packed.MarshalManifestPath("root/data", 1) },
+				func(s *internalpb.SnapshotImportSource) { s.V2Reference.SegmentId = 0 },
+				func(s *internalpb.SnapshotImportSource) { s.V2Reference.SnapshotManifestPath = " " },
+				func(s *internalpb.SnapshotImportSource) { s.V2Reference.SnapshotFormatVersion = -1 },
+				func(s *internalpb.SnapshotImportSource) { s.V2Reference.OriginalKeyPrefix = proto.String("") },
+			} {
+				bad := proto.Clone(source).(*internalpb.SnapshotImportSource)
+				mutate(bad)
+				require.Error(t, ValidateSnapshotImportFiles([]*internalpb.ImportFile{{SnapshotSource: bad}}, opts))
+			}
+		})
+	}
+}
+
+func TestResolveSnapshotV2Avro(t *testing.T) {
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager()
+	root := t.TempDir()
+	uri := root + "/snapshots/1/metadata/2.json"
+	avroPath := root + "/snapshots/1/manifests/arbitrary.avro"
+	for _, mode := range []string{"referenced", "moved", "bucket_root", "absent_prefix", "wrong_id", "wrong_version", "wrong_commit", "wrong_scope", "l0", "missing", "corrupt", "invalid_avro_path", "outside_manifest", "outside_data", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			dataPath := root + "/files/insert"
+			source := &internalpb.SnapshotImportSource{Version: 14, SourceCommitTimestamp: 300, SourceChannel: "source", SourcePartitionId: 10,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: avroPath, SnapshotFormatVersion: 6}}
+			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: uri}, {Key: SnapshotLayout, Value: "self-contained"}}
+			segment := &datapb.SegmentDescription{SegmentId: 20, PartitionId: 10, ChannelName: "source", StorageVersion: storage.StorageV2, CommitTimestamp: 300, SegmentLevel: datapb.SegmentLevel_L1}
+			switch mode {
+			case "referenced":
+				opts[len(opts)-1].Value = "referenced"
+			case "moved":
+				source.V2Reference.OriginalKeyPrefix = proto.String("old")
+				dataPath = "old/files/insert"
+			case "bucket_root":
+				source.V2Reference.OriginalKeyPrefix = proto.String("")
+				dataPath = "files/insert"
+			case "wrong_id":
+				segment.SegmentId++
+			case "wrong_version":
+				segment.StorageVersion = storage.StorageV3
+			case "wrong_commit":
+				segment.CommitTimestamp++
+			case "wrong_scope":
+				segment.ChannelName = "other"
+			case "l0":
+				segment.SegmentLevel = datapb.SegmentLevel_L0
+			case "missing":
+				source.V2Reference.SnapshotManifestPath += ".missing"
+			case "outside_manifest":
+				source.V2Reference.SnapshotManifestPath = "/outside/manifest"
+			case "invalid_avro_path":
+				source.V2Reference.SnapshotManifestPath = avroPath + "/../data"
+			case "outside_data":
+				dataPath = "/outside/insert"
+			}
+			segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: dataPath}}}}
+			data, err := snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			if mode == "corrupt" {
+				data = []byte("not avro")
+			}
+			require.NoError(t, cm.Write(ctx, avroPath, data))
+			readCtx := ctx
+			if mode == "cancel" {
+				c, cancel := context.WithCancel(ctx)
+				cancel()
+				readCtx = c
+			}
+			resolved, err := resolveSnapshotV2Source(readCtx, cm, source, opts)
+			success := mode == "referenced" || mode == "moved" || mode == "bucket_root" || mode == "absent_prefix" || mode == "outside_data"
+			if success {
+				require.NoError(t, err)
+				validate, err := SnapshotPathValidator(opts, cm)
+				require.NoError(t, err)
+				if mode == "outside_data" {
+					require.Error(t, validate(resolved.Binlogs[0].Binlogs[0].LogPath))
+				} else {
+					require.Equal(t, root+"/files/insert", resolved.Binlogs[0].Binlogs[0].LogPath)
+				}
+			} else {
+				require.Error(t, err)
+				require.Nil(t, resolved)
+			}
+		})
+	}
+}
+
+func TestSnapshotV2CrossBucketRebase(t *testing.T) {
+	type bucketIdentity interface{ BucketName() string }
+	type sourceCM struct {
+		storage.ChunkManager
+		bucketIdentity
+	}
+	cm := &sourceCM{}
+	bucket := mockey.Mock((*sourceCM).BucketName).Return("new-bucket").Build()
+	defer bucket.UnPatch()
+	for _, mode := range []string{"moved", "unmatched_prefix", "credentials", "referenced"} {
+		t.Run(mode, func(t *testing.T) {
+			source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "new/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6, OriginalKeyPrefix: proto.String("old")}}
+			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: "s3://new-bucket/new/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "self-contained"}}
+			path := "s3://old-bucket/old/files/insert"
+			if mode == "unmatched_prefix" {
+				path = "s3://old-bucket/other/files/insert"
+			}
+			if mode == "credentials" {
+				path = "s3://user:secret@old-bucket/old/files/insert"
+			}
+			if mode == "referenced" {
+				source.V2Reference.OriginalKeyPrefix = nil
+				opts[len(opts)-1].Value = "referenced"
+			}
+			data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: path}}}}})
+			require.NoError(t, err)
+			read := mockey.Mock((*sourceCM).Read).Return(data, nil).Build()
+			defer read.UnPatch()
+			segment, err := resolveSnapshotV2Source(context.Background(), cm, source, opts)
+			if mode == "credentials" || mode == "referenced" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			validate, err := SnapshotPathValidator(opts, cm)
+			require.NoError(t, err)
+			err = validate(segment.Binlogs[0].Binlogs[0].LogPath)
+			if mode == "unmatched_prefix" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "new/files/insert", segment.Binlogs[0].Binlogs[0].LogPath)
+			}
+		})
+	}
+}
+
+func TestSnapshotV2ReaderFactoryDispatch(t *testing.T) {
+	paramtable.Init()
+	for _, mode := range []string{"private_v2", "shared_v2", "avro_failure", "mixed_v3"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			cm := storage.NewLocalChunkManager()
+			cfg := &indexpb.StorageConfig{StorageType: "local"}
+			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "referenced"}}
+			source := &internalpb.SnapshotImportSource{Version: 10, SourceCommitTimestamp: 300,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6}}
+			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: "root/data"}}}}}
+			var shared *binlog.SnapshotL0Deletes
+			if mode == "shared_v2" {
+				source.Version, source.SourceChannel, source.SourcePartitionId = 14, "source", 10
+				shared = &binlog.SnapshotL0Deletes{}
+			}
+			if mode == "mixed_v3" {
+				source.V2Reference = nil
+				source.ManifestPath = packed.MarshalManifestPath("root/data", 3)
+			}
+			before := proto.Clone(source)
+			var readErr error
+			if mode == "avro_failure" {
+				readErr = merr.ErrIoPermissionDenied
+			}
+			avro := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSegmentManifest).Return(segment, readErr).Build()
+			defer avro.UnPatch()
+			v2 := mockey.Mock(binlog.NewStorageV2SnapshotReader).When(func(_ context.Context, gotCM storage.ChunkManager, _ *schemapb.CollectionSchema,
+				gotCfg *indexpb.StorageConfig, gotSegment *datapb.SegmentDescription, _, _ uint64, _ int, _ binlog.SourceEncryption,
+				gotSource *internalpb.SnapshotImportSource, budget int64, gotShared *binlog.SnapshotL0Deletes, _ func(string) error,
+			) bool {
+				require.Same(t, cm, gotCM)
+				require.Same(t, cfg, gotCfg)
+				require.EqualValues(t, 1, gotSource.Version)
+				require.EqualValues(t, 300, gotSource.SourceCommitTimestamp)
+				require.Empty(t, gotSource.SourceChannel)
+				require.EqualValues(t, 1024, budget)
+				require.Same(t, shared, gotShared)
+				if shared == nil {
+					require.Equal(t, segment.Binlogs, gotSegment.Binlogs)
+				} else {
+					require.Nil(t, gotSegment, "shared reads must borrow prepared inputs without reopening Avro")
+				}
+				return true
+			}).Return(nil, merr.ErrIoKeyNotFound).Build()
+			defer v2.UnPatch()
+			v3 := mockey.Mock(binlog.NewStorageV3ManifestReader).When(func(_ context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema,
+				_ *indexpb.StorageConfig, path string, _, _ uint64, _ int, _ binlog.SourceEncryption,
+				gotSource *internalpb.SnapshotImportSource, _ int64, _ func(string) error,
+			) bool {
+				require.Equal(t, source.ManifestPath, path)
+				require.EqualValues(t, 1, gotSource.Version)
+				return true
+			}).Return(nil, merr.ErrIoKeyNotFound).Build()
+			defer v3.UnPatch()
+			_, err := NewReaderFactory(ctx, cm, cfg, opts).NewReader(ctx, nil, &internalpb.ImportFile{SnapshotSource: source}, 1024, 1024, shared)
+			if mode == "avro_failure" {
+				require.ErrorIs(t, err, readErr)
+				require.Zero(t, v2.Times())
+			} else {
+				require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+				if mode == "mixed_v3" {
+					require.Equal(t, 1, v3.Times())
+					require.Zero(t, v2.Times())
+				} else {
+					require.Equal(t, 1, v2.Times())
+					require.Zero(t, v3.Times())
+				}
+			}
+			if mode == "shared_v2" || mode == "mixed_v3" {
+				require.Zero(t, avro.Times())
+			} else {
+				require.Equal(t, 1, avro.Times())
+			}
+			require.True(t, proto.Equal(before, source), "reader adaptation must preserve the durable descriptor")
+		})
+	}
+}
+
+func TestSnapshotV2FactoryPreparesMixedDeletes(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager()
+	cfg := &indexpb.StorageConfig{StorageType: "local"}
+	opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "referenced"}}
+	v2 := &internalpb.SnapshotImportSource{Version: 14, SourceChannel: "source", SourcePartitionId: 10,
+		V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6}}
+	v3 := &internalpb.SnapshotImportSource{Version: 14, SourceChannel: "source", SourcePartitionId: 10, ManifestPath: packed.MarshalManifestPath("root/data", 1)}
+	files := []*internalpb.ImportFile{{SnapshotSource: v2}, {SnapshotSource: v3}}
+	l0 := &internalpb.SnapshotImportL0Source{SourceChannel: "source", SourcePartitionId: 10}
+	avro := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSegmentManifest).Return(&datapb.SegmentDescription{
+		SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1, ChannelName: "source", PartitionId: 10,
+	}, nil).Build()
+	defer avro.UnPatch()
+	want := &binlog.SnapshotL0Deletes{}
+	build := mockey.Mock(binlog.BuildSnapshotDeleteMasksWithV2).To(func(gotCtx context.Context, gotCM storage.ChunkManager,
+		_ *schemapb.CollectionSchema, gotCfg *indexpb.StorageConfig, sources []*internalpb.SnapshotImportSource,
+		gotL0 *internalpb.SnapshotImportL0Source, _, _ uint64, deletes, bitmaps int64, _ binlog.SourceEncryption,
+		_ func(string) error, resolve binlog.SnapshotV2Resolver,
+	) (*binlog.SnapshotL0Deletes, error) {
+		require.Same(t, cm, gotCM)
+		require.Same(t, cfg, gotCfg)
+		require.Equal(t, []*internalpb.SnapshotImportSource{v2, v3}, sources)
+		require.Same(t, l0, gotL0)
+		require.EqualValues(t, 1024, deletes)
+		require.EqualValues(t, 2048, bitmaps)
+		_, err := resolve(gotCtx, v2)
+		require.NoError(t, err)
+		return want, nil
+	}).Build()
+	defer build.UnPatch()
+	got, err := NewReaderFactory(ctx, cm, cfg, opts).PrepareSnapshotDeletes(ctx, nil, files, l0, 1024, 2048)
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, 1, avro.Times())
 }

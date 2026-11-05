@@ -49,6 +49,14 @@ import (
 
 // =========================== Test Helper Functions ===========================
 
+func TestSnapshotReaderSegmentManifestReadFailure(t *testing.T) {
+	reader := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager())
+	segment, err := reader.ReadSegmentManifest(context.Background(), path.Join(t.TempDir(), "missing.avro"), 6)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to read manifest file")
+	require.Nil(t, segment)
+}
+
 func createTestSnapshotData() *snapshotstorage.SnapshotData {
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
