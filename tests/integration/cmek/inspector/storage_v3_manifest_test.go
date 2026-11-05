@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iskorotkov/avro/v2/ocf"
+	"github.com/hamba/avro/v2/ocf"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"

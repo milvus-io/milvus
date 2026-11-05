@@ -25,7 +25,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/iskorotkov/avro/v2/ocf"
+	"github.com/hamba/avro/v2/ocf"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
@@ -118,7 +118,6 @@ func ParseParquetObjectsV3(raw []byte, basePath string) ([]ParquetObjectV3, erro
 	if err != nil {
 		return nil, err
 	}
-	defer decoder.Close()
 	if !decoder.HasNext() {
 		return nil, errors.New("manifest has no record")
 	}
