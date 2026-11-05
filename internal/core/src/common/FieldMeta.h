@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -36,6 +37,8 @@ using TokenizerParams = std::string;
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params);
 
+// A lightweight handle to an immutable field description. Copies share the
+// description without retaining its originating Schema or Collection.
 class FieldMeta {
  public:
     FieldMeta(const FieldMeta&) = default;
@@ -52,14 +55,16 @@ class FieldMeta {
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          nullable_(nullable),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(!IsVectorDataType(type_));
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .nullable_ = nullable,
+              .default_value_ = std::move(default_value),
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(!IsVectorDataType(data_->type_));
     }
 
     FieldMeta(FieldName name,
@@ -70,15 +75,17 @@ class FieldMeta {
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          nullable_(nullable),
-          string_info_(StringInfo{max_length}),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(IsStringDataType(type_));
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .nullable_ = nullable,
+              .default_value_ = std::move(default_value),
+              .string_info_ = StringInfo{max_length},
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(IsStringDataType(data_->type_));
     }
 
     FieldMeta(FieldName name,
@@ -92,20 +99,23 @@ class FieldMeta {
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          nullable_(nullable),
-          string_info_(StringInfo{
-              max_length,
-              enable_match,
-              enable_analyzer,
-              std::move(params),
-          }),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(IsStringDataType(type_));
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .nullable_ = nullable,
+              .default_value_ = std::move(default_value),
+              .string_info_ =
+                  StringInfo{
+                      max_length,
+                      enable_match,
+                      enable_analyzer,
+                      std::move(params),
+                  },
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(IsStringDataType(data_->type_));
     }
 
     FieldMeta(FieldName name,
@@ -119,46 +129,35 @@ class FieldMeta {
               std::string local_format = LOCAL_FORMAT_RAW,
               std::optional<milvus::proto::schema::TypeSchema> type_schema =
                   std::nullopt,
-              TypeParams type_params = {})
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          element_type_(element_type),
-          nullable_(nullable),
-          element_nullable_(element_nullable),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)),
-          type_schema_(std::move(type_schema)),
-          array_type_params_(std::move(type_params)) {
-        Assert(type_ == DataType::ARRAY);
-        AssertInfo(element_type_ != DataType::ARRAY || type_schema_.has_value(),
+              TypeParams type_params = {}) {
+        Assert(type == DataType::ARRAY);
+        AssertInfo(element_type != DataType::ARRAY || type_schema.has_value(),
                    "nested ARRAY field {} requires type_schema",
-                   name_.get());
-        if (type_schema_.has_value()) {
+                   name.get());
+        if (type_schema.has_value()) {
             AssertInfo(
-                type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
+                type == DataType::ARRAY && element_type == DataType::ARRAY,
                 "type_schema is only supported for nested ARRAY "
                 "FieldMeta");
-            ValidateNestedTypeSchema(*type_schema_, name_.get());
+            ValidateNestedTypeSchema(*type_schema, name.get());
 
-            AssertInfo(type_schema_->nullable() == nullable_,
+            AssertInfo(type_schema->nullable() == nullable,
                        "nested ARRAY field {} root nullable does not match "
                        "FieldSchema.nullable",
-                       name_.get());
+                       name.get());
             AssertInfo(
-                type_schema_->array_element().nullable() == element_nullable_,
+                type_schema->array_element().nullable() == element_nullable,
                 "nested ARRAY field {} element nullable does not "
                 "match FieldSchema.element_nullable",
-                name_.get());
-        } else if (element_nullable_) {
-            ValidateArrayLeafType(element_type_, name_.get());
+                name.get());
+        } else if (element_nullable) {
+            ValidateArrayLeafType(element_type, name.get());
             proto::schema::TypeSchema type;
-            type.set_nullable(nullable_);
+            type.set_nullable(nullable);
             auto* leaf = type.mutable_array_element();
-            leaf->set_leaf_type(ToProtoDataType(element_type_));
+            leaf->set_leaf_type(ToProtoDataType(element_type));
             leaf->set_nullable(true);
-            for (const auto& [key, value] : array_type_params_) {
+            for (const auto& [key, value] : type_params) {
                 if (key != MAX_LENGTH && key != "max_capacity") {
                     continue;
                 }
@@ -167,8 +166,21 @@ class FieldMeta {
                 param->set_key(key);
                 param->set_value(value);
             }
-            type_schema_ = std::move(type);
+            type_schema = std::move(type);
         }
+        data_ = std::make_shared<const Data>(Data{
+            .name_ = std::move(name),
+            .id_ = id,
+            .type_ = type,
+            .element_type_ = element_type,
+            .nullable_ = nullable,
+            .element_nullable_ = element_nullable,
+            .default_value_ = std::move(default_value),
+            .external_field_mapping_ = std::move(external_field_mapping),
+            .local_format_ = std::move(local_format),
+            .type_schema_ = std::move(type_schema),
+            .array_type_params_ = std::move(type_params),
+        });
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -182,16 +194,19 @@ class FieldMeta {
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          nullable_(nullable),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(IsVectorDataType(type_) && type_ != DataType::VECTOR_ARRAY);
-        Assert(!default_value_.has_value() &&
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .nullable_ = nullable,
+              .default_value_ = std::move(default_value),
+              .vector_info_ = VectorInfo{dim, std::move(metric_type)},
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(IsVectorDataType(data_->type_) &&
+               data_->type_ != DataType::VECTOR_ARRAY);
+        Assert(!data_->default_value_.has_value() &&
                "vector fields do not support default values");
     }
 
@@ -206,19 +221,21 @@ class FieldMeta {
               bool element_nullable,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          type_(type),
-          nullable_(nullable),
-          element_type_(element_type),
-          element_nullable_(element_nullable),
-          vector_info_(VectorInfo{dim, std::move(metric_type)}),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(type_ == DataType::VECTOR_ARRAY);
-        Assert(IsBinaryVectorDataType(element_type_) ||
-               IsDenseFloatVectorDataType(element_type_) ||
-               IsIntVectorDataType(element_type_));
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .element_type_ = element_type,
+              .nullable_ = nullable,
+              .element_nullable_ = element_nullable,
+              .vector_info_ = VectorInfo{dim, std::move(metric_type)},
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(data_->type_ == DataType::VECTOR_ARRAY);
+        Assert(IsBinaryVectorDataType(data_->element_type_) ||
+               IsDenseFloatVectorDataType(data_->element_type_) ||
+               IsIntVectorDataType(data_->element_type_));
     }
 
     // for json stats shredding column field meta,
@@ -231,36 +248,38 @@ class FieldMeta {
               std::optional<DefaultValueType> default_value,
               std::string external_field_mapping = "",
               std::string local_format = LOCAL_FORMAT_RAW)
-        : name_(std::move(name)),
-          id_(id),
-          main_field_id_(main_field_id),
-          type_(type),
-          nullable_(nullable),
-          default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)),
-          local_format_(std::move(local_format)) {
-        Assert(!IsVectorDataType(type_));
+        : FieldMeta(Data{
+              .name_ = std::move(name),
+              .id_ = id,
+              .type_ = type,
+              .nullable_ = nullable,
+              .default_value_ = std::move(default_value),
+              .main_field_id_ = main_field_id,
+              .external_field_mapping_ = std::move(external_field_mapping),
+              .local_format_ = std::move(local_format),
+          }) {
+        Assert(!IsVectorDataType(data_->type_));
     }
 
     int64_t
     get_dim() const {
-        Assert(IsVectorDataType(type_));
+        Assert(IsVectorDataType(data_->type_));
         // should not attempt to get dim() of a sparse vector from schema.
-        Assert(!IsSparseFloatVectorDataType(type_));
-        Assert(vector_info_.has_value());
-        return vector_info_->dim_;
+        Assert(!IsSparseFloatVectorDataType(data_->type_));
+        Assert(data_->vector_info_.has_value());
+        return data_->vector_info_->dim_;
     }
 
     int64_t
     get_max_len() const {
-        Assert(IsStringDataType(type_));
-        Assert(string_info_.has_value());
-        return string_info_->max_length;
+        Assert(IsStringDataType(data_->type_));
+        Assert(data_->string_info_.has_value());
+        return data_->string_info_->max_length;
     }
 
     int64_t
     get_main_field_id() const {
-        return main_field_id_;
+        return data_->main_field_id_;
     }
 
     bool
@@ -274,40 +293,41 @@ class FieldMeta {
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
-        Assert(IsVectorDataType(type_));
-        Assert(vector_info_.has_value());
-        return vector_info_->metric_type_;
+        Assert(IsVectorDataType(data_->type_));
+        Assert(data_->vector_info_.has_value());
+        return data_->vector_info_->metric_type_;
     }
 
     const FieldName&
     get_name() const {
-        return name_;
+        return data_->name_;
     }
 
     const FieldId&
     get_id() const {
-        return id_;
+        return data_->id_;
     }
 
     DataType
     get_data_type() const {
-        return type_;
+        return data_->type_;
     }
 
     DataType
     get_element_type() const {
-        return element_type_;
+        return data_->element_type_;
     }
 
     const milvus::proto::schema::TypeSchema&
     get_array_type_schema() const {
-        Assert(type_ == DataType::ARRAY && is_native_list_array());
-        return *type_schema_;
+        Assert(data_->type_ == DataType::ARRAY && is_native_list_array());
+        return *data_->type_schema_;
     }
 
     bool
     is_nested_array() const {
-        return type_ == DataType::ARRAY && element_type_ == DataType::ARRAY;
+        return data_->type_ == DataType::ARRAY &&
+               data_->element_type_ == DataType::ARRAY;
     }
 
     // Whether this Array field uses the Arrow list storage format introduced
@@ -339,82 +359,89 @@ class FieldMeta {
     // away together with the legacy formats.
     bool
     is_native_list_array() const {
-        return (type_ == DataType::ARRAY &&
-                (element_nullable_ || is_nested_array())) ||
-               (type_ == DataType::VECTOR_ARRAY && element_nullable_);
+        return (data_->type_ == DataType::ARRAY &&
+                (data_->element_nullable_ || is_nested_array())) ||
+               (data_->type_ == DataType::VECTOR_ARRAY &&
+                data_->element_nullable_);
     }
 
     bool
     has_nullable_array_element() const {
-        return type_ == DataType::ARRAY && is_native_list_array() &&
-               (element_nullable_ ||
-                (is_nested_array() &&
-                 type_schema_->array_element().array_element().nullable()));
+        return data_->type_ == DataType::ARRAY && is_native_list_array() &&
+               (data_->element_nullable_ ||
+                (is_nested_array() && data_->type_schema_->array_element()
+                                          .array_element()
+                                          .nullable()));
     }
 
     bool
     is_vector() const {
-        return IsVectorDataType(type_);
+        return IsVectorDataType(data_->type_);
     }
 
     bool
     is_json() const {
-        return type_ == DataType::JSON;
+        return data_->type_ == DataType::JSON;
     }
 
     bool
     is_string() const {
-        return IsStringDataType(type_);
+        return IsStringDataType(data_->type_);
     }
 
     bool
     is_nullable() const {
-        return nullable_;
+        return data_->nullable_;
     }
 
     bool
     is_element_nullable() const {
-        return element_nullable_;
+        return data_->element_nullable_;
     }
 
     bool
     NeedLoad() const {
-        return external_field_mapping_.empty();
+        return data_->external_field_mapping_.empty();
     }
 
     const std::string&
     get_external_field_mapping() const {
-        return external_field_mapping_;
+        return data_->external_field_mapping_;
     }
 
     bool
     has_default_value() const {
-        return default_value_.has_value();
+        return data_->default_value_.has_value();
     }
 
     const std::optional<DefaultValueType>&
     default_value() const {
-        return default_value_;
+        return data_->default_value_;
     }
 
     bool
     is_external_field() const {
-        return !external_field_mapping_.empty();
+        return !data_->external_field_mapping_.empty();
     }
 
     const std::string&
     get_external_field() const {
-        return external_field_mapping_;
+        return data_->external_field_mapping_;
     }
 
     void
     set_external_field(const std::string& external_field) {
-        external_field_mapping_ = external_field;
+        if (data_->external_field_mapping_ == external_field) {
+            return;
+        }
+        auto data = std::make_shared<Data>(*data_);
+        data->external_field_mapping_ = external_field;
+        data_ = std::move(data);
     }
 
     const std::string&
     get_local_format() const {
-        return local_format_;
+        return data_->local_format_;
     }
 
     milvus::proto::schema::FieldSchema
@@ -422,24 +449,24 @@ class FieldMeta {
 
     size_t
     get_sizeof() const {
-        AssertInfo(!IsSparseFloatVectorDataType(type_),
+        AssertInfo(!IsSparseFloatVectorDataType(data_->type_),
                    "should not attempt to get_sizeof() of a sparse vector from "
                    "schema");
         static const size_t ARRAY_SIZE = 128;
         static const size_t JSON_SIZE = 512;
         // assume float vector with dim 512, array length 10
         static const size_t VECTOR_ARRAY_SIZE = 512 * 10 * 4;
-        if (type_ == DataType::VECTOR_ARRAY) {
+        if (data_->type_ == DataType::VECTOR_ARRAY) {
             return VECTOR_ARRAY_SIZE;
         } else if (is_vector()) {
-            return GetDataTypeSize(type_, get_dim());
+            return GetDataTypeSize(data_->type_, get_dim());
         } else if (is_string()) {
-            Assert(string_info_.has_value());
-            return string_info_->max_length;
-        } else if (IsVariableDataType(type_)) {
-            return type_ == DataType::ARRAY ? ARRAY_SIZE : JSON_SIZE;
+            Assert(data_->string_info_.has_value());
+            return data_->string_info_->max_length;
+        } else if (IsVariableDataType(data_->type_)) {
+            return data_->type_ == DataType::ARRAY ? ARRAY_SIZE : JSON_SIZE;
         } else {
-            return GetDataTypeSize(type_);
+            return GetDataTypeSize(data_->type_);
         }
     }
 
@@ -465,22 +492,30 @@ class FieldMeta {
         bool enable_analyzer;
         std::map<std::string, std::string> params;
     };
-    FieldName name_;
-    FieldId id_;
-    DataType type_ = DataType::NONE;
-    DataType element_type_ = DataType::NONE;
-    bool nullable_;
-    bool element_nullable_ = false;
-    std::optional<DefaultValueType> default_value_;
-    std::optional<VectorInfo> vector_info_;
-    std::optional<StringInfo> string_info_;
-    // for json stats, the main field id is the real field id
-    // of collection schema, the field id is the json shredding field id
-    int64_t main_field_id_ = INVALID_FIELD_ID;
-    std::string external_field_mapping_;
-    std::string local_format_ = LOCAL_FORMAT_RAW;
-    std::optional<milvus::proto::schema::TypeSchema> type_schema_;
-    TypeParams array_type_params_;
+    struct Data {
+        FieldName name_;
+        FieldId id_;
+        DataType type_ = DataType::NONE;
+        DataType element_type_ = DataType::NONE;
+        bool nullable_;
+        bool element_nullable_ = false;
+        std::optional<DefaultValueType> default_value_;
+        std::optional<VectorInfo> vector_info_;
+        std::optional<StringInfo> string_info_;
+        // for json stats, the main field id is the real field id
+        // of collection schema, the field id is the json shredding field id
+        int64_t main_field_id_ = INVALID_FIELD_ID;
+        std::string external_field_mapping_;
+        std::string local_format_ = LOCAL_FORMAT_RAW;
+        std::optional<milvus::proto::schema::TypeSchema> type_schema_;
+        TypeParams array_type_params_;
+    };
+
+    explicit FieldMeta(Data data)
+        : data_(std::make_shared<const Data>(std::move(data))) {
+    }
+
+    std::shared_ptr<const Data> data_;
 };
 
 std::shared_ptr<arrow::DataType>

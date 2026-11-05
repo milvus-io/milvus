@@ -25,6 +25,32 @@
 
 namespace milvus {
 
+TEST(FieldMetaTest, CopiesShareDescriptionAndKeepIndependentExternalMappings) {
+    proto::schema::FieldSchema schema_proto;
+    schema_proto.set_fieldid(200);
+    schema_proto.set_name("shared_description");
+    schema_proto.set_data_type(proto::schema::DataType::VarChar);
+    schema_proto.mutable_default_value()->set_string_data("default text");
+    auto* max_length = schema_proto.add_type_params();
+    max_length->set_key("max_length");
+    max_length->set_value("1024");
+    auto field = FieldMeta::ParseFrom(schema_proto);
+    auto copy = field;
+
+    EXPECT_EQ(&copy.get_name(), &field.get_name());
+    EXPECT_EQ(&copy.default_value(), &field.default_value());
+    EXPECT_EQ(copy.ToProto().SerializeAsString(),
+              field.ToProto().SerializeAsString());
+    EXPECT_LE(sizeof(FieldMeta), 2 * sizeof(void*));
+
+    copy.set_external_field("physical_column");
+    EXPECT_TRUE(field.get_external_field().empty());
+    EXPECT_EQ(copy.get_external_field(), "physical_column");
+    EXPECT_NE(&copy.get_name(), &field.get_name());
+    EXPECT_EQ(copy.default_value()->string_data(), "default text");
+    EXPECT_EQ(field.default_value()->string_data(), "default text");
+}
+
 TEST(FieldMetaTest, NeedLoadReturnsTrueForNormalField) {
     auto field = FieldMeta(FieldName("normal_field"),
                            FieldId(100),
