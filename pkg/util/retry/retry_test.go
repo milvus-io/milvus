@@ -318,3 +318,60 @@ func TestDo_InputErrorAbortsByDefault(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 	assert.Equal(t, 1, counter, "Do should abort on InputError without retrying")
 }
+
+// Once the attempts are used up, Do and Handle must return the last error
+// right away. Sleeping another backoff first only delays the caller, since no
+// retry follows it.
+func TestNoSleepAfterLastAttempt(t *testing.T) {
+	runners := map[string]func(fn func() error, opts ...Option) error{
+		"Do": func(fn func() error, opts ...Option) error {
+			return Do(context.Background(), fn, opts...)
+		},
+		"Handle": func(fn func() error, opts ...Option) error {
+			return Handle(context.Background(), func() (bool, error) {
+				return true, fn()
+			}, opts...)
+		},
+	}
+
+	for name, run := range runners {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mockErr := errors.New("mock error")
+			start := time.Now()
+			err := run(func() error {
+				calls++
+				return mockErr
+			}, Attempts(1), Sleep(10*time.Second))
+			assert.ErrorIs(t, err, mockErr)
+			assert.Equal(t, 1, calls)
+			assert.Less(t, time.Since(start), 5*time.Second)
+
+			// Two attempts sleep 1s between them, but not the 2s after the
+			// second one. The last attempt's error is returned.
+			calls = 0
+			start = time.Now()
+			err = run(func() error {
+				calls++
+				return fmt.Errorf("attempt %d failed", calls)
+			}, Attempts(2), Sleep(time.Second))
+			elapsed := time.Since(start)
+			assert.EqualError(t, err, "attempt 2 failed")
+			assert.Equal(t, 2, calls)
+			assert.GreaterOrEqual(t, elapsed, time.Second)
+			assert.Less(t, elapsed, 2500*time.Millisecond)
+
+			// AttemptAlways has no last attempt, so it keeps retrying.
+			calls = 0
+			err = run(func() error {
+				calls++
+				if calls < 4 {
+					return mockErr
+				}
+				return nil
+			}, AttemptAlways(), Sleep(time.Millisecond))
+			assert.NoError(t, err)
+			assert.Equal(t, 4, calls)
+		})
+	}
+}

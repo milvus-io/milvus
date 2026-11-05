@@ -201,6 +201,8 @@ ComputeScorerScoresOnPreparedChunks(
     query_context->set_search_info(plan->plan_node_->search_info_);
 
     auto op_context = milvus::OpContext(cancel_token);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     query_context->set_op_context(&op_context);
     auto exec_context = milvus::exec::ExecContext(query_context.get());
 

@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -699,9 +698,9 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		} else {
 			// Keep references until segment catalog deletion has completed; pending
 			// cleanup entries still belong to m.segments.
-			segments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(m.segments))
+			segments := make([]segment.SchemaReference, 0, len(m.segments))
 			for _, view := range m.segments {
-				segments = append(segments, view.AssignmentMeta())
+				segments = append(segments, view.SchemaReference())
 			}
 			owner := m.vchannelView
 			deleted, changed := owner.SchemaCleanupPlan(cleanup.PhysicalTimeTick, segments)
@@ -746,9 +745,9 @@ func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.Segment
 	if m.vchannelView == nil || !view.TombstonedCleanupReady(cleanup.PhysicalTimeTick) {
 		return false
 	}
-	sealed := view.AssignmentMeta().GetSealedAtDataVersion()
-	if sealed != nil {
-		version := qviews.FromProtoDataVersion(sealed)
+	// TombstonedCleanupReady implies the TOMBSTONED state SealedDataVersion
+	// requires, and every view of this module belongs to m.vchannel.
+	if version, sealed := view.SealedDataVersion(m.vchannel); sealed {
 		if oldest, ok := m.queryResources.OldestDataVersion(); ok && version.GT(oldest) {
 			return false
 		}

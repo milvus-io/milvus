@@ -746,11 +746,15 @@ func buildTargetManifestIndexes(
 		for key, value := range definition.GetProperties() {
 			properties[key] = value
 		}
-		properties[common.IndexTypeKey] = definition.GetIndexType()
+		indexType := info.GetIndexType()
+		if indexType == "" {
+			indexType = definition.GetIndexType()
+		}
+		properties[common.IndexTypeKey] = indexType
 		entries = append(entries, packed.ManifestIndexInfo{
 			ColumnName:                definition.GetColumnName(),
 			IndexName:                 info.GetIndexName(),
-			IndexType:                 definition.GetIndexType(),
+			IndexType:                 indexType,
 			Path:                      relativePath,
 			FieldID:                   definition.GetFieldId(),
 			IndexID:                   definition.GetIndexId(),
@@ -1150,6 +1154,7 @@ func buildIndexInfoFromSource(
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
 			IndexName:                 srcIndex.GetIndexName(),
+			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}
 		if target.IndexStorePathVersion != nil {

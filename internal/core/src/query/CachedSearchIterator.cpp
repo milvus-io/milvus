@@ -270,7 +270,8 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    milvus::OpContext* op_context) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -289,9 +290,9 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &query_ds, &search_info, &bitset](
+        [this, op_context, column, &query_ds, &search_info, &bitset](
             int64_t chunk_id, int64_t physical_begin) {
-            auto pw = column->DataOfChunk(nullptr, chunk_id)
+            auto pw = column->DataOfChunk(op_context, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
@@ -308,9 +309,9 @@ CachedSearchIterator::CachedSearchIterator(
             bool element_nullable = false;
             if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
-                    column->VectorArrayOffsets(nullptr, chunk_id);
+                    column->VectorArrayOffsets(op_context, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];
-                auto chunk_pw = column->GetChunk(nullptr, chunk_id);
+                auto chunk_pw = column->GetChunk(op_context, chunk_id);
                 element_nullable =
                     static_cast<VectorArrayChunk*>(chunk_pw.get())
                         ->IsElementNullable();
@@ -327,7 +328,7 @@ CachedSearchIterator::CachedSearchIterator(
             } else if (element_nullable) {
                 // The chunk stores only valid vectors; map them to logical
                 // element ids. The ids live on the column.
-                column->BuildElementPhysicalToLogicalIds(nullptr);
+                column->BuildElementPhysicalToLogicalIds(op_context);
                 auto id_view = column->GetElementPhysicalToLogicalIds(chunk_id);
                 AssertInfo(id_view.count == chunk_size,
                            "element id map of chunk {} has {} ids, expected "

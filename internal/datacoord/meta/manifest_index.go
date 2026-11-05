@@ -182,6 +182,7 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		IndexID:                   manifestIndex.IndexID,
 		BuildID:                   manifestIndex.BuildID,
 		IndexName:                 manifestIndex.IndexName,
+		IndexType:                 manifestIndex.IndexType,
 		IndexParams:               manifestIndexParams(manifestIndex),
 		IndexFilePaths:            filePaths,
 		SerializedSize:            uint64(manifestIndex.SerializedSize),
@@ -361,8 +362,8 @@ func (m *Meta) ReloadSegmentIndexesFromManifests(ctx context.Context) error {
 	reader := m.newManifestIndexReader(ctx, segments, concurrency, storageConfig, rootPath)
 	defer reader.Close()
 	recovery := m.IndexCatalog.NewManifestIndexRecovery()
-	// Per-record installs published their aggregates immediately; publish them
-	// on every return too, including when a later manifest fails startup.
+	// Publish what was installed on every return, including when a later manifest
+	// fails startup.
 	defer recovery.Finish()
 	var emptyMarkers []UpdateOperator
 	flushMarkers := func(markers []UpdateOperator) error {

@@ -85,7 +85,6 @@ func legacyManifestIndexRecovery(ctx context.Context, m *meta.Meta, im *IndexMet
 				continue
 			}
 			legacyUpdateSegmentIndex(im, segIdx)
-			im.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID, float64(segIdx.IndexSerializedSize))
 		}
 	}
 	return nil
@@ -262,18 +261,26 @@ type recoveredIndexState struct {
 	Builds      map[UniqueID]model.SegmentIndex
 	BySegment   map[UniqueID]map[UniqueID]UniqueID
 	TaskTotal   indexTaskStateCounts
-	TaskByIndex map[[2]int64]indexTaskStateCounts
+	TaskByIndex map[[2]int64]indexTaskStats
 	Gauges      map[string]float64
 	LRUKeys     []UniqueID
 	LRUValues   []metricsinfo.IndexTaskStats
 	Markers     map[UniqueID]bool
 }
 
+// waitStoredSizesPublished publishes the stored sizes, or waits for the
+// publication recovery started off its own path.
+func waitStoredSizesPublished(im *IndexMeta) {
+	im.taskCounts.publishStoredSizes()
+	im.taskCounts.publishMu.Lock()
+	defer im.taskCounts.publishMu.Unlock()
+}
+
 func snapshotRecoveredIndexState(t *testing.T, m *meta.Meta, im *IndexMeta) recoveredIndexState {
 	s := recoveredIndexState{
 		Builds:      make(map[UniqueID]model.SegmentIndex),
 		BySegment:   make(map[UniqueID]map[UniqueID]UniqueID),
-		TaskByIndex: make(map[[2]int64]indexTaskStateCounts),
+		TaskByIndex: make(map[[2]int64]indexTaskStats),
 		Gauges:      make(map[string]float64),
 		Markers:     make(map[UniqueID]bool),
 	}
@@ -291,10 +298,11 @@ func snapshotRecoveredIndexState(t *testing.T, m *meta.Meta, im *IndexMeta) reco
 	})
 	im.taskCounts.mu.RLock()
 	s.TaskTotal = im.taskCounts.total
-	for key, counts := range im.taskCounts.byIndex {
-		s.TaskByIndex[key] = counts
+	for key, stats := range im.taskCounts.byIndex {
+		s.TaskByIndex[key] = stats
 	}
 	im.taskCounts.mu.RUnlock()
+	waitStoredSizesPublished(im)
 	collected := make(chan prometheus.Metric)
 	go func() {
 		metrics.DataCoordStoredIndexFilesSize.Collect(collected)

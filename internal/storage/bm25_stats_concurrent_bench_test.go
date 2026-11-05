@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -46,17 +47,32 @@ func loadBenchTables() benchTables {
 	benchOnce.Do(func() {
 		r := rand.New(rand.NewSource(1))
 		tokens := make([]uint32, benchVocab)
-		plain := NewBM25Stats()
 		for i := range tokens {
-			tokens[i] = r.Uint32()
-			plain.rowsWithToken[tokens[i]] += 1 + int32(r.Intn(100))
+			// An odd multiplier permutes uint32, so all fixture tokens are unique.
+			tokens[i] = uint32(i) * 2246822519
 		}
-		plain.numRow, plain.numToken = 12_000_000, 600_000_000
+		plain := benchStats(tokens, func() int32 { return 1 + int32(r.Intn(100)) }, 12_000_000, 600_000_000)
 		concurrent := NewConcurrentBM25Stats()
 		concurrent.Merge(plain)
 		benchData = benchTables{tokens: tokens, plain: plain, concurrent: concurrent}
 	})
 	return benchData
+}
+
+// Use the unchanged wire format so the same fixtures benchmark either memory layout.
+func benchStats(tokens []uint32, count func() int32, rows, total int64) *BM25Stats {
+	data := make([]byte, 20+len(tokens)*8)
+	common.Endian.PutUint64(data[4:12], uint64(rows))
+	common.Endian.PutUint64(data[12:20], uint64(total))
+	for i, token := range tokens {
+		common.Endian.PutUint32(data[20+i*8:], token)
+		common.Endian.PutUint32(data[24+i*8:], uint32(count()))
+	}
+	stats, err := NewBM25StatsWithBytes(data)
+	if err != nil {
+		panic(err)
+	}
+	return stats
 }
 
 func benchQuery(r *rand.Rand, tokens []uint32, n int) []byte {
@@ -129,5 +145,73 @@ func BenchmarkUpdateGrowing(b *testing.B) {
 		b.Run(fmt.Sprintf("rows=%d/plain", rows), func(b *testing.B) { run(b, plain.Merge) })
 		b.Run(fmt.Sprintf("rows=%d/concurrent", rows), func(b *testing.B) { run(b, concurrent.Merge) })
 		b.Run(fmt.Sprintf("rows=%d/concurrent-unlocked", rows), func(b *testing.B) { run(b, concurrent.MergeUnlocked) })
+	}
+}
+
+func BenchmarkBM25StatsBulkApply(b *testing.B) {
+	data := loadBenchTables()
+	base := benchStats(data.tokens, func() int32 { return 1 << 28 }, 1<<40, 1<<60)
+	for _, tokens := range []int{50, 5000, 65536, 1_000_000} {
+		delta := benchStats(data.tokens[:tokens], func() int32 { return 1 }, 1, int64(tokens))
+		for _, operation := range []string{"Merge", "Minus", "MergeUnlocked", "MinusUnlocked", "MergeFrom", "MergeConcurrent", "PlainMerge", "PlainMinus"} {
+			b.Run(fmt.Sprintf("tokens=%d/%s", tokens, operation), func(b *testing.B) {
+				c := NewConcurrentBM25Stats()
+				c.MergeUnlocked(base)
+				var apply func(*BM25Stats)
+				switch operation {
+				case "PlainMerge", "PlainMinus":
+					plain := base.Clone()
+					apply = plain.Merge
+					if operation == "PlainMinus" {
+						apply = plain.Minus
+					}
+				case "Merge", "MergeConcurrent":
+					apply = c.Merge
+				case "Minus":
+					apply = c.Minus
+				case "MergeUnlocked":
+					apply = c.MergeUnlocked
+				case "MinusUnlocked":
+					apply = c.MinusUnlocked
+				case "MergeFrom":
+					other := NewConcurrentBM25Stats()
+					other.MergeUnlocked(delta)
+					apply = func(*BM25Stats) { c.MergeFrom(other) }
+				}
+				apply(delta)
+				var oracle sync.Mutex
+				b.ReportAllocs()
+				b.ResetTimer()
+				if operation == "MergeConcurrent" {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							apply(delta)
+						}
+					})
+					return
+				}
+				for i := 0; i < b.N; i++ {
+					oracle.Lock()
+					apply(delta)
+					oracle.Unlock()
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkBM25StatsAppend(b *testing.B) {
+	for _, tokens := range []int{8, 50, 5000} {
+		row := make(map[uint32]float32, tokens)
+		for i := 0; i < tokens; i++ {
+			row[uint32(i)*2246822519] = 1
+		}
+		b.Run(fmt.Sprintf("tokens=%d", tokens), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				stats := NewBM25Stats()
+				stats.Append(row)
+			}
+		})
 	}
 }

@@ -66,6 +66,15 @@ FetchContent_GetProperties( milvus-storage )
 if ( NOT milvus-storage_POPULATED )
     FetchContent_Populate( milvus-storage )
 
+    if(WITH_CRT)
+        # The pinned storage revision caches the SDK header used by its native
+        # handle extension. Refresh it from Conan when upgrading the SDK in an
+        # existing build directory, before storage generates the overlay.
+        unset(STORAGE_S3_CRT_INCLUDE_DIR CACHE)
+        find_path(STORAGE_S3_CRT_INCLUDE_DIR aws/s3-crt/S3CrtClient.h
+            HINTS ${AWSSDK_INCLUDE_DIRS} NO_DEFAULT_PATH REQUIRED)
+    endif()
+
     # Adding the following target:
     # milvus-storage
     add_subdirectory( ${milvus-storage_SOURCE_DIR}/cpp
@@ -102,6 +111,15 @@ if ( NOT milvus-storage_POPULATED )
         target_link_libraries(milvus-storage PUBLIC AWS::s3)
     else()
         message(FATAL_ERROR "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
+    endif()
+
+    # Native CRT calls need explicit links when the AWS runtime is shared.
+    find_package(aws-c-io REQUIRED CONFIG)
+    target_link_libraries(milvus-storage PUBLIC AWS::aws-c-io)
+    if(WITH_CRT)
+        find_package(aws-c-auth REQUIRED CONFIG)
+        find_package(aws-c-http REQUIRED CONFIG)
+        target_link_libraries(milvus-storage PUBLIC AWS::aws-c-auth AWS::aws-c-http)
     endif()
 
     # On macOS, aws-c-io uses Apple's Network.framework for socket operations

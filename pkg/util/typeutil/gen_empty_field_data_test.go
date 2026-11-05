@@ -47,3 +47,30 @@ func TestGenEmptyNestedArrayFieldData(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, schemapb.DataType_Array, data.GetScalars().GetArrayData().GetElementType())
 }
+
+func TestGenEmptyScalarFieldDataLayout(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Int64, schemapb.DataType_Timestamptz} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{Name: "value", FieldID: 100, DataType: dtype, IsDynamic: true}
+			field, err := GenEmptyFieldData(schema)
+			require.NoError(t, err)
+			require.Equal(t, dtype, field.Type)
+			require.Equal(t, schema.Name, field.FieldName)
+			require.Equal(t, schema.FieldID, field.FieldId)
+			require.True(t, field.IsDynamic)
+			switch dtype {
+			case schemapb.DataType_Int64:
+				require.NotNil(t, field.GetScalars().GetLongData())
+				require.Empty(t, field.GetScalars().GetLongData().GetData())
+			case schemapb.DataType_Timestamptz:
+				// Preserve the shared helper's historical empty-result layout.
+				require.NotNil(t, field.GetScalars().GetLongData())
+				require.Nil(t, field.GetScalars().GetTimestamptzData())
+				require.Empty(t, field.GetScalars().GetLongData().GetData())
+			default:
+				require.NotNil(t, field.GetScalars().GetStringData())
+				require.Empty(t, field.GetScalars().GetStringData().GetData())
+			}
+		})
+	}
+}

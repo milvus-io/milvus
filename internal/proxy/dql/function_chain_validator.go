@@ -113,6 +113,9 @@ func splitFunctionChainsByStage(chains []*schemapb.FunctionChain) ([]*schemapb.F
 		if chainPB == nil {
 			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain[%d] is nil", i)
 		}
+		if len(chainPB.GetOutputColumns()) != 0 {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("output_columns is currently supported only by QueryScan chains")
+		}
 		stage := chainPB.GetStage()
 		if _, ok := seenStages[stage]; ok {
 			return nil, nil, merr.WrapErrParameterInvalidMsg("function chain stage %s appears more than once", stage.String())

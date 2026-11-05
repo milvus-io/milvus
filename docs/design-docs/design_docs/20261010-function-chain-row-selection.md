@@ -7,23 +7,12 @@
 - **Related:** [Function Chain API](20260624-function-chain-api.md),
   [Hybrid Search integration](20260818-hybrid-search-function-chain.md).
 
-## Problem and decision
+## Execution model
 
-Map, Filter, Sort, Limit and GroupBy previously built complete DataFrames inside
-individual operators. Filter, Sort and GroupBy separately selected every input
-column. That duplicated row-alignment, Arrow ownership and metadata handling,
-and coupled operators to the types of unrelated columns they carried.
-
-Single-input operators now return **input positions plus computed columns**.
-The framework validates the result, applies one selection to every retained
-input column, and assembles the complete DataFrame. There is no materialized
-`$row_id` column, no renumbering pass, and no parallel legacy result interface.
-Positions are implicit in each operator's immediate input.
-
-This change does not implement a text-search operator, change the public
-Function Chain grammar, change stage permissions, add wire fields, or change
-storage or distributed reduction. Existing business algorithms remain owned
-by their operators.
+Single-input operators return input positions and computed columns. The
+framework validates the result, applies one selection to every retained input
+column, and assembles the complete DataFrame. Positions are relative to each
+operator's immediate input. Business algorithms remain owned by their operators.
 
 ## Positions, identity and chunk boundaries
 
@@ -87,10 +76,8 @@ type RowSelection struct {
 `FuncChain` uses `ExecuteOperator` to run a single-input operator and assemble
 its output. Direct callers that need a complete DataFrame use this helper too.
 Raw `Operator.Execute` callers receive only the selection/computed columns and
-must release the result themselves and supply a valid input layout. There is no
-`ResultOperator` extension or `ExecuteResult` method. This is an internal Go API
-change: former direct `op.Execute` callers expecting a DataFrame migrate to
-`ExecuteOperator`; direct Merge callers use `ExecuteMulti`, even for one input.
+must release the result themselves and supply a valid input layout. Direct
+Merge callers use `ExecuteMulti`, including for one input.
 The expression interface continues to return `[]*arrow.Chunked`.
 
 `Selection == nil` means every input row survives in unchanged order. A non-nil
@@ -125,9 +112,10 @@ The framework executes the following steps:
 4. Append input columns whose names were not replaced, preserving their relative
    order and applying the same per-chunk selection. Identity selection retains
    references; ranges use zero-copy slices; index lists use the existing
-   `dispatchPickByIndices` helper for Boolean, integer, floating-point and String
-   arrays, including nullable values. Non-empty index selections of other types,
-   including Binary, List and Struct, are unsupported.
+   `dispatchPickByIndices` helper for Boolean, integer, floating-point, String
+   and Binary arrays, including nullable values. Binary selection copies opaque
+   bytes without interpreting JSON. Non-empty index selections of List, Struct
+   and other unsupported types are rejected.
 5. Publish the complete output after successful assembly.
 
 `assembleOperatorResult` receives the complete `inputDF` retained after any
@@ -148,14 +136,32 @@ Selection preserves the exact retained Arrow fields (type, nullable flag and
 field metadata), schema metadata, DataFrame metadata, and retained Milvus field
 IDs/types. Empty results retain their columns and schema, including DataFrames
 with zero query chunks. Column pruning preserves the Arrow schema metadata as
-well and remains a separate framework operation guided by liveness. This fixes
-an existing pruning metadata gap: `DataFrameBuilder.Build` reconstructs Arrow
-fields, while `CopyAllMetadata` copies only the DataFrame metadata map. It does
-not change which columns pruning keeps.
+well and remains a separate framework operation guided by liveness. `DataFrameBuilder.Build` reconstructs Arrow fields, while `CopyAllMetadata`
+copies the DataFrame metadata map.
+
+Each DataFrame column has one immutable descriptor with explicit origin and
+an owned FieldSchema or computed metadata.
+Origin distinguishes `columnDeclared` from `columnComputed`. Collection fields
+retain their schema definitions. Computed columns use an explicit logical type
+from Arrow field metadata when present, otherwise an unambiguous Arrow mapping.
+Type, ID, nullability, element types and vector parameters have one authority.
+CopyFieldMetadata replaces the entire descriptor, including absent properties,
+and shares immutable snapshots across selection, pruning and merge. Builder
+setters use copy-on-write. HybridSearch L2 rerank supplies Merge inputs from a
+common plan/schema. Merge copies the first available column definition, including
+its nullability, to the output descriptor. `SetFieldType` returns an
+internal error on a type conflict with a saved declaration and leaves metadata
+unchanged. Replacing a declaration requires `SetFieldSchema`; changing a type
+does not silently change column origin. Search and Query both export from
+this metadata through `exportFieldData(df, name)`. Query result export receives
+only the DataFrame and classifies columns by saved collection origin. Search's
+all-valid scalar mask omission is a response-assembly policy, not a separate
+conversion implementation.
 
 Computed columns use their declared `arrow.Field`; they do not inherit stale
 source-field metadata or a collection FieldID merely because they overwrite an
-existing name. The Milvus type is inferred where a mapping exists. Replacing a
+existing name. Explicit `milvus.data_type` metadata is consumed by `SetComputedField`; otherwise
+the Milvus type is inferred where a mapping exists. Replacing a
 column can change its type and nullability; consumers must use the output
 schema. Map declares expression outputs nullable because the expression
 interface does not expose an output-nullability contract. GroupBy's generated
@@ -166,7 +172,7 @@ request/stage validation; declaring an output is not new client authorization.
 Index slices are reused for selection of all retained columns without building
 Arrow index arrays. The pinned Arrow v17 fork's `TakeArray` has quadratic
 allocation/copy costs for variable-length binary and list arrays. The framework
-therefore keeps the legacy scalar-type dispatch. `TakeArray` can be reconsidered
+therefore uses explicit scalar/Binary dispatch. `TakeArray` can be reconsidered
 after upgrading Arrow with the fixes in apache/arrow-go#557 and #573, released
 in v18.5.0. A zero-copy range can retain a larger backing buffer than its visible
 output; this change does not claim an RSS bound.
@@ -218,8 +224,7 @@ requires input identity as well as row position and may combine scores across
 inputs. `FuncChain` handles it first through that entry, including one-input
 merges, and validates the resulting layout before subsequent execution. Its
 single-input `Execute` method rejects accidental use; a single-input
-`RowSelection` cannot express Merge's ownership/field-source rules. There is no
-legacy dispatch path for the five single-input operators.
+`RowSelection` cannot express Merge's ownership/field-source rules.
 
 ## Ownership and failure behavior
 
@@ -254,100 +259,30 @@ columns, repeated positions, empty selection versus identity, zero query chunks,
 metadata/pruning, range overflow, malformed selections/outputs/masks, error
 preservation, cancellation and reference cleanup with Arrow's checked allocator.
 
-### Final review and evidence (2026-10-13)
+### Validation boundaries
 
-This historical review predates the scalar-dispatch and cancellation follow-up
-below; nested-array and Arrow-kernel-injection evidence describes that earlier
-implementation, not the current selection path.
+- Native chain regression and targeted QueryNode/Proxy tests cover selection,
+  pruning, source alignment and metadata propagation. They do not replace a
+  complete `make test-go` or deployed multi-node test.
+- Expansion is tested at the per-chunk framework level. There is no public
+  expansion operator; distributed identity, deduplication and pagination for
+  such an operator are outside this contract.
+- Index selection uses `dispatchPickByIndices` for scalar and Binary arrays.
+  List and Struct rejection is covered with checked-allocator cleanup checks.
+- Cancellation tests cover canceled/expired contexts at entry, operator errors
+  with partial results, and cancellation during execution or assembly. A last
+  operator may complete successfully; a following operator checks cancellation
+  at entry.
+- Error tests verify preservation of errors received by the framework, not
+  service-wide retry behavior. OOM/allocator-exhaustion was not fault-injected.
 
-The final diff review found no blocking correctness defect in the reviewed
-single-input execution paths. The obsolete Sort `reorderArray` helper was
-removed and pruning import groups were normalized. The following are the
-verified boundaries, not a claim of a full Milvus deployment test:
-
-| Area | Evidence |
-|---|---|
-| Producers and interface migration | Audited all production `OperatorResult`/`RowSelection` producers (Map, Filter, Sort, Limit, GroupBy), their input-relative mappings and output shapes; chain dispatch uses `ExecuteOperator`, Merge uses `ExecuteMulti` |
-| Native package regression | `chain`, `chain/expr`, `chain/types` passed with the local native libraries, without an overlay or `CGO_ENABLED=0` |
-| Row selection and ownership | Checked-allocator tests cover identity/ranges/indices, repeated rows, nested/nullable values, zero chunks, both release orders, malformed outputs/masks, partial results and cancellation |
-| Expansion | Test-only operators cover `2->5`, `0->0`, `1->3`, pruning on/off and subsequent Map/Filter/Sort/Limit; no production expansion operator or registration added |
-| Error propagation | Arrow request-local registry injects cancellation, wrapped timeout and kernel failures after a successful chunk; a kernel error survives concurrent context cancellation through `FuncChain` |
-| Overflow | Limit and GroupBy interval tests cover very large limits; selection checks total row-count arithmetic |
-| Export order | A regression verifies computed-first schema/name alignment and matching field names/values in `ToSearchResultData` |
-| Actual callers | Native targeted QueryNode L1 and Proxy rerank tests exercise source realignment, late materialization, pruning, JSON-path inputs and Merge integration |
-
-The caller audit also traced `ReadInputColumns` (name lookup in declared
-expression-input order), L1 token generation/rebuilding and removal, Proxy
-rerank export, and `reduce.WriteGroupByFieldValues` (field-ID-based lookup).
-Result export follows DataFrame order; this review does not establish unchanged
-field positions for every possible external consumer.
-
-Native commands use the locally built library paths. From the repository root:
+Run the framework regression from the repository root with the native library
+environment configured:
 
 ```sh
-export PKG_CONFIG_PATH="$PWD/internal/core/output/lib/pkgconfig"
-export LD_LIBRARY_PATH="$PWD/internal/core/output/lib"
-
 go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
   ./internal/util/function/chain/...
-
-go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
-  ./internal/querynodev2/tasks -run 'Test.*L1'
-
-go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
-  ./internal/proxy/dql -run 'TestSearchPipeline/(TestBuild.*Chain|TestRerankOp)'
 ```
-
-Earlier checks used a temporary no-CGO overlay to isolate the storage-backed
-file-resource manager because installed C++ headers lacked `talon_*` fields.
-That historical blocker did not reproduce in the final native chain run. The
-overlay is no longer necessary for the native verification recorded here and
-is not part of the production change.
-
-### Rebase integration with PyUDF
-
-When replayed onto master containing `06161a3334` (PyUDF support), Map keeps
-master's score normalization and output-count error contract while returning
-`OperatorResult`. Newly added Map/Sort/Limit test callers use `ExecuteOperator`
-when they need a complete DataFrame. Native `chain`, `chain/expr`, and
-`chain/types` suites passed again after this merge, including score conversion,
-NULL/non-finite score behavior, and PyUDF expression tests. The targeted
-QueryNode/Proxy evidence above was collected before this rebase and was not
-rerun as part of conflict resolution.
-
-### Remaining boundaries
-
-- No complete `make test-go` or deployed multi-node end-to-end suite was run.
-  Targeted caller tests include their existing mocks and are not a live-service
-  validation.
-- Expansion is proven at the per-chunk framework level only. Identity,
-  deduplication, pagination and output-size limits for a public expansion
-  operator remain separate work. General aggregation, source-free `0->m`, Join
-  and cross-chunk regrouping are not represented by this contract.
-- No OOM/allocator-exhaustion injection, deployed latency measurement or RSS
-  benchmark was performed. A local string-selection allocation benchmark is
-  recorded below. Empty slices can retain backing buffers, and cancellation is
-  cooperative.
-- Error preservation is verified at the new framework boundary for errors as
-  received. This refactor does not repair all upstream expression/provider error
-  construction sites or establish service-wide retry behavior.
-- Complete Arrow schema retention applies to assembly and pruning here; other
-  existing builders/adapters are not globally migrated by this change.
-
-### Scalar dispatch and cancellation follow-up
-
-Index selection now reuses `dispatchPickByIndices` pending an Arrow upgrade.
-Expansion tests use nullable scalar columns; Binary, List and Struct rejection
-is covered with checked-allocator cleanup assertions. The string UUID benchmark
-measured cumulative Arrow allocation requests of 139,840 / 558,528 / 2,232,896
-bytes for 1,000 / 4,000 / 16,000 rows respectively. These are local selection
-measurements, not peak memory or deployed query latency.
-
-Cancellation tests cover canceled/expired contexts before direct execution,
-operator-returned cancellation/timeout with partial results, and cancellation
-during execution or assembly. Late cancellation allows the current operator to
-finish: the last operator returns an owned result, or the next operator's entry
-check stops the chain and releases the intermediate result.
 
 ## Key implementation files
 

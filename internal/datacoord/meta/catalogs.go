@@ -52,8 +52,9 @@ type SegmentIndexCatalog interface {
 	// from this call until the metric closure has run. The returned install
 	// updates memory only and takes no fieldIndexLock, so the caller runs it
 	// after the catalog write succeeds, inside its segMu critical section.
-	// install returns a metric closure that takes fieldIndexLock; the caller
-	// runs it after releasing segMu and before releasing the build-ID lock.
+	// install returns an observability closure that can wait for a Prometheus
+	// scrape; the caller runs it after releasing segMu and before releasing the
+	// build-ID lock.
 	StageSegmentIndexMutation(mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
 
 	// RLockFieldIndexes takes the read side of fieldIndexLock, whose write side
@@ -89,13 +90,13 @@ type CompactionProtection interface {
 }
 
 // ManifestIndexRecovery installs the SegmentIndex records startup recovers from
-// segment manifests. Index DDL must not run before Finish returns.
+// segment manifests.
 type ManifestIndexRecovery interface {
 	// Install adds segIdx unless a catalog row or an earlier manifest already
 	// holds its build ID, which then stays authoritative.
 	Install(segIdx *model.SegmentIndex)
-	// Finish applies the aggregates of the records installed so far. Later calls
-	// do nothing.
+	// Finish publishes the stored sizes and fills the task-stats LRU from the
+	// records installed so far. Later calls do nothing.
 	Finish()
 	// Installed returns the number of records installed so far.
 	Installed() int

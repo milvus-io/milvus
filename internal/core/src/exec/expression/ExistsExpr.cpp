@@ -43,10 +43,8 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::DetermineExecPath() {
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index serves this path; see SegmentExpr::FallbackToJsonStatsIfEligible().
     auto req = MakeIndexRequirement(RequiredReader::JsonPath);
     // EXISTS has no cast requirement. Multi-path JSON and projected exact-path
     // readers both answer Exists(Any); path matching still prevents a projected

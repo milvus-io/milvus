@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -56,4 +57,17 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	pathless := good
 	pathless.Path = ""
 	require.Error(t, ValidateManifestIndexPublishable(5001, pathless))
+}
+
+func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {
+	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+		IndexName: "custom_vector", IndexType: "HNSW_SQ",
+		Path: "index_v1/1/2/3/102/4", IndexFileKeys: []string{"index.bin"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		Properties:            map[string]string{common.IndexTypeKey: "HNSW"},
+	})
+	require.True(t, ok)
+	require.Equal(t, "HNSW_SQ", info.GetIndexType())
+	require.Equal(t, "HNSW_SQ", GetIndexType(info.GetIndexParams()))
+	require.Equal(t, "custom_vector", info.GetIndexName())
 }

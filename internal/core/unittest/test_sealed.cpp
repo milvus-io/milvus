@@ -5878,6 +5878,7 @@ TEST(SealedSegmentCowState, FieldTranslatorsRequireExplicitMmapWritebackMode) {
                   GroupChunkType,
                   std::unordered_map<FieldId, FieldMeta>,
                   FieldDataInfo,
+                  milvus_storage::ArrowFileSystemPtr,
                   std::vector<std::string>,
                   std::vector<milvus_storage::RowGroupMetadataVector>,
                   bool,

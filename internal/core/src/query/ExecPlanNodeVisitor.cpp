@@ -289,6 +289,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     query_context->set_op_context(&op_context);
 
     // Do task execution
@@ -349,7 +351,42 @@ ExecPlanNodeVisitor::setupRetrieveResult(
             tmp_retrieve_result.has_more_result = has_more;
         } else {
             tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
-            auto results_pair = segment->find_first_n(node.limit_, view);
+            auto limit = node.limit_;
+            if (retrieve_candidate_budget_) {
+                // Bound both selection and reserve() by the scan cap, while
+                // leaving the original Query limit unchanged.
+                const auto candidates = view.size() - view.count();
+                auto reserved_rows = candidates;
+                limit = segcore::Unlimited;
+                if (retrieve_candidate_max_rows_ > 0) {
+                    limit = retrieve_candidate_max_rows_;
+                    reserved_rows =
+                        std::min(candidates, static_cast<size_t>(limit));
+                }
+                if (reserved_rows >
+                    static_cast<uint64_t>(*retrieve_candidate_budget_) /
+                        sizeof(int64_t)) {
+                    ThrowInfo(
+                        InvalidParameter,
+                        "grep candidate offsets exceed the retrieve byte "
+                        "budget "
+                        "(limit={} bytes); add a more selective filter or "
+                        "configure function.grep.maxScanRows "
+                        "(a row cap may produce incomplete results)",
+                        *retrieve_candidate_budget_);
+                }
+            }
+            auto results_pair = segment->find_first_n(limit, view);
+            if (retrieve_candidate_budget_ &&
+                retrieve_candidate_max_rows_ > 0 && results_pair.second) {
+                LOG_WARN(
+                    "Candidate scan reached row cap; results may be "
+                    "incomplete: "
+                    "segmentID={}, maxRows={}, returnedRows={}",
+                    segment->get_segment_id(),
+                    retrieve_candidate_max_rows_,
+                    results_pair.first.size());
+            }
             tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
             tmp_retrieve_result.has_more_result = results_pair.second;
         }
@@ -448,6 +485,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
             }
 
             auto op_context = milvus::OpContext(cancel_token_);
+            op_context.runtime_load_priority =
+                milvus::proto::common::LoadPriority::HIGH;
             op_context.trace_span = trace_span_;
             query_context->set_op_context(&op_context);
 
@@ -512,6 +551,8 @@ ExecPlanNodeVisitor::visit(VectorPlanNode& node) {
 
     // Set op context to query context
     auto op_context = milvus::OpContext(cancel_token_);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     op_context.trace_span = trace_span_;
     query_context->set_op_context(&op_context);
 

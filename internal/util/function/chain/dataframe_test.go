@@ -224,9 +224,9 @@ func (s *DataFrameSuite) TestDataFrameBuilder_SetFieldNullable() {
 	df := builder.Build()
 	defer df.Release()
 
-	s.True(df.fieldNullables["col1"])
-	s.False(df.fieldNullables["col2"])
-	s.False(df.fieldNullables["col3"])
+	s.True(df.FieldNullable("col1"))
+	s.False(df.FieldNullable("col2"))
+	s.False(df.FieldNullable("col3"))
 }
 
 func (s *DataFrameSuite) TestCopyFieldMetadata_IncludesNullable() {
@@ -271,7 +271,7 @@ func (s *DataFrameSuite) TestCopyFieldMetadata_IncludesNullable() {
 	df := builder.Build()
 	defer df.Release()
 
-	s.True(df.fieldNullables["nullable_col"])
+	s.True(df.FieldNullable("nullable_col"))
 
 	ft, ok := df.FieldType("nullable_col")
 	s.True(ok)
@@ -462,11 +462,10 @@ func (s *DataFrameSuite) TestDataFrameBuilder_AfterBuild() {
 	df := builder.Build()
 	defer df.Release()
 
-	// After Build(), b.result is nil. Setters should return builder (no-op).
+	// After Build(), fluent setters are no-ops; the validated type setter returns an error.
 	ret := builder.SetChunkSizes([]int64{3})
 	s.Equal(builder, ret)
-	ret = builder.SetFieldType("x", schemapb.DataType_Int64)
-	s.Equal(builder, ret)
+	s.Error(builder.SetFieldType("x", schemapb.DataType_Int64))
 	ret = builder.SetFieldID("x", 1)
 	s.Equal(builder, ret)
 	ret = builder.SetFieldNullable("x", true)

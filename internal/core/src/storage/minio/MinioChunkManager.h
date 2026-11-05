@@ -312,6 +312,13 @@ class MinioChunkManager : public ChunkManager {
     static bool
     NeedChecksumOverride(const std::string& cloud_provider);
 
+    // Aws::InitAPI, whose reference ReleaseSDKAPIAtExit drops when the
+    // process exits. Called with client_mutex_ held.
+    static void
+    InitSDKAPIUntilExit(const Aws::SDKOptions& options);
+    static void
+    ReleaseSDKAPIAtExit();
+
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
