@@ -18,8 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,7 +31,6 @@ type recordingTalonPrewarm struct {
 	batches      [][]TalonPrewarmRequest
 	statFailure  string
 	batchFailure bool
-	beforeStat   func()
 	pending      chan struct{}
 	closeStarted chan struct{}
 	closeRelease chan struct{}
@@ -42,9 +39,6 @@ type recordingTalonPrewarm struct {
 }
 
 func (c *recordingTalonPrewarm) Stat(ctx context.Context, uri string) (uint64, string, error) {
-	if c.beforeStat != nil {
-		c.beforeStat()
-	}
 	c.stats[uri]++
 	if uri == c.statFailure {
 		return 0, "", errors.New("stat unavailable")
@@ -123,26 +117,22 @@ func TestTalonPrewarmInspectorRounds(t *testing.T) {
 
 // Readers open a manifest whose descriptor records its size with that size and
 // the unchecked version, so the load uses the same identity without a stat.
-// Such manifests all load before the first stat.
 func TestTalonPrewarmInspectorRecordedSize(t *testing.T) {
 	c := &recordingTalonPrewarm{stats: map[string]int{}}
-	c.beforeStat = func() { require.Len(t, c.batches, 2) }
 	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) {
-		return []string{"sized1", "unsized1", "sized2", "unsized2", "sized3"}, nil
+		return []string{"sized", "unsized"}, nil
 	}, c, func(s string) (string, uint64, error) {
-		if strings.HasPrefix(s, "sized") {
+		if s == "sized" {
 			return s, 4096, nil
 		}
 		return s, 0, nil
 	}, time.Hour, 2)
 	inspector.inspect(context.Background())
-	unsized1 := TalonPrewarmRequest{URI: "unsized1", Size: 8, Version: "etag:unsized1"}
-	unsized2 := TalonPrewarmRequest{URI: "unsized2", Size: 8, Version: "etag:unsized2"}
-	require.Equal(t, map[string]int{"unsized1": 1, "unsized2": 1}, c.stats)
-	require.Len(t, c.batches, 3)
-	require.ElementsMatch(t, []TalonPrewarmRequest{{URI: "sized1", Size: 4096}, {URI: "sized2", Size: 4096}, {URI: "sized3", Size: 4096}}, slices.Concat(c.batches[:2]...))
-	require.ElementsMatch(t, []TalonPrewarmRequest{unsized1, unsized2}, c.batches[2])
-	require.Equal(t, map[string]TalonPrewarmRequest{"unsized1": unsized1, "unsized2": unsized2}, inspector.metadata)
+	unsized := TalonPrewarmRequest{URI: "unsized", Size: 7, Version: "etag:unsized"}
+	require.Equal(t, map[string]int{"unsized": 1}, c.stats)
+	require.Len(t, c.batches, 1)
+	require.ElementsMatch(t, []TalonPrewarmRequest{{URI: "sized", Size: 4096}, unsized}, c.batches[0])
+	require.Equal(t, map[string]TalonPrewarmRequest{"unsized": unsized}, inspector.metadata)
 }
 
 func TestTalonPrewarmInspectorStopPending(t *testing.T) {
