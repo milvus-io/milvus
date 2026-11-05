@@ -891,10 +891,17 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// Recover the segment indexes recorded in segment manifests while the
 	// collection and DataView phases below run: it needs only the recovered
 	// segments and index meta, and neither phase reads the index meta or the
-	// manifest markers it clears. Publication waits for it. Declared after the
-	// executor cleanup so that it is joined first.
-	manifestIndexes := startManifestIndexRecovery(s.ctx, recoveredMeta)
-	defer manifestIndexes.abort()
+	// manifest markers it clears. Publication waits for it. A failed later phase
+	// cancels and joins it, since it writes through the shared MetaStore.
+	manifestIndexCtx, cancelManifestIndexes := context.WithCancel(s.ctx)
+	var manifestIndexes errgroup.Group
+	manifestIndexes.Go(func() error {
+		return recoveredMeta.ReloadSegmentIndexesFromManifests(manifestIndexCtx)
+	})
+	defer func() {
+		cancelManifestIndexes()
+		_ = manifestIndexes.Wait()
+	}()
 	// Retry each recovery phase independently: a later metadata error must
 	// not repeat the successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
@@ -937,7 +944,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
-	if err := manifestIndexes.wait(); err != nil {
+	if err := manifestIndexes.Wait(); err != nil {
 		// Object-store reads have already retried per segment. Retrying
 		// initMeta would reread every successful manifest.
 		return retry.Unrecoverable(err)

@@ -21,8 +21,10 @@ import (
 	"path"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -154,4 +156,30 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A later phase that fails must cancel the running manifest scan and wait for it:
+// the scan writes segment markers through the shared MetaStore, so it must not
+// outlive a failed initMeta.
+func TestInitMetaCancelsAndJoinsManifestScanOnFailure(t *testing.T) {
+	stopped := false
+	scan := mockey.Mock((*meta.Meta).ReloadSegmentIndexesFromManifests).To(func(_ *meta.Meta, ctx context.Context) error {
+		<-ctx.Done()
+		// Finish well after the cancel, so that only a join sees it stop.
+		time.Sleep(100 * time.Millisecond)
+		stopped = true
+		return ctx.Err()
+	}).Build()
+	defer scan.UnPatch()
+	listViews := mockey.Mock((*datacoord.Catalog).ListAllDataViews).Return(nil, retry.Unrecoverable(merr.WrapErrDataIntegrityMsg("invalid DataView catalog"))).Build()
+	defer listViews.UnPatch()
+	b := broker.NewMockBroker(t)
+	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
+	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{}, nil)
+	server := &Server{ctx: t.Context(), kv: meta.NewMetaMemoryKV(), broker: b}
+
+	err := server.initMeta(storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")))
+
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.True(t, stopped)
 }
