@@ -2680,7 +2680,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
-                                            *properties));
+                                            properties));
     committer.Commit([reader](RuntimeResourceState& runtime,
                               PublishedSegmentState&) mutable {
         runtime.reader = std::move(reader);
@@ -8222,7 +8222,7 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
             }
             auto reader = std::shared_ptr<milvus_storage::api::Reader>(
                 milvus_storage::api::Reader::create(
-                    column_groups, arrow_schema, needed_columns, *properties)
+                    column_groups, arrow_schema, needed_columns, properties)
                     .release());
             committer.Commit(
                 [reader = std::move(reader)](RuntimeResourceState& runtime,

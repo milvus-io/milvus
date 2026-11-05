@@ -2185,7 +2185,11 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
                     PROPERTY_READER_ASYNC_TASK_SPLIT_STRATEGY, ": ", *error);
             }
             auto reader = milvus_storage::api::Reader::create(
-                column_groups, nullptr, columns, reader_properties);
+                column_groups,
+                nullptr,
+                columns,
+                std::make_shared<const milvus_storage::api::Properties>(
+                    std::move(reader_properties)));
             const auto parallelism =
                 milvus_storage::ThreadPoolHolder::GetParallelism();
             auto pool =
@@ -2410,7 +2414,7 @@ VisitFieldDataFromManifestPaged(
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
     auto reader = milvus_storage::api::Reader::create(
-        column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
+        column_groups, reader_schema, needed_cols_ptr, loon_ffi_properties);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
@@ -2974,9 +2978,10 @@ BuildTextFieldReaderSchema(const FieldDataMeta& field_meta,
 }
 
 static milvus_storage::segment::SegmentReaderConfig
-BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
-                             int64_t field_id,
-                             const std::string& lob_base_path) {
+BuildTextSegmentReaderConfig(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
+    int64_t field_id,
+    const std::string& lob_base_path) {
     milvus_storage::segment::SegmentReaderConfig config;
     config.properties = properties;
 
@@ -3002,7 +3007,7 @@ OpenTextFieldSegmentReader(
         BuildTextLobBasePath(segment_base_path, field_meta.field_id);
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-        *loon_ffi_properties, segment_base_path);
+        loon_ffi_properties, segment_base_path);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),
@@ -3014,7 +3019,7 @@ OpenTextFieldSegmentReader(
 
     auto schema = BuildTextFieldReaderSchema(field_meta, column_name);
     auto config = BuildTextSegmentReaderConfig(
-        *loon_ffi_properties, field_meta.field_id, lob_base_path);
+        loon_ffi_properties, field_meta.field_id, lob_base_path);
 
     auto reader_result = milvus_storage::segment::SegmentReader::Open(
         fs, loon_manifest, schema, {column_name}, config);

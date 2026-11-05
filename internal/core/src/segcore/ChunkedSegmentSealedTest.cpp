@@ -3043,7 +3043,10 @@ WriteArrowVortexFile(const std::filesystem::path& path,
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path.string(), properties);
+        fs,
+        schema,
+        path.string(),
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};

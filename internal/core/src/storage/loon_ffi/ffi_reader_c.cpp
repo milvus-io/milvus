@@ -78,7 +78,7 @@ GetLoonReader(
         arrow_schema,
         std::make_shared<std::vector<std::string>>(
             needed_columns, needed_columns + needed_columns_size),
-        *properties);
+        properties);
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {

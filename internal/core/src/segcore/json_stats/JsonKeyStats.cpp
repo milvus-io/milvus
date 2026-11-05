@@ -298,14 +298,14 @@ BuildJsonStatsColumnFieldIds(const std::vector<std::string>& column_names,
     return result;
 }
 
-milvus_storage::api::Properties
+std::shared_ptr<const milvus_storage::api::Properties>
 GetJsonStatsReadProperties() {
     auto properties =
         storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
     if (properties == nullptr) {
-        return {};
+        return std::make_shared<const milvus_storage::api::Properties>();
     }
-    return *properties;
+    return properties;
 }
 
 // Opens one JSON-stats projection synchronously and preserves its storage
@@ -339,13 +339,14 @@ NoopParquetKeyRetriever(const std::string&) {
 }
 
 folly::coro::Task<JsonStatsParquetMetadata>
-ReadJsonStatsParquetMetadata(const std::string& file,
-                             const milvus_storage::ArrowFileSystemPtr& fs,
-                             const milvus_storage::api::Properties& properties,
-                             bool use_async,
-                             bool retain_schema,
-                             folly::CancellationToken token,
-                             proto::common::LoadPriority priority) {
+ReadJsonStatsParquetMetadata(
+    const std::string& file,
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
+    bool use_async,
+    bool retain_schema,
+    folly::CancellationToken token,
+    proto::common::LoadPriority priority) {
     token = folly::cancellation_token_merge(
         token, co_await folly::coro::co_current_cancellation_token);
     storage::ThrowIfCancelled(token, "prepare JSON stats footer");

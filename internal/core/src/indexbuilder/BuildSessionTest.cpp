@@ -169,16 +169,16 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
                      {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, 7},
                      {PROPERTY_FS_TALON_MODE, 0}}) {
                 auto actual =
-                    milvus_storage::api::GetValue<uint32_t>(*props, key);
+                    milvus_storage::api::GetValue<uint32_t>(props, key);
                 ASSERT_TRUE(actual.ok()) << key;
                 EXPECT_EQ(*actual, value) << key;
             }
             auto coordinator = milvus_storage::api::GetValue<std::string>(
-                *props, PROPERTY_FS_TALON_COORDINATOR);
+                props, PROPERTY_FS_TALON_COORDINATOR);
             ASSERT_TRUE(coordinator.ok());
             EXPECT_EQ(*coordinator, "coordinator:1234");
             auto external = milvus_storage::api::GetValue<std::string>(
-                *props, "milvus.talon.external_mode");
+                props, "milvus.talon.external_mode");
             ASSERT_TRUE(external.ok());
             EXPECT_EQ(*external, external_enabled ? "2" : "0");
         }
