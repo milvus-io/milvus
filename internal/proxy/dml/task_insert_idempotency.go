@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package dml
 
 import (
@@ -71,29 +87,14 @@ func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 // nil decoration means idempotency is disabled for this insert and every method
 // below is a no-op.
 type insertIdempotencyDecoration struct {
-	key            string
-	decorateHeader func(*message.InsertMessageHeader, []int) error
+	key string
 }
 
-// idempotentInsertDecoration returns the idempotency decoration for this insert,
-// or nil when idempotency is disabled for it. The transaction commit message,
-// synthesized later in the producer, gets the key applied there.
 func (it *InsertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
 	if !it.idempotencyEnabled {
 		return nil
 	}
-	ids := it.result.GetIDs()
-	return &insertIdempotencyDecoration{
-		key: it.idempotencyKey,
-		decorateHeader: func(header *message.InsertMessageHeader, rowOffsets []int) error {
-			result, err := buildInsertWriteUnitIdempotentInsertResult(ids, rowOffsets)
-			if err != nil {
-				return err
-			}
-			message.SetInsertHeaderIdempotentInsertResult(header, result)
-			return nil
-		},
-	}
+	return &insertIdempotencyDecoration{key: it.idempotencyKey}
 }
 
 // enabled reports whether this insert is an idempotent write.
@@ -111,29 +112,6 @@ func (d *insertIdempotencyDecoration) idempotencyKey() message.IdempotencyKey {
 		return ""
 	}
 	return message.IdempotencyKey(d.key)
-}
-
-// decorate stamps the per-write-unit insert result onto the insert header.
-func (d *insertIdempotencyDecoration) decorate(header *message.InsertMessageHeader, rowOffsets []int) error {
-	if d == nil {
-		return nil
-	}
-	return d.decorateHeader(header, rowOffsets)
-}
-
-func buildInsertWriteUnitIdempotentInsertResult(ids *schemapb.IDs, rowOffsets []int) (*messagespb.IdempotentInsertResult, error) {
-	writeUnitIDs, err := idsByOffsets(ids, rowOffsets)
-	if err != nil {
-		return nil, err
-	}
-	offsets := make([]uint32, 0, len(rowOffsets))
-	for _, offset := range rowOffsets {
-		if offset < 0 {
-			return nil, merr.WrapErrServiceInternalMsg("negative row offset %d", offset)
-		}
-		offsets = append(offsets, uint32(offset))
-	}
-	return message.NewIdempotentInsertResult(offsets, writeUnitIDs), nil
 }
 
 func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {

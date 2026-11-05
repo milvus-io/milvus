@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -253,4 +254,70 @@ func (m *shardManagerImpl) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	if err := pm.AsyncFlushSegment(signal); err != nil {
 		logger.Warn(m.ctx, "segment not found when AsyncMustSeal, may be already sealed", mlog.Err(err))
 	}
+}
+
+// AssignSegments assigns one receiving-cluster segment per target partition.
+// No rows or bytes are charged until all targets pass admission.
+func (m *shardManagerImpl) AssignSegments(requests []*AssignSegmentRequest) ([]*AssignSegmentResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	selected := make([]*segmentAllocManager, len(requests))
+	allocations := make([]stats.Allocation, len(requests))
+	for index, req := range requests {
+		pm := m.partitionManagers[PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}]
+		if pm == nil {
+			return nil, ErrPartitionNotFound
+		}
+		if req.TimeTick <= pm.fencedAssignTimeTick {
+			return nil, ErrFencedAssign
+		}
+		if info := m.collections[req.CollectionID]; info != nil {
+			req.SchemaVersion = info.SchemaVersion()
+			req.RequiresStorageV3 = info.RequiresStorageV3()
+			req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
+		}
+		var tooOld bool
+		for _, segment := range pm.segments {
+			if segment.inner.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+				continue
+			}
+			if req.TimeTick <= segment.CreateSegmentTimeTick() {
+				tooOld = true
+				continue
+			}
+			if state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(segment.GetSegmentID()); state == nil || state.ShouldBeSealed() {
+				continue
+			}
+			selected[index] = segment
+			break
+		}
+		if selected[index] == nil {
+			if tooOld {
+				return nil, ErrTimeTickTooOld
+			}
+			pm.asyncAllocSegment(req.SchemaVersion, req.RequiresStorageV3)
+			return nil, ErrWaitForNewSegment
+		}
+		allocations[index] = stats.Allocation{SegmentID: selected[index].GetSegmentID(), Modified: req.ModifiedMetrics, RuntimeFlushSize: req.RuntimeFlushSize}
+	}
+	for _, segment := range selected {
+		segment.ackSem.Inc()
+	}
+	if err := resource.Resource().SegmentStatsManager().AllocRowsBatch(allocations); err != nil {
+		for _, segment := range selected {
+			segment.ackSem.Dec()
+		}
+		return nil, ErrWaitForNewSegment
+	}
+	results := make([]*AssignSegmentResult, len(requests))
+	for index, req := range requests {
+		segment := selected[index]
+		if req.TxnSession != nil {
+			segment.txnSem.Inc()
+			req.TxnSession.RegisterCleanup(func() { segment.txnSem.Dec() }, req.TimeTick)
+		}
+		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
+		results[index] = &AssignSegmentResult{SegmentID: segment.GetSegmentID(), Acknowledge: &segment.ackSem}
+	}
+	return results, nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -177,6 +178,12 @@ func checkMaxInsertSize(ctx context.Context, op string, size int) error {
 }
 
 func (it *InsertTask) PreExecute(ctx context.Context) error {
+	if err := requireUnifiedUpsertGeneration(); err != nil {
+		return err
+	}
+	if it.insertMsg.Namespace != nil {
+		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace requests")
+	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()
 
@@ -236,6 +243,9 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema.CollectionSchema
+	if err := streamingmessage.ValidateUpsertSchema(it.schema); err != nil {
+		return err
+	}
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(it.schema); err != nil {
 		return err

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -84,7 +85,7 @@ func (s *upsertWALFixture) SetupSuite() {
 			walpoint.BeforeIdempotencyAppend + `=return("` + filepath.Join(s.controlDir, "commit.json") + `")`,
 		}, ";")}
 	}))
-	s.WithMilvusConfig("streaming.wal.upsert.enabled", "true")
+	s.WithMilvusConfig("streaming.wal.upsert.unifiedEnabled", "true")
 	s.WithMilvusConfig("function.enableWriteBeforeMaterialization", "true")
 	s.WithMilvusConfig("common.session.ttl", "10")
 	s.WithMilvusConfig("metrics.port", "0")
@@ -107,7 +108,7 @@ func (s *upsertWALFixture) create(ctx context.Context) collection {
 	return s.createWithPK(ctx, schemapb.DataType_Int64, false)
 }
 
-func (s *upsertWALFixture) createWithPK(ctx context.Context, pkType schemapb.DataType, autoID bool) collection {
+func (s *upsertWALFixture) createWithPK(ctx context.Context, pkType schemapb.DataType, autoID bool, configure ...func(*schemapb.CollectionSchema)) collection {
 	name := "native_upsert_" + funcutil.GenRandomStr()
 	schema := &schemapb.CollectionSchema{Name: name, Fields: []*schemapb.FieldSchema{
 		{Name: "pk", DataType: pkType, IsPrimaryKey: true, AutoID: autoID},
@@ -116,6 +117,9 @@ func (s *upsertWALFixture) createWithPK(ctx context.Context, pkType schemapb.Dat
 	}}
 	if pkType == schemapb.DataType_VarChar {
 		schema.Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: "max_length", Value: "64"}}
+	}
+	for _, apply := range configure {
+		apply(schema)
 	}
 	payload, err := proto.Marshal(schema)
 	s.Require().NoError(err)
@@ -176,19 +180,20 @@ func (c collection) upsert(pk, marker int64, key ...string) message.MutableMessa
 	if len(key) > 0 {
 		idempotencyKey = key[0]
 	}
-	var result *messagespb.IdempotentInsertResult
+	var mapping *messagespb.UpsertRequestRowMapping
 	if idempotencyKey != "" {
-		result = &messagespb.IdempotentInsertResult{Ids: keys, RowOffsets: []uint32{0}}
+		mapping = &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0}}
 	}
 	return message.NewUpsertMessageBuilderV2().WithVChannel(c.vchannel).WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(c.id, idempotencyKey)).
 		WithHeader(&message.UpsertMessageHeader{
-			CollectionId: c.id, SchemaVersion: &version, DeleteRows: 1, IdempotentResult: result,
-			Partition: &message.PartitionSegmentAssignment{PartitionId: c.partition, Rows: 1, BinarySize: 32},
+			CollectionId: c.id, SchemaVersion: &version, DeleteRows: 1,
+			Partitions: []*message.PartitionSegmentAssignment{{PartitionId: c.partition, Rows: 1, BinarySize: 32}},
 		}).
-		WithBody(&message.UpsertMessageBody{
-			Insert: &msgpb.InsertRequest{CollectionID: c.id, PartitionID: c.partition, NumRows: 1, RowIDs: []int64{rowID}, FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased},
-			Delete: &msgpb.DeleteRequest{CollectionID: c.id, PartitionID: -1, NumRows: 1, PrimaryKeys: keys},
-		}).MustBuildMutable()
+		WithBody(func() *message.UpsertMessageBody {
+			body := upsertfixture.Body(&msgpb.InsertRequest{CollectionID: c.id, NumRows: 1, RowIDs: []int64{rowID}, FieldsData: fields}, &msgpb.DeleteRequest{PartitionID: -1, PrimaryKeys: keys})
+			body.RequestRowMapping = mapping
+			return body
+		}()).MustBuildMutable()
 }
 
 func (s *upsertWALFixture) assertRows(ctx context.Context, c collection, pk, marker int64, expected int) {

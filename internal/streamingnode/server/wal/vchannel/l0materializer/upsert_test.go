@@ -30,20 +30,18 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 func walUpsert(tt uint64) message.ImmutableMessage {
 	return message.NewUpsertMessageBuilderV2().WithVChannel("v1").
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{
-			Insert: &msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 10, NumRows: 1, FieldsData: []*schemapb.FieldData{{
-				Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 32768, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 32768)}},
-				}},
-			}}},
-			Delete: &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"key"}}}}},
-		}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
+		WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 10, NumRows: 1, FieldsData: []*schemapb.FieldData{{
+			FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 32768, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 32768)}},
+			}},
+		}}}, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"key"}}}}})).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
 }
 
 func TestWALMaterializerUpsertChargesOnlyDeletes(t *testing.T) {
@@ -62,8 +60,10 @@ func TestWALMaterializerUpsertChargesOnlyDeletes(t *testing.T) {
 			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 			walObserve(m, tracker, raw)
 			require.Greater(t, raw.EstimateSize(), 4096)
-			deletion, ok := messageutil.AsDeleteRequest(upsert)
-			require.True(t, ok)
+			deletions, err := messageutil.DeleteRequests(context.Background(), upsert)
+			require.NoError(t, err)
+			require.Len(t, deletions, 1)
+			deletion := deletions[0]
 			expected := uint64(proto.Size(deletion.GetPrimaryKeys()) + 8)
 			require.Equal(t, expected, m.pendingBytes, "vector bytes belong to L1, not L0 pressure")
 			require.Empty(t, *tasks)

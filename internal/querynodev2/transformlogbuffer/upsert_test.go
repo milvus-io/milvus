@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //go:build test && dynamic
 
 package transformlogbuffer
@@ -17,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
@@ -53,13 +70,10 @@ func (s *payloadTransformSegment) appliedEntries() []*streamingpb.TransformLogEn
 func transformUpsert(tick uint64) message.ImmutableMessage {
 	return message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 2}).
-		WithBody(&message.UpsertMessageBody{
-			Insert: &msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 2},
-			Delete: &msgpb.DeleteRequest{
-				CollectionID: 1, PartitionID: -1, NumRows: 2, Timestamps: []uint64{999, 999},
-				PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"one", "two"}}}},
-			},
-		}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
+		WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 2}, &msgpb.DeleteRequest{
+			CollectionID: 1, PartitionID: -1, NumRows: 2, Timestamps: []uint64{999, 999},
+			PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"one", "two"}}}},
+		})).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
 }
 
 func transformDelete(tick uint64, partition int64, key string) message.ImmutableMessage {

@@ -1041,7 +1041,8 @@ func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 		WithLastConfirmed(walimplstest.NewTestMessageID(101)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(102))
 	assert.Empty(t, idempotencyKeyOf(replicated))
-	keys, insert := insertSummaryOf(replicated)
+	keys, insert, err := insertSummaryOf(context.Background(), replicated)
+	require.NoError(t, err)
 	require.NotNil(t, keys)
 	assert.Empty(t, keys.GetKey())
 	require.NotNil(t, insert)
@@ -1060,7 +1061,8 @@ func TestStagedRecordSizeChargesTheRecordNotTheMessage(t *testing.T) {
 	// orders of magnitude too early.
 	vchannel := "by-dev-rootcoord-dml_0_40451v0"
 	msg := newTestIdempotentInsertMessage(t, vchannel, 100, "key-a", []int64{1, 2}, []uint32{0, 1})
-	keys, insert := insertSummaryOf(msg)
+	keys, insert, err := insertSummaryOf(context.Background(), msg)
+	require.NoError(t, err)
 	require.NotNil(t, insert)
 
 	record := &stagedRecord{idempotency: keys, insert: insert}

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
@@ -44,8 +45,8 @@ func TestUpsertBM25LiveAndSnapshotUseSameInsertContent(t *testing.T) {
 		body.FieldsData = append(body.FieldsData, &schemapb.FieldData{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}}})
 		version := int32(0)
 		mutable := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{
-			CollectionId: 1, SchemaVersion: &version, Partition: insert.Header().GetPartitions()[0], DeleteRows: 1,
-		}).WithBody(&message.UpsertMessageBody{Insert: body, Delete: &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}}).MustBuildMutable()
+			CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{insert.Header().GetPartitions()[0]}, DeleteRows: 1,
+		}).WithBody(upsertfixture.Body(body, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}})).MustBuildMutable()
 		typed := message.MustAsMutableUpsertMessageV2(mutable)
 		require.NoError(t, message.ValidateUpsert(typed.Header(), typed.MustBody(), primary))
 		return mutable.WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
@@ -58,7 +59,7 @@ func TestUpsertBM25LiveAndSnapshotUseSameInsertContent(t *testing.T) {
 		MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(30).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(30))
 	txn, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(build(21, 20)).Build(message.MustAsImmutableCommitTxnMessageV2(commit))
 	require.NoError(t, err)
-	runtime, err := newOracleRuntime(t.Context(), nil, walview.VChannelWALView{Schema: schema, WriteSchema: schema, CollectionID: 1, VChannel: "v1"}, nil, true)
+	runtime, err := newOracleRuntime(t.Context(), nil, walview.VChannelWALView{Schema: schema, RequiredFields: testRequiredFields(schema), WriteSchema: schema, CollectionID: 1, VChannel: "v1"}, nil, true)
 	require.NoError(t, err)
 	defer runtime.Close()
 	runtime.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: raw})
@@ -68,7 +69,7 @@ func TestUpsertBM25LiveAndSnapshotUseSameInsertContent(t *testing.T) {
 		require.EqualValues(t, 2, runtime.growingStore.segments[segmentID].stats[102].GetAvgdl())
 	}
 	recovered, err := newOracleRuntime(t.Context(), &Provider{}, walview.VChannelWALView{
-		Schema: schema, WriteSchema: schema, CollectionID: 1, VChannel: "v1",
+		Schema: schema, RequiredFields: testRequiredFields(schema), WriteSchema: schema, CollectionID: 1, VChannel: "v1",
 		SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{
 			{SegmentID: 20, PartitionID: 10, Schema: schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{raw}}},
 			{SegmentID: 21, PartitionID: 10, Schema: schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{txn}}},

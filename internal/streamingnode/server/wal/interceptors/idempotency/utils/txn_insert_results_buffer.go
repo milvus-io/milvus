@@ -71,7 +71,7 @@ func (bs *TxnInsertResultBuffers) Add(msg message.MutableMessage, result *messag
 			rows += partition.GetRows()
 		}
 	case message.MessageTypeUpsert:
-		rows = message.MustAsMutableUpsertMessageV2(msg).Header().GetPartition().GetRows()
+		rows = message.UpsertRowCount(message.MustAsMutableUpsertMessageV2(msg).Header())
 	}
 	if rows > 0 && uint64(len(result.GetRowOffsets())) != rows {
 		builder.hasMissingResult = true

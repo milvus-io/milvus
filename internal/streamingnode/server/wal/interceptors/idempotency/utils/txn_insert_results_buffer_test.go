@@ -127,7 +127,7 @@ func TestTxnInsertResultBuffersRejectsPartialRowResultsWithUpsert(t *testing.T) 
 	header.Partitions = []*message.PartitionSegmentAssignment{{Rows: 2}}
 	typed.OverwriteHeader(header)
 	buffers.Add(legacy, intIDsResult([]uint32{0}, 100), 0)
-	upsert := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{Partition: &message.PartitionSegmentAssignment{Rows: 1}}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
+	upsert := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{Partitions: []*message.PartitionSegmentAssignment{{Rows: 1}}}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
 	buffers.Add(upsert, intIDsResult([]uint32{2}, 101), 0)
 	require.Nil(t, buffers.Build(upsert), "present metadata must cover every inserted row")
 }

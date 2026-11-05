@@ -33,8 +33,10 @@ func TestCloseReleasesReferencesWithoutResolvingUncertainCommit(t *testing.T) {
 	s := newTxnSession("p_1v0", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 0, metrics.BeginTxn())
 	body := message.NewUpsertMessageBuilderV2().WithVChannel(s.VChannel()).
 		WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().IntoImmutableMessage(nil)
+	require.NoError(t, s.AddNewMessage(context.Background(), 0))
 	s.RecordSuccessfulBody(body)
-	require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 0))
+	s.AddNewMessageDoneAndKeepalive(0, message.MessageTypeUpsert)
+	require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 1))
 	cleaned := false
 	s.RegisterCleanup(func() { cleaned = true }, 0)
 	m := &TxnManager{sessions: map[message.TxnID]*TxnSession{1: s}, recoveredSessions: map[message.TxnID]struct{}{1: {}}, recoveredSessionsDoneChan: make(chan struct{})}

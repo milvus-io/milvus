@@ -4,14 +4,13 @@ import "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 // AdvancesQueryTransformMVCC classifies a committed VChannel message for both
 // query planning and TransformLog notifications. The caller excludes uncommitted
-// transaction bodies and pure Insert transactions before representing a
-// transaction by its Commit. Publication/schema barriers can advance the
-// transform frontier without a Delete payload.
+// transaction bodies; a Commit also needs the caller's insert-only session
+// classification. Upsert advances Transform only with explicit deletes.
+// Publication and schema barriers retain their existing frontier behavior.
 func AdvancesQueryTransformMVCC(msg message.BasicMessage) bool {
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection,
 		message.MessageTypeDelete,
-		message.MessageTypeUpsert,
 		message.MessageTypeCommitTxn,
 		message.MessageTypeCommitImport,
 		message.MessageTypeFlush,
@@ -25,6 +24,11 @@ func AdvancesQueryTransformMVCC(msg message.BasicMessage) bool {
 		message.MessageTypeFlushAll,
 		message.MessageTypeAlterWAL:
 		return true
+	case message.MessageTypeUpsert:
+		if immutable, ok := msg.(message.ImmutableMessage); ok {
+			return message.MustAsImmutableUpsertMessageV2(immutable).Header().GetDeleteRows() > 0
+		}
+		return message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header().GetDeleteRows() > 0
 	case message.MessageTypeAlterCollection:
 		if immutable, ok := msg.(message.ImmutableMessage); ok {
 			return IsSchemaChange(message.MustAsImmutableAlterCollectionMessageV2(immutable).Header())

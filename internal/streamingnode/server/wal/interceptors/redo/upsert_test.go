@@ -42,7 +42,7 @@ func TestUpsertWaitsForTargetPartition(t *testing.T) {
 	s := &upsertReadyShard{}
 	r := &redoAppendInterceptor{shardManager: s, gracefulStop: make(chan struct{})}
 	msg := message.NewUpsertMessageBuilderV2().WithVChannel("p_10v0").
-		WithHeader(&message.UpsertMessageHeader{CollectionId: 10, Partition: &message.PartitionSegmentAssignment{PartitionId: 20}}).
+		WithHeader(&message.UpsertMessageHeader{CollectionId: 10, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 20}}}).
 		WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
 	require.NoError(t, r.waitUntilGrowingSegmentReady(context.Background(), msg))
 	require.Equal(t, shards.PartitionUniqueKey{CollectionID: 10, PartitionID: 20}, s.key)

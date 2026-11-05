@@ -18,6 +18,9 @@ func createQueryTestMessage(t *testing.T, tt uint64, vc string, typ message.Mess
 		properties["_np"] = ""
 	}
 	msg := message.NewMutableMessageBeforeAppend(nil, properties).WithTimeTick(tt)
+	if typ == message.MessageTypeUpsert {
+		msg = message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{DeleteRows: 1}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTimeTick(tt)
+	}
 	if txn {
 		msg = msg.WithTxnContext(message.TxnContext{})
 	}
@@ -325,4 +328,16 @@ func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
 	got, ready = cm.Snapshot("v", 80)
 	require.True(t, ready)
 	require.Zero(t, got)
+}
+
+func TestPureUpsertPublishesOnlyGrowing(t *testing.T) {
+	cm := NewQueryMVCCManager(10)
+	cm.ApplyRecoveryBarrier("v", 10)
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("v").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTimeTick(20)
+	cm.ObserveAppend(msg)
+	require.EqualValues(t, 20, cm.Minimum("v", true))
+	publishQueryTestPrefix(t, cm, 20, msg)
+	actual, ready := cm.Snapshot("v", 20)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{20, 10}, actual)
 }

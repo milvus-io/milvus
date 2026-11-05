@@ -33,8 +33,9 @@ import (
 
 func TestUpsertSummaryOriginalResult(t *testing.T) {
 	result := &messagespb.IdempotentInsertResult{RowOffsets: []uint32{2}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}}
-	msg := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("key").WithHeader(&message.UpsertMessageHeader{IdempotentResult: result}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTimeTick(42).WithLastConfirmed(rmq.NewRmqID(9)).IntoImmutableMessage(rmq.NewRmqID(10))
-	keys, insert := insertSummaryOf(msg)
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("key").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{PrimaryKeys: result.Ids, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: result.RowOffsets}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmed(rmq.NewRmqID(9)).IntoImmutableMessage(rmq.NewRmqID(10))
+	keys, insert, err := insertSummaryOf(context.Background(), msg)
+	require.NoError(t, err)
 	require.Equal(t, "key", keys.GetKey())
 	require.Equal(t, result.GetRowOffsets(), keys.GetRowOffsets())
 	require.True(t, proto.Equal(result.GetIds(), insert.GetIds()))
@@ -49,7 +50,7 @@ func TestUpsertTxnSummaryRequiresEveryInsertedResult(t *testing.T) {
 		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(1).IntoImmutableMessage(rmq.NewRmqID(1))
 		builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
 		result := &messagespb.IdempotentInsertResult{RowOffsets: []uint32{0}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}}
-		upsert := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{IdempotentResult: result}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(2).IntoImmutableMessage(rmq.NewRmqID(2))
+		upsert := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{PrimaryKeys: result.Ids, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: result.RowOffsets}}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(2).IntoImmutableMessage(rmq.NewRmqID(2))
 		builder.Add(upsert)
 		header := &message.InsertMessageHeader{CollectionId: 1}
 		if complete {
@@ -60,7 +61,8 @@ func TestUpsertTxnSummaryRequiresEveryInsertedResult(t *testing.T) {
 		commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("key").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 2}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(4).WithLastConfirmed(rmq.NewRmqID(1)).IntoImmutableMessage(rmq.NewRmqID(4))
 		txnMsg, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
 		require.NoError(t, err)
-		keys, fact := insertSummaryOf(txnMsg)
+		keys, fact, err := insertSummaryOf(context.Background(), txnMsg)
+		require.NoError(t, err)
 		require.NotNil(t, fact)
 		if complete {
 			require.Equal(t, "key", keys.GetKey())
@@ -72,24 +74,18 @@ func TestUpsertTxnSummaryRequiresEveryInsertedResult(t *testing.T) {
 	}
 }
 
-func TestUpsertSummaryResultDoesNotDecodeCompoundBody(t *testing.T) {
-	result := &messagespb.IdempotentInsertResult{RowOffsets: []uint32{0}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}}
-	base := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("header-only").WithHeader(&message.UpsertMessageHeader{IdempotentResult: result}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+func TestUpsertSummaryRejectsMalformedMetadataWithoutProgress(t *testing.T) {
+	base := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("bad-metadata").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
 	raw := message.NewMutableMessageBeforeAppend([]byte{0xff}, base.Properties().ToRawMap()).WithTimeTick(100).WithLastConfirmed(rmq.NewRmqID(90)).IntoImmutableMessage(rmq.NewRmqID(100))
-	actual, fact := insertResultOf(raw)
-	require.True(t, fact)
-	require.True(t, proto.Equal(result, actual))
-	keys, insert := insertSummaryOf(raw)
-	require.Equal(t, "header-only", keys.GetKey())
-	require.True(t, proto.Equal(result.GetIds(), insert.GetIds()))
-	// Full observation still needs the Delete body and must fail atomically.
+	_, _, err := insertResultOf(context.Background(), raw)
+	require.Error(t, err)
 	manager, _ := newTestManagerWithStore(t)
 	require.NoError(t, manager.Restore(context.Background()))
 	manager.InitLastAcked(50)
 	manager.ObserveMessage(context.Background(), raw)
 	require.Error(t, manager.terminalErr)
 	require.Equal(t, uint64(50), manager.LastAcked())
-	require.Empty(t, manager.pending, "neither the insert fact nor the delete effect can be staged")
+	require.Empty(t, manager.pending)
 }
 
 func TestUpsertSummaryPersistsBothEffectsAtOnePosition(t *testing.T) {
@@ -99,11 +95,8 @@ func TestUpsertSummaryPersistsBothEffectsAtOnePosition(t *testing.T) {
 	manager.InitLastAcked(50)
 	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("replace-7").
-		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1, IdempotentResult: &messagespb.IdempotentInsertResult{Ids: ids, RowOffsets: []uint32{0}}}).
-		WithBody(&message.UpsertMessageBody{
-			Insert: &msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 20, NumRows: 1},
-			Delete: &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: ids},
-		}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1}).
+		WithBody(&message.UpsertMessageBody{PrimaryKeys: ids, RowIds: []int64{1}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: ids, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	manager.ObserveMessage(ctx, raw)
 	require.Equal(t, uint64(50), manager.LastAcked(), "Summary persistence independently pins the recovery prefix")
 	require.NoError(t, persistSummary(ctx, manager))

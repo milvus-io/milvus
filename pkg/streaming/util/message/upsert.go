@@ -17,127 +17,186 @@
 package message
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ValidateUpsertEnvelope checks scope markers for Upsert and its transaction members.
-// Legacy-only transactions do not use this contract.
+// ValidateUpsertEnvelope checks scope markers for a persisted single-channel write.
 func ValidateUpsertEnvelope(msg BasicMessage) error {
-	if msg == nil || !msg.IsPersisted() {
-		return merr.WrapErrServiceInternalMsg("Upsert protocol requires persisted messages")
-	}
-	if msg.IsPChannelLevel() || msg.Properties().Exist(messageBroadcastHeader) {
-		return merr.WrapErrServiceInternalMsg("Upsert protocol requires a single-VChannel envelope without broadcast metadata")
-	}
-	if msg.IsUnreplicable() {
-		return merr.WrapErrServiceInternalMsg("Upsert WAL messages must be replicable")
+	if msg == nil || !msg.IsPersisted() || msg.IsPChannelLevel() || msg.Properties().Exist(messageBroadcastHeader) || msg.IsUnreplicable() {
+		return merr.WrapErrServiceInternalMsg("Upsert requires a persisted, replicable single-VChannel envelope")
 	}
 	return nil
 }
 
-// ValidateUpsert checks one explicit delete-and-insert write unit against its primary key schema.
-// Nested timestamps, shard names and segment IDs are not authoritative.
-// Producers must supply valid canonical fields, as required for Insert.
-// Callers must reject namespace-enabled schemas and outer partial-update CAS markers.
-func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primaryKey *schemapb.FieldSchema) error {
-	invalid := func(reason string) error {
-		return merr.WrapErrServiceInternalMsg("invalid Upsert WAL message: %s", reason)
+// UpsertRowCount returns the number of inserted logical rows.
+func UpsertRowCount(header *UpsertMessageHeader) uint64 {
+	var rows uint64
+	for _, p := range header.GetPartitions() {
+		rows += p.GetRows()
 	}
-	if header == nil || header.GetPartition() == nil || header.SchemaVersion == nil || body.GetInsert() == nil || body.GetDelete() == nil {
-		return invalid("missing header, assignment, insert or delete")
+	return rows
+}
+
+// UpsertPrimaryKeyCount returns the number of keys without a schema lookup.
+func UpsertPrimaryKeyCount(ids *schemapb.IDs) int {
+	return len(ids.GetIntId().GetData()) + len(ids.GetStrId().GetData())
+}
+
+// UpsertSelections validates placement and returns logical rows per partition.
+// Each selection preserves source order and is shared by every column.
+func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][]int64, error) {
+	invalid := func() ([][]int64, error) { return nil, merr.WrapErrServiceInternalMsg("invalid Upsert row placement") }
+	rows := UpsertPrimaryKeyCount(body.GetPrimaryKeys())
+	partitions := header.GetPartitions()
+	if rows == 0 || len(partitions) == 0 || len(body.GetRowIds()) != rows {
+		return invalid()
 	}
-	insert, deletion, partition := body.GetInsert(), body.GetDelete(), header.GetPartition()
-	if header.GetCollectionId() <= 0 || insert.GetCollectionID() != header.GetCollectionId() || deletion.GetCollectionID() != header.GetCollectionId() {
-		return invalid("collection identity differs")
+	result := make([][]int64, len(partitions))
+	seen := make(map[int64]struct{}, len(partitions))
+	for _, p := range partitions {
+		if p.GetPartitionId() <= 0 || p.GetRows() == 0 {
+			return invalid()
+		}
+		if _, ok := seen[p.GetPartitionId()]; ok {
+			return invalid()
+		}
+		seen[p.GetPartitionId()] = struct{}{}
 	}
-	if partition.GetPartitionId() <= 0 || insert.GetPartitionID() != partition.GetPartitionId() || deletion.GetPartitionID() != -1 {
-		return invalid("invalid partition scope")
+	indexes := body.GetPartitionIndexes()
+	if (len(partitions) == 1 && len(indexes) != 0) || (len(partitions) > 1 && len(indexes) != rows) {
+		return invalid()
 	}
-	if insert.GetNumRows() == 0 || partition.GetRows() != insert.GetNumRows() || uint64(len(insert.GetRowIDs())) != insert.GetNumRows() {
-		return invalid("insert row count differs")
+	for row := 0; row < rows; row++ {
+		index := uint32(0)
+		if len(indexes) > 0 {
+			index = indexes[row]
+		}
+		if uint64(index) >= uint64(len(partitions)) {
+			return invalid()
+		}
+		result[index] = append(result[index], int64(row))
 	}
-	if _, exists := insert.GetBase().GetProperties()[messagePartialUpdateCAS]; exists {
-		return invalid("partial update CAS is not supported")
-	}
-	if insert.GetVersion() != msgpb.InsertDataVersion_ColumnBased || insert.Namespace != nil || len(insert.GetRowData()) != 0 || len(deletion.GetSerializedExprPlan()) != 0 || len(deletion.GetInt64PrimaryKeys()) != 0 {
-		return invalid("unsupported namespace, row format or delete expression")
-	}
-	if deletion.GetNumRows() <= 0 || uint64(deletion.GetNumRows()) != header.GetDeleteRows() || primaryKey == nil || !primaryKey.GetIsPrimaryKey() {
-		return invalid("invalid delete count or primary key schema")
-	}
-	var field *schemapb.FieldData
-	for _, candidate := range insert.GetFieldsData() {
-		if candidate.GetFieldId() == primaryKey.GetFieldID() {
-			if field != nil {
-				return invalid("duplicate primary key field")
-			}
-			field = candidate
+	for i, p := range partitions {
+		if uint64(len(result[i])) != p.GetRows() {
+			return invalid()
 		}
 	}
-	if field == nil || field.GetType() != primaryKey.GetDataType() {
-		return invalid("missing or mistyped primary key field")
+	return result, nil
+}
+
+// ValidateUpsert checks the compound contract. Producers validate column values.
+// Metadata-only projections contain column descriptors without their values.
+func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primary *schemapb.FieldSchema) error {
+	invalid := func(reason string) error { return merr.WrapErrServiceInternalMsg("invalid Upsert: %s", reason) }
+	if header.GetCollectionId() <= 0 || header.SchemaVersion == nil || primary == nil || !primary.GetIsPrimaryKey() {
+		return invalid("missing collection, schema version or primary key schema")
 	}
-	switch primaryKey.GetDataType() {
-	case schemapb.DataType_Int64:
-		values := field.GetScalars().GetLongData().GetData()
-		keys, ok := deletion.GetPrimaryKeys().GetIdField().(*schemapb.IDs_IntId)
-		if !ok || uint64(len(values)) != insert.GetNumRows() || int64(len(keys.IntId.GetData())) != deletion.GetNumRows() || !sameUpsertKeys(values, keys.IntId.GetData()) {
-			return invalid("delete keys differ from distinct inserted primary keys")
-		}
-	case schemapb.DataType_VarChar:
-		values := field.GetScalars().GetStringData().GetData()
-		keys, ok := deletion.GetPrimaryKeys().GetIdField().(*schemapb.IDs_StrId)
-		if !ok || uint64(len(values)) != insert.GetNumRows() || int64(len(keys.StrId.GetData())) != deletion.GetNumRows() || !sameUpsertKeys(values, keys.StrId.GetData()) {
-			return invalid("delete keys differ from distinct inserted primary keys")
-		}
-	default:
-		return invalid("unsupported primary key type")
+	if _, err := UpsertSelections(header, body); err != nil {
+		return err
 	}
-	if result := header.GetIdempotentResult(); result != nil {
-		if uint64(len(result.GetRowOffsets())) != insert.GetNumRows() {
-			return invalid("append result row count differs")
-		}
-		switch primaryKey.GetDataType() {
+	validKeys := func(ids *schemapb.IDs) bool {
+		switch primary.GetDataType() {
 		case schemapb.DataType_Int64:
-			keys, ok := result.GetIds().GetIdField().(*schemapb.IDs_IntId)
-			if !ok || !equalUpsertKeys(field.GetScalars().GetLongData().GetData(), keys.IntId.GetData()) {
-				return invalid("append result primary keys differ")
-			}
+			_, ok := ids.GetIdField().(*schemapb.IDs_IntId)
+			return ok
 		case schemapb.DataType_VarChar:
-			keys, ok := result.GetIds().GetIdField().(*schemapb.IDs_StrId)
-			if !ok || !equalUpsertKeys(field.GetScalars().GetStringData().GetData(), keys.StrId.GetData()) {
-				return invalid("append result primary keys differ")
-			}
+			_, ok := ids.GetIdField().(*schemapb.IDs_StrId)
+			return ok
 		}
-	}
-	return nil
-}
-
-func sameUpsertKeys[T comparable](inserted, deleted []T) bool {
-	keys := make(map[T]struct{}, len(inserted))
-	for _, key := range inserted {
-		keys[key] = struct{}{}
-	}
-	seen := make(map[T]struct{}, len(deleted))
-	for _, key := range deleted {
-		if _, ok := keys[key]; !ok {
-			return false
-		}
-		seen[key] = struct{}{}
-	}
-	return len(keys) == len(seen)
-}
-
-func equalUpsertKeys[T comparable](left, right []T) bool {
-	if len(left) != len(right) {
 		return false
 	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
+	if !validKeys(body.GetPrimaryKeys()) {
+		return invalid("primary key type differs from schema")
+	}
+	seen := map[int64]struct{}{}
+	for _, column := range body.GetColumns() {
+		id := column.GetFieldId()
+		if id <= 1 || id == primary.GetFieldID() {
+			return invalid("columns contain a primary key or system field")
+		}
+		if _, ok := seen[id]; ok {
+			return invalid("duplicate column")
+		}
+		seen[id] = struct{}{}
+	}
+	var deleted uint64
+	for _, effect := range body.GetDeleteEffects() {
+		if !validKeys(effect.GetPrimaryKeys()) || UpsertPrimaryKeyCount(effect.GetPrimaryKeys()) == 0 {
+			return invalid("empty or mistyped delete keys")
+		}
+		switch scope := effect.GetScope().(type) {
+		case *messagespb.UpsertDeleteEffect_AllPartitions:
+			if scope.AllPartitions == nil {
+				return invalid("missing delete scope")
+			}
+		case *messagespb.UpsertDeleteEffect_PartitionId:
+			if scope.PartitionId <= 0 {
+				return invalid("invalid delete partition")
+			}
+		default:
+			return invalid("missing delete scope")
+		}
+		deleted += uint64(UpsertPrimaryKeyCount(effect.GetPrimaryKeys()))
+	}
+	if deleted != header.GetDeleteRows() {
+		return invalid("delete count differs from effects")
+	}
+	if mapping := body.GetRequestRowMapping(); mapping != nil {
+		if len(mapping.GetRowOffsets()) != UpsertPrimaryKeyCount(body.GetPrimaryKeys()) {
+			return invalid("request row mapping count differs")
+		}
+		if err := ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: mapping.GetRowOffsets()}); err != nil {
+			return err
 		}
 	}
-	return true
+	if cas := body.GetPartialUpdateCas(); cas != nil {
+		if err := validatePartialUpdateCAS(cas); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpsertRetryResult reads original keys and row offsets without decoding columns.
+func UpsertRetryResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
+	body, err := ReadUpsertMetadata(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if body.GetRequestRowMapping() == nil {
+		return nil, nil
+	}
+	result := &messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: body.GetRequestRowMapping().GetRowOffsets()}
+	if len(result.GetRowOffsets()) != UpsertPrimaryKeyCount(result.GetIds()) {
+		return nil, merr.WrapErrServiceInternalMsg("incomplete Upsert retry mapping")
+	}
+	if err := ValidateIdempotentInsertResult(result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// UpsertPrimaryKeyColumn borrows validated row keys for function and storage
+// interfaces that require a FieldData column. The caller must not modify keys.
+func UpsertPrimaryKeyColumn(primary *schemapb.FieldSchema, keys *schemapb.IDs) *schemapb.FieldData {
+	column := &schemapb.FieldData{FieldId: primary.GetFieldID(), FieldName: primary.GetName(), Type: primary.GetDataType()}
+	if primary.GetDataType() == schemapb.DataType_Int64 {
+		column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: keys.GetIntId()}}}
+	} else {
+		column.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: keys.GetStrId()}}}
+	}
+	return column
+}
+
+// ValidateUpsertSchema rejects collections whose namespace routing cannot use
+// the unified protocol. This check also applies to replicated appends.
+func ValidateUpsertSchema(schema *schemapb.CollectionSchema) error {
+	if schema.GetEnableNamespace() {
+		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace collections")
+	}
+	return nil
 }

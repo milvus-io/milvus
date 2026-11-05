@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
@@ -43,11 +44,11 @@ func persistenceUpsert(t *testing.T) message.ImmutableMessage {
 	body.CollectionID = 1
 	body.PartitionID = 2
 	return message.NewUpsertMessageBuilderV2().WithVChannel("v1").
-		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partition: insert.Header().GetPartitions()[0], DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{Insert: body, Delete: &msgpb.DeleteRequest{
+		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: func() *int32 { v := int32(1); return &v }(), Partitions: []*message.PartitionSegmentAssignment{insert.Header().GetPartitions()[0]}, DeleteRows: 1}).
+		WithBody(upsertfixture.Body(body, &msgpb.DeleteRequest{
 			CollectionID: 1, PartitionID: -1, NumRows: 1, Timestamps: []uint64{999},
 			PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
-		}}).MustBuildMutable().WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(10)).IntoImmutableMessage(rmq.NewRmqID(20))
+		})).MustBuildMutable().WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(10)).IntoImmutableMessage(rmq.NewRmqID(20))
 }
 
 func persistenceTxn(t *testing.T, body message.ImmutableMessage) message.ImmutableMessage {

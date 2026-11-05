@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -36,20 +37,17 @@ func (c collection) legacy(kind string, pk, marker int64) message.MutableMessage
 		return c.upsert(pk, marker)
 	}
 	if kind == "Insert" {
-		body := upsert.MustBody()
-		body.Insert.Base = &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}
-		body.Insert.Timestamps = []uint64{0}
-		upsert.OverwriteBody(body)
-		return message.NewInsertMessageBuilderV1().WithVChannel(c.vchannel).
-			WithHeader(&message.InsertMessageHeader{CollectionId: c.id, SchemaVersion: upsert.Header().SchemaVersion, Partitions: []*message.PartitionSegmentAssignment{upsert.Header().GetPartition()}}).
-			WithBody(upsert.MustBody().GetInsert()).MustBuildMutable()
+		body := upsertfixture.Insert(upsert.MustBody())
+		body.CollectionID = c.id
+		body.Base = &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}
+		body.Timestamps = make([]uint64, body.NumRows)
+		return message.NewInsertMessageBuilderV1().WithVChannel(c.vchannel).WithHeader(&message.InsertMessageHeader{CollectionId: c.id, SchemaVersion: upsert.Header().SchemaVersion, Partitions: upsert.Header().Partitions}).WithBody(body).MustBuildMutable()
 	}
-	body := upsert.MustBody()
-	body.Delete.Base = &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete}
-	body.Delete.Timestamps = []uint64{0}
-	upsert.OverwriteBody(body)
-	return message.NewDeleteMessageBuilderV1().WithVChannel(c.vchannel).
-		WithHeader(&message.DeleteMessageHeader{CollectionId: c.id, Rows: 1}).WithBody(upsert.MustBody().GetDelete()).MustBuildMutable()
+	body := upsertfixture.Delete(upsert.MustBody())
+	body.CollectionID = c.id
+	body.Base = &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete}
+	body.Timestamps = make([]uint64, body.NumRows)
+	return message.NewDeleteMessageBuilderV1().WithVChannel(c.vchannel).WithHeader(&message.DeleteMessageHeader{CollectionId: c.id, Rows: uint64(body.NumRows)}).WithBody(body).MustBuildMutable()
 }
 
 func (s *UpsertWALSuite) TestProxyInsertKeepsExistingDuplicateBehavior() {
@@ -57,7 +55,7 @@ func (s *UpsertWALSuite) TestProxyInsertKeepsExistingDuplicateBehavior() {
 	defer cancel()
 	c := s.create(ctx)
 	for _, marker := range []int64{1, 2} {
-		request := message.MustAsMutableUpsertMessageV2(c.upsert(11, marker)).MustBody().GetInsert()
+		request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, marker)).MustBody())
 		result, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData()})
 		s.Require().NoError(merr.CheckRPCCall(result, err))
 	}
@@ -165,9 +163,9 @@ func (s *UpsertWALSuite) rawProduceScope(recovery bool) {
 	_, err = producer.Append(ctx, message.NewInsertMessageBuilderV1().WithVChannel(second.vchannel).
 		WithHeader(&message.InsertMessageHeader{
 			CollectionId: second.id, SchemaVersion: typed.Header().SchemaVersion,
-			Partitions: []*message.PartitionSegmentAssignment{typed.Header().GetPartition()},
+			Partitions: []*message.PartitionSegmentAssignment{typed.Header().GetPartitions()[0]},
 		}).
-		WithBody(typed.MustBody().GetInsert()).MustBuildMutable().WithTxnContext(txn))
+		WithBody(upsertfixture.Insert(typed.MustBody())).MustBuildMutable().WithTxnContext(txn))
 	s.Require().NoError(err)
 	_, err = producer.Append(ctx, first.upsert(11, 3).WithTxnContext(txn))
 	s.Require().NoError(err)

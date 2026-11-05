@@ -17,6 +17,8 @@
 package messageutil
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -40,8 +42,13 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 		return TransformLogKindNone
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeDelete, message.MessageTypeUpsert:
+	case message.MessageTypeDelete:
 		return TransformLogKindDelete
+	case message.MessageTypeUpsert:
+		if AdvancesQueryTransformMVCC(msg) {
+			return TransformLogKindDelete
+		}
+		return TransformLogKindNone
 	case message.MessageTypeInsert:
 		return TransformLogKindNone
 	case message.MessageTypeTxn:
@@ -60,8 +67,12 @@ func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	kind := TransformLogKindNone
 	_ = txn.RangeOver(func(inner message.ImmutableMessage) error {
 		switch inner.MessageType() {
-		case message.MessageTypeDelete, message.MessageTypeUpsert:
+		case message.MessageTypeDelete:
 			kind = TransformLogKindDelete
+		case message.MessageTypeUpsert:
+			if ClassifyTransformLogMessage(inner) == TransformLogKindDelete {
+				kind = TransformLogKindDelete
+			}
 		case message.MessageTypeInsert:
 		default:
 			if kind != TransformLogKindDelete {
@@ -102,15 +113,20 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeDelete, message.MessageTypeUpsert:
-		deleted, _ := AsDeleteRequest(msg)
-		return transformEntryFromDeletes(msg.TimeTick(), []*msgpb.DeleteRequest{deleted}, opt)
+		deleted, err := DeleteRequests(context.Background(), msg)
+		if err != nil {
+			panic(err)
+		}
+		return transformEntryFromDeletes(msg.TimeTick(), deleted, opt)
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(msg)
 		deletes := make([]*msgpb.DeleteRequest, 0)
 		_ = txn.RangeOver(func(im message.ImmutableMessage) error {
-			if deleted, ok := AsDeleteRequest(im); ok {
-				deletes = append(deletes, deleted)
+			deleted, err := DeleteRequests(context.Background(), im)
+			if err != nil {
+				panic(err)
 			}
+			deletes = append(deletes, deleted...)
 			return nil
 		})
 		return transformEntryFromDeletes(msg.TimeTick(), deletes, opt)

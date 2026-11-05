@@ -37,7 +37,7 @@ func TestUpsertGenerationGate(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
 	params := paramtable.Get()
-	const key = "streaming.wal.upsert.enabled"
+	const key = "streaming.wal.upsert.unifiedEnabled"
 	defer params.Reset(key)
 	require.NoError(t, params.Save(key, "false"))
 	opener, err := registry.MustGetBuilder(message.WALNameTest, timetick.NewInterceptorBuilder()).Build()

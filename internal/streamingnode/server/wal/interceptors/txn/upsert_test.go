@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -152,9 +153,9 @@ func TestRecoveredUpsertCommitValidatesScopeAndCounts(t *testing.T) {
 			bodyMessage := upsertForTest(test.bodyChannel).WithTxnContext(txnContext).WithLastConfirmedUseMessageID()
 			if test.name == "foreign collection wrong count" {
 				typed := message.MustAsMutableUpsertMessageV2(bodyMessage)
-				payload := typed.MustBody()
-				payload.Insert.CollectionID = 2
-				typed.OverwriteBody(payload)
+				header := typed.Header()
+				header.CollectionId = 2
+				typed.OverwriteHeader(header)
 			}
 			if test.name == "unreplicable body wrong count" {
 				bodyMessage.Properties().ToRawMap()["_ur"] = ""
@@ -198,7 +199,7 @@ func TestRecoveredUpsertCommitValidatesScopeAndCounts(t *testing.T) {
 
 func upsertForTest(vc string) message.MutableMessage {
 	version := int32(1)
-	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partition: &message.PartitionSegmentAssignment{PartitionId: 2, Rows: 1}, DeleteRows: 1}).WithBody(&message.UpsertMessageBody{Insert: &msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 1, RowIDs: []int64{7}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}}}}}, Delete: &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}}}).MustBuildMutable().WithTimeTick(10)
+	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 1, RowIDs: []int64{7}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}}}}}, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}})).MustBuildMutable().WithTimeTick(10)
 }
 
 func TestRecoveredUpsertCommitRejectsForbiddenEnvelopes(t *testing.T) {
@@ -242,5 +243,23 @@ func TestRecoveredUpsertCommitRejectsForbiddenEnvelopes(t *testing.T) {
 				manager.Close()
 			})
 		}
+	}
+}
+
+func TestRecoveredUpsertInsertOnlyClassification(t *testing.T) {
+	resource.InitForTest(t)
+	for _, effects := range []bool{false, true} {
+		ctx := message.TxnContext{TxnID: 70}
+		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(10))
+		header := &message.UpsertMessageHeader{CollectionId: 1}
+		if effects {
+			header.DeleteRows = 1
+		}
+		body := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(header).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(11))
+		manager := NewTxnManager(types.PChannelInfo{Name: "test"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{70: message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(body)})
+		session, err := manager.GetSessionOfTxn(70)
+		require.NoError(t, err)
+		require.Equal(t, !effects, session.IsInsertOnly())
+		manager.Close()
 	}
 }

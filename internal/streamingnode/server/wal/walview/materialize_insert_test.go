@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
@@ -32,13 +33,13 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	assignment := &messagespb.PartitionSegmentAssignment{PartitionId: 10, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}
 	inputFor := func(body *msgpb.InsertRequest) SegmentInsertMessage {
 		raw := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{Partitions: []*messagespb.PartitionSegmentAssignment{assignment}}).WithBody(body).MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
-		return SegmentInsertMessage{Message: message.MustAsImmutableInsertMessageV1(raw), Assignment: assignment, TimeTick: 10}
+		return SegmentInsertMessage{Message: func() messageutil.InsertRequest { rows, _, _ := messageutil.AsInsertRequest(raw); return rows }(), Assignment: assignment, TimeTick: 10}
 	}
 	input := inputFor(body)
-	before := proto.Clone(input.Message.MustBody())
+	before := proto.Clone(body)
 	output, err := MaterializeInsertRequest(schema, input)
 	require.NoError(t, err)
-	require.True(t, proto.Equal(before, input.Message.MustBody()), "query materialization cannot mutate retained WAL")
+	require.True(t, proto.Equal(before, body), "query materialization cannot mutate retained WAL")
 	require.Equal(t, int64(10), output.PartitionID)
 	require.Equal(t, int64(20), output.SegmentID)
 	require.Len(t, output.FieldsData, 2)
@@ -46,7 +47,8 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	patch := mockey.Mock((*function.FunctionRunnerLocalStore).FillEmbeddingData).Return(context.Canceled).Build()
 	defer patch.UnPatch()
 	materializedInput := inputFor(output)
-	cached := materializedInput.Message.MustBody()
+	cached, err := materializedInput.Message.ReadRows(context.Background(), schema, nil)
+	require.NoError(t, err)
 	materialized, err := MaterializeInsertRequest(schema, materializedInput)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(output, materialized))
@@ -58,4 +60,61 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	_, err = MaterializeInsertRequest(nil, input)
 	require.Error(t, err)
+}
+
+func TestUnifiedUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}, {Key: "enable_analyzer", Value: "true"}}},
+		{FieldID: 102, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}}},
+	}, Functions: []*schemapb.FunctionSchema{{Name: "minhash", Type: schemapb.FunctionType_MinHash, InputFieldNames: []string{"text"}, InputFieldIds: []int64{101}, OutputFieldNames: []string{"hash"}, OutputFieldIds: []int64{102}, Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: "16"}}}}}
+	version := int32(1)
+	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}, {PartitionId: 11, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 21}}}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{1, 2}, PartitionIndexes: []uint32{0, 1}, Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"first text", "second document"}}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	before := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody())
+	seen := 0
+	require.NoError(t, ForEachSegmentInsertMessage(raw, 0, func(selected SegmentInsertMessage) error {
+		row, err := MaterializeInsertRequest(schema, selected)
+		if err != nil {
+			return err
+		}
+		require.Equal(t, uint64(1), row.NumRows)
+		require.Equal(t, []uint64{42}, row.Timestamps)
+		var hashes []byte
+		for _, column := range row.FieldsData {
+			if column.FieldId == 102 {
+				hashes = column.GetVectors().GetBinaryVector()
+			}
+		}
+		require.Len(t, hashes, 64)
+		seen++
+		return nil
+	}))
+	require.Equal(t, 2, seen)
+	require.True(t, proto.Equal(before, message.MustAsImmutableUpsertMessageV2(raw).MustBody()))
+}
+
+func BenchmarkUnifiedUpsertBM25Materialization(b *testing.B) {
+	const rows = 128
+	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}, {Key: "enable_analyzer", Value: "true"}}},
+		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+	}, Functions: []*schemapb.FunctionSchema{{Name: "bm25", Type: schemapb.FunctionType_BM25, InputFieldNames: []string{"text"}, InputFieldIds: []int64{101}, OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102}}}}
+	texts := make([]string, rows)
+	for i := range texts {
+		texts[i] = "shared document for materialization benchmark"
+	}
+	version := int32(1)
+	assignment := &messagespb.PartitionSegmentAssignment{PartitionId: 10, Rows: rows, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}
+	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{assignment}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: texts}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := ForEachSegmentInsertMessage(raw, 20, func(selected SegmentInsertMessage) error {
+			_, err := MaterializeInsertRequest(schema, selected)
+			return err
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

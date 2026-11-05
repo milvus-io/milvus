@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1981,6 +1982,12 @@ func (it *UpsertTask) deletePreExecute(ctx context.Context) error {
 }
 
 func (it *UpsertTask) PreExecute(ctx context.Context) error {
+	if err := requireUnifiedUpsertGeneration(); err != nil {
+		return err
+	}
+	if it.req.Namespace != nil {
+		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace requests")
+	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
 	defer sp.End()
 
@@ -2033,6 +2040,9 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
+	if err := streamingmessage.ValidateUpsertSchema(schema.CollectionSchema); err != nil {
+		return err
+	}
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err

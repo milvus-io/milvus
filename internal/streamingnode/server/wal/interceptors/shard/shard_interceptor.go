@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -469,15 +470,26 @@ type deletePressureRecorder interface {
 }
 
 // mutableUpsertInsert exposes nested row content to the existing function manager.
-type mutableUpsertInsert struct{ message.MutableUpsertMessageV2 }
+type mutableUpsertInsert struct {
+	message.MutableUpsertMessageV2
+	primary *schemapb.FieldSchema
+}
 
 func (u mutableUpsertInsert) MustBody() *msgpb.InsertRequest {
-	return u.MutableUpsertMessageV2.MustBody().GetInsert()
+	body := u.MutableUpsertMessageV2.MustBody()
+	fields := append([]*schemapb.FieldData(nil), body.GetColumns()...)
+	fields = append(fields, message.UpsertPrimaryKeyColumn(u.primary, body.GetPrimaryKeys()))
+	return &msgpb.InsertRequest{CollectionID: u.Header().GetCollectionId(), NumRows: message.UpsertRowCount(u.Header()), RowIDs: body.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 }
 
 func (u mutableUpsertInsert) OverwriteBody(insert *msgpb.InsertRequest) {
 	body := u.MutableUpsertMessageV2.MustBody()
-	body.Insert = insert
+	body.Columns = nil
+	for _, field := range insert.GetFieldsData() {
+		if field.GetFieldId() != u.primary.GetFieldID() {
+			body.Columns = append(body.Columns, field)
+		}
+	}
 	u.MutableUpsertMessageV2.OverwriteBody(body)
 }
 
@@ -509,9 +521,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if parseErr != nil || collectionID <= 0 || collectionID != header.GetCollectionId() || funcutil.IsControlChannel(msg.VChannel()) {
 		return nil, status.NewUnrecoverableError("Upsert has an invalid collection or vchannel scope")
 	}
-	if message.HasPartialUpdateCAS(msg) {
-		return nil, status.NewUnrecoverableError("Upsert does not support partial update CAS")
-	}
+
 	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: collectionID, SchemaVersion: header.SchemaVersion})
 	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
 		return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d", header.GetSchemaVersion(), version)
@@ -523,14 +533,15 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, err
 	}
-	if schema.GetEnableNamespace() {
-		return nil, status.NewUnrecoverableError("Upsert does not support namespace collections")
+
+	if err := message.ValidateUpsertSchema(schema); err != nil {
+		return nil, status.NewInvalidArgument("%v", err)
 	}
 	primary, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
-	body, err := upsert.Body(ctx)
+	body, err := message.ReadUpsertMetadata(ctx, msg)
 	if err != nil {
 		return nil, upsertBodyDecodeError(err)
 	}
@@ -538,7 +549,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
 	}
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
-		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutableUpsertInsert{upsert})
+		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutableUpsertInsert{MutableUpsertMessageV2: upsert, primary: primary})
 		if err != nil {
 			var preparation *function.PreparationRequiredError
 			if errors.As(err, &preparation) {
@@ -551,7 +562,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
 		}
 	}
-	body, err = upsert.Body(ctx)
+	body, err = message.ReadUpsertMetadata(ctx, msg)
 	if err != nil {
 		return nil, upsertBodyDecodeError(err)
 	}
@@ -562,24 +573,68 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if !ok {
 		return nil, status.NewInner("shard delete accounting is not available")
 	}
-	partition := header.GetPartition()
-	partition.BinarySize = uint64(proto.Size(body.GetInsert()))
-	request := &shards.AssignSegmentRequest{CollectionID: collectionID, PartitionID: partition.GetPartitionId(), ModifiedMetrics: stats.ModifiedMetrics{Rows: partition.GetRows(), BinarySize: partition.GetBinarySize()}, TimeTick: msg.TimeTick()}
-	if session := txn.GetTxnSessionFromContext(ctx); session != nil {
-		request.TxnSession = session
+	selections, err := message.UpsertSelections(header, body)
+	if err != nil {
+		return nil, err
 	}
-	assignment, err := impl.shardManager.AssignSegment(request)
+	if (body.GetPartialUpdateCas() != nil) != message.HasPartialUpdateCAS(msg) {
+		return nil, status.NewUnrecoverableError("Upsert CAS marker and proof differ")
+	}
+	content, err := upsert.Body(ctx)
+	if err != nil {
+		return nil, upsertBodyDecodeError(err)
+	}
+	// Borrow all columns for exact selected-row sizing. The view encoder does not
+	// copy vectors or materialize partition-sized FieldData objects.
+	primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
+	fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
+	source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds())), RowIDs: content.GetRowIds(), Timestamps: make([]uint64, len(content.GetRowIds())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	requests := make([]*shards.AssignSegmentRequest, len(header.GetPartitions()))
+	for index, partition := range header.GetPartitions() {
+		rows := make([]int, len(selections[index]))
+		for i, row := range selections[index] {
+			rows[i] = int(row)
+		}
+		selectedRowIDs := make([]int64, len(rows))
+		for i, row := range rows {
+			selectedRowIDs[i] = content.RowIds[row]
+		}
+		encoder, err := fastpb.NewUpsertViewEncoder(&message.UpsertMessageBody{RowIds: selectedRowIDs}, source, rows)
+		if err != nil {
+			return nil, err
+		}
+		size, err := encoder.EncodedSize()
+		if err != nil {
+			return nil, err
+		}
+		partition.BinarySize = uint64(size)
+		requests[index] = &shards.AssignSegmentRequest{CollectionID: collectionID, PartitionID: partition.GetPartitionId(), ModifiedMetrics: stats.ModifiedMetrics{Rows: partition.GetRows(), BinarySize: partition.GetBinarySize()}, TimeTick: msg.TimeTick()}
+		if session := txn.GetTxnSessionFromContext(ctx); session != nil {
+			requests[index].TxnSession = session
+		}
+	}
+	assigner, ok := impl.shardManager.(interface {
+		AssignSegments([]*shards.AssignSegmentRequest) ([]*shards.AssignSegmentResult, error)
+	})
+	if !ok {
+		return nil, status.NewInner("batch segment assignment is unavailable")
+	}
+	assignments, err := assigner.AssignSegments(requests)
 	if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
 		return nil, redo.ErrRedo
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer assignment.Ack()
-	// Source assignments never select a destination segment.
-	partition.SegmentAssignment = &message.SegmentAssignment{SegmentId: assignment.SegmentID}
+	for index, assignment := range assignments {
+		defer assignment.Ack()
+		header.Partitions[index].SegmentAssignment = &message.SegmentAssignment{SegmentId: assignment.SegmentID}
+	}
 	upsert.OverwriteHeader(header)
-	recorder.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(body.GetDelete())))
+	if header.GetDeleteRows() > 0 {
+		recorder.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects()})))
+	}
+
 	return appendOp(ctx, msg)
 }
 

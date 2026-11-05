@@ -50,7 +50,7 @@ func (cm *QueryMVCCManager) ObserveAppend(msg message.MutableMessage) {
 		return
 	}
 	kind, channel, tick := msg.MessageType(), msg.VChannel(), msg.TimeTick()
-	if kind != message.MessageTypeInsert && !messageutil.AdvancesQueryTransformMVCC(msg) {
+	if kind != message.MessageTypeInsert && kind != message.MessageTypeUpsert && !messageutil.AdvancesQueryTransformMVCC(msg) {
 		return
 	}
 	cm.mu.Lock()
@@ -187,7 +187,7 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot {
 		return
 	}
-	if kind == message.MessageTypeCommitTxn && insertOnly {
+	if (kind == message.MessageTypeCommitTxn && insertOnly) || (kind == message.MessageTypeUpsert && !messageutil.AdvancesQueryTransformMVCC(msg)) {
 		kind = message.MessageTypeInsert
 	}
 	switch kind {

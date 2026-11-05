@@ -170,19 +170,10 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 	insertMessages := make([]*msgstream.InsertMsg, 0, len(pack.Inserts))
 	for _, raw := range pack.Inserts {
 		if err := forEachSegmentInsertMessage(raw, pack.SegmentID, func(insert segmentInsertMessage) error {
-			// A single insert message body carries one contiguous row range
-			// assigned wholesale to exactly one segment; the producer builds
-			// one message per segment (see proxy task_insert_streaming.go).
-			// Reject a multi-partition message here instead of persisting the
-			// whole body into every segment it is assigned to.
-			if insert.PartitionCount > 1 {
-				return merr.WrapErrServiceInternalMsg(
-					"unsupported multi-partition insert message for segment %d: %d partitions, body cannot be split by segment",
-					pack.SegmentID, insert.PartitionCount)
+			request, err := insert.Message.ReadRows(context.Background(), schema, insert.Rows)
+			if err != nil {
+				return err
 			}
-			// MustBody panics on unmarshal failure, so request is never nil
-			// here.
-			request := storage.CopyInsertRequestMetadata(insert.Message.MustBody())
 			request.ShardName = pack.VChannel
 			request.CollectionID = pack.CollectionID
 			request.PartitionID = insert.Assignment.GetPartitionId()
