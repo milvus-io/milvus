@@ -119,7 +119,8 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 		view.ShardID(),
 		key.QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 10},
-		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}}, nil,
+		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
+		&viewpb.SegmentSelection{SegmentIds: []int64{1000}, Mode: viewpb.SegmentSelection_Include},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, testCollectionID, optimizer.queryReq.GetCollectionID())
@@ -129,6 +130,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 	assert.Equal(t, key, mgr.queryKey)
 	require.Len(t, mgr.queryView.GetPartitions(), 1)
 	assert.Equal(t, int64(10), mgr.queryView.GetPartitions()[0].GetPartitionId())
+	assert.Equal(t, []int64{1000}, mgr.queryView.GetPartitions()[0].GetSegmentIds())
 
 	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 1), OnReport: rc.onReport}})
 	assert.Equal(t, 1, mgr.releasedCount())
@@ -140,7 +142,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 
 func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testing.T) {
 	mgr := newMockSegmentManager()
-	handles := []*mockSealedSegmentHandle{{id: 2000, partitionID: 20}}
+	handles := []*mockSealedSegmentHandle{{id: 1001, partitionID: 10}}
 	mgr.queryHandles = []SealedSegmentHandle{handles[0]}
 	optimizer := &fakeLocalOptimizer{}
 	mgr.beforeQuery = func() {
@@ -162,7 +164,8 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testi
 		view.ShardID(),
 		key.QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 10},
-		&internalpb.SearchRequest{CollectionID: testCollectionID, PartitionIDs: []int64{20}}, nil,
+		&internalpb.SearchRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
+		&viewpb.SegmentSelection{SegmentIds: []int64{1000}, Mode: viewpb.SegmentSelection_Exclude},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, testCollectionID, optimizer.searchReq.GetCollectionID())
@@ -171,7 +174,8 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testi
 	require.Len(t, tasks.Tasks(), 1)
 	assert.Equal(t, key, mgr.queryKey)
 	require.Len(t, mgr.queryView.GetPartitions(), 1)
-	assert.Equal(t, int64(20), mgr.queryView.GetPartitions()[0].GetPartitionId())
+	assert.Equal(t, int64(10), mgr.queryView.GetPartitions()[0].GetPartitionId())
+	assert.Equal(t, []int64{1001}, mgr.queryView.GetPartitions()[0].GetSegmentIds())
 
 	h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 1), OnReport: rc.onReport}})
 	assert.Equal(t, 1, mgr.releasedCount())

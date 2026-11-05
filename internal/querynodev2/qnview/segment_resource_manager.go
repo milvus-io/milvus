@@ -63,10 +63,12 @@ type viewResources struct {
 }
 
 type segmentBinding struct {
-	view         *viewResources
-	resource     *segmentResource
-	partitionID  int64
-	manifest     int64
+	view        *viewResources
+	resource    *segmentResource
+	partitionID int64
+	manifest    int64
+	// Zero-manifest requirements validate fresh metadata before reusing a read.
+	snapshot     *SegmentLoadInfoSnapshot
 	prepared     *preparedSegmentRead
 	reported     bool
 	retryAfter   time.Time
@@ -77,6 +79,7 @@ type preparedSegmentRead struct {
 	schema   int32
 	load     uint64
 	manifest int64
+	snapshot *querypb.SegmentLoadInfo
 	base     *segmentBase
 	read     segments.ReadState
 }
@@ -330,7 +333,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.dirty = true
 			b = nil
 		}
-		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest) {
+		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
@@ -345,6 +348,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			if err == nil {
 				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
 				r.snapshot = &snapshot
+				if b.manifest == 0 {
+					b.snapshot = r.snapshot
+				}
 				if snapshotManifestVersion(snapshot) < b.manifest {
 					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
 				}
@@ -376,6 +382,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			return nil
 		}
 		snapshot := *r.snapshot
+		if b.manifest == 0 {
+			snapshot = *b.snapshot
+		}
 		collection := b.view.collection
 		b.view.operationRefs++
 		m.mu.Unlock()
@@ -396,8 +405,13 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		m.mu.Lock()
 		b.view.operationRefs--
 		if err != nil {
+			// A missing V2 artifact may have appeared since this attempt.
+			b.snapshot = nil
 			b.backoffLocked()
 		} else {
+			if b.manifest == 0 {
+				result.snapshot = snapshot.LoadInfo
+			}
 			b.resetRetryLocked()
 			r.reads = append(r.reads, result)
 		}
@@ -477,6 +491,9 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
+		return false
+	}
 	return read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() &&
 		read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest)
 }
@@ -487,7 +504,8 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 		return merr.WrapErrServiceInternalMsg("segment %d received mismatched loading metadata", r.id)
 	}
 	_, version, err := packed.UnmarshalManifestPath(info.GetManifestPath())
-	if err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3 {
+	legacyV2 := info.GetStorageVersion() == storage.StorageV2 && info.GetManifestPath() == ""
+	if !legacyV2 && (err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3) {
 		return merr.WrapErrServiceInternalMsg("segment %d requires a committed StorageV3 manifest", r.id)
 	}
 	if info.GetTransformStartAfterTimetick() == 0 {
@@ -524,7 +542,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	// snapshots may replace it, so they require an identical manifest to share.
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		sameManifest := candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
+		sameManifest := info.GetManifestPath() != "" && candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
 		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
 			break

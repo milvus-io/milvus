@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -20,10 +18,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Schema resources are process-local and independent of View load scopes.
+// Read bindings are process-local and isolate index metadata by load version.
+// Their CCollections share the parsed immutable Schema through segcore's pool.
 type collectionSchemaKey struct {
-	collectionID  int64
-	schemaVersion int32
+	collectionID    int64
+	schemaVersion   int32
+	loadInfoVersion uint64
 }
 type readSchemaPool struct {
 	mu        sync.Mutex
@@ -80,16 +80,16 @@ func (b *readSchemaBinding) Prepare(ctx context.Context, provider LoadInfoProvid
 		if err != nil {
 			return err
 		}
-		view.RequiredFields = qviews.ResolveRequiredFields(view.Schema, info.RequiredFields)
+		view.RequiredFields = info.RequiredFields
 		view.IndexInfos = info.IndexInfos
 	}
-	schema, err := b.module.pool.acquire(ctx, view)
+	schema, err := b.module.pool.acquire(ctx, view, b.meta.GetLoadInfoVersion())
 	if err != nil {
 		return err
 	}
 	// Runner initialization may read external resources. The acquired guard keeps
 	// its schema alive without holding the shared collection registry lock.
-	for _, field := range qviews.ResolveRequiredFields(view.Schema, view.RequiredFields) {
+	for _, field := range view.RequiredFields {
 		if _, err := function.GetManager().RunWithRunner(ctx, view.CollectionID, schema.functionKey, field.GetFieldId(), func(function.FunctionRunner) error { return nil }); err != nil {
 			b.module.pool.release(schema)
 			return err
@@ -118,39 +118,20 @@ type readSchema struct {
 	key         collectionSchemaKey
 }
 
-func (p *readSchemaPool) acquire(ctx context.Context, view walview.VChannelWALView) (*readSchema, error) {
+func (p *readSchemaPool) acquire(ctx context.Context, view walview.VChannelWALView, version uint64) (*readSchema, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	key := collectionSchemaKey{view.CollectionID, view.Schema.GetVersion()}
-	req := &segcore.CreateCCollectionRequest{CollectionID: view.CollectionID, Schema: view.Schema}
+	key := collectionSchemaKey{view.CollectionID, view.Schema.GetVersion(), version}
+	if schema := p.resources[key]; schema != nil {
+		schema.owners++
+		return schema, nil
+	}
+	req := &segcore.CreateCCollectionRequest{CollectionID: view.CollectionID, Schema: view.Schema, ShareSchema: true}
 	if len(view.IndexInfos) > 0 {
 		index := segcore.ComposeCollectionIndexMeta(ctx, view.IndexInfos, view.Schema)
 		if len(index.GetIndexMetas()) > 0 && index.GetMaxIndexRowCount() > 0 {
 			req.IndexMeta = index
 		}
-	}
-	if schema := p.resources[key]; schema != nil {
-		// Another live View may use fields absent from this load scope. Preserve
-		// their search metadata just as GrowingRuntime does for leased Views.
-		if next := req.IndexMeta; next != nil {
-			current := schema.collection.IndexMeta()
-			fields := make(map[int64]bool, len(next.GetIndexMetas()))
-			for _, field := range next.GetIndexMetas() {
-				fields[field.GetFieldID()] = true
-			}
-			for _, field := range current.GetIndexMetas() {
-				if !fields[field.GetFieldID()] {
-					next.IndexMetas = append(next.IndexMetas, field)
-				}
-			}
-			if !proto.Equal(current, next) {
-				if err := schema.collection.UpdateIndexMeta(next); err != nil {
-					return nil, err
-				}
-			}
-		}
-		schema.owners++
-		return schema, nil
 	}
 	collection, err := segcore.CreateCCollection(req)
 	if err != nil {

@@ -50,6 +50,8 @@ func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	defer patch.UnPatch()
 	require.NoError(t, task.Execute(t.Context()))
 	require.Equal(t, 1, appends)
-	require.Zero(t, invalidations)
+	// A later shard mismatch expires the schema for the next request without
+	// replaying this partially committed append or replacing its first error.
+	require.Equal(t, 1, invalidations)
 	require.Contains(t, task.result.GetStatus().GetReason(), "first shard shutting down")
 }

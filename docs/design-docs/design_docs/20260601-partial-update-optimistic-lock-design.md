@@ -160,9 +160,9 @@ remaining values are internal constants:
 
 | Parameter or constant | Default | Purpose |
 |---|---|---|
-| `defaultVersionIndexTTL` | 30 seconds | Limits how long each vchannel retains recent PK-write versions and also bounds the valid window from `readTS` to `commitTS` for one partial-update attempt. When the window is exceeded, StreamingNode returns a retryable CAS rejection; Proxy automatically retries only replacement updates that can be rebuilt safely. |
+| `defaultVersionIndexTTL` | 30 seconds | Controls reclamation of recent PK-write versions. It does not limit read-to-commit age; admission uses the actual forgotten-write boundary described below. |
 | `streaming.partialUpdate.enableCAS` | `true` | Hidden switch added by #54248. When it is `false`, the partial-update interceptor installs no row-lock hook, skips write-set recovery, and passes every write through without CAS validation, so concurrent updates based on stale rows may overwrite each other. Shard lifecycle and structural DDL locks are unchanged. Each interceptor reads it once when the WAL opens. |
-| `streaming.partialUpdate.versionIndexMaxBytes` | 640,000,000 bytes, approximately 610 MiB | Caps the estimated memory used by all PK-version indexes on one StreamingNode. When the shared budget is unavailable, ordinary writes continue, but CAS on the affected vchannel fails closed until the omitted write leaves the valid read window. |
+| `streaming.partialUpdate.versionIndexMaxBytes` | 640,000,000 bytes, approximately 610 MiB | Caps the estimated memory used by all PK-version indexes on one StreamingNode. When the shared budget is unavailable, ordinary writes continue, but CAS on the affected vchannel rejects snapshots older than the omitted write; snapshots including that write remain verifiable. |
 | `streaming.partialUpdate.recoveryDecodeTimeout` | `5s` | Total time budget, per WAL open, for rebuilding pending transaction write sets. A transaction whose bodies are not decoded within it is marked incomplete, and its commit is rejected and replayed. The budget is checked before each body decode, so `0` or a negative value marks every pending transaction with an insert or delete body incomplete. Larger values can delay WAL open when decoding stalls. |
 | `partialUpdateCASMaxRetryAttempts` | 5 attempts, including the first attempt | Limits the total number of Proxy attempts used to rebuild a complete replacement update after a deterministic CAS conflict. Requests containing relative field operations do not use this automatic retry. |
 | `partialUpdateCASRetryBackoff` | Starts at 10 ms with exponential backoff; each sleep is capped at 40 ms | Controls the delay between Proxy CAS attempts and reduces sustained contention caused by immediately retrying concurrent conflicts. The 40 ms cap is calculated as `4 * partialUpdateCASRetryBackoff`. |
@@ -987,8 +987,7 @@ term.
 
 The PK index has a fixed 30-second TTL. All WAL terms on one StreamingNode
 share the configured estimated-byte budget, while each WAL keeps independent
-vchannel maps, expiration heaps, retention watermarks, and incomplete-history
-markers.
+vchannel maps, expiration heaps, and forgotten-write boundaries.
 
 An entry is charged conservatively:
 
@@ -1000,20 +999,33 @@ The default 640,000,000-byte node budget is approximately five million Int64
 entries across all WALs hosted by the StreamingNode.
 
 `Update`, `Verify`, and TimeTick advancement incrementally evict expired
-entries. Validation fails closed when:
+entries. Each vchannel retains `forgottenWriteTS`, the maximum commit TimeTick
+of any exact PK record evicted or omitted because of the byte budget. Eviction
+and boundary advancement occur under the same vchannel index mutex used by
+validation. The boundary never regresses within the channel lifecycle; elapsed
+time alone cannot advance it. A delayed older write that is not recorded is
+already covered by this boundary.
 
-- `readTS < retainedSinceTS`;
-- physical read-to-commit age exceeds the TTL;
-- `commitTS < readTS`, which is an unrecoverable internal invariant violation;
-- the byte budget previously caused a committed write to be omitted.
+Validation rejects `readTS < forgottenWriteTS`. Equality is allowed: the
+snapshot already includes writes at readTS. It then checks retained records for
+any target PK with `lastWriteTS > readTS`. A forgotten conflicting write at W is
+covered by the boundary (readTS < W <= forgottenWriteTS); a retained conflicting
+write is covered by the exact PK lookup. No physical read-to-commit age check
+remains. `commitTS < readTS` remains an internal invariant violation.
 
 If a new distinct PK cannot reserve its estimated bytes, ordinary writes remain
-available, but the affected vchannel records `lastMissedWriteTS`. CAS on that
-vchannel remains unavailable until the last missed write exits every valid
-read window. Other vchannels are not directly failed by this state.
+available and that write advances `forgottenWriteTS`. This fence does not expire
+with time, even if no exact records remain. Other vchannels are unaffected.
+A newer snapshot including the omitted write can proceed without waiting for TTL.
+The boundary may conservatively reject a read because of an unrelated forgotten
+PK; it cannot accept a read whose conflicting history was lost.
 
-TimeTick advances retention even when no DML arrives, allowing idle channels to
-release entries and recover from an incomplete window.
+TimeTick can reclaim idle-channel records without moving the boundary beyond the
+last actual forgotten write. Thus a Strong snapshot at the channel's last change
+remains valid after an arbitrarily long idle period, provided the independent WAL
+lifecycle and collection/transaction fences also permit it. TTL and the shared
+byte budget still bound retained PK memory; the boundary costs one uint64 per
+vchannel and is removed only with that channel's state.
 
 ### Recovery and term changes
 
@@ -1091,7 +1103,7 @@ Promotion creates a new term and a new empty per-term version index.
 
 | Origin | Internal classification | Proxy or client result |
 |---|---|---|
-| Term mismatch, PK conflict, collection fence, TTL expiry, or budget-incomplete history | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
+| Term mismatch, PK conflict, collection fence, or read before the forgotten-write boundary | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Rebuild `REPLACE`; project relative update to non-retriable conflict |
 | Recovered local CAS without complete proof | `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE` | Same as above |
 | Transaction body that arrives after its CommitTxn | `STREAMING_CODE_TRANSACTION_EXPIRED` | Producer contract violation; with the stock producer only a stale first attempt after a stream break, whose response is dropped with the broken stream |
 | Local CommitTxn that arrives while a body of its transaction is still in flight | `STREAMING_CODE_TRANSACTION_EXPIRED` from `admitTxnCommit`, before TimeTick | Producer replays an ordinary transaction and converts local CAS to `STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE`; with the stock producer only after a stream break |
@@ -1295,7 +1307,7 @@ end-to-end throughput gain; production-scale benchmarks remain necessary.
 
 ## Open Questions
 
-- Is the 30-second TTL sufficient for production query and commit latency?
+- Is the 30-second reclamation TTL an appropriate memory versus conservative-retry tradeoff?
 - Is the proposal's five-million-entry budget sufficient for high-cardinality
   workloads and long VarChar PKs?
 - How should Import, RestoreSnapshot, and backfill coordinate with partial
@@ -1344,7 +1356,7 @@ After the existing replication bypass and term validation, local CAS admission
 requires `F != 0` and `readTS >= F`. An unavailable floor fails closed as an
 internal unrecoverable error. A snapshot older than F returns the existing typed
 partial-update retryable error before appending CommitTxn. The existing PK
-conflict index, retention window, missed-write fence, and collection fence checks
+conflict index, forgotten-write boundary, and collection fence checks
 still apply under the exclusive PK row locks and existing shared lifecycle
 locks described above.
 
@@ -1373,10 +1385,11 @@ snapshots. No partial-update-specific read timestamp allocator or read-mode
 switch remains. Ordinary non-partial query and Search requery timestamp
 handling retain their existing contracts.
 
-Strong snapshots remain subject to the existing 30-second CAS history window.
-If a read is too old or the history index is incomplete, admission rejects it;
-repeated rejections can exhaust the existing bounded retry budget. This design
-does not force snapshot advancement with a fixed-timestamp fallback.
+Strong snapshots are subject to the forgotten-write boundary, not a physical
+age limit. A read preceding discarded or omitted history is rejected; repeated
+rejections can exhaust the existing bounded retry budget. Unchanged snapshots
+remain admissible while idle. No fixed-timestamp fallback or BarrierMVCC is
+required for partial update.
 
 ### Deployment assumption
 

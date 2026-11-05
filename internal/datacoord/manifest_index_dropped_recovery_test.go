@@ -75,7 +75,7 @@ func TestManifestDroppedParentSurvivesRestart(t *testing.T) {
 			require.NotNil(t, parent)
 			childID := meta.RestartSegID + 1
 			child := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: childID, State: commonpb.SegmentState_Flushed, CompactionFrom: []int64{meta.RestartSegID}})
-			frontier, _ := retrieveSegment(map[int64]*meta.SegmentInfo{meta.RestartSegID: parent, childID: child}, typeutil.NewUniqueSet(childID), typeutil.NewUniqueSet(meta.RestartSegID), ready, ready)
+			frontier, _ := meta.RetrieveSegment(map[int64]*meta.SegmentInfo{meta.RestartSegID: parent, childID: child}, typeutil.NewUniqueSet(childID), typeutil.NewUniqueSet(meta.RestartSegID), ready, ready)
 			require.True(t, ready(meta.RestartSegID))
 			gcx := gc.NewGarbageCollector(restarted, meta.NewMockHandler(), gc.GcTestDomainOption(restartedDomains, gc.GcOption{Cli: restarted.ChunkManager}))
 			defer gcx.Option.RemoveObjectPool.Release()

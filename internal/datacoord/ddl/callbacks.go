@@ -32,12 +32,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Deps holds what the DDL ack callbacks read.
 type Deps struct {
+	RefreshDataView                  func(context.Context, int64) (*viewpb.DataVersion, error)
 	Meta                             *meta.Meta
 	ImportMeta                       bulkimport.ImportMeta
 	IndexMeta                        *index.IndexMeta

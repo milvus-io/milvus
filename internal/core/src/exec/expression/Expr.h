@@ -3919,6 +3919,11 @@ class SegmentExpr : public Expr {
                     exec_path_ = ExprExecPath::RawData;
                     return false;
                 }
+                // By design, JsonFlat indexes array elements at the same path
+                // as scalar values, so scalar predicates may match array
+                // elements (e.g. a == 1 matches {"a": [1, 2]}). Preserve this
+                // index behavior rather than forcing raw JSON evaluation to
+                // distinguish scalar and array shapes.
                 selected_json_view_ =
                     json_reader_->Resolve(req.json_path, *cast);
                 if (!selected_json_view_) {

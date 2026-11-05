@@ -87,7 +87,7 @@ func (policy *BumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, 
 }
 
 func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]view.CompactionView, error) {
-	collections := policy.meta.GetCollections()
+	collections := policy.meta.CollectionsForPreparation(ctx)
 	events := make(map[CompactionTriggerType][]view.CompactionView)
 
 	for _, collection := range collections {

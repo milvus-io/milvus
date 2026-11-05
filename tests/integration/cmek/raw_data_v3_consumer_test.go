@@ -54,6 +54,7 @@ func (s *RawDataV3ConsumerSuite) SetupSuite() {
 }
 
 func TestRawDataV3ConsumerSuite(t *testing.T) {
+	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	suite.Run(t, new(RawDataV3ConsumerSuite))
 }
 

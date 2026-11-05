@@ -65,7 +65,7 @@ func (policy *ClusteringCompactionPolicy) Name() string {
 
 func (policy *ClusteringCompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]view.CompactionView, error) {
 	mlog.Info(ctx, "start trigger clusteringCompactionPolicy...")
-	collections := policy.Meta.GetCollections()
+	collections := policy.Meta.CollectionsForPreparation(ctx)
 
 	events := make(map[CompactionTriggerType][]view.CompactionView, 0)
 	views := make([]view.CompactionView, 0)
