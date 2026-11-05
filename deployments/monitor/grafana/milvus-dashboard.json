@@ -15711,7 +15711,7 @@
           "datasource": {
             "uid": "${datasource}"
           },
-          "description": "Compare sampled CPU (including unclassified) with process CPU over 5 minutes. These are not synchronized snapshots; failures can cause catch-up spikes. A gap is not assigned to a guessed pool. Keep the window at least four scrape intervals.",
+          "description": "Compare sampled CPU (including unclassified) with process CPU over the same Grafana rate interval. These are not synchronized snapshots; failures can cause catch-up spikes. A gap is not assigned to a guessed pool. Configure the Prometheus data source scrape interval to match actual scraping.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -15749,7 +15749,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "sum by (pod) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m]))",
+              "expr": "sum by (pod) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
               "interval": "",
               "intervalFactor": 2,
               "legendFormat": "sampled {{pod}}",
@@ -15758,7 +15758,7 @@
             },
             {
               "exemplar": true,
-              "expr": "sum by (pod) (rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m]))",
+              "expr": "sum by (pod) (rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
               "interval": "",
               "intervalFactor": 2,
               "legendFormat": "process {{pod}}",

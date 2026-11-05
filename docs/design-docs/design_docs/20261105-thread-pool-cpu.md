@@ -81,8 +81,9 @@ average; do not multiply by 100. Keep sampling at five seconds, retain the
 existing Prometheus scrape interval, and use a rate window covering at least
 four scrapes.
 
-A separate five-minute comparison plots all sampled pools, including
-unclassified, against the same Pod's `process_cpu_seconds_total` rate. These
+A separate comparison uses `$__rate_interval` for both all sampled pools
+(including unclassified) and the same Pod's `process_cpu_seconds_total` rate.
+Configure the Prometheus data source scrape interval to match actual scraping. These
 are not synchronized snapshots. Do not interpret their difference as an exact
 missing pool or force it into unclassified. Threads created and destroyed
 between scans are invisible. CPU after a thread's final sample and before
