@@ -49,6 +49,11 @@ type CompactionTask interface {
 	SaveTaskMeta() error
 }
 
+// IsL0Compaction includes restore materialization using the ordinary L0 executor.
+func IsL0Compaction(typ datapb.CompactionType) bool {
+	return typ == datapb.CompactionType_Level0DeleteCompaction || typ == datapb.CompactionType_RestoreLevel0DeleteCompaction
+}
+
 type compactionTaskOpt func(task *datapb.CompactionTask)
 
 func SetNodeID(nodeID int64) compactionTaskOpt {

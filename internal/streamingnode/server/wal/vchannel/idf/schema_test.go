@@ -37,10 +37,28 @@ func fieldTestSchema(version int32, ids ...int64) *schemapb.CollectionSchema {
 	return schema
 }
 
+// Test snapshots model Coordinator's explicit allowed field set.
+func testRequiredFields(schema *schemapb.CollectionSchema) []*viewpb.LoadFieldConfig {
+	fields := make([]*viewpb.LoadFieldConfig, 0, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: field.GetFieldID()})
+	}
+	return fields
+}
+
 func prepareTestView(t *testing.T, r *Runtime, view walview.VChannelWALView) (*viewBinding, error) {
 	t.Helper()
 	if view.CaptureQueryView == nil {
 		view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	}
+	captureSource := view.CaptureQueryView
+	view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		return captureSource(meta, func(snapshot walview.VChannelWALView) {
+			if snapshot.RequiredFields == nil {
+				snapshot.RequiredFields = testRequiredFields(snapshot.Schema)
+			}
+			capture(snapshot)
+		})
 	}
 	if err := r.Prepare(t.Context(), view); err != nil {
 		return nil, err
@@ -144,7 +162,7 @@ func TestFieldPreparationCancellationUnblocksFullEventQueue(t *testing.T) {
 	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
 	defer r.Close()
 	version := qviews.DataVersion{StreamingVersion: 10}
-	view := walview.VChannelWALView{Schema: fieldTestSchema(1, 102), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
+	view := walview.VChannelWALView{RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}, Schema: fieldTestSchema(1, 102), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
 	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
 	require.NoError(t, r.Prepare(t.Context(), view))
 	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}).(*viewBinding)
@@ -159,7 +177,11 @@ func TestFieldPreparationCancellationUnblocksFullEventQueue(t *testing.T) {
 	defer patch.UnPatch()
 	done := make(chan error, 1)
 	go func() { done <- binding.Prepare(ctx, nil) }()
-	<-reading
+	select {
+	case <-reading:
+	case <-time.After(5 * time.Second):
+		t.Fatal("field preparation did not start resource loading")
+	}
 	event := walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: qviews.DataVersion{StreamingVersion: 11}}}
 	for i := 0; i < 1024; i++ {
 		r.ApplyLiveEvent(t.Context(), event)
@@ -299,4 +321,17 @@ func TestHybridBatchAlignsSharedFieldVersions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, target, binding.fields[1].oracle.currentVersion)
+}
+
+func TestEmptyRequiredFieldsDoNotCreateBM25Resources(t *testing.T) {
+	schema := fieldTestSchema(1, 102)
+	require.Empty(t, newBM25StatsFromSchema(schema, nil))
+	r := &Runtime{}
+	defer r.Close()
+	view := walview.VChannelWALView{Schema: schema, RequiredFields: []*viewpb.LoadFieldConfig{}}
+	binding, err := prepareTestView(t, r, view)
+	require.NoError(t, err)
+	defer binding.Release()
+	require.Empty(t, binding.fields)
+	require.Empty(t, r.fields)
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -15,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -176,7 +174,7 @@ func (p *Provider) buildOracle(
 	return newOracleRuntime(ctx, p, walView, resources, false)
 }
 
-func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+func loadFieldIDs(fields []*viewpb.LoadFieldConfig) []int64 {
 	ids := make([]int64, 0, len(fields))
 	for _, field := range fields {
 		ids = append(ids, field.GetFieldId())
@@ -266,7 +264,7 @@ func (r *Runtime) Close() {
 	}
 }
 
-func collectGrowingInsertStats(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {
+func (r *oracleRuntime) collectGrowingInsertStats(ctx context.Context, stats bm25Stats, insert walview.SegmentInsertMessage) error {
 	if len(stats) == 0 {
 		return nil
 	}
@@ -279,26 +277,19 @@ func collectGrowingInsertStats(stats bm25Stats, schema *schemapb.CollectionSchem
 		}
 	}
 	if missing {
-		// Only materialize BM25 outputs required by this oracle. A retained read
-		// schema may contain dropped columns or unrelated functions; decoding the
-		// entire insert against that schema would incorrectly require those columns.
-		projected := proto.Clone(schema).(*schemapb.CollectionSchema)
-		projected.Functions = nil
-		for _, fn := range schema.GetFunctions() {
-			if fn.GetType() == schemapb.FunctionType_BM25 && len(fn.GetOutputFieldIds()) == 1 {
-				if _, needed := stats[fn.GetOutputFieldIds()[0]]; needed {
-					projected.Functions = append(projected.Functions, fn)
-				}
-			}
-		}
-		runners, err := function.BuildEmbeddingRunners(projected)
-		if err != nil {
-			return err
-		}
-		defer function.CloseRunners(runners)
 		request = storage.CopyInsertRequestMetadata(request)
-		if _, err := function.FillFunctionFields(runners, request); err != nil {
-			return err
+		// Only fill outputs required by this oracle. Retained read schemas can
+		// contain removed or unrelated functions whose inputs are no longer written.
+		for fieldID := range stats {
+			if function.HasFieldData(request.GetFieldsData(), fieldID) {
+				continue
+			}
+			if _, err := function.GetManager().RunWithRunner(ctx, r.collectionID, r.functionKey, fieldID, func(runner function.FunctionRunner) error {
+				_, err := function.FillFunctionFields([]function.FunctionRunner{runner}, request)
+				return err
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	for fieldID, fieldStats := range stats {

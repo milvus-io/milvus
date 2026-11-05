@@ -215,7 +215,7 @@ class PhyMembershipFilterExpr : public SegmentExpr {
         // advertises a cheap per-row lookup.
         auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
         req.value_type = expr_->column_.data_type_;
-        if (SelectAndPinIndex(req) && IndexSupportsReverseLookup()) {
+        if (SelectAndCreateIndexReader(req) && IndexSupportsReverseLookup()) {
             return;
         }
         ClearSelectedIndex();

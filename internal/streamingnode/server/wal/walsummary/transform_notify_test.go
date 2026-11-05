@@ -58,14 +58,24 @@ func TestTransformNotificationsAreVChannelScoped(t *testing.T) {
 	requireNotification(t, a.TransformChanged, false)
 	requireNotification(t, b.TransformChanged, false)
 
-	// An assembled insert-only commit advances Transform MVCC without a Delete entry.
+	// An assembled insert-only commit advances coverage without notifying Transform consumers.
 	txn := newTestIdempotentTxnMessage(t, "a", 40, "", [][]int64{{1}})
 	m.ObserveMessage(context.Background(), txn)
-	requireNotification(t, a.TransformChanged, true)
+	requireNotification(t, a.TransformChanged, false)
 	requireNotification(t, b.TransformChanged, false)
 	batch := readNotification(t, m, "a")
 	require.Empty(t, batch.Entries)
 	require.Equal(t, txn.TimeTick(), batch.CoveredThrough)
+	// Historical empty transactions have neither payload nor Transform progress.
+	empty := newTestIdempotentTxnMessage(t, "a", 50, "", nil)
+	m.ObserveMessage(context.Background(), empty)
+	requireNotification(t, a.TransformChanged, false)
+	requireNotification(t, b.TransformChanged, false)
+	require.Empty(t, readNotification(t, m, "a").Entries)
+	// A real Delete after the ignored commits must still wake the subscriber.
+	m.ObserveMessage(context.Background(), newTestDeleteMessage(t, "a", 60, 1, 1))
+	requireNotification(t, a.TransformChanged, true)
+	requireNotification(t, b.TransformChanged, false)
 }
 
 func TestTransformBarrierNotifications(t *testing.T) {

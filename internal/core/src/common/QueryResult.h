@@ -359,7 +359,7 @@ struct SearchResult {
     // Request-pinned sealed read snapshot, captured once while the read lease
     // is held. Result fill / export reuse it at the fill layer (FillTargetEntry
     // / bulk_subscript / take) instead of re-capturing the published state per
-    // output field. Deeper column/index helpers (get_raw_data, PinIndex,
+    // output field. Deeper column/index helpers (get_raw_data, CreateIndexReader,
     // HasFieldData, ...) may still self-capture; migrating them is a Phase 4
     // follow-up. Growing and non-pinned paths leave this empty.
     std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_;

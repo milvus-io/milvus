@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Utils.h"
 #include "common/Types.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/VectorTypeUtils.h"
@@ -93,6 +94,12 @@ class KnowhereEngine {
     // before any file-manager or mmap dependency it may still reference.
     std::shared_ptr<const void> backing_owner;
     knowhere::Index<knowhere::IndexNode> native_index;
+
+    // Native owned memory/file accounting is unavailable; zero is a sentinel.
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return {};
+    }
 
     // --- self-description ---------------------------------------------------
 

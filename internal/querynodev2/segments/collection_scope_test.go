@@ -25,10 +25,14 @@ func TestCollectionLoadScopesShareNativeSchema(t *testing.T) {
 	owner, err := NewCollection(1, schema, nil, &querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection})
 	require.NoError(t, err)
 	defer DeleteCollection(owner)
-	left := owner.WithLoadScope([]int64{10}, []int64{100, 101})
+	left := owner.WithLoadScope([]int64{10}, []int64{100, 101}, []int64{101})
 	right := owner.WithLoadScope([]int64{20}, []int64{100, 102})
 	empty := owner.WithLoadScope(nil, nil)
 	require.Empty(t, empty.loadFields.Collect())
+	require.Empty(t, empty.fieldHints)
+	require.Empty(t, right.fieldHints)
+	require.Equal(t, []int64{101}, left.fieldHints)
+	require.ElementsMatch(t, []int64{100, 101, 102}, owner.fieldHints)
 	require.Same(t, left.GetCCollection(), right.GetCCollection())
 	require.Same(t, owner.GetCCollection(), left.GetCCollection())
 	require.ElementsMatch(t, []int64{100, 101}, left.loadFields.Collect())
@@ -38,20 +42,23 @@ func TestCollectionLoadScopesShareNativeSchema(t *testing.T) {
 	require.Equal(t, []int64{10}, left.GetPartitions())
 	require.Empty(t, owner.GetPartitions())
 
-	var captured []int64
+	var captured, hints []int64
 	patch := mockey.Mock(segcore.CreateCSegment).To(func(req *segcore.CreateCSegmentRequest) (segcore.CSegment, error) {
 		require.Same(t, owner.GetCCollection(), req.Collection)
 		require.True(t, req.ExplicitLoadScope)
 		captured = append([]int64(nil), req.LoadFields...)
+		hints = append([]int64(nil), req.FieldHints...)
 		return nil, nil
 	}).Build()
 	defer patch.UnPatch()
 	_, err = left.CreateCSegment(&segcore.CreateCSegmentRequest{LoadInfo: &querypb.SegmentLoadInfo{}})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{100, 101}, captured)
+	require.Equal(t, []int64{101}, hints)
 	_, err = right.CreateCSegment(&segcore.CreateCSegmentRequest{LoadInfo: &querypb.SegmentLoadInfo{}})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{100, 102}, captured)
+	require.Empty(t, hints)
 }
 
 func TestCollectionLoadScopeIndexUpdatesPreserveOtherScopes(t *testing.T) {

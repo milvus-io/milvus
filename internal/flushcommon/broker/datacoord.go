@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -104,29 +103,6 @@ func (dc *dataCoordBroker) GetSegmentInfo(ctx context.Context, ids []int64) ([]*
 	}
 
 	return ret, nil
-}
-
-func (dc *dataCoordBroker) UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error {
-	req := &datapb.UpdateChannelCheckpointRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(dc.serverID),
-		),
-		ChannelCheckpoints: channelCPs,
-	}
-
-	resp, err := dc.client.UpdateChannelCheckpoint(ctx, req)
-	if err = merr.CheckRPCCall(resp, err); err != nil {
-		channels := lo.Map(channelCPs, func(pos *msgpb.MsgPosition, _ int) string {
-			return pos.GetChannelName()
-		})
-		channelTimes := lo.Map(channelCPs, func(pos *msgpb.MsgPosition, _ int) time.Time {
-			return tsoutil.PhysicalTime(pos.GetTimestamp())
-		})
-		mlog.Warn(ctx, "failed to update channel checkpoint", mlog.Strings("channelNames", channels),
-			mlog.Times("channelCheckpointTimes", channelTimes), mlog.Err(err))
-		return err
-	}
-	return nil
 }
 
 func (dc *dataCoordBroker) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {

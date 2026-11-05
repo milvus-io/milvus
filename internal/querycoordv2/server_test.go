@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -59,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -128,6 +128,23 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	initStreamingSystem()
+	// These node lifecycle tests have no pending schema ALTER.
+	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
+	suite.T().Cleanup(func() { schemaTarget.UnPatch() })
+	provider := newRuntimeDataViewProvider(suite.T())
+	// Keep one allocator across runtime restarts, just as the coordinator's
+	// persisted allocator does. Node lifecycle tests do not run RootCoord RPCs.
+	allocateVersion := params.RandomIncrementIDAllocator()
+	var createRuntime func(context.Context, qviewsRuntimeDependencies) (*qviewsRuntime, error)
+	patch := mockey.Mock(newQViewsRuntime).Origin(&createRuntime).To(func(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
+		deps.dataViewProvider = provider
+		deps.loadConfigDependencies.AllocateVersion = func(context.Context) (uint64, error) {
+			id, err := allocateVersion()
+			return uint64(id), err
+		}
+		return createRuntime(ctx, deps)
+	}).Build()
+	suite.T().Cleanup(func() { patch.UnPatch() })
 
 	var err error
 	suite.tikvCli = tikv.SetupLocalTxn()
@@ -157,8 +174,7 @@ func (suite *ServerSuite) SetupTest() {
 
 	suite.loadAll()
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(suite.ctx, collection))
-		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.True(suite.server.qviewsRuntime.loadConfigStore.Contains(collection))
 	}
 }
 
@@ -188,7 +204,7 @@ func (suite *ServerSuite) TestRecover() {
 	suite.NoError(err)
 
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(suite.ctx, collection))
+		suite.True(suite.server.qviewsRuntime.loadConfigStore.Contains(collection))
 	}
 
 	suite.True(suite.server.nodeMgr.IsStoppingNode(suite.nodes[0].ID))
@@ -196,7 +212,7 @@ func (suite *ServerSuite) TestRecover() {
 
 func (suite *ServerSuite) TestNodeUp() {
 	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil)
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()
 	err := node1.Start()
 	suite.NoError(err)
 	defer node1.Stop()
@@ -206,13 +222,9 @@ func (suite *ServerSuite) TestNodeUp() {
 		if node == nil {
 			return false
 		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
-			if replica == nil {
-				return false
-			}
-		}
-		return true
+		// QueryView placement uses the published node cache, not legacy
+		// per-collection replica membership.
+		return suite.server.qviewsRuntime.balanceCache.GetNode(node1.ID) != nil
 	}, 5*time.Second, time.Second)
 }
 
@@ -236,13 +248,7 @@ func (suite *ServerSuite) TestNodeDown() {
 		if node != nil {
 			return false
 		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
-			if replica != nil {
-				return false
-			}
-		}
-		return true
+		return suite.server.qviewsRuntime.balanceCache.GetNode(downNode.ID) == nil
 	}, 5*time.Second, time.Second)
 }
 
@@ -388,227 +394,6 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 
 		cancel()
 		wg.Wait()
-	})
-}
-
-func TestApplyLoadConfigChanges(t *testing.T) {
-	mockey.PatchConvey("TestApplyLoadConfigChanges", t, func() {
-		ctx := context.Background()
-
-		// Create mock server
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
-
-		// Create mock collection with IsUserSpecifiedReplicaMode = false
-		mockCollection1 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1001,
-				UserSpecifiedReplicaMode: false,
-			},
-		}
-
-		// Create mock collection with IsUserSpecifiedReplicaMode = true
-		mockCollection2 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1002,
-				UserSpecifiedReplicaMode: true,
-			},
-		}
-
-		// Mock meta.CollectionManager.GetAll to return collection IDs
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
-
-		// Mock meta.CollectionManager.GetCollection to return different collections
-		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			switch collectionID {
-			case 1001:
-				return mockCollection1
-			case 1002:
-				return mockCollection2
-			}
-			return nil
-		}).Build()
-
-		// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
-		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
-
-		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
-
-		// Mock force override config disabled by default.
-		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
-
-		// Mock UpdateLoadConfig to capture the call
-		var updateLoadConfigCalled bool
-		var capturedCollectionIDs []int64
-		var capturedReplicaNum int32
-		var capturedRGs []string
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-			updateLoadConfigCalled = true
-			capturedCollectionIDs = collectionIDs
-			capturedReplicaNum = newReplicaNum
-			capturedRGs = newRGs
-			return nil
-		}).Build()
-
-		// Call applyLoadConfigChanges
-		watcher := &LoadConfigWatcher{
-			s:         testServer,
-			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
-			triggerCh: make(chan struct{}, 10),
-		}
-		watcher.applyLoadConfigChanges()
-
-		// Verify UpdateLoadConfig was called
-		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
-
-		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
-		assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
-		assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
-		assert.Equal(t, []string{"default", "rg1"}, capturedRGs, "ResourceGroups should match cluster level config")
-
-		watcher = NewLoadConfigWatcher(testServer)
-		watcher.Trigger()
-		time.Sleep(1 * time.Second)
-		watcher.Close()
-	})
-}
-
-func TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode(t *testing.T) {
-	mockey.PatchConvey("TestApplyLoadConfigChangesForceOverrideUserSpecifiedReplicaMode", t, func() {
-		ctx := context.Background()
-
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
-
-		mockCollection1 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1001,
-				UserSpecifiedReplicaMode: false,
-			},
-		}
-		mockCollection2 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1002,
-				UserSpecifiedReplicaMode: true,
-			},
-		}
-
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
-		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			switch collectionID {
-			case 1001:
-				return mockCollection1
-			case 1002:
-				return mockCollection2
-			}
-			return nil
-		}).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
-
-		var capturedCollectionIDs []int64
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-			capturedCollectionIDs = collectionIDs
-			return nil
-		}).Build()
-
-		watcher := &LoadConfigWatcher{
-			s:         testServer,
-			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
-			triggerCh: make(chan struct{}, 10),
-		}
-		watcher.applyLoadConfigChanges()
-
-		assert.Equal(t, []int64{1001, 1002}, capturedCollectionIDs, "Force override should include user-specified replica mode collections")
-	})
-}
-
-func TestApplyLoadConfigChangesSkipsReleasedCollection(t *testing.T) {
-	mockey.PatchConvey("TestApplyLoadConfigChangesSkipsReleasedCollection", t, func() {
-		ctx := context.Background()
-
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
-
-		mockCollection := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1001,
-				UserSpecifiedReplicaMode: false,
-			},
-		}
-
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
-		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			if collectionID == 1001 {
-				return mockCollection
-			}
-			return nil
-		}).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(false).Build()
-
-		var capturedCollectionIDs []int64
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-			capturedCollectionIDs = collectionIDs
-			return nil
-		}).Build()
-
-		watcher := &LoadConfigWatcher{
-			s:         testServer,
-			notifier:  syncutil.NewAsyncTaskNotifier[struct{}](),
-			triggerCh: make(chan struct{}, 10),
-		}
-		watcher.applyLoadConfigChanges()
-
-		assert.Equal(t, []int64{1001}, capturedCollectionIDs)
-	})
-}
-
-func TestApplyLoadConfigChangesWhenForceOverrideConfigChanges(t *testing.T) {
-	mockey.PatchConvey("TestApplyLoadConfigChangesWhenForceOverrideConfigChanges", t, func() {
-		ctx := context.Background()
-
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
-
-		mockCollection := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1002,
-				UserSpecifiedReplicaMode: true,
-			},
-		}
-
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1002}).Build()
-		mockey.Mock((*meta.CollectionManager).GetCollection).Return(mockCollection).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsInt32).Return(int32(2)).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default", "rg1"}).Build()
-		mockey.Mock((*paramtable.ParamItem).GetAsBool).Return(true).Build()
-
-		var updateLoadConfigCalled bool
-		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string, needWaitRGReady ...bool) error {
-			updateLoadConfigCalled = true
-			assert.Equal(t, []int64{1002}, collectionIDs)
-			return nil
-		}).Build()
-
-		watcher := &LoadConfigWatcher{
-			s:                                    testServer,
-			notifier:                             syncutil.NewAsyncTaskNotifier[struct{}](),
-			triggerCh:                            make(chan struct{}, 10),
-			previousReplicaNum:                   2,
-			previousRGs:                          []string{"default", "rg1"},
-			previousForceOverrideUserReplicaMode: false,
-		}
-		watcher.applyLoadConfigChanges()
-
-		assert.True(t, updateLoadConfigCalled, "force override config change should trigger load config update even when replica/RG config is unchanged")
 	})
 }
 
@@ -798,7 +583,7 @@ func (suite *ServerSuite) hackServer() {
 			DbId:           1,
 			CollectionID:   collection,
 			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
-			Schema:         &schemapb.CollectionSchema{},
+			Schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}}},
 		}, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
@@ -817,7 +602,7 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
-			Schema: &schemapb.CollectionSchema{},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}}},
 		}, nil).Maybe()
 		req := &milvuspb.ShowPartitionsRequest{
 			Base: commonpbutil.NewMsgBase(

@@ -19,13 +19,16 @@
 #include "index/contracts/Registry.h"
 #include "index/IndexLoadInput.h"
 #include <functional>
+#include <type_traits>
 #include "storage/FileManager.h"
 
 namespace milvus::index {
 
 /** @brief Family payload decoding invoked within a legacy loading operation. */
-using LegacyLoadFn = std::function<folly::coro::Task<IIndexReaderBasePtr>(
+template <typename Result>
+using LegacyLoad = std::function<folly::coro::Task<Result>(
     storage::FileSource&, const storage::LoadOptions&, bool)>;
+using LegacyLoadFn = LegacyLoad<IndexPtr>;
 
 /**
  * @brief Execute family decoding with a per-call legacy source context.
@@ -35,15 +38,18 @@ using LegacyLoadFn = std::function<folly::coro::Task<IIndexReaderBasePtr>(
  * @param load Family payload decoder; owns its targets until I/O and cleanup
  * finish.
  * @param context Borrowed only until task completion; may be null.
- * @return A reader after final cancellation checks.
+ * @return A smart pointer to storage or an index after final cancellation checks.
  * @note Source context is reset on success and failure. Sync stays on the
  * caller; async orchestration uses the loading executor. Families offload
  * blocking file phases to the local-file executor.
  */
-folly::coro::Task<IIndexReaderBasePtr>
+template <typename Result = IndexPtr>
+folly::coro::Task<Result>
 RunLegacyLoad(LegacyIndexSource& source,
               const storage::LoadOptions& options,
-              LegacyLoadFn load,
+              std::type_identity_t<LegacyLoad<Result>> load,
               milvus::OpContext* context);
 
 }  // namespace milvus::index
+
+#include "index/LegacyIndexLoad-inl.h"

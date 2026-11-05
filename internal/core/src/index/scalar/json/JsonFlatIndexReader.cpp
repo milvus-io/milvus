@@ -155,7 +155,7 @@ OwnStrings(size_t n, const std::string_view* values) {
 
 }  // namespace
 
-JsonFlatIndexReaderState::JsonFlatIndexReaderState(
+JsonFlatIndexStorage::JsonFlatIndexStorage(
     std::shared_ptr<storage::LocalDirectory> directory,
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
     std::string field_path_prefix,
@@ -202,7 +202,7 @@ JsonFlatIndexReaderState::JsonFlatIndexReaderState(
         }
     }
 
-    size_t heap = sizeof(JsonFlatIndexReaderState);
+    size_t heap = sizeof(JsonFlatIndexStorage);
     AddBytes(
         heap, sizeof(milvus::tantivy::TantivyIndexWrapper), "JSON flat reader");
     AddBytes(heap, engine_path_bytes_, "JSON flat reader");
@@ -218,8 +218,8 @@ JsonFlatIndexReaderState::JsonFlatIndexReaderState(
     file_bytes_ = mmap_ ? ToUsageBytes(engine_bytes_, "JSON flat reader") : 0;
 }
 
-std::shared_ptr<const JsonFlatIndexReaderState>
-JsonFlatIndexReaderState::Create(
+std::unique_ptr<JsonFlatIndexStorage>
+JsonFlatIndexStorage::Create(
     std::shared_ptr<storage::LocalDirectory> directory,
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
     std::string field_path_prefix,
@@ -227,43 +227,43 @@ JsonFlatIndexReaderState::Create(
     bool mmap,
     size_t engine_bytes,
     size_t engine_path_bytes) {
-    return std::shared_ptr<const JsonFlatIndexReaderState>(
-        new JsonFlatIndexReaderState(std::move(directory),
-                                     std::move(engine),
-                                     std::move(field_path_prefix),
-                                     std::move(null_offsets),
-                                     mmap,
-                                     engine_bytes,
-                                     engine_path_bytes));
+    return std::unique_ptr<JsonFlatIndexStorage>(
+        new JsonFlatIndexStorage(std::move(directory),
+                                 std::move(engine),
+                                 std::move(field_path_prefix),
+                                 std::move(null_offsets),
+                                 mmap,
+                                 engine_bytes,
+                                 engine_path_bytes));
 }
 
 milvus::tantivy::TantivyIndexWrapper&
-JsonFlatIndexReaderState::Engine() const {
+JsonFlatIndexStorage::Engine() const {
     return *engine_;
 }
 
 const std::string&
-JsonFlatIndexReaderState::RootPath() const {
+JsonFlatIndexStorage::RootPath() const {
     return field_path_prefix_;
 }
 
 uint32_t
-JsonFlatIndexReaderState::Count() const {
+JsonFlatIndexStorage::Count() const {
     return count_;
 }
 
 int64_t
-JsonFlatIndexReaderState::HeapBytes() const {
+JsonFlatIndexStorage::HeapBytes() const {
     return heap_bytes_;
 }
 
 int64_t
-JsonFlatIndexReaderState::FileBytes() const {
+JsonFlatIndexStorage::FileBytes() const {
     return file_bytes_;
 }
 
 TargetBitmap
-JsonFlatIndexReaderState::FieldIsNull() const {
+JsonFlatIndexStorage::FieldIsNull() const {
     if (all_valid_) {
         return TargetBitmap(count_);
     }
@@ -273,7 +273,7 @@ JsonFlatIndexReaderState::FieldIsNull() const {
 }
 
 TargetBitmap
-JsonFlatIndexReaderState::FieldIsNotNull() const {
+JsonFlatIndexStorage::FieldIsNotNull() const {
     if (all_valid_) {
         return TargetBitmap(count_, true);
     }
@@ -284,10 +284,10 @@ namespace {
 
 class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
  public:
-    JsonPathReaderBase(const JsonFlatIndexReaderState* state,
+    JsonPathReaderBase(std::shared_ptr<const JsonFlatIndexStorage> state,
                        std::string tantivy_path,
                        ::JsonExistValueType comparable_type)
-        : state_(state),
+        : state_(std::move(state)),
           tantivy_path_(std::move(tantivy_path)),
           comparable_type_(comparable_type) {
         AssertInfo(state_ != nullptr,
@@ -302,20 +302,6 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
     int64_t
     Count() const override {
         return static_cast<int64_t>(state_->Count());
-    }
-
-    int64_t
-    MemoryUsage() const override {
-        // Shared engine/directory bytes belong to the root cache cell. This
-        // view still reports its own object and bound-path allocation.
-        size_t bytes = ObjectBytes();
-        AddBytes(bytes, StringHeapBytes(tantivy_path_), "JSON path reader");
-        return ToUsageBytes(bytes, "JSON path reader");
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {MemoryUsage(), 0};
     }
 
     TargetBitmap
@@ -334,9 +320,9 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
     }
 
  protected:
-    const JsonFlatIndexReaderState*
+    const JsonFlatIndexStorage*
     State() const {
-        return state_;
+        return state_.get();
     }
 
     milvus::tantivy::TantivyIndexWrapper&
@@ -349,11 +335,8 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
         return tantivy_path_;
     }
 
-    virtual size_t
-    ObjectBytes() const = 0;
-
  private:
-    const JsonFlatIndexReaderState* state_{nullptr};
+    std::shared_ptr<const JsonFlatIndexStorage> state_;
     std::string tantivy_path_;
     ::JsonExistValueType comparable_type_{::JsonExistValueType::Any};
 };
@@ -370,9 +353,10 @@ NotIn(const Reader& reader, size_t n, const T* values) {
 class JsonBoolPathReader final : public JsonPathReaderBase,
                                  public IScalarPredicateReader<bool> {
  public:
-    JsonBoolPathReader(const JsonFlatIndexReaderState* state, std::string path)
+    JsonBoolPathReader(std::shared_ptr<const JsonFlatIndexStorage> state,
+                       std::string path)
         : JsonPathReaderBase(
-              state, std::move(path), ::JsonExistValueType::Bool) {
+              std::move(state), std::move(path), ::JsonExistValueType::Bool) {
     }
 
     ReaderCaps
@@ -383,11 +367,6 @@ class JsonBoolPathReader final : public JsonPathReaderBase,
     DataType
     ValueType() const override {
         return DataType::BOOL;
-    }
-
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonBoolPathReader);
     }
 
     TargetBitmap
@@ -679,10 +658,11 @@ class JsonNumericPathReader final : public JsonPathReaderBase,
                                     public IScalarPredicateReader<int64_t>,
                                     public IScalarPredicateReader<double> {
  public:
-    JsonNumericPathReader(const JsonFlatIndexReaderState* state,
+    JsonNumericPathReader(std::shared_ptr<const JsonFlatIndexStorage> state,
                           std::string path)
-        : JsonPathReaderBase(
-              state, std::move(path), ::JsonExistValueType::Numeric) {
+        : JsonPathReaderBase(std::move(state),
+                             std::move(path),
+                             ::JsonExistValueType::Numeric) {
     }
 
     ReaderCaps
@@ -695,11 +675,6 @@ class JsonNumericPathReader final : public JsonPathReaderBase,
         // JsonCastType's numeric vocabulary is DOUBLE, while this object also
         // exposes the int64 mixin needed for lossless integer predicates.
         return DataType::DOUBLE;
-    }
-
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonNumericPathReader);
     }
 
     TargetBitmap
@@ -933,10 +908,10 @@ class JsonStringPathReader final
       public IScalarPredicateReader<std::string_view>,
       public IPatternMatchReader {
  public:
-    JsonStringPathReader(const JsonFlatIndexReaderState* state,
+    JsonStringPathReader(std::shared_ptr<const JsonFlatIndexStorage> state,
                          std::string path)
         : JsonPathReaderBase(
-              state, std::move(path), ::JsonExistValueType::String) {
+              std::move(state), std::move(path), ::JsonExistValueType::String) {
     }
 
     ReaderCaps
@@ -951,11 +926,6 @@ class JsonStringPathReader final
     DataType
     ValueType() const override {
         return DataType::VARCHAR;
-    }
-
-    size_t
-    ObjectBytes() const override {
-        return sizeof(JsonStringPathReader);
     }
 
     TargetBitmap
@@ -1100,10 +1070,100 @@ class JsonStringPathReader final
 
 }  // namespace
 
+cachinglayer::ResourceUsage
+JsonFlatIndexStorage::CellByteSize() const {
+    return {HeapBytes(), FileBytes()};
+}
+
+JsonFlatIndex::JsonFlatIndex(
+    std::shared_ptr<const JsonFlatIndexStorage> storage)
+    : storage_(std::move(storage)) {
+    AssertInfo(std::get<std::shared_ptr<const JsonFlatIndexStorage>>(
+                   storage_) != nullptr,
+               "JSON flat index requires storage");
+}
+
+JsonFlatIndex::JsonFlatIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot,
+    std::optional<int64_t> count,
+    std::string root_path)
+    : storage_(CachedStorage{std::move(slot), count, std::move(root_path)}) {
+    AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+               "JSON flat index requires a cache slot");
+    AssertInfo(!count || *count >= 0, "JSON flat count must not be negative");
+}
+
+std::shared_ptr<const JsonFlatIndexStorage>
+JsonFlatIndex::PinStorage(milvus::OpContext* op_ctx) const {
+    if (const auto* resident =
+            std::get_if<std::shared_ptr<const JsonFlatIndexStorage>>(&storage_))
+        return *resident;
+    const auto& cached = std::get<CachedStorage>(storage_);
+    std::shared_ptr<const JsonFlatIndexStorage> storage;
+    if (const auto* resident = cached.slot->TryBorrowCell(0))
+        storage = {cached.slot, resident};
+    else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        storage = {std::move(pin), cell};
+    }
+    AssertInfo(storage != nullptr &&
+                   (!cached.count || storage->Count() == *cached.count) &&
+                   storage->RootPath() == cached.root_path,
+               "JSON flat storage disagrees with index metadata");
+    return storage;
+}
+
+const std::string&
+JsonFlatIndex::RootPath() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_))
+        return cached->root_path;
+    return std::get<std::shared_ptr<const JsonFlatIndexStorage>>(storage_)
+        ->RootPath();
+}
+
+IndexMetadata
+JsonFlatIndex::Metadata() const {
+    const auto* cached = std::get_if<CachedStorage>(&storage_);
+    return {ReaderCaps{.json_paths = true, .exact = true},
+            Domain::Row,
+            DataType::JSON,
+            cached ? cached->count
+                   : std::optional<int64_t>{
+                         std::get<std::shared_ptr<const JsonFlatIndexStorage>>(
+                             storage_)
+                             ->Count()}};
+}
+
+IIndexReaderBasePtr
+JsonFlatIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new JsonFlatIndexReader(shared_from_this(), op_ctx));
+}
+
+void
+JsonFlatIndex::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_))
+        cached->slot->CancelWarmup();
+}
+
 JsonFlatIndexReader::JsonFlatIndexReader(
-    std::shared_ptr<const JsonFlatIndexReaderState> state)
-    : state_(std::move(state)) {
-    AssertInfo(state_ != nullptr, "JSON flat reader requires shared state");
+    std::shared_ptr<const JsonFlatIndexStorage> state)
+    : JsonFlatIndexReader(std::make_shared<JsonFlatIndex>(std::move(state)),
+                          nullptr) {
+}
+
+JsonFlatIndexReader::JsonFlatIndexReader(
+    std::shared_ptr<const JsonFlatIndex> index, milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
+}
+
+const std::shared_ptr<const JsonFlatIndexStorage>&
+JsonFlatIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
 }
 
 JsonFlatIndexReader::~JsonFlatIndexReader() = default;
@@ -1120,7 +1180,9 @@ JsonFlatIndexReader::CoordDomain() const {
 
 int64_t
 JsonFlatIndexReader::Count() const {
-    return static_cast<int64_t>(state_->Count());
+    if (const auto count = index_->Metadata().count)
+        return *count;
+    return GetStorage()->Count();
 }
 
 DataType
@@ -1128,35 +1190,20 @@ JsonFlatIndexReader::ValueType() const {
     return DataType::JSON;
 }
 
-int64_t
-JsonFlatIndexReader::MemoryUsage() const {
-    const auto own =
-        ToUsageBytes(sizeof(JsonFlatIndexReader), "JSON flat root reader");
-    if (state_->HeapBytes() > std::numeric_limits<int64_t>::max() - own) {
-        ThrowInfo(DataFormatBroken, "JSON flat reader memory size overflows");
-    }
-    return own + state_->HeapBytes();
-}
-
-cachinglayer::ResourceUsage
-JsonFlatIndexReader::CellByteSize() const {
-    return {MemoryUsage(), state_->FileBytes()};
-}
-
 TargetBitmap
 JsonFlatIndexReader::IsNull() const {
-    return state_->FieldIsNull();
+    return GetStorage()->FieldIsNull();
 }
 
 TargetBitmap
 JsonFlatIndexReader::IsNotNull() const {
-    return state_->FieldIsNotNull();
+    return GetStorage()->FieldIsNotNull();
 }
 
 JsonResolvedReader
 JsonFlatIndexReader::Resolve(std::string_view path,
                              JsonCastType cast_type) const {
-    auto tantivy_path = ResolveTantivyPath(state_->RootPath(), path);
+    auto tantivy_path = ResolveTantivyPath(index_->RootPath(), path);
     if (!tantivy_path) {
         return {};
     }
@@ -1164,16 +1211,16 @@ JsonFlatIndexReader::Resolve(std::string_view path,
     switch (cast_type.element_type()) {
         case JsonCastType::DataType::BOOL:
             return JsonResolvedReader::Owned(
-                std::make_unique<JsonBoolPathReader>(state_.get(),
+                std::make_unique<JsonBoolPathReader>(GetStorage(),
                                                      std::move(*tantivy_path)));
         case JsonCastType::DataType::DOUBLE:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonNumericPathReader>(
-                    state_.get(), std::move(*tantivy_path)));
+                    GetStorage(), std::move(*tantivy_path)));
         case JsonCastType::DataType::VARCHAR:
             return JsonResolvedReader::Owned(
                 std::make_unique<JsonStringPathReader>(
-                    state_.get(), std::move(*tantivy_path)));
+                    GetStorage(), std::move(*tantivy_path)));
         case JsonCastType::DataType::UNKNOWN:
         case JsonCastType::DataType::ARRAY:
         case JsonCastType::DataType::JSON:
@@ -1184,18 +1231,19 @@ JsonFlatIndexReader::Resolve(std::string_view path,
 
 TargetBitmap
 JsonFlatIndexReader::Exists(std::string_view path) const {
-    auto tantivy_path = ResolveTantivyPath(state_->RootPath(), path);
+    auto tantivy_path = ResolveTantivyPath(index_->RootPath(), path);
     AssertInfo(tantivy_path.has_value(),
                "JSON Exists requires a path supported by CastTypesOf");
-    TargetBitmap result(Count());
-    state_->Engine().json_exist_query(
+    const auto& storage = GetStorage();
+    TargetBitmap result(storage->Count());
+    storage->Engine().json_exist_query(
         *tantivy_path, true, ::JsonExistValueType::Any, &result);
     return result;
 }
 
 std::vector<JsonCastType>
 JsonFlatIndexReader::CastTypesOf(std::string_view path) const {
-    if (!ResolveTantivyPath(state_->RootPath(), path)) {
+    if (!ResolveTantivyPath(index_->RootPath(), path)) {
         return {};
     }
     return {JsonCastType::FromString("BOOL"),

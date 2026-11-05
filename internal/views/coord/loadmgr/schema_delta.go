@@ -41,18 +41,61 @@ func RequiredFieldsForSchema(schema *schemapb.CollectionSchema) []*viewpb.LoadFi
 	return fields
 }
 
+// PreloadFieldIDsForSchema resolves external load intent at the Coordinator.
+// Only the request boundary treats an omitted selection as schema defaults;
+// persisted requirements and their consumers always interpret empty literally.
+func PreloadFieldIDsForSchema(schema *schemapb.CollectionSchema, requested []int64) []int64 {
+	selected := make(map[int64]bool, len(requested))
+	for _, id := range requested {
+		selected[id] = true
+	}
+	fields := make([]int64, 0)
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetFieldID() < common.StartOfUserFieldID {
+			continue
+		}
+		preload := selected[field.GetFieldID()]
+		if len(requested) == 0 {
+			preload = defaultPreload(field)
+		}
+		if preload {
+			fields = append(fields, field.GetFieldID())
+		}
+	}
+	return fields
+}
+
+func defaultPreload(field *schemapb.FieldSchema) bool {
+	preload, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
+	// Match the existing API policy: an invalid skip_load value is ignored.
+	return err != nil || preload
+}
+
 func reconcileSchemaFields(current *LoadConfig, oldSchema, target *schemapb.CollectionSchema, bound []*viewpb.LoadFieldConfig) *LoadConfig {
 	next := current.Clone()
 	next.RequiredFields = RequiredFieldsForSchema(target)
-	desired := make(map[int64]bool, len(next.RequiredFields))
-	for _, field := range next.RequiredFields {
-		desired[field.GetFieldId()] = true
+	previousFields := make(map[int64]bool)
+	for _, field := range typeutil.GetAllFieldSchemas(oldSchema) {
+		previousFields[field.GetFieldID()] = true
 	}
-	// Full-load intent is represented by an empty hint. Explicit hints retain
-	// their surviving fields and never acquire additions from schema evolution.
-	next.LoadFields = slices.DeleteFunc(next.LoadFields, func(field *viewpb.LoadFieldConfig) bool {
-		return !desired[field.GetFieldId()]
-	})
+	preloaded := make(map[int64]*viewpb.LoadFieldConfig, len(current.LoadFields))
+	for _, field := range next.LoadFields {
+		preloaded[field.GetFieldId()] = field
+	}
+	next.LoadFields = nil
+	// Derive both scopes from the same target schema. Surviving fields keep their
+	// explicit preload choice; additions follow their own schema defaults.
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		id := field.GetFieldID()
+		if id < common.StartOfUserFieldID {
+			continue
+		}
+		if previous := preloaded[id]; previous != nil {
+			next.LoadFields = append(next.LoadFields, previous)
+		} else if !previousFields[id] && defaultPreload(field) {
+			next.LoadFields = append(next.LoadFields, &viewpb.LoadFieldConfig{FieldId: id})
+		}
+	}
 	return next
 }
 

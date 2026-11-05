@@ -34,7 +34,6 @@
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
-#include "index/contracts/build/IReaderConvertible.h"
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IJsonIndexReader.h"
@@ -465,20 +464,6 @@ HybridLifecycleCases() {
                      static_cast<void>(std::make_unique<HybridIndexArtifact>(
                          std::make_unique<NoopArtifact>(),
                          static_cast<ScalarIndexType>(255)));
-                 });
-             }},
-        {.name = "ArtifactIsNotReaderConvertible",
-         .run =
-             [] {
-                 const auto& backend =
-                     ScalarReaderBackends().Get<int64_t>("HybridInt64NonNull");
-                 auto data = IntegerCardinalityData(3, false);
-                 const ScalarTestInput<int64_t> input(data);
-                 auto artifact = backend.Build(
-                     input.View(), {.row_count = data.values.size()});
-                 ExpectSegcoreError(ErrorCode::Unsupported, [&] {
-                     static_cast<void>(
-                         IReaderConvertible::FromArtifact(std::move(artifact)));
                  });
              }},
     };

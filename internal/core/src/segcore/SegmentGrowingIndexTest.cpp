@@ -455,7 +455,7 @@ TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
                         data.row_ids_.data(),
                         data.timestamps_.data(),
                         data.SharedRaw());
-        auto pin = growing->PinGrowingIndex(vec);
+        auto pin = growing->PinGrowingIndex(nullptr, vec);
         ASSERT_TRUE(pin)
             << "algorithm must build an index instead of falling back";
         EXPECT_EQ(pin.CoveredRowEnd(), begin + count);
@@ -529,7 +529,7 @@ TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
                     dataset.timestamps_.data(),
                     std::make_shared<InsertRecordProto>(*dataset.raw_));
 
-    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    const auto index_pin = segment_impl->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(index_pin);
     EXPECT_EQ(index_pin.CoveredRowEnd(), row_count);
     EXPECT_EQ(index_pin.Reader().Count(), row_count);
@@ -1105,10 +1105,11 @@ TEST(GrowingIndexBuildThreadRateTest, MultiThreadedBuildKeepsSearchCorrect) {
         auto* growing_segment =
             dynamic_cast<SegmentGrowingImpl*>(segment.get());
         EXPECT_NE(growing_segment, nullptr);
-        EXPECT_TRUE(growing_segment != nullptr &&
-                    static_cast<bool>(growing_segment->PinGrowingIndex(vec)));
+        EXPECT_TRUE(
+            growing_segment != nullptr &&
+            static_cast<bool>(growing_segment->PinGrowingIndex(nullptr, vec)));
         if (growing_segment != nullptr) {
-            const auto pin = growing_segment->PinGrowingIndex(vec);
+            const auto pin = growing_segment->PinGrowingIndex(nullptr, vec);
             EXPECT_EQ(pin.CoveredRowEnd(), per_batch * n_batch);
             if (pin) {
                 EXPECT_EQ(pin.Reader().Count(), per_batch * n_batch);

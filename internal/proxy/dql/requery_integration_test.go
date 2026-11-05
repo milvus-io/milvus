@@ -240,11 +240,11 @@ func TestSearchTask_RequeryKeepsSearchTimestamp(t *testing.T) {
 	collectionTTL := time.Hour
 	gracefulTime := paramtable.Get().CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
 
+	// QueryView derives TTL from the bound read schema's properties.
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: collectionName,
 		Properties: []*commonpb.KeyValuePair{{
-			Key:   common.CollectionTTLConfigKey,
-			Value: strconv.FormatInt(int64(collectionTTL/time.Second), 10),
+			Key: common.CollectionTTLConfigKey, Value: strconv.FormatInt(int64(collectionTTL/time.Second), 10),
 		}},
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},

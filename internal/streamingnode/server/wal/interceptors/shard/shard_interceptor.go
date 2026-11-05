@@ -35,6 +35,7 @@ type shardInterceptor struct {
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
 		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
+		message.MessageTypeRestoreSnapshot:    impl.handleRestoreSnapshot,
 		message.MessageTypeDropCollection:     impl.handleDropCollection,
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
@@ -49,6 +50,24 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
 	}
+}
+
+func (impl *shardInterceptor) handleRestoreSnapshot(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	body := message.MustAsMutableRestoreSnapshotMessageV2(msg).MustBody()
+	if body.GetCollection() == nil {
+		return appendOp(ctx, msg)
+	}
+	if body.GetCollectionHeader() == nil || body.GetCollection().GetCollectionSchema() == nil {
+		return nil, status.NewUnrecoverableError("restore snapshot creation payload is incomplete")
+	}
+	id, err := appendOp(ctx, msg)
+	if err != nil {
+		return id, err
+	}
+	created := messageutil.RestoreCollectionMessage(msg.IntoImmutableMessage(id))
+	impl.shardManager.CreateCollection(created)
+	impl.allocFunctionRunners(created.Header().GetCollectionId(), created.VChannel(), body.GetCollection().GetCollectionSchema())
+	return id, nil
 }
 
 // Name returns the name of the interceptor.

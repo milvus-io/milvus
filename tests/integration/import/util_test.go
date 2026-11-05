@@ -31,7 +31,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -51,15 +51,28 @@ import (
 
 const dim = 128
 
-func CheckLogID(fieldBinlogs []*datapb.FieldBinlog) error {
-	for _, fieldBinlog := range fieldBinlogs {
-		for _, l := range fieldBinlog.GetBinlogs() {
-			if l.GetLogID() == 0 {
-				return errors.New("unexpected log id 0")
-			}
-		}
+func (s *importTestBase) assertImportedSegmentMetadata(segment *datapb.SegmentInfo, pkFieldID int64) {
+	s.T().Helper()
+	if segment.GetNumOfRows() == 0 {
+		// Import drops unused preallocated segments rather than writing
+		// empty data and statistics files for them.
+		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+		return
 	}
-	return nil
+	s.Require().EqualValues(storage.StorageV3, segment.GetStorageVersion())
+	s.Require().NotEmpty(segment.GetManifestPath())
+	// Import V3 stores file references in the manifest, not the legacy
+	// Binlogs/Statslogs catalog keys. Verify the actual data and PK stats.
+	groups, err := packed.ReadManifestColumnGroups(segment.GetManifestPath(), packed.CreateStorageConfig())
+	s.Require().NoError(err)
+	s.NotEmpty(groups)
+	for _, group := range groups {
+		s.NotEmpty(group.Files)
+	}
+	stats, err := packed.GetManifestStats(segment.GetManifestPath(), packed.CreateStorageConfig())
+	s.Require().NoError(err)
+	s.NotEmpty(stats[fmt.Sprintf("bloom_filter.%d", pkFieldID)].Paths)
+	s.Empty(segment.GetDeltalogs())
 }
 
 func GenerateParquetFile(c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, numRows int) (string, error) {

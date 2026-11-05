@@ -177,18 +177,48 @@ func (s *DBPropertiesSuite) TestDenyReadingDB() {
 	ctx := context.Background()
 	dbName := "db2"
 	s.prepareDatabase(ctx, dbName, common.DatabaseForceDenyReadingKey, "true")
-
 	collectionName := "Test" + funcutil.GenRandomStr()
 	s.prepareCollection(ctx, dbName, collectionName)
 
-	s.waitForSuccessOrTimeout(func() (error, bool) {
-		resp, err := s.search(ctx, dbName, collectionName)
-		if err != nil {
-			return err, false
-		}
-		fmt.Println("TestDenyReadingDB search response:", resp)
-		return nil, merr.ErrServiceQuotaExceeded.Is(merr.Error(resp.GetStatus()))
-	}, "TestDenyReadingDB-search")
+	setDenyReading := func(value string) {
+		status, err := s.Cluster.MilvusClient.AlterDatabase(ctx, &milvuspb.AlterDatabaseRequest{
+			DbName:     dbName,
+			Properties: []*commonpb.KeyValuePair{{Key: common.DatabaseForceDenyReadingKey, Value: value}},
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+	}
+	check := func(denied bool) {
+		s.waitForSuccessOrTimeout(func() (error, bool) {
+			response, err := s.search(ctx, dbName, collectionName)
+			if err != nil {
+				return err, false
+			}
+			if denied {
+				return nil, merr.ErrServiceQuotaExceeded.Is(merr.Error(response.GetStatus()))
+			}
+			return nil, merr.Ok(response.GetStatus())
+		}, "TestDenyReadingDB-search")
+	}
+	// Cover empty, growing-only and sealed collections, and both directions of
+	// the database property update so stale quota entries cannot pass the test.
+	for _, state := range []string{"empty", "growing", "sealed"} {
+		s.Run(state, func() {
+			switch state {
+			case "growing":
+				response, err := s.insert(ctx, dbName, collectionName, 100)
+				s.Require().NoError(merr.CheckRPCCall(response, err))
+			case "sealed":
+				response, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{DbName: dbName, CollectionNames: []string{collectionName}})
+				s.Require().NoError(merr.CheckRPCCall(response, err))
+				s.WaitForFlush(ctx, response.GetFlushCollSegIDs()[collectionName].GetData(), response.GetCollFlushTs()[collectionName], dbName, collectionName)
+			}
+			check(true)
+			setDenyReading("false")
+			check(false)
+			setDenyReading("true")
+			check(true)
+		})
+	}
 }
 
 func (s *DBPropertiesSuite) TestDenyWringDB() {

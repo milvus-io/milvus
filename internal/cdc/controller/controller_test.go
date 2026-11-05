@@ -38,16 +38,19 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestController_StartAndStop_WithEvents(t *testing.T) {
+	paramtable.Init()
+	prefix := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 	mockReplicateManagerClient := replication.NewMockReplicateManagerClient(t)
 	mockReplicateManagerClient.EXPECT().Close().Return()
 
 	// Create test data
 	replicateMeta := &streamingpb.ReplicatePChannelMeta{
-		SourceChannelName: "by-dev-test-source-channel",
-		TargetChannelName: "by-dev-test-target-channel",
+		SourceChannelName: prefix + "-test-source-channel",
+		TargetChannelName: prefix + "-test-target-channel",
 	}
 	metaBytes, _ := proto.Marshal(replicateMeta)
 
@@ -94,6 +97,7 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	)
 
 	ctrl := NewController()
+	t.Cleanup(ctrl.Stop)
 	go ctrl.watchLoop(eventCh)
 
 	// Wait for put event to be processed
@@ -108,7 +112,6 @@ func TestController_StartAndStop_WithEvents(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for delete event")
 	}
-	ctrl.Stop()
 }
 
 // failingRangeServer fails the first failures Range calls with err.

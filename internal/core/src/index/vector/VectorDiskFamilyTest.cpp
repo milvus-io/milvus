@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #ifdef BUILD_DISK_ANN
@@ -26,6 +28,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -35,7 +38,11 @@
 #include <vector>
 
 #include "arrow/buffer.h"
+#include "cachinglayer/Metrics.h"
+#include "folly/ScopeGuard.h"
+#include "knowhere/index/index_factory.h"
 #include "common/Utils.h"
+#include "common/OpContext.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
@@ -256,6 +263,9 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
+    bool defer_load = false;
+    OpContext* reader_context = nullptr;
+    std::optional<IndexCacheConfig> cache_config;
 };
 
 template <typename T>
@@ -368,19 +378,40 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
-    opened.base =
-        LoaderRegistry::Instance()
-            .Lookup(adapted.family)
-            .Load({IndexFiles{context,
-                              std::move(paths),
-                              LegacyIndexStorageConfig{
-                                  storage::V1SourceLayout::DiskFiles}},
-                   options});
+    auto cache = milvus::index::test::TestIndexCacheConfig();
+    if (build.defer_load) {
+        cache = IndexCacheConfig{
+            staging_dir + "/engine_cache",
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+    }
+    if (build.cache_config) {
+        cache = *build.cache_config;
+    }
+    auto index = LoaderRegistry::Instance()
+                     .Lookup(adapted.family)
+                     .Load({IndexFiles{context,
+                                       std::move(paths),
+                                       LegacyIndexStorageConfig{
+                                           storage::V1SourceLayout::DiskFiles}},
+                            options,
+                            cache});
+    if (build.defer_load)
+        EXPECT_FALSE(index->Metadata().count.has_value());
+    opened.base = index->CreateReader(build.reader_context);
 }
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
+RunOrdinaryDiskSearch(bool mmap,
+                      bool resident = false,
+                      bool defer_load = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
@@ -390,7 +421,9 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              {.mmap = mmap, .tensor = resident ? values.data() : nullptr});
+              {.mmap = mmap,
+               .tensor = resident ? values.data() : nullptr,
+               .defer_load = defer_load});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -404,7 +437,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     };
     auto query = GenDataset(2, kDim, values.data() + 100 * kDim);
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     ASSERT_EQ(result.seg_offsets_.size(), 8);
     EXPECT_EQ(result.unity_topK_, 4);
@@ -415,7 +448,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     params.search_params_[knowhere::meta::RADIUS] = 0.2;
     params.search_params_[knowhere::meta::RANGE_FILTER] = 0.1;
     SearchResult range_result;
-    reader->Search(query, params, BitsetView{}, nullptr, range_result);
+    reader->Search(query, params, BitsetView{}, range_result);
     EXPECT_EQ(range_result.total_nq_, 2);
     EXPECT_EQ(range_result.seg_offsets_.size(), 8);
     if constexpr (std::is_same_v<T, float>) {
@@ -652,6 +685,130 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
     }
 }
 
+TEST(VectorDiskCacheTest, ColdMetadataAndCancelledCountDoNotOpenEngine) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_cold_XXXXXX", "vector disk cold test");
+    const auto raw_path = files->Path() + "/raw";
+    const auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+    OpContext context(cancellation.getToken());
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.defer_load = true, .reader_context = &context});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    EXPECT_EQ(vector->Metric(), "L2");
+    EXPECT_EQ(vector->KnowhereIndexType(), knowhere::IndexEnum::INDEX_DISKANN);
+    try {
+        (void)opened.base->Count();
+        FAIL() << "cancelled cold disk load unexpectedly succeeded";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+// Scope the lazy feature bit on real DiskANN to exercise the loader policy
+// even when a native lazy backend is not linked. Backend algorithms are unchanged.
+TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
+    auto& features = const_cast<std::map<std::string, uint64_t>&>(
+        knowhere::IndexFactory::GetIndexFeatures());
+    auto& disk_features = features.at(knowhere::IndexEnum::INDEX_DISKANN);
+    const auto original_features = disk_features;
+    auto restore_features =
+        folly::makeGuard([&] { disk_features = original_features; });
+    disk_features |= knowhere::feature::LAZY_LOAD;
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_native_lazy_XXXXXX", "native lazy budget test");
+    const auto raw_path = files->Path() + "/raw";
+    WriteRaw(raw_path, MakeRows<float>(), kRows, kDim);
+    auto& resident = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& loading = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& resident_disk = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    auto& loading_disk = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    const auto resident_disk_before = resident_disk.Value();
+    const auto loading_disk_before = loading_disk.Value();
+    const auto resident_before = resident.Value();
+    const auto loading_before = loading.Value();
+    IndexCacheConfig config{
+        files->Path() + "/native_engine",
+        cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 1024 * 1024},
+        {4096, 4096},
+        4096,
+        0,
+        {8192, 0}};
+    OpContext ctx;
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.defer_load = true, .reader_context = &ctx, .cache_config = config});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    ctx.cancellation_token = cancelled.getToken();
+    EXPECT_THROW(opened.base->Prefetch(), SegcoreError);
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    ctx.cancellation_token = {};
+    opened.base->Prefetch();
+    EXPECT_EQ(opened.base->Count(), kRows);
+    EXPECT_EQ(resident.Value(),
+              resident_before + config.loaded_usage.memory_bytes);
+    EXPECT_EQ(resident_disk.Value(),
+              resident_disk_before + config.loaded_usage.file_bytes);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    opened.base->Prefetch();
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+
+    // A request larger than the test cache budget must fail admission.
+    config.loaded_usage.memory_bytes = int64_t{1} << 40;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.defer_load = true, .cache_config = config});
+    vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    try {
+        opened.base->Prefetch();
+        FAIL() << "native lazy load bypassed resource admission";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), InsufficientResource);
+    }
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+}
+
+TEST(VectorDiskFamilyTest, CachedFloatBuildLoadSearchAndRawCapability) {
+    RunOrdinaryDiskSearch<float>(false, false, true);
+}
+
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
 }
@@ -742,11 +899,8 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
         .topk_ = 4,
     };
     SearchResult result;
-    EXPECT_ANY_THROW(reader->Search(GenDataset(1, kDim, values.data()),
-                                    params,
-                                    BitsetView{},
-                                    nullptr,
-                                    result));
+    EXPECT_ANY_THROW(reader->Search(
+        GenDataset(1, kDim, values.data()), params, BitsetView{}, result));
 }
 
 TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
@@ -795,7 +949,7 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
         .topk_ = 4,
     };
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.unity_topK_, 4);
     EXPECT_EQ(result.seg_offsets_.size(), 8);
@@ -883,7 +1037,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data()),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    unfiltered_result);
     ASSERT_EQ(unfiltered_result.seg_offsets_.size(), 1);
     EXPECT_GE(unfiltered_result.seg_offsets_[0], 0);
@@ -896,7 +1049,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data() + allowed * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], allowed);
@@ -982,7 +1134,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + last * kDim),
                    params,
                    BitsetView{},
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], logical_ids[last]);
@@ -994,7 +1145,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + (last - 1) * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    filtered_result);
     ASSERT_EQ(filtered_result.seg_offsets_.size(), 1);
     EXPECT_EQ(filtered_result.seg_offsets_[0], allowed);

@@ -73,7 +73,7 @@ class JsonFlatExpressionTest : public ::testing::Test {
                                  DataType::JSON,
                                  std::move(opened),
                                  DataType::NONE,
-                                 &observed_index_pin_ctx_);
+                                 &observed_reader_ctx_);
     }
 
     void
@@ -86,7 +86,7 @@ class JsonFlatExpressionTest : public ::testing::Test {
     std::vector<std::string> json_data_;
     expr_index::RawFieldFiles raw_files_;
     segcore::SegmentSealedUPtr segment_;
-    OpContext* observed_index_pin_ctx_{nullptr};
+    OpContext* observed_reader_ctx_{nullptr};
 };
 
 class JsonFlatContainsExpressionTest : public ::testing::Test {
@@ -434,7 +434,7 @@ TEST_F(JsonFlatExpressionTest, JSONArrayEqualityFallsBackToRawData) {
 
     EXPECT_EQ(final.count(), 1);
     EXPECT_TRUE(final[6]);
-    EXPECT_EQ(observed_index_pin_ctx_, nullptr);
+    EXPECT_EQ(observed_reader_ctx_, nullptr);
 }
 
 TEST_F(JsonFlatExpressionTest,
