@@ -897,6 +897,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	t.GroupByFieldId = t.rankParams.GetGroupByFieldId()
+	t.GroupByFieldIds = t.rankParams.GetGroupByFieldIds()
 	t.GroupSize = t.rankParams.GetGroupSize()
 
 	if t.partitionKeyMode {
@@ -1288,6 +1289,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	t.queryInfos = append(t.queryInfos, queryInfo)
 	t.DslType = commonpb.DslType_BoolExprV1
 	t.GroupByFieldId = queryInfo.GroupByFieldId
+	t.GroupByFieldIds = queryInfo.GroupByFieldIds
 	t.GroupSize = queryInfo.GroupSize
 	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
