@@ -822,10 +822,10 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
-	// UpdateReplicateConfiguration reads the latest assignment three times: once
-	// to fill the redacted connection tokens, once for the validation before the
-	// cluster resource key is acquired, and once for the validation after it.
-	// Only the third read must observe the configuration as already applied.
+	// UpdateReplicateConfiguration reads the latest assignment twice: once for
+	// the validation before the cluster resource key is acquired and once for
+	// the validation after it. Only the second read must observe the
+	// configuration as already applied.
 	callCount := 0
 	cfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
@@ -846,7 +846,7 @@ func TestUpdateReplicateConfigSecondValidateSameConfig(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 2 {
+		if callCount <= 1 {
 			// Before the resource key: config is different (nil)
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
@@ -1288,8 +1288,8 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	}).Build()
 	defer mockGetClusterChannels.UnPatch()
 
-	// As above, the first two reads serve the token filling and the validation
-	// before the resource key is acquired; the failure belongs to the third.
+	// As above, the first read serves the validation before the resource key is
+	// acquired; the failure belongs to the second.
 	callCount := 0
 	b := mock_balancer.NewMockBalancer(t)
 	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
@@ -1300,7 +1300,7 @@ func TestSecondValidateNonSameError(t *testing.T) {
 	b.EXPECT().Close().Return().Maybe()
 	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
 		callCount++
-		if callCount <= 2 {
+		if callCount <= 1 {
 			return &balancer.WatchChannelAssignmentsCallbackParam{
 				PChannelView: &channel.PChannelView{
 					Channels: map[channel.ChannelID]*channel.PChannelMeta{
@@ -1444,4 +1444,218 @@ func TestForcePromoteMultiplePChannels(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
+}
+
+// tokenFillClusters are the two clusters the token-filling tests share: the
+// current cluster, and a replication peer reachable at its own uri with a token
+// the caller is never given back.
+func tokenFillCluster(id, uri, token string) *commonpb.MilvusCluster {
+	return &commonpb.MilvusCluster{
+		ClusterId:       id,
+		Pchannels:       []string{id + "-1"},
+		ConnectionParam: &commonpb.ConnectionParam{Uri: uri, Token: token},
+	}
+}
+
+func tokenFillEdge(target string) *commonpb.CrossClusterTopology {
+	return &commonpb.CrossClusterTopology{SourceClusterId: "by-dev", TargetClusterId: target}
+}
+
+// runTokenFillUpdate drives UpdateReplicateConfiguration with the stored
+// configuration served per GetLatestChannelAssignment call (1-based, the last
+// entry repeats), and returns the configuration that reached the broadcast, if
+// any, together with the call's error.
+func runTokenFillUpdate(t *testing.T, snapshots []*commonpb.ReplicateConfiguration, incoming *commonpb.ReplicateConfiguration) (*commonpb.ReplicateConfiguration, error) {
+	resource.InitForTest()
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-1_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	broadcast.ResetBroadcaster()
+	snmanager.ResetStreamingNodeManager()
+
+	mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
+		Channels:       []string{"by-dev-1"},
+		ControlChannel: "by-dev-1_vcchan",
+	}).Build()
+	defer mockGetClusterChannels.UnPatch()
+
+	pchannelView := &channel.PChannelView{
+		Channels: map[channel.ChannelID]*channel.PChannelMeta{
+			{Name: "by-dev-1"}: channel.NewPChannelMeta("by-dev-1", types.AccessModeRW),
+		},
+	}
+
+	callCount := 0
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil).Maybe()
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).Maybe()
+	b.EXPECT().Close().Return().Maybe()
+	b.EXPECT().GetLatestChannelAssignment().RunAndReturn(func() (*balancer.WatchChannelAssignmentsCallbackParam, error) {
+		callCount++
+		snapshot := snapshots[len(snapshots)-1]
+		if callCount <= len(snapshots) {
+			snapshot = snapshots[callCount-1]
+		}
+		return &balancer.WatchChannelAssignmentsCallbackParam{PChannelView: pchannelView, ReplicateConfiguration: snapshot}, nil
+	})
+	balance.Register(b)
+
+	var broadcasted *commonpb.ReplicateConfiguration
+	mba := mock_broadcaster.NewMockBroadcastAPI(t)
+	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		broadcasted = message.MustAsBroadcastAlterReplicateConfigMessageV2(msg).Header().GetReplicateConfiguration()
+		return &types.BroadcastAppendResult{BroadcastID: 1}, nil
+	}).Maybe()
+	mba.EXPECT().Close().Return().Maybe()
+
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil).Maybe()
+	mb.EXPECT().Close().Return().Maybe()
+	broadcast.Register(mb)
+
+	as := NewAssignmentService()
+	_, err := as.UpdateReplicateConfiguration(context.Background(), &streamingpb.UpdateReplicateConfigurationRequest{
+		Configuration: incoming,
+	})
+	return broadcasted, err
+}
+
+func tokenOf(cfg *commonpb.ReplicateConfiguration, clusterID string) (string, bool) {
+	for _, cluster := range cfg.GetClusters() {
+		if cluster.GetClusterId() == clusterID {
+			return cluster.GetConnectionParam().GetToken(), true
+		}
+	}
+	return "", false
+}
+
+func TestUpdateReplicateConfigTokenFillUsesValidationSnapshot(t *testing.T) {
+	// A cluster removed between the token filling and the validation must not be
+	// re-addable with the token it used to hold. The connection-parameter
+	// consistency check only covers clusters present in the current
+	// configuration, so a token taken from an older snapshot than the one the
+	// validation reads would be bound to a uri nobody checked.
+	//
+	// The stored configuration replicates to "peer". The caller re-adds "peer"
+	// under a uri it controls, with the token redacted as every read hands it
+	// back. The first read, inside the validation that runs before the cluster
+	// resource key is acquired, still sees "peer"; filling and validating from
+	// that same snapshot catches the uri change right there, so no later read
+	// happens and nothing is broadcast.
+	withPeer := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", "by-dev"),
+			tokenFillCluster("peer", "http://peer:19530", "peer-secret"),
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{tokenFillEdge("peer")},
+	}
+	withoutPeer := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", "by-dev"),
+		},
+	}
+	incoming := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", ""),
+			tokenFillCluster("peer", "http://elsewhere:19530", ""),
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{tokenFillEdge("peer")},
+	}
+
+	broadcasted, err := runTokenFillUpdate(t, []*commonpb.ReplicateConfiguration{withPeer, withoutPeer}, incoming)
+
+	// Whatever the outcome, the token of the removed cluster must not reach a uri
+	// no consistency check ever saw.
+	for _, cluster := range broadcasted.GetClusters() {
+		assert.NotEqual(t, "peer-secret", cluster.GetConnectionParam().GetToken(),
+			"stored token broadcast under uri %s", cluster.GetConnectionParam().GetUri())
+	}
+	// The uri change is caught, because the filling and the validation agree on
+	// which configuration is current. Filling before the first read instead let
+	// this through and broadcast "peer-secret" bound to the new uri.
+	assert.Nil(t, broadcasted)
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "connection_param.uri cannot be changed")
+	}
+}
+
+func TestUpdateReplicateConfigTokenFillLeavesUnknownClusterEmpty(t *testing.T) {
+	// "peer" is in no stored snapshot, so there is no token to fill: it is a new
+	// cluster, accepted with the empty token the caller sent, while the current
+	// cluster's own redacted token is filled from the snapshot.
+	withoutPeer := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", "by-dev"),
+		},
+	}
+	incoming := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", ""),
+			tokenFillCluster("peer", "http://peer:19530", ""),
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{tokenFillEdge("peer")},
+	}
+
+	broadcasted, err := runTokenFillUpdate(t, []*commonpb.ReplicateConfiguration{withoutPeer}, incoming)
+
+	assert.NoError(t, err)
+	if assert.NotNil(t, broadcasted) {
+		token, ok := tokenOf(broadcasted, "by-dev")
+		assert.True(t, ok)
+		assert.Equal(t, "by-dev", token)
+		token, ok = tokenOf(broadcasted, "peer")
+		assert.True(t, ok)
+		assert.Empty(t, token)
+	}
+}
+
+func TestUpdateReplicateConfigTokenFillDropsTokenOfClusterRemovedUnderKey(t *testing.T) {
+	// The first read still has "peer" at an unchanged uri, so the validation
+	// before the resource key fills "peer-secret" and passes. A concurrent
+	// update then removes "peer", and the validation under the key reads a
+	// snapshot without it. That validation fills from its own snapshot, so the
+	// broadcast carries "peer" as a new cluster with an empty token, not the
+	// token the earlier snapshot held.
+	withPeer := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", "by-dev"),
+			tokenFillCluster("peer", "http://peer:19530", "peer-secret"),
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{tokenFillEdge("peer")},
+	}
+	withoutPeer := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", "by-dev"),
+		},
+	}
+	// Adding "third" keeps the request different from the stored configuration,
+	// so neither validation short-circuits as "same".
+	incoming := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			tokenFillCluster("by-dev", "http://test:19530", ""),
+			tokenFillCluster("peer", "http://peer:19530", ""),
+			tokenFillCluster("third", "http://third:19530", ""),
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{tokenFillEdge("peer"), tokenFillEdge("third")},
+	}
+
+	broadcasted, err := runTokenFillUpdate(t, []*commonpb.ReplicateConfiguration{withPeer, withoutPeer}, incoming)
+
+	assert.NoError(t, err)
+	if assert.NotNil(t, broadcasted) {
+		token, ok := tokenOf(broadcasted, "by-dev")
+		assert.True(t, ok)
+		assert.Equal(t, "by-dev", token)
+		token, ok = tokenOf(broadcasted, "peer")
+		assert.True(t, ok)
+		assert.Empty(t, token, "token of a cluster the validated snapshot no longer holds")
+		token, ok = tokenOf(broadcasted, "third")
+		assert.True(t, ok)
+		assert.Empty(t, token)
+	}
 }
