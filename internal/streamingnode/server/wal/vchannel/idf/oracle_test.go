@@ -186,7 +186,8 @@ func TestOracleRefreshOnlyFetchesRequestedView(t *testing.T) {
 func TestOracleOnlyLoadsRequestedBM25Fields(t *testing.T) {
 	r, resource := newTestOracle(t)
 	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}}
-	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{103}})
+	view.Schema.Fields = append(view.Schema.Fields, &schemapb.FieldSchema{FieldID: 103, Name: "other_sparse", DataType: schemapb.DataType_SparseFloatVector})
+	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{103}})
 	res := resource(20, 2)
 	res.Bm25Binlogs = append(res.Bm25Binlogs, &datapb.FieldBinlog{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "must-not-read"}}})
 	oracle, err := newOracleRuntime(context.Background(), r.provider, view, []*datapb.StreamingNodeBM25Resource{res}, false)

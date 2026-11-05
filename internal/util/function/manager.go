@@ -1092,7 +1092,8 @@ func BuildEmbeddingRunner(schema *schemapb.CollectionSchema, fn *schemapb.Functi
 		return nil, nil
 	}
 
-	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+	// Borrow the immutable collection schema. MinHash may append derived
+	// parameters to its function definition, so only isolate that small record.
 	fn = proto.Clone(fn).(*schemapb.FunctionSchema)
 	return NewFunctionRunner(schema, fn, extraInfo...)
 }

@@ -91,7 +91,7 @@ func TestGrowingBM25StatsRejectIncompleteOutput(t *testing.T) {
 	insert := walview.SegmentInsertMessage{Message: message.MustAsImmutableInsertMessageV1(raw), Assignment: original.Header().GetPartitions()[0]}
 	stats := bm25Stats{}
 	stats.getOrCreate(102)
-	require.ErrorIs(t, collectGrowingInsertStats(stats, &schemapb.CollectionSchema{}, insert), merr.ErrDataIntegrity)
+	require.ErrorIs(t, (&oracleRuntime{}).collectGrowingInsertStats(t.Context(), stats, insert), merr.ErrDataIntegrity)
 	require.Zero(t, stats[102].NumRow())
 }
 
@@ -113,7 +113,11 @@ func TestGrowingStatsMaterializesOnlyRequiredBM25(t *testing.T) {
 	}}
 	stats := bm25Stats{}
 	stats.getOrCreate(102)
-	require.NoError(t, collectGrowingInsertStats(stats, schema, insert))
+	r, err := newOracleRuntime(t.Context(), nil, walview.VChannelWALView{Schema: schema, RequiredFields: testRequiredFields(schema)}, nil, true)
+	require.NoError(t, err)
+	defer r.Close()
+	require.Same(t, schema, r.schema, "oracle borrows the immutable schema")
+	require.NoError(t, r.collectGrowingInsertStats(t.Context(), stats, insert))
 	require.EqualValues(t, 1, stats[102].NumRow())
 	require.Positive(t, stats[102].GetAvgdl())
 	require.Len(t, insert.Message.MustBody().GetFieldsData(), 1, "materialization must preserve retained WAL body")

@@ -53,9 +53,18 @@ contract. Both the growing search segment and IDF recovery use
 `MaterializeInsertRequest` and `storage.CopyInsertRequestMetadata` to own the
 request metadata and field wrappers before filling missing function outputs.
 Large column values remain borrowed read-only; existing outputs are preserved,
-and neither consumer modifies the cached Body. Missing outputs use the local
-function-runner fallback. This schema-dependent materialization remains outside
-the Body cache and is not deduplicated by it.
+and neither consumer modifies the cached Body. IDF fills missing outputs through
+the shared FunctionRunnerManager using an oracle-owned registration of its exact,
+immutable collection schema. The oracle borrows that schema without deep copying
+or projecting it: other owners of the same schema version must observe the same
+complete definition. IDF explicitly prepares and executes only its required BM25
+outputs. Preparation acquires their file resources and constructs their runners before
+snapshot replay or live publication, including for an empty shard. Snapshot and
+live inserts reuse those prepared runners. Initialization failure releases the
+registration; normal retirement releases it after the oracle's consumers drain.
+Independent owner keys let other oracles and Views retain shared runners and file
+resources. This schema-dependent materialization remains outside the Body cache
+and is not deduplicated by it.
 Only required BM25 output fields contribute. Required fields come from the internal `required_fields` scope, independently of user preload hints. Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
