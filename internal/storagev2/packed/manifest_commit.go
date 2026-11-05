@@ -19,6 +19,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -114,10 +115,15 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	res := C.loon_transaction_begin(cBasePath, cProperties,
 		C.int64_t(baseVersion),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(res); err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.
@@ -130,7 +136,11 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	}
 
 	var commitVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	res = C.loon_transaction_commit(handle, &commitVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(res); err != nil {
 		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}

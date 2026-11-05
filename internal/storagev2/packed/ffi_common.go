@@ -13,6 +13,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -499,7 +500,12 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -527,7 +533,11 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// commit transaction
 	var committedVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -554,7 +564,12 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
