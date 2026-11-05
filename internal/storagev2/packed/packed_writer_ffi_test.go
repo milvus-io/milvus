@@ -422,14 +422,16 @@ func TestPackedFFIWriter(t *testing.T) {
 				require.NoError(t, err)
 				defer out.Destroy()
 
-				if key != nil {
-					assertPackedWriterParquetReadback(t, out, key, rec)
-				}
-
 				manifest, err := CommitManifestUpdates(basePath, version, cfg,
 					&ManifestUpdates{NewFiles: out})
 				require.NoError(t, err)
 				require.NotEmpty(t, manifest)
+
+				if key != nil {
+					fragments, err := ReadFragmentsFromManifest(manifest, cfg, nil)
+					require.NoError(t, err)
+					assertPackedWriterParquetReadback(t, fragments, key, rec)
+				}
 
 				p, pv, err := UnmarshalManifestPath(manifest)
 				require.NoError(t, err)
@@ -444,18 +446,14 @@ func TestPackedFFIWriter(t *testing.T) {
 }
 
 // Read with Arrow Go and the complete binary key, independently of Loon's reader.
-func assertPackedWriterParquetReadback(t *testing.T, output WriterOutput, key []byte, expected arrow.Record) {
+func assertPackedWriterParquetReadback(t *testing.T, fragments []Fragment, key []byte, expected arrow.Record) {
 	t.Helper()
-	require.IsType(t, &ColumnGroups{}, output)
-	groups, err := output.(*ColumnGroups).ColumnGroupEntries()
-	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	require.NotEmpty(t, groups[0].Files)
+	require.NotEmpty(t, fragments)
 	var rows int64
-	for _, object := range groups[0].Files {
+	for _, object := range fragments {
 		props := parquet.NewReaderProperties(memory.DefaultAllocator)
 		props.FileDecryptProps = parquet.NewFileDecryptionProperties(parquet.WithFooterKey(string(key)))
-		reader, err := file.OpenParquetFile(object.Path, false, file.WithReadProps(props))
+		reader, err := file.OpenParquetFile(object.FilePath, false, file.WithReadProps(props))
 		require.NoError(t, err)
 		defer reader.Close()
 		arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -463,7 +461,7 @@ func assertPackedWriterParquetReadback(t *testing.T, output WriterOutput, key []
 		table, err := arrowReader.ReadTable(context.Background())
 		require.NoError(t, err)
 		defer table.Release()
-		want := expected.NewSlice(object.StartIndex, object.EndIndex)
+		want := expected.NewSlice(object.StartRow, object.EndRow)
 		defer want.Release()
 		require.Equal(t, want.NumRows(), table.NumRows())
 		require.Equal(t, want.NumCols(), table.NumCols())
@@ -471,7 +469,7 @@ func assertPackedWriterParquetReadback(t *testing.T, output WriterOutput, key []
 			values, err := array.Concatenate(table.Column(column).Data().Chunks(), memory.DefaultAllocator)
 			require.NoError(t, err)
 			defer values.Release()
-			require.True(t, array.Equal(want.Column(column), values), "column %d differs after decrypting %s", column, object.Path)
+			require.True(t, array.Equal(want.Column(column), values), "column %d differs after decrypting %s", column, object.FilePath)
 		}
 		rows += table.NumRows()
 	}
