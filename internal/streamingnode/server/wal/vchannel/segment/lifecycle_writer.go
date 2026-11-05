@@ -30,7 +30,7 @@ func NewSegmentLifecycleWriter(coord types.MixCoordClient, serverID int64) Lifec
 }
 
 // maxRPCAttempts bounds the coordinator client's built-in retry loop (default
-// 10 attempts, up to ~52.8s for a fully failing call) to this many attempts
+// 10 attempts, up to ~42.6s for a fully failing call) to this many attempts
 // per RPC call — 3 attempts cost roughly 0.6s of client backoff per execution.
 // A task that exhausts them returns its error to the task layer, which requeues
 // it via ErrDelay — releasing the scheduler worker between executions instead
