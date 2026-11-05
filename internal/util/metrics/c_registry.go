@@ -50,7 +50,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-const cacheShardDiskUsageMetricName = "internal_cache_shard_disk_usage_bytes"
+// cacheShardUsageMetricNames lists the C++ cache gauges labeled with a real
+// VChannel.
+var cacheShardUsageMetricNames = []string{
+	"internal_cache_shard_disk_usage_bytes",
+	"internal_cache_shard_memory_usage_bytes",
+}
 
 // metricSorter is a sortable slice of *dto.Metric.
 type metricSorter []*dto.Metric
@@ -192,11 +197,13 @@ func applyCollectionLevelMetricsMode(metricFamilies map[string]*dto.MetricFamily
 	}
 	// Normalize only the parsed Prometheus projection; the C++ caching layer's
 	// internal per-shard attribution remains unchanged.
-	metricFamily, ok := metricFamilies[cacheShardDiskUsageMetricName]
-	if !ok || metricFamily.GetType() != dto.MetricType_GAUGE {
-		return
+	for _, name := range cacheShardUsageMetricNames {
+		metricFamily, ok := metricFamilies[name]
+		if !ok || metricFamily.GetType() != dto.MetricType_GAUGE {
+			continue
+		}
+		aggregateGaugeMetricFamilyLabel(metricFamily, "shard", pkgmetrics.AllLabel)
 	}
-	aggregateGaugeMetricFamilyLabel(metricFamily, "shard", pkgmetrics.AllLabel)
 }
 
 // aggregateGaugeMetricFamilyLabel collapses labelName to aggregateValue and

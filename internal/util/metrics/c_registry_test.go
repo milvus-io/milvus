@@ -33,34 +33,38 @@ func TestApplyCollectionLevelMetricsModeAggregatesCacheShardMetric(t *testing.T)
 		pkgmetrics.SetCollectionLevelMetricsMode(previous)
 	})
 
-	metricFamilies := map[string]*dto.MetricFamily{
-		cacheShardDiskUsageMetricName: cacheShardMetricFamily(
-			cacheShardSample{"vector_index", "pchannel_1_1v0", 10},
-			cacheShardSample{"vector_index", "pchannel_1_2v0", 20},
-			cacheShardSample{"scalar_index", "pchannel_1_3v0", 5},
-		),
+	for _, name := range cacheShardUsageMetricNames {
+		t.Run(name, func(t *testing.T) {
+			metricFamilies := map[string]*dto.MetricFamily{
+				name: cacheShardMetricFamily(name,
+					cacheShardSample{"vector_index", "pchannel_1_1v0", 10},
+					cacheShardSample{"vector_index", "pchannel_1_2v0", 20},
+					cacheShardSample{"scalar_index", "pchannel_1_3v0", 5},
+				),
+			}
+
+			parsed := append([]*dto.Metric(nil), metricFamilies[name].Metric...)
+
+			applyCollectionLevelMetricsMode(metricFamilies)
+
+			metricFamily := metricFamilies[name]
+			require.Len(t, metricFamily.Metric, 2)
+			// The parsed metrics are relabeled in place rather than cloned.
+			require.Same(t, parsed[0], metricFamily.Metric[0])
+			require.Same(t, parsed[2], metricFamily.Metric[1])
+			values := make(map[string]float64, 2)
+			for _, metric := range metricFamily.Metric {
+				labels := make(map[string]string, len(metric.Label))
+				for _, label := range metric.Label {
+					labels[label.GetName()] = label.GetValue()
+				}
+				require.Equal(t, pkgmetrics.AllLabel, labels["shard"])
+				values[labels["data_type"]] = metric.GetGauge().GetValue()
+			}
+			require.Equal(t, float64(30), values["vector_index"])
+			require.Equal(t, float64(5), values["scalar_index"])
+		})
 	}
-
-	parsed := append([]*dto.Metric(nil), metricFamilies[cacheShardDiskUsageMetricName].Metric...)
-
-	applyCollectionLevelMetricsMode(metricFamilies)
-
-	metricFamily := metricFamilies[cacheShardDiskUsageMetricName]
-	require.Len(t, metricFamily.Metric, 2)
-	// The parsed metrics are relabeled in place rather than cloned.
-	require.Same(t, parsed[0], metricFamily.Metric[0])
-	require.Same(t, parsed[2], metricFamily.Metric[1])
-	values := make(map[string]float64, 2)
-	for _, metric := range metricFamily.Metric {
-		labels := make(map[string]string, len(metric.Label))
-		for _, label := range metric.Label {
-			labels[label.GetName()] = label.GetValue()
-		}
-		require.Equal(t, pkgmetrics.AllLabel, labels["shard"])
-		values[labels["data_type"]] = metric.GetGauge().GetValue()
-	}
-	require.Equal(t, float64(30), values["vector_index"])
-	require.Equal(t, float64(5), values["scalar_index"])
 }
 
 func TestApplyCollectionLevelMetricsModePreservesFullCacheShardMetric(t *testing.T) {
@@ -70,8 +74,9 @@ func TestApplyCollectionLevelMetricsModePreservesFullCacheShardMetric(t *testing
 		pkgmetrics.SetCollectionLevelMetricsMode(previous)
 	})
 
+	name := cacheShardUsageMetricNames[0]
 	metricFamilies := map[string]*dto.MetricFamily{
-		cacheShardDiskUsageMetricName: cacheShardMetricFamily(
+		name: cacheShardMetricFamily(name,
 			cacheShardSample{"vector_index", "pchannel_1_1v0", 10},
 			cacheShardSample{"vector_index", "pchannel_1_2v0", 20},
 		),
@@ -79,7 +84,7 @@ func TestApplyCollectionLevelMetricsModePreservesFullCacheShardMetric(t *testing
 
 	applyCollectionLevelMetricsMode(metricFamilies)
 
-	require.Len(t, metricFamilies[cacheShardDiskUsageMetricName].Metric, 2)
+	require.Len(t, metricFamilies[name].Metric, 2)
 }
 
 type cacheShardSample struct {
@@ -88,7 +93,7 @@ type cacheShardSample struct {
 	value    float64
 }
 
-func cacheShardMetricFamily(samples ...cacheShardSample) *dto.MetricFamily {
+func cacheShardMetricFamily(name string, samples ...cacheShardSample) *dto.MetricFamily {
 	metrics := make([]*dto.Metric, 0, len(samples))
 	for _, sample := range samples {
 		metrics = append(metrics, &dto.Metric{
@@ -101,7 +106,7 @@ func cacheShardMetricFamily(samples ...cacheShardSample) *dto.MetricFamily {
 	}
 	gaugeType := dto.MetricType_GAUGE
 	return &dto.MetricFamily{
-		Name:   proto.String(cacheShardDiskUsageMetricName),
+		Name:   proto.String(name),
 		Type:   &gaugeType,
 		Metric: metrics,
 	}
