@@ -237,3 +237,46 @@ func TestEmptyAggResultGlobalMinLayouts(t *testing.T) {
 		})
 	}
 }
+
+// Segcore emits Timestamptz columns as TimestamptzData. An empty GROUP BY
+// partial with a Timestamptz key must use the same layout so that it can be
+// the first reduce input without breaking assembly of real group values.
+func TestEmptyAggResultGroupByTimestamptzKey(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: emptyAggGroupFieldID, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+			{FieldID: emptyAggValueFieldID, Name: "x", DataType: schemapb.DataType_Int64, Nullable: true},
+		},
+	}
+	reducer := func() *GroupAggReducer {
+		return NewGroupAggReducer([]int64{emptyAggGroupFieldID}, []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_count, FieldId: emptyAggValueFieldID},
+		}, -1, schema)
+	}
+
+	empty, err := reducer().EmptyAggResult()
+	require.NoError(t, err)
+	require.Equal(t, schemapb.DataType_Timestamptz, empty.GetFieldDatas()[0].GetType())
+	require.NotNil(t, empty.GetFieldDatas()[0].GetScalars().GetTimestamptzData(),
+		"empty Timestamptz group column must use the TimestamptzData layout")
+
+	const ts int64 = 1_700_000_000_000_000
+	nonEmpty := NewAggregationResult([]*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Timestamptz,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{Data: []int64{ts}}},
+			}},
+		},
+		makeAggColumn(t, schemapb.DataType_Int64, []float64{4}, nil),
+	}, 4)
+
+	for _, inputs := range [][]*AggregationResult{{empty, nonEmpty}, {nonEmpty, empty}} {
+		out, err := reducer().Reduce(context.Background(), inputs)
+		require.NoError(t, err)
+		fields := out.GetFieldDatas()
+		require.Len(t, fields, 2)
+		require.Equal(t, []any{ts}, readColumn(t, fields[0]))
+		require.Equal(t, []any{int64(4)}, readColumn(t, fields[1]))
+	}
+}

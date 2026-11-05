@@ -70,6 +70,13 @@ func (reducer *GroupAggReducer) EmptyAggResult() (*AggregationResult, error) {
 		if err != nil {
 			return err
 		}
+		// GenEmptyFieldData backs Timestamptz with LongData, but segcore emits
+		// TimestamptzData. The reducer copies the first input's layout, so match it.
+		if field.GetDataType() == schemapb.DataType_Timestamptz {
+			emptyFieldData.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
+				TimestamptzData: &schemapb.TimestamptzArray{Data: nil},
+			}
+		}
 		ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
 		return nil
 	}
