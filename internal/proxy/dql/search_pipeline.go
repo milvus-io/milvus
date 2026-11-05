@@ -1366,6 +1366,9 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				// Keep the search timestamp (QueryTask.SetTs does not overwrite it) so
+				// the requery derives the same guarantee and TTL cutoffs as the search.
+				commonpbutil.WithTimeStamp(op.timestamp),
 			),
 			ReqID:            paramtable.GetNodeID(),
 			PartitionIDs:     op.partitionIDs, // use search partitionIDs
