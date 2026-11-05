@@ -102,3 +102,32 @@ func TestTxnInsertResultBuffersConcurrentAddBuildRemove(t *testing.T) {
 	wg.Wait()
 	require.Empty(t, buffers.builders, "all txns removed: the vchannel buffer must be dropped")
 }
+
+func TestTxnInsertResultBuffersCompletenessForInsertAndUpsert(t *testing.T) {
+	for _, withUpsert := range []bool{false, true} {
+		buffers := NewTxnInsertResultBuffers(nil, nil)
+		legacy := newTestTxnMessage(t, "v1", 1)
+		buffers.Add(legacy, nil, 0)
+		msg := legacy
+		if withUpsert {
+			msg = message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
+		}
+		buffers.Add(msg, intIDsResult([]uint32{0}, 100), 0)
+		require.Nil(t, buffers.Build(msg), "a partial response cannot be cached for either message type")
+		buffers.Remove(msg)
+		require.Empty(t, buffers.builders)
+	}
+}
+
+func TestTxnInsertResultBuffersRejectsPartialRowResultsWithUpsert(t *testing.T) {
+	buffers := NewTxnInsertResultBuffers(nil, nil)
+	legacy := newTestTxnMessage(t, "v1", 1)
+	typed := message.MustAsMutableInsertMessageV1(legacy)
+	header := typed.Header()
+	header.Partitions = []*message.PartitionSegmentAssignment{{Rows: 2}}
+	typed.OverwriteHeader(header)
+	buffers.Add(legacy, intIDsResult([]uint32{0}, 100), 0)
+	upsert := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{Partition: &message.PartitionSegmentAssignment{Rows: 1}}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
+	buffers.Add(upsert, intIDsResult([]uint32{2}, 101), 0)
+	require.Nil(t, buffers.Build(upsert), "present metadata must cover every inserted row")
+}

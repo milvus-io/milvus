@@ -3,19 +3,21 @@ package segment
 import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// segmentInsertMessage is an Insert or Txn(Insert) entry selected for one
+// segmentInsertMessage is row content from Insert, Upsert, or Txn selected for one
 // segment. It is persistence-owned and intentionally does not depend on the
 // persistence module.
 type segmentInsertMessage struct {
-	Message    message.ImmutableInsertMessageV1
-	Assignment *messagespb.PartitionSegmentAssignment
-	TimeTick   uint64
+	Message        messageutil.InsertRequest
+	Assignment     *messagespb.PartitionSegmentAssignment
+	TimeTick       uint64
+	PartitionCount int
 }
 
-// InsertBatch is the part of one Insert or Txn WAL message assigned to a
+// InsertBatch is the part of one Insert, Upsert, or Txn WAL message assigned to a
 // single segment. The vchannel layer builds batches once and each SegmentView
 // consumes exactly one batch.
 type InsertBatch struct {
@@ -49,9 +51,9 @@ func forEachSegmentInsertMessage(
 		return merr.WrapErrServiceInternalMsg("nil insert WAL message")
 	}
 	switch raw.MessageType() {
-	case message.MessageTypeInsert:
+	case message.MessageTypeInsert, message.MessageTypeUpsert:
 		return forEachSegmentInsertMessageFromInsert(
-			message.MustAsImmutableInsertMessageV1(raw),
+			raw,
 			segmentID,
 			raw.TimeTick(),
 			visit,
@@ -62,11 +64,8 @@ func forEachSegmentInsertMessage(
 			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
 		}
 		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeInsert {
-				return nil
-			}
 			return forEachSegmentInsertMessageFromInsert(
-				message.MustAsImmutableInsertMessageV1(inner),
+				inner,
 				segmentID,
 				raw.TimeTick(),
 				visit,
@@ -78,19 +77,24 @@ func forEachSegmentInsertMessage(
 }
 
 func forEachSegmentInsertMessageFromInsert(
-	insert message.ImmutableInsertMessageV1,
+	raw message.ImmutableMessage,
 	segmentID int64,
 	timeTick uint64,
 	visit func(segmentInsertMessage) error,
 ) error {
-	for _, assignment := range insert.Header().GetPartitions() {
+	insert, assignments, ok := messageutil.AsInsertRequest(raw)
+	if !ok {
+		return nil
+	}
+	for _, assignment := range assignments {
 		if segmentID != 0 && assignment.GetSegmentAssignment().GetSegmentId() != segmentID {
 			continue
 		}
 		if err := visit(segmentInsertMessage{
-			Message:    insert,
-			Assignment: assignment,
-			TimeTick:   timeTick,
+			Message:        insert,
+			Assignment:     assignment,
+			TimeTick:       timeTick,
+			PartitionCount: len(assignments),
 		}); err != nil {
 			return err
 		}

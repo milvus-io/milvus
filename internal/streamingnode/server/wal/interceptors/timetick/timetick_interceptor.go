@@ -87,6 +87,9 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 			// Cancellation/fencing ends this writer. For either transaction origin,
 			// WAL recovery determines the outcome; a failed append is not a Commit.
 		}()
+		if err = txnSession.ValidateCommit(ctx, msg); err != nil {
+			return nil, txn.MarkCommitAdmissionRejected(err)
+		}
 	case message.MessageTypeRollbackTxn:
 		if txnSession, err = impl.handleRollback(ctx, msg); err != nil {
 			return nil, err
@@ -120,6 +123,12 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if immutableMsg, err = impl.appendMsg(ctx, msg, append); err != nil {
 		return nil, err
 	}
+	if txnSession != nil && msg.MessageType() == message.MessageTypeBeginTxn {
+		txnSession.RecordBegin(immutableMsg)
+	}
+	if txnSession != nil && msg.MessageType() != message.MessageTypeBeginTxn && msg.MessageType() != message.MessageTypeCommitTxn && msg.MessageType() != message.MessageTypeRollbackTxn {
+		txnSession.RecordSuccessfulBody(immutableMsg)
+	}
 	return immutableMsg.MessageID(), nil
 }
 
@@ -140,6 +149,7 @@ func (impl *timeTickAppendInterceptor) GracefulClose() {
 func (impl *timeTickAppendInterceptor) Close() {
 	resource.Resource().TimeTickInspector().UnregisterSyncOperator(impl.operator)
 	impl.operator.Close()
+	impl.txnManager.Close()
 }
 
 // handleBegin handle the begin transaction message.
@@ -198,6 +208,11 @@ func (impl *timeTickAppendInterceptor) handleTxnMessage(ctx context.Context, msg
 	session, err = impl.txnManager.GetSessionOfTxn(txnContext.TxnID)
 	if err != nil {
 		return nil, err
+	}
+	if msg.MessageType() == message.MessageTypeUpsert {
+		if err := session.ValidateUpsertScope(msg.VChannel()); err != nil {
+			return nil, err
+		}
 	}
 	// Add the message to the transaction.
 	if err = session.AddNewMessage(ctx, msg.TimeTick()); err != nil {

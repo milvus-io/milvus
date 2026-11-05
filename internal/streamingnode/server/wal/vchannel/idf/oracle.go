@@ -635,7 +635,7 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 			}
 		}
 		r.mu.Unlock()
-	case message.MessageTypeInsert, message.MessageTypeTxn:
+	case message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeTxn:
 		return walview.ForEachSegmentInsertMessage(msg, 0, func(insert walview.SegmentInsertMessage) error {
 			if !r.includesPartition(insert.Assignment.GetPartitionId()) {
 				return nil

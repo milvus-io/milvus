@@ -157,13 +157,16 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 // ApplyDelete: TODO move the L0 flush operation here.
 func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
+	m.RecordDelete(msg.VChannel(), msg.TimeTick(), msg.Header().GetRows(), uint64(msg.EstimateSize()))
+	return nil
+}
+
+// RecordDelete accounts only the delete portion of a logical write.
+func (m *shardManagerImpl) RecordDelete(vchannel string, timeTick, rows, binarySize uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	rows := msg.Header().GetRows()
 	m.metrics.ObserveDelete(rows)
-	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
-	return nil
+	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, vchannel, timeTick, rows, binarySize)
 }
 
 // WaitUntilGrowingSegmentReady waits until the growing segment is ready.

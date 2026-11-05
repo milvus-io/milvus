@@ -18,6 +18,7 @@ package producer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -256,57 +257,68 @@ func TestProduceGuardPartialUpdateTxnExpiredReturnsCASRetry(t *testing.T) {
 }
 
 func TestProduceGuardOrdinaryTxnExpiredReplaysWholeTransaction(t *testing.T) {
-	msgs := []message.MutableMessage{
-		createRealInsertMessage(t, "test-v"),
-		createRealInsertMessage(t, "test-v"),
-	}
-	guard := &ProduceGuard{
-		producer: &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}},
-		msgs:     msgs,
-	}
-
-	var (
-		mu        sync.Mutex
-		beginIDs  []message.TxnID
-		bodyCount = make(map[message.TxnID]int)
-		commitIDs []message.TxnID
-	)
-	nextTxnID := message.TxnID(1)
-	producePatch := mockey.Mock((*ResumableProducer).produceInternal).To(
-		func(_ *ResumableProducer, _ context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
-			mu.Lock()
-			defer mu.Unlock()
-
-			switch msg.MessageType() {
-			case message.MessageTypeBeginTxn:
-				txnCtx := &message.TxnContext{TxnID: nextTxnID, Keepalive: time.Second}
-				nextTxnID++
-				beginIDs = append(beginIDs, txnCtx.TxnID)
-				return &types.AppendResult{TxnCtx: txnCtx}, nil
-			case message.MessageTypeCommitTxn:
-				txnID := msg.TxnContext().TxnID
-				commitIDs = append(commitIDs, txnID)
-				if txnID == 1 {
-					return nil, status.NewTransactionExpired("expired")
-				}
-				return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
-			default:
-				txnID := msg.TxnContext().TxnID
-				bodyCount[txnID]++
-				return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+	for _, upsert := range []bool{false, true} {
+		t.Run(fmt.Sprintf("upsert_%t", upsert), func(t *testing.T) {
+			msgs := []message.MutableMessage{
+				createRealInsertMessage(t, "test-v"),
+				createRealInsertMessage(t, "test-v"),
 			}
-		},
-	).Build()
-	defer producePatch.UnPatch()
+			if upsert {
+				msgs[0] = message.NewUpsertMessageBuilderV2().WithVChannel("test-v").WithHeader(&message.UpsertMessageHeader{CollectionId: 1}).WithBody(&message.UpsertMessageBody{Insert: &msgpb.InsertRequest{CollectionID: 1}}).MustBuildMutable()
+			}
+			guard := &ProduceGuard{
+				producer: &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}},
+				msgs:     msgs,
+			}
 
-	result, err := guard.produceTxn(context.Background(), msgs...)
+			var (
+				mu        sync.Mutex
+				beginIDs  []message.TxnID
+				bodyCount = make(map[message.TxnID]int)
+				commitIDs []message.TxnID
+			)
+			nextTxnID := message.TxnID(1)
+			producePatch := mockey.Mock((*ResumableProducer).produceInternal).To(
+				func(_ *ResumableProducer, _ context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+					mu.Lock()
+					defer mu.Unlock()
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Equal(t, []message.TxnID{1, 2}, beginIDs)
-	require.Equal(t, []message.TxnID{1, 2}, commitIDs)
-	require.Equal(t, len(msgs), bodyCount[1])
-	require.Equal(t, len(msgs), bodyCount[2])
+					switch msg.MessageType() {
+					case message.MessageTypeBeginTxn:
+						txnCtx := &message.TxnContext{TxnID: nextTxnID, Keepalive: time.Second}
+						nextTxnID++
+						beginIDs = append(beginIDs, txnCtx.TxnID)
+						return &types.AppendResult{TxnCtx: txnCtx}, nil
+					case message.MessageTypeCommitTxn:
+						txnID := msg.TxnContext().TxnID
+						commitIDs = append(commitIDs, txnID)
+						if txnID == 1 {
+							require.Equal(t, len(msgs)+1, bodyCount[txnID])
+							return nil, status.NewTransactionExpired("body count mismatch after a resent body")
+						}
+						return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+					default:
+						txnID := msg.TxnContext().TxnID
+						if txnID == 1 && bodyCount[txnID] == 0 {
+							bodyCount[txnID]++ // Simulate one body persisted twice after an acknowledgement was lost.
+						}
+						bodyCount[txnID]++
+						return &types.AppendResult{TxnCtx: msg.TxnContext()}, nil
+					}
+				},
+			).Build()
+			defer producePatch.UnPatch()
+
+			result, err := guard.produceTxn(context.Background(), msgs...)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, []message.TxnID{1, 2}, beginIDs)
+			require.Equal(t, []message.TxnID{1, 2}, commitIDs)
+			require.Equal(t, len(msgs)+1, bodyCount[1])
+			require.Equal(t, len(msgs), bodyCount[2])
+		})
+	}
 }
 
 func TestProduceGuardCommitExistingPartialUpdateTxnIsNotRewrapped(t *testing.T) {

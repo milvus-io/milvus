@@ -24,6 +24,17 @@ func createQueryTestMessage(t *testing.T, tt uint64, vc string, typ message.Mess
 	return msg
 }
 
+func TestUpsertPublishesGrowingAndTransformTogether(t *testing.T) {
+	cm := NewQueryMVCCManager(10)
+	cm.ApplyRecoveryBarrier("v", 10)
+	upsert := createQueryTestMessage(t, 20, "v", message.MessageTypeUpsert, false, true)
+	cm.ObserveAppend(upsert)
+	publishQueryTestPrefix(t, cm, 20, upsert)
+	actual, ready := cm.Snapshot("v", 20)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{20, 20}, actual)
+}
+
 func publishQueryTestPrefix(t *testing.T, cm *QueryMVCCManager, through uint64, msgs ...message.MutableMessage) {
 	t.Helper()
 	immutable := make([]message.ImmutableMessage, 0, len(msgs))

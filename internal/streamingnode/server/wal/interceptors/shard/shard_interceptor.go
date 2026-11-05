@@ -4,7 +4,10 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -15,10 +18,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "shard"
@@ -40,6 +45,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
 		message.MessageTypeInsert:             impl.handleInsertMessage,
+		message.MessageTypeUpsert:             impl.handleUpsert,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
@@ -78,10 +84,11 @@ func (impl *shardInterceptor) Name() string {
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
 	op, ok := impl.ops[msg.MessageType()]
-	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
+	if ok && (msg.MessageType() == message.MessageTypeUpsert ||
+		!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.
-		// control channel message is only used to determine the DDL/DCL order,
-		// perform no effect on the shard manager, so skip it.
+		// Upsert always reaches its handler for scope validation.
+		// Other control-channel messages only order DDL/DCL and skip shard effects.
 		return op(ctx, msg, appendOp)
 	}
 	return appendOp(ctx, msg)
@@ -450,4 +457,134 @@ func (impl *shardInterceptor) Close() {
 			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
+}
+
+type writeSchemaProvider interface {
+	GetWriteSchema(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error)
+}
+
+type deletePressureRecorder interface {
+	RecordDelete(vchannel string, timeTick, rows, binarySize uint64)
+}
+
+// mutableUpsertInsert exposes nested row content to the existing function manager.
+type mutableUpsertInsert struct{ message.MutableUpsertMessageV2 }
+
+func (u mutableUpsertInsert) MustBody() *msgpb.InsertRequest {
+	return u.MutableUpsertMessageV2.MustBody().GetInsert()
+}
+
+func (u mutableUpsertInsert) OverwriteBody(insert *msgpb.InsertRequest) {
+	body := u.MutableUpsertMessageV2.MustBody()
+	body.Insert = insert
+	u.MutableUpsertMessageV2.OverwriteBody(body)
+}
+
+func (impl *shardInterceptor) writeSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
+	provider, ok := impl.shardManager.(writeSchemaProvider)
+	if !ok {
+		return nil, status.NewInner("shard write schema is not available")
+	}
+	schema, err := provider.GetWriteSchema(collectionID, vchannel)
+	if err != nil {
+		return nil, err
+	}
+	if schema.GetSchema() == nil {
+		return nil, status.NewInner("shard write schema is not ready")
+	}
+	return schema.GetSchema(), nil
+}
+
+func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	if err := message.ValidateUpsertEnvelope(msg); err != nil {
+		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
+	}
+	upsert, err := message.AsMutableUpsertMessageV2(msg)
+	if err != nil {
+		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
+	}
+	header := upsert.Header()
+	_, collectionID, _, parseErr := funcutil.ParseVChannel(msg.VChannel())
+	if parseErr != nil || collectionID <= 0 || collectionID != header.GetCollectionId() || funcutil.IsControlChannel(msg.VChannel()) {
+		return nil, status.NewUnrecoverableError("Upsert has an invalid collection or vchannel scope")
+	}
+	if message.HasPartialUpdateCAS(msg) {
+		return nil, status.NewUnrecoverableError("Upsert does not support partial update CAS")
+	}
+	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: collectionID, SchemaVersion: header.SchemaVersion})
+	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {
+		return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d", header.GetSchemaVersion(), version)
+	}
+	if err != nil {
+		return nil, err
+	}
+	schema, err := impl.writeSchema(collectionID, msg.VChannel())
+	if err != nil {
+		return nil, err
+	}
+	if schema.GetEnableNamespace() {
+		return nil, status.NewUnrecoverableError("Upsert does not support namespace collections")
+	}
+	primary, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	body, err := upsert.Body(ctx)
+	if err != nil {
+		return nil, upsertBodyDecodeError(err)
+	}
+	if err := message.ValidateUpsert(header, body, primary); err != nil {
+		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
+	}
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
+		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutableUpsertInsert{upsert})
+		if err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				return nil, err
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Keep the legacy execution policy and retain the original cause.
+			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
+		}
+	}
+	body, err = upsert.Body(ctx)
+	if err != nil {
+		return nil, upsertBodyDecodeError(err)
+	}
+	if err := message.ValidateUpsert(header, body, primary); err != nil {
+		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
+	}
+	recorder, ok := impl.shardManager.(deletePressureRecorder)
+	if !ok {
+		return nil, status.NewInner("shard delete accounting is not available")
+	}
+	partition := header.GetPartition()
+	partition.BinarySize = uint64(proto.Size(body.GetInsert()))
+	request := &shards.AssignSegmentRequest{CollectionID: collectionID, PartitionID: partition.GetPartitionId(), ModifiedMetrics: stats.ModifiedMetrics{Rows: partition.GetRows(), BinarySize: partition.GetBinarySize()}, TimeTick: msg.TimeTick()}
+	if session := txn.GetTxnSessionFromContext(ctx); session != nil {
+		request.TxnSession = session
+	}
+	assignment, err := impl.shardManager.AssignSegment(request)
+	if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
+		return nil, redo.ErrRedo
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer assignment.Ack()
+	// Source assignments never select a destination segment.
+	partition.SegmentAssignment = &message.SegmentAssignment{SegmentId: assignment.SegmentID}
+	upsert.OverwriteHeader(header)
+	recorder.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(body.GetDelete())))
+	return appendOp(ctx, msg)
+}
+
+func upsertBodyDecodeError(err error) error {
+	if errors.Is(err, message.ErrMalformedBody) {
+		return status.NewUnrecoverableError("malformed Upsert transaction body: %v", err)
+	}
+	return err
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
@@ -42,6 +43,13 @@ func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.Muta
 		return appendOp(ctx, msg)
 	}
 
+	// Replication can classify a duplicate as ignored before shard admission.
+	// Validate its envelope before that response, as for idempotency cache hits.
+	if msg.MessageType() == message.MessageTypeUpsert && msg.ReplicateHeader() != nil {
+		if err := message.ValidateUpsertEnvelope(msg); err != nil {
+			return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
+		}
+	}
 	// Begin to replicate the message.
 	acker, err := impl.replicateManager.BeginReplicateMessage(ctx, msg)
 	if errors.Is(err, replicates.ErrNotHandledByReplicateManager) {

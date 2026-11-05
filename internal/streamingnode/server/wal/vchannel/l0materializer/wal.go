@@ -144,8 +144,7 @@ func isL0FlushMessage(t message.MessageType) bool {
 func deleteBytes(msg message.ImmutableMessage) uint64 {
 	var size uint64
 	count := func(msg message.ImmutableMessage) error {
-		if msg.MessageType() == message.MessageTypeDelete {
-			body := message.MustAsImmutableDeleteMessageV1(msg).MustBody()
+		if body, ok := messageutil.AsDeleteRequest(msg); ok {
 			size += uint64(proto.Size(body.GetPrimaryKeys()) + 8*messageutil.PrimaryKeyCount(body.GetPrimaryKeys()))
 		}
 		return nil

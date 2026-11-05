@@ -29,6 +29,7 @@ const (
 	MessageTypeTimeTick                  MessageType = MessageType(messagespb.MessageType_TimeTick)
 	MessageTypeInsert                    MessageType = MessageType(messagespb.MessageType_Insert)
 	MessageTypeDelete                    MessageType = MessageType(messagespb.MessageType_Delete)
+	MessageTypeUpsert                    MessageType = MessageType(messagespb.MessageType_Upsert)
 	MessageTypeCreateCollection          MessageType = MessageType(messagespb.MessageType_CreateCollection)
 	MessageTypeDropCollection            MessageType = MessageType(messagespb.MessageType_DropCollection)
 	MessageTypeTruncateCollection        MessageType = MessageType(messagespb.MessageType_TruncateCollection)
@@ -111,6 +112,8 @@ type (
 	InsertRequest                          = msgpb.InsertRequest
 	DeleteMessageHeader                    = messagespb.DeleteMessageHeader
 	DeleteRequest                          = msgpb.DeleteRequest
+	UpsertMessageHeader                    = messagespb.UpsertMessageHeader
+	UpsertMessageBody                      = messagespb.UpsertMessageBody
 	CreateCollectionMessageHeader          = messagespb.CreateCollectionMessageHeader
 	CreateCollectionRequest                = msgpb.CreateCollectionRequest
 	DropCollectionMessageHeader            = messagespb.DropCollectionMessageHeader
@@ -470,6 +473,56 @@ var MustAsBroadcastDeleteMessageV1 = MustAsSpecializedBroadcastMessage[*DeleteMe
 
 // NewDeleteMessageBuilderV1 creates a new message builder for DeleteMessageV1
 var NewDeleteMessageBuilderV1 = newMutableMessageBuilder[*DeleteMessageHeader, *DeleteRequest]
+
+// Type aliases for UpsertMessageV2
+type (
+	MutableUpsertMessageV2           = specializedMutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+	ImmutableUpsertMessageV2         = SpecializedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+	OwnedImmutableUpsertMessageV2    = SpecializedOwnedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+	RetainedImmutableUpsertMessageV2 = SpecializedRetainedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+	BroadcastUpsertMessageV2         = SpecializedBroadcastMessage[*UpsertMessageHeader, *UpsertMessageBody]
+	BroadcastResultUpsertMessageV2   = BroadcastResult[*UpsertMessageHeader, *UpsertMessageBody]
+	AckResultUpsertMessageV2         = AckResult[*UpsertMessageHeader, *UpsertMessageBody]
+)
+
+// MessageTypeWithVersion for UpsertMessageV2
+var MessageTypeUpsertV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeUpsert,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for UpsertMessageV2
+var SpecializedTypeUpsertV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*UpsertMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*UpsertMessageHeader)(nil)),
+}
+
+// AsMutableUpsertMessageV2 converts a BasicMessage to MutableUpsertMessageV2
+var AsMutableUpsertMessageV2 = asSpecializedMutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// MustAsMutableUpsertMessageV2 converts a BasicMessage to MutableUpsertMessageV2, panics on error
+var MustAsMutableUpsertMessageV2 = mustAsSpecializedMutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// AsImmutableUpsertMessageV2 converts an ImmutableMessage to ImmutableUpsertMessageV2
+var AsImmutableUpsertMessageV2 = asSpecializedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// MustAsImmutableUpsertMessageV2 converts an ImmutableMessage to ImmutableUpsertMessageV2, panics on error
+var MustAsImmutableUpsertMessageV2 = MustAsSpecializedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// MustAsOwnedImmutableUpsertMessageV2 converts an OwnedImmutableMessage to OwnedImmutableUpsertMessageV2, panics on error
+var MustAsOwnedImmutableUpsertMessageV2 = MustAsSpecializedOwnedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// MustAsRetainedImmutableUpsertMessageV2 converts a RetainedImmutableMessage to RetainedImmutableUpsertMessageV2, panics on error
+var MustAsRetainedImmutableUpsertMessageV2 = MustAsSpecializedRetainedImmutableMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// AsBroadcastUpsertMessageV2 converts a BasicMessage to BroadcastUpsertMessageV2
+var AsBroadcastUpsertMessageV2 = asSpecializedBroadcastMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// MustAsBroadcastUpsertMessageV2 converts a BasicMessage to BroadcastUpsertMessageV2, panics on error
+var MustAsBroadcastUpsertMessageV2 = MustAsSpecializedBroadcastMessage[*UpsertMessageHeader, *UpsertMessageBody]
+
+// NewUpsertMessageBuilderV2 creates a new message builder for UpsertMessageV2
+var NewUpsertMessageBuilderV2 = newMutableMessageBuilder[*UpsertMessageHeader, *UpsertMessageBody]
 
 // Type aliases for CreateCollectionMessageV1
 type (
@@ -3205,6 +3258,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
 	reflect.TypeOf(&messagespb.UpdateImportMessageHeader{}):              MessageTypeUpdateImport,
+	reflect.TypeOf(&messagespb.UpsertMessageHeader{}):                    MessageTypeUpsert,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -3284,6 +3338,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
 	MessageTypeUpdateImportV2:              SpecializedTypeUpdateImportV2,
+	MessageTypeUpsertV2:                    SpecializedTypeUpsertV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
@@ -3347,4 +3402,5 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,
 	SpecializedTypeUpdateImportV2:              MessageTypeUpdateImportV2,
+	SpecializedTypeUpsertV2:                    MessageTypeUpsertV2,
 }

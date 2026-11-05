@@ -175,10 +175,10 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			// one message per segment (see proxy task_insert_streaming.go).
 			// Reject a multi-partition message here instead of persisting the
 			// whole body into every segment it is assigned to.
-			if partitions := insert.Message.Header().GetPartitions(); len(partitions) > 1 {
+			if insert.PartitionCount > 1 {
 				return merr.WrapErrServiceInternalMsg(
 					"unsupported multi-partition insert message for segment %d: %d partitions, body cannot be split by segment",
-					pack.SegmentID, len(partitions))
+					pack.SegmentID, insert.PartitionCount)
 			}
 			// MustBody panics on unmarshal failure, so request is never nil
 			// here.

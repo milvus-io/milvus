@@ -1743,6 +1743,9 @@ queryView:
 
 # Any configuration related to the streaming service.
 streaming:
+  wal:
+    upsert:
+      enabled: false # Enable native Upsert WAL generation and replicated append. false: disable generation (default); auto: enable after all online local components reach 3.0.7 for one minute; true: force enable. Configure auto before coordinator startup. The control plane must keep CDC targets upgraded and enabled before the primary. Retained decoding and transaction resolution remain enabled when false.
   schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.

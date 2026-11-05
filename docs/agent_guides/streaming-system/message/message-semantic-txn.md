@@ -16,6 +16,8 @@ Messages managing transactions on a single VChannel.
 
 ## Key Invariants
 
+- Upsert is one logical transaction body. Transactions containing Upsert require a nonzero exact Commit body count. The server checks Begin, every successful body, and Commit for matching VChannel and collection identity, including after recovery. Repeated PKs and overlap involving Upsert use the existing equal-TimeTick semantics, without a last-write-wins guarantee. These checks do not change legacy-only transaction semantics. See [Upsert WAL Message](../../../design-docs/design_docs/wal/upsert_message.md).
+
 - BeginTxn must precede all body messages and CommitTxn/RollbackTxn for the same transaction.
 - Body messages must arrive within the keepalive window, otherwise the transaction expires. After expiration, local clients must begin a new transaction. A replicated transaction aborted by local Flush may reuse its source TxnID during complete replay.
 - CommitTxn/RollbackTxn must come after all body messages have completed (inFlightCount == 0).

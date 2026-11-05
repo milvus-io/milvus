@@ -73,6 +73,13 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 	if r == nil || msg == nil {
 		return nil
 	}
+	// Decode the complete compound unit before either component changes state.
+	// A transaction can contain several Upsert bodies with one final frontier.
+	if applyGrowing || applyTransform {
+		if err := predecodeUpserts(ctx, msg); err != nil {
+			return err
+		}
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeAlterCollection:
 		if !applyGrowing {
@@ -109,7 +116,7 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 			return nil
 		}
 		return r.applyInsertMessage(ctx, msg)
-	case message.MessageTypeTxn:
+	case message.MessageTypeUpsert, message.MessageTypeTxn:
 		if applyGrowing {
 			if err := r.applyInsertMessage(ctx, msg); err != nil {
 				return err
@@ -140,6 +147,47 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 	}
 }
 
+func predecodeUpserts(ctx context.Context, msg message.ImmutableMessage) error {
+	var txn message.ImmutableTxnMessage
+	compound := msg.MessageType() == message.MessageTypeUpsert
+	if msg.MessageType() == message.MessageTypeTxn {
+		txn = message.AsImmutableTxnMessage(msg)
+		if txn == nil {
+			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
+		}
+		if err := txn.RangeOver(func(body message.ImmutableMessage) error {
+			compound = compound || body.MessageType() == message.MessageTypeUpsert
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if !compound {
+		return nil
+	}
+	// Validate every sibling before any component changes state. The same
+	// projections perform the later conversion, so malformed deletes cannot
+	// fail only after an insert has already reached a native segment.
+	decode := func(body message.ImmutableMessage) error {
+		if insert, assignments, ok := messageutil.AsInsertRequest(body); ok {
+			if _, err := insert.Body(ctx); err != nil {
+				return err
+			}
+			for _, assignment := range assignments {
+				if assignment.GetSegmentAssignment().GetSegmentId() == 0 {
+					return merr.WrapErrServiceInternalMsg("compound insert has no segment assignment")
+				}
+			}
+		}
+		_, _, err := messageutil.DeleteRequest(ctx, body)
+		return err
+	}
+	if txn != nil {
+		return txn.RangeOver(decode)
+	}
+	return decode(msg)
+}
+
 func (r *Runtime) applyInsertMessage(ctx context.Context, raw message.ImmutableMessage) error {
 	return walview.ForEachSegmentInsertMessage(raw, 0, func(insert walview.SegmentInsertMessage) error {
 		assignment := insert.Assignment
@@ -157,20 +205,26 @@ func (r *Runtime) applyInsertMessage(ctx context.Context, raw message.ImmutableM
 
 func (r *Runtime) applyLiveDeleteMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	switch msg.MessageType() {
-	case message.MessageTypeDelete:
-		deleted := message.MustAsImmutableDeleteMessageV1(msg)
-		return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
+	case message.MessageTypeDelete, message.MessageTypeUpsert:
+		deleted, _, err := messageutil.DeleteRequest(ctx, msg)
+		if err != nil {
+			return err
+		}
+		return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted)
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(msg)
 		if txn == nil {
 			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
 		}
 		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeDelete {
+			if inner.MessageType() != message.MessageTypeDelete && inner.MessageType() != message.MessageTypeUpsert {
 				return nil
 			}
-			deleted := message.MustAsImmutableDeleteMessageV1(inner)
-			return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
+			deleted, _, err := messageutil.DeleteRequest(ctx, inner)
+			if err != nil {
+				return err
+			}
+			return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted)
 		})
 	default:
 		return nil

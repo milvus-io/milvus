@@ -3,17 +3,18 @@ package walview
 import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// SegmentInsertMessage is an Insert or Txn(Insert) entry selected for one segment.
+// SegmentInsertMessage is row content selected for one segment from an outer WAL message.
 type SegmentInsertMessage struct {
-	Message    message.ImmutableInsertMessageV1
+	Message    messageutil.InsertRequest
 	Assignment *messagespb.PartitionSegmentAssignment
 	TimeTick   uint64
 }
 
-// ForEachSegmentInsertMessage expands raw Insert or Txn WAL messages and visits
+// ForEachSegmentInsertMessage expands Insert, Upsert, or Txn WAL messages and visits
 // only the insert assignments that belong to segmentID.
 func ForEachSegmentInsertMessage(
 	raw message.ImmutableMessage,
@@ -24,9 +25,9 @@ func ForEachSegmentInsertMessage(
 		return merr.WrapErrServiceInternalMsg("nil insert WAL message")
 	}
 	switch raw.MessageType() {
-	case message.MessageTypeInsert:
+	case message.MessageTypeInsert, message.MessageTypeUpsert:
 		return forEachSegmentInsertMessageFromInsert(
-			message.MustAsImmutableInsertMessageV1(raw),
+			raw,
 			segmentID,
 			raw.TimeTick(),
 			visit,
@@ -37,11 +38,8 @@ func ForEachSegmentInsertMessage(
 			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
 		}
 		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeInsert {
-				return nil
-			}
 			return forEachSegmentInsertMessageFromInsert(
-				message.MustAsImmutableInsertMessageV1(inner),
+				inner,
 				segmentID,
 				raw.TimeTick(),
 				visit,
@@ -53,12 +51,16 @@ func ForEachSegmentInsertMessage(
 }
 
 func forEachSegmentInsertMessageFromInsert(
-	insert message.ImmutableInsertMessageV1,
+	raw message.ImmutableMessage,
 	segmentID int64,
 	timeTick uint64,
 	visit func(SegmentInsertMessage) error,
 ) error {
-	for _, assignment := range insert.Header().GetPartitions() {
+	insert, assignments, ok := messageutil.AsInsertRequest(raw)
+	if !ok {
+		return nil
+	}
+	for _, assignment := range assignments {
 		if segmentID != 0 && assignment.GetSegmentAssignment().GetSegmentId() != segmentID {
 			continue
 		}
