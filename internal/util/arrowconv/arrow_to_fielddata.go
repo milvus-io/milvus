@@ -672,6 +672,23 @@ func resolveVectorDim(dtype arrow.DataType, schema *schemapb.FieldSchema) (int64
 	return physical, nil
 }
 
+// VectorDimFromByteWidth is the dim of a dense vector of type dt whose
+// values are byteWidth bytes each: the fallback when the field schema
+// carries no usable dim. 0 for a type it does not cover.
+func VectorDimFromByteWidth(dt schemapb.DataType, byteWidth int) int64 {
+	switch dt {
+	case schemapb.DataType_FloatVector:
+		return int64(byteWidth / 4)
+	case schemapb.DataType_BinaryVector:
+		return int64(byteWidth * 8)
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return int64(byteWidth / 2)
+	case schemapb.DataType_Int8Vector:
+		return int64(byteWidth)
+	}
+	return 0
+}
+
 func bytesVectorFieldData(chunks []arrow.Array, schema *schemapb.FieldSchema, validRows int, dim int64) *schemapb.FieldData_Vectors {
 	data := compactBytesVector(chunks, validRows)
 

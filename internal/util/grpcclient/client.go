@@ -445,6 +445,13 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		// canceled or deadline exceeded
 		return true, c.needResetCancel(), false, err
 	case funcutil.IsGrpcErr(err, codes.Unimplemented):
+		if c.isNode {
+			// A node at this address is the node the session points at (the
+			// ServerID interceptor catches a replaced node); Unimplemented only
+			// means it runs an older version. Resetting the shared connection
+			// would disturb every in-flight RPC on it, so fail fast and keep it.
+			return false, false, false, merr.WrapErrServiceUnimplemented(err)
+		}
 		// for unimplemented error, reset coord connection to avoid old coord's side effect.
 		// old coord's side effect: when coord changed, the connection in coord's client won't reset automatically.
 		// so if new interface appear in new coord, will got a unimplemented error

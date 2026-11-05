@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type RetrieveSuite struct {
@@ -746,6 +747,48 @@ func TestRetrieveOnSegmentsCountWithEmptyResult(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 	})
+}
+
+// RetrieveSelectedSegments (a task's ExecuteOnSegments) honors
+// WithArrowTransport as Retrieve does: a materialize task's segments take the
+// Arrow path whatever zeroCopy says.
+func TestRetrieveSelectedSegments_ArrowTransport(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled.Key)
+
+	collectionID := int64(100)
+	schema := mock_segcore.GenTestCollectionSchema("test-retrieve-selected-arrow", schemapb.DataType_Int64, true)
+	coll, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: collectionID,
+		Schema:       schema,
+		IndexMeta:    mock_segcore.GenTestIndexMeta(collectionID, schema),
+	})
+	require.NoError(t, err)
+	defer coll.Release()
+	plan, err := mock_segcore.GenSimpleRetrievePlan(coll)
+	require.NoError(t, err)
+	defer plan.Delete()
+	req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{CollectionID: collectionID, Limit: typeutil.Unlimited}}
+
+	for _, useArrow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("arrow=%v", useArrow), func(t *testing.T) {
+			seg := NewMockSegment(t)
+			seg.EXPECT().Type().Return(SegmentTypeSealed).Maybe()
+			seg.EXPECT().DatabaseName().Return("default").Maybe()
+			seg.EXPECT().ResourceGroup().Return("rg").Maybe()
+			var opts []RetrieveOption
+			if useArrow {
+				opts = append(opts, WithArrowTransport())
+				seg.EXPECT().RetrieveArrow(mock.Anything, mock.Anything).Return(&segcorepb.RetrieveResults{}, nil, nil)
+			} else {
+				seg.EXPECT().Retrieve(mock.Anything, mock.Anything).Return(&segcorepb.RetrieveResults{}, nil)
+			}
+			res, err := RetrieveSelectedSegments(context.TODO(), plan, req, []Segment{seg}, opts...)
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+		})
+	}
 }
 
 func TestShouldEnableIgnoreNonPkWithGroupBy(t *testing.T) {
