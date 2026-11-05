@@ -554,8 +554,19 @@ func ManifestHasColumns(
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
 ) (bool, error) {
+	missing, err := ManifestMissingColumns(manifestPath, storageConfig, columns)
+	return err == nil && len(missing) == 0, err
+}
+
+// ManifestMissingColumns returns requested columns absent from every column
+// group, in request order. Read failures are not evidence that columns are absent.
+func ManifestMissingColumns(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]string, error) {
 	if len(columns) == 0 {
-		return true, nil
+		return nil, nil
 	}
 
 	required := make(map[string]struct{}, len(columns))
@@ -565,14 +576,21 @@ func ManifestHasColumns(
 
 	groups, err := readColumnGroupsFromManifest(manifestPath, storageConfig)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, group := range groups {
 		for _, column := range group.Columns {
 			delete(required, column)
 		}
 	}
-	return len(required) == 0, nil
+	var missing []string
+	for _, column := range columns {
+		if _, ok := required[column]; ok {
+			missing = append(missing, column)
+			delete(required, column)
+		}
+	}
+	return missing, nil
 }
 
 // readManifestColumnGroupEntries copies selected column-group metadata into
