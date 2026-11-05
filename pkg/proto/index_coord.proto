@@ -191,6 +191,7 @@ message IndexFilePathInfo {
     uint64 mem_size = 12;
     int32 current_scalar_index_version = 13;
     IndexStorePathVersion index_store_path_version = 14;
+    string index_type = 15;
 }
 
 message SegmentInfo {

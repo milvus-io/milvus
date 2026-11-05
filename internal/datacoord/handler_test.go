@@ -2633,6 +2633,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	indexType := "HNSW_SQ"
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
@@ -2650,6 +2651,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				PartitionID:           20,
 				SegmentID:             segmentID,
 				IndexID:               10,
+				IndexType:             indexType,
 				BuildID:               30,
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
@@ -2666,7 +2668,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockIndexName := mockey.Mock((*index.IndexMeta).GetIndexNameByID).Return("vec_idx").Build()
 	defer mockIndexName.UnPatch()
 
-	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).Return(nil).Build()
+	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).To(func(*index.IndexMeta, UniqueID, UniqueID) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	}).Build()
 	defer mockIndexParams.UnPatch()
 
 	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
@@ -2676,6 +2680,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
@@ -2690,9 +2697,19 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	indexFiles, err = uncompressIndexFiles(handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
 	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	indexType = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Empty(t, indexFiles[0].GetIndexType())
+	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 
 	segment.ManifestPath = ""
 	indexFiles, err = uncompressIndexFiles(handler, segment)
