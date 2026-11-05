@@ -3287,8 +3287,10 @@ func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
 					require.NoError(t, writer.Close())
 					deltaPath := bundleRoot + "/files/v2/l0.parquet"
 					put(deltaPath, buf.Bytes())
-					l0 := &datapb.SegmentDescription{SegmentId: segmentID + 1, PartitionId: partitionID, ChannelName: firstSegment.ChannelName, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: 2,
-						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 1}}}}}
+					l0 := &datapb.SegmentDescription{
+						SegmentId: segmentID + 1, PartitionId: partitionID, ChannelName: firstSegment.ChannelName, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: 2,
+						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 1}}}},
+					}
 					data, err := snapshotio.MarshalSegmentManifest(l0)
 					require.NoError(t, err)
 					l0Avro := bundleRoot + "/snapshots/l0.avro"

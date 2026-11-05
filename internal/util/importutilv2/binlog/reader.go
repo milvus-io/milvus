@@ -932,8 +932,10 @@ func (r *reader) prepareStorageV2Snapshot(segment *datapb.SegmentDescription, bu
 			input.deltas = append(input.deltas, path)
 		}
 	}
-	options := []storage.RwOption{storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(r.storageConfig),
-		storage.WithBufferSize(32 * 1024 * 1024), storage.WithPluginContext(r.sourceEncryption.PluginContext)}
+	options := []storage.RwOption{
+		storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(r.storageConfig),
+		storage.WithBufferSize(32 * 1024 * 1024), storage.WithPluginContext(r.sourceEncryption.PluginContext),
+	}
 	present, err := storage.PackedBinlogPresentFields(r.ctx, input.binlogs, r.schema, options...)
 	if err != nil {
 		return nil, err

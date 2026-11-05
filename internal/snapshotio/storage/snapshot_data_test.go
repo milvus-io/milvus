@@ -3642,10 +3642,12 @@ func TestRebaseSelfContainedSnapshotData_SameKeyPrefix(t *testing.T) {
 			t.Run(fmt.Sprintf("root=%s/storage=%d", root, version), func(t *testing.T) {
 				key := path.Join(root, "files", "segment")
 				uri := "s3://original-bucket/" + key
-				segment := &datapb.SegmentDescription{StorageVersion: version,
-					Binlogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}, {LogPath: key}, {}}}},
-					Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}}}},
-					ManifestPath: uri}
+				segment := &datapb.SegmentDescription{
+					StorageVersion: version,
+					Binlogs:        []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}, {LogPath: key}, {}}}},
+					Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}}}},
+					ManifestPath:   uri,
+				}
 				if version == storage.StorageV3 {
 					segment.ManifestPath = packed.MarshalManifestPath(uri, 7)
 				}
