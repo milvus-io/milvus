@@ -668,9 +668,12 @@ func TestStructArrayElementSearchNoFilter(t *testing.T) {
 	t.Run("ground_truth", func(t *testing.T) {
 		queryVec := rows[42].StructA[1].Embedding
 		const limit = 20
+		// The default HNSW ef is max(limit, 16) = 20, which misses near-tied neighbors
+		// among the ~2.7k elements; a larger ef keeps the recall check off the HNSW boundary.
 		rs, err := mc.Search(ctx, client.NewSearchOption(collName, limit, []entity.Vector{entity.FloatVector(queryVec)}).
 			WithANNSField("structA[embedding]").
 			WithSearchParam("metric_type", "COSINE").
+			WithAnnParam(index.NewHNSWAnnParam(200)).
 			WithOutputFields("id").
 			WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, true)
