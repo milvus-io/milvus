@@ -262,6 +262,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 }
                 milvus::futures::throwIfCancelled(cancel_token);
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 auto read_lease =
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 // Capture the request-scoped read snapshot once per segment so
