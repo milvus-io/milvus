@@ -76,7 +76,7 @@ The fixture protocol and physical-format inspectors are shared with the other CM
 | `scalar_index_oracle_test.go` | Scalar-index test inputs, index parameters, query predicates and expected IDs/counts for each family. `assertOracle` compares Milvus query results with those expectations. |
 | `fixture_keys_test.go` | Independently authenticate fixture EDEKs and derive object DEKs for the real Parquet object's three key modes. |
 
-Raw-data format campaigns disable compaction before starting the cluster; propagation scenarios enable the required task explicitly. On 3.0, ordinary flush persists WAL SegmentView data through PackWriter and chooses BulkPackWriterV2 or BulkPackWriterV3 using the Segment Storage Version. Each campaign inspects every object reported by its completed flush, releases/reloads the collection, and verifies the loaded Segment identities. The old QueryNode growing-source writer and its dedicated batch/recovery tests are excluded from this PR.
+Raw-data format campaigns disable compaction before starting the cluster; propagation scenarios enable the required task explicitly. Ordinary flush chooses BulkPackWriterV2 or BulkPackWriterV3 using the Segment Storage Version. Each campaign inspects every object reported by its completed flush, releases/reloads the collection, and verifies the loaded Segment identities. The old QueryNode growing-source writer and its dedicated batch/recovery tests are excluded from this PR.
 
 The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
 
