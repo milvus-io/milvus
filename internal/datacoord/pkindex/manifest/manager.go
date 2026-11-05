@@ -90,9 +90,9 @@ var (
 	// min key above its max key, or ranges that overlap or are not in
 	// ascending order); or an L0 table would end up behind a run.
 	ErrStaleEdit = errors.New("compaction edit does not fit the manifest")
-	// ErrSSTReclaimed reports a flush that is not an applied retry and adds an
+	// ErrSSTReclaimed reports an edit that is not an applied retry and adds an
 	// SST ID that is not above the reclaimed SST ID of the pointer: garbage
-	// collection may have deleted that SST. The flush did not take effect.
+	// collection may have deleted that SST. The edit did not take effect.
 	ErrSSTReclaimed = errors.New("sst ID is not above the reclaimed sst ID")
 )
 
@@ -163,8 +163,15 @@ func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 // CommitCompaction applies a compaction (see applyCompaction) and returns the
 // resulting version.
 func (m *Manager) CommitCompaction(ctx context.Context, collectionID int64, vchannel string, c Compaction) (*pkindexpb.Manifest, error) {
-	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest, _ int64) (*pkindexpb.Manifest, error) {
-		return applyCompaction(cur, c)
+	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest, maxReclaimed int64) (*pkindexpb.Manifest, error) {
+		next, err := applyCompaction(cur, c)
+		if err != nil || next == nil {
+			return next, err
+		}
+		if err := checkReclaimedSSTs(vchannel, c.Outputs, maxReclaimed); err != nil {
+			return nil, err
+		}
+		return next, nil
 	})
 }
 
@@ -480,10 +487,8 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 	if err := checkNewSSTs(base.GetVchannel(), idSet(base.GetSsts()), req.GetAddSsts()); err != nil {
 		return nil, err
 	}
-	for _, s := range req.GetAddSsts() {
-		if s.GetId() <= maxReclaimed {
-			return nil, errors.Wrapf(ErrSSTReclaimed, "vchannel %s: sst %d, reclaimed sst ID %d", base.GetVchannel(), s.GetId(), maxReclaimed)
-		}
+	if err := checkReclaimedSSTs(base.GetVchannel(), req.GetAddSsts(), maxReclaimed); err != nil {
+		return nil, err
 	}
 	next := nextVersion(base)
 	next.LastFlushTerm = req.GetPchannelTerm()
@@ -658,6 +663,17 @@ func checkL0Prefix(vchannel string, list []*pkindexpb.SSTRef) error {
 			seenRun = true
 		} else if seenRun {
 			return errors.Wrapf(ErrStaleEdit, "vchannel %s: L0 table %d is behind a run", vchannel, s.GetId())
+		}
+	}
+	return nil
+}
+
+// checkReclaimedSSTs rejects new references to objects that GC may have deleted.
+// Applied retries bypass this check because they add no reference.
+func checkReclaimedSSTs(vchannel string, tables []*pkindexpb.SSTRef, maxReclaimed int64) error {
+	for _, table := range tables {
+		if table.GetId() <= maxReclaimed {
+			return errors.Wrapf(ErrSSTReclaimed, "vchannel %s: sst %d, reclaimed sst ID %d", vchannel, table.GetId(), maxReclaimed)
 		}
 	}
 	return nil

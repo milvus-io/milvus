@@ -646,3 +646,18 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   term change between that read and the return. The fenced owner does not
   write bad data: its next flush that changes the manifest fails the term
   check or the condition of the write.
+
+### Reclaimed compaction outputs
+
+The reclaimed SST ID also applies to new compaction outputs. The manager first
+checks for an applied retry, then rejects any new output ID at or below the
+pointer's `max_reclaimed_sst_id`. Every pointer update preserves that value,
+including compaction and truncate commits. A compaction commit that wins before
+GC raises the value changes the pointer and makes GC abandon its SST sweep.
+
+The in-flight output list alone is insufficient: a compaction can start after
+GC reads that list and stall beyond the grace window before the SST scan.
+Reclaimed outputs must receive new IDs before they can be committed.
+
+GC obeys `dataCoord.enableGarbageCollection` and collection pauses. It checks
+for a pause before scanning a collection and again before deleting objects.

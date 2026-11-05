@@ -283,6 +283,9 @@ func (t *Task) commit(cluster session.Cluster, outputs []*pkindexpb.SSTRef) {
 		t.mu.Unlock()
 		mlog.Info(t.ctx, "pkindex compaction committed", t.logFields(mlog.Int("outputs", len(outputs)))...)
 		t.end()
+	case errors.Is(err, manifest.ErrSSTReclaimed):
+		mlog.Warn(t.ctx, "pkindex compaction outputs may be reclaimed, will dispatch with new IDs", t.logFields(mlog.Err(err))...)
+		t.reset(cluster)
 	case errors.Is(err, pkindex.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled):
 		t.mu.Lock()
 		if t.commitBackoff == 0 {

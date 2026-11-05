@@ -370,3 +370,20 @@ func TestTaskTableOneTaskPerVChannel(t *testing.T) {
 	require.Zero(t, tbl.len())
 	tbl.remove(a.taskID) // idempotent
 }
+
+func TestTaskReclaimedOutputsGetNewIDs(t *testing.T) {
+	committer := &fakeCommitter{err: manifest.ErrSSTReclaimed}
+	task := newTestTask(t, committer, func(*Task) { t.Fatal("must retry without ending the task") })
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().CreatePKIndexCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+	cluster.EXPECT().DropPKIndexCompaction(mock.Anything, mock.Anything).Return(nil).Once()
+	task.CreateTaskOnWorker(5, cluster)
+	oldBegin, oldEnd := task.idBegin, task.idEnd
+	finishWith(t, task, cluster, []*pkindexpb.SSTRef{ref(oldBegin, 7, 1)})
+	require.Equal(t, taskcommon.Init, task.GetTaskState())
+	require.Equal(t, int64(nullNodeID), task.getNodeID())
+	task.CreateTaskOnWorker(5, cluster)
+	require.GreaterOrEqual(t, task.idBegin, oldEnd)
+	require.Equal(t, taskcommon.InProgress, task.GetTaskState())
+	require.Len(t, committer.commits, 1)
+}

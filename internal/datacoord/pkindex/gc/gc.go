@@ -91,7 +91,7 @@ type GC struct {
 	inFlight  InFlightOutputs
 	paused    Paused
 	now       func() time.Time
-	observer manifest.Observer
+	observer  manifest.Observer
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup

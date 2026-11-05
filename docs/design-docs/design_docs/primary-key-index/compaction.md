@@ -467,3 +467,11 @@ A failed task never deletes its outputs. The GC is the only delete path.
 | `dataNode.pkindex.compaction.terminalTaskTTL` | 600 s | Time a finished or failed task waits for a query before the node deletes it. A value of 0 or below gives 1 minute |
 | `dataNode.pkindex.compaction.parallelism` | 4 | Tasks that run at once on one node |
 | `dataNode.pkindex.compaction.diskMargin` | 1 GiB | Free disk a task needs on top of twice its input bytes |
+
+### Outputs selected by GC
+
+`manifest.ErrSSTReclaimed` means that the commit added no output reference.
+The task drops the worker attempt and returns to Init. Its next dispatch
+allocates a fresh output ID range and repeats the work. It does not retry
+CommitCompaction with the rejected IDs. A retry of an already applied
+compaction still succeeds, even if GC has since raised the reclaimed SST ID.
