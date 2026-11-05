@@ -423,9 +423,13 @@ func expandSnapshotImportFiles(
 		if segment.GetManifestPath() == "" {
 			continue
 		}
-		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
-		if err != nil {
-			return nil, nil, nil, err
+		base := segment.GetManifestPath()
+		// V2 also permits a plain manifest object key in snapshot metadata.
+		if segment.GetStorageVersion() != milvusstorage.StorageV2 || strings.HasPrefix(strings.TrimSpace(base), "{") {
+			base, _, err = packed.UnmarshalManifestPath(base)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 		}
 		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
 	}

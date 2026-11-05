@@ -3117,8 +3117,23 @@ func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
 // independently written V2 packed chunks. It also exercises Avro rebasing after
 // moving a self-contained bundle; the extra unlisted file must never be opened.
 func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "object_keys")
+}
+
+func TestImportSnapshotV2PlainManifest(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "plain_manifest")
+}
+
+func TestImportSnapshotV2SamePrefixCrossBucket(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "same_prefix_bucket")
+}
+
+func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
 	for _, mixed := range []bool{false, true} {
 		for _, selfContained := range []bool{false, true} {
+			if compatibility == "same_prefix_bucket" && !selfContained {
+				continue
+			}
 			t.Run(fmt.Sprintf("mixed=%t/self_contained=%t", mixed, selfContained), func(t *testing.T) {
 				ctx := hp.CreateContext(t, 10*time.Minute)
 				mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -3130,7 +3145,7 @@ func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
 				minio, err := newMinIOClient(cfg)
 				require.NoError(t, err)
 				skipIfMinIOUnreachable(ctx, t, minio, cfg.bucket)
-				var jobID string
+				var jobID, foreignBucket string
 				t.Cleanup(func() {
 					cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 					defer cancel()
@@ -3143,6 +3158,10 @@ func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
 					}
 					cleanupMinIOPrefix(cleanup, minio, cfg.bucket, prefix+"/")
 					cleanupMinIOPrefix(cleanup, minio, cfg.bucket, moved+"/")
+					if foreignBucket != "" {
+						cleanupMinIOPrefix(cleanup, minio, foreignBucket, prefix+"/")
+						require.NoError(t, minio.RemoveBucket(cleanup, foreignBucket))
+					}
 				})
 				for _, name := range []string{sourceName, targetName} {
 					schema := entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
@@ -3229,6 +3248,9 @@ func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
 					require.NoError(t, writer.Close())
 					key := fmt.Sprintf("%s/files/v2/chunk-%d.parquet", bundleRoot, chunk)
 					put(key, buf.Bytes())
+					if compatibility == "same_prefix_bucket" {
+						key = extTestURI(serverCfg, key)
+					}
 					group.Binlogs = append(group.Binlogs, &datapb.Binlog{LogPath: key, EntriesNum: int64(len(ids))})
 				}
 				segment.Binlogs = []*datapb.FieldBinlog{group}
@@ -3239,6 +3261,12 @@ func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
 				put(avroPath, avro)
 				if !mixed {
 					metadata.ManifestList, metadata.SegmentIds, metadata.Storagev2ManifestList = nil, nil, nil
+				}
+				if compatibility == "plain_manifest" {
+					manifestKey := bundleRoot + "/files/v2/manifest.json"
+					put(manifestKey, []byte("{}"))
+					metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList,
+						&datapb.StorageV2SegmentManifest{SegmentId: segmentID, Manifest: manifestKey})
 				}
 				metadata.ManifestList = append(metadata.ManifestList, avroPath)
 				metadata.SegmentIds = append(metadata.SegmentIds, segmentID)
@@ -3274,12 +3302,35 @@ func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
 				raw, err = protojson.Marshal(metadata)
 				require.NoError(t, err)
 				put(metadataKey, raw)
-				if selfContained {
+				externalSpec := ""
+				if compatibility == "same_prefix_bucket" {
+					foreignBucket = strings.ToLower(strings.ReplaceAll(common.GenRandomString("snapshot-v2", 10), "_", "-"))
+					require.NoError(t, minio.MakeBucket(ctx, foreignBucket, miniogo.MakeBucketOptions{}))
+					for object := range minio.ListObjects(ctx, cfg.bucket, miniogo.ListObjectsOptions{Prefix: prefix + "/", Recursive: true}) {
+						require.NoError(t, object.Err)
+						_, err := minio.CopyObject(ctx, miniogo.CopyDestOptions{Bucket: foreignBucket, Object: object.Key},
+							miniogo.CopySrcOptions{Bucket: cfg.bucket, Object: object.Key})
+						require.NoError(t, err)
+					}
+					// Remove the original objects so reading the old bucket cannot pass.
+					cleanupMinIOPrefix(ctx, minio, cfg.bucket, prefix+"/")
+					if object, ok := <-minio.ListObjects(ctx, cfg.bucket, miniogo.ListObjectsOptions{Prefix: prefix + "/", Recursive: true}); ok {
+						require.NoError(t, object.Err)
+						t.Fatalf("original snapshot object remains after relocation: %s", object.Key)
+					}
+					serverCfg.bucket = foreignBucket
+					uri = extTestURI(serverCfg, metadataKey)
+					externalSpec = extTestSpec(serverCfg, "parquet")
+				} else if selfContained {
 					uri, err = relocateSnapshotBundle(ctx, minio, cfg.bucket, uri, prefix, moved)
 					require.NoError(t, err)
 				}
-				response, err := bulkwriter.BulkImport(ctx, bulkwriter.NewBulkImportOption(baseURL, targetName, [][]string{{uri}}).WithAPIKey(apiKey).
-					WithOption("backup", "true").WithOption("source_type", "snapshot").WithOption("auto_commit", "true"))
+				importOption := bulkwriter.NewBulkImportOption(baseURL, targetName, [][]string{{uri}}).WithAPIKey(apiKey).
+					WithOption("backup", "true").WithOption("source_type", "snapshot").WithOption("auto_commit", "true")
+				if externalSpec != "" {
+					importOption.WithOption("external_spec", externalSpec)
+				}
+				response, err := bulkwriter.BulkImport(ctx, importOption)
 				require.NoError(t, err)
 				require.Empty(t, response.Message)
 				jobID = response.Data.JobID
