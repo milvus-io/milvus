@@ -78,9 +78,9 @@ knowhere	internal/core/src/segcore/segcore_init_c.cpp
 knowhere	internal/core/src/segcore/segment_c.cpp
 knowhere	internal/core/src/segcore/SegmentGrowingImpl.cpp
 knowhere	internal/core/src/segcore/SegmentInterface.h
-knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTranslator.cpp
-knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTranslator.h
-knowhere	internal/core/src/segcore/storagev1translator/SealedIndexLoader.cpp
+knowhere	internal/core/src/segcore/indexing/InterimSealedIndexTranslator.cpp
+knowhere	internal/core/src/segcore/indexing/InterimSealedIndexTranslator.h
+knowhere	internal/core/src/segcore/indexing/SealedIndexLoader.cpp
 knowhere	internal/core/src/segcore/Utils.cpp
 knowhere	internal/core/src/segcore/vector_index_c.cpp
 knowhere	internal/core/src/storage/artifact/FileSink.cpp

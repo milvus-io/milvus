@@ -57,7 +57,7 @@
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
@@ -1678,8 +1678,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     file_manager_context.set_for_loading_index(true);
 
     // Each index owns the cache for its storage.
-    auto loader = std::make_unique<
-        milvus::segcore::storagev1translator::SealedIndexLoader>(
+    auto loader = std::make_unique<milvus::segcore::SealedIndexLoader>(
         load_index_info, ctx, file_manager_context, config, op_ctx);
     load_index_info->index_family = loader->Family();
     load_index_info->index_value_type = loader->ValueType();

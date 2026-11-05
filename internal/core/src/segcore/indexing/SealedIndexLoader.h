@@ -22,7 +22,7 @@
 #include "common/Tracer.h"
 #include "common/resource_c.h"
 #include "knowhere/index/index_factory.h"
-#include "segcore/storagev1translator/IndexLoadUtils.h"
+#include "segcore/indexing/IndexLoadUtils.h"
 #include "index/contracts/Registry.h"
 #include "index/IndexCacheConfig.h"
 #include "storage/FileManager.h"
@@ -32,7 +32,7 @@ namespace milvus::segcore {
 struct LoadIndexInfo;
 }
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 /** @brief Prepare metadata and construct a sealed index with its own storage cache. */
 class SealedIndexLoader {
@@ -116,4 +116,4 @@ class SealedIndexLoader {
     bool lazy_load_{false};
     milvus::cachinglayer::Meta meta_;
 };
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

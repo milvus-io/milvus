@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/json_stats/BsonInvertedIndexTranslator.h"
 
 #include <algorithm>
 #include <functional>
@@ -42,7 +42,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
     BsonInvertedIndexLoadInfo load_info,
@@ -254,4 +254,4 @@ BsonInvertedIndexTranslator::meta() {
     return &meta_;
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

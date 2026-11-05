@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/storagev1translator/TextMatchIndexLoader.h"
+#include "segcore/indexing/TextMatchIndexLoader.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -44,7 +44,7 @@
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
 bool
@@ -299,4 +299,4 @@ TextMatchIndexLoader::CreateIndex(milvus::OpContext* ctx) {
     return index;
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

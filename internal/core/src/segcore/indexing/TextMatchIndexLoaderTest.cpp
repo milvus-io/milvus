@@ -37,14 +37,14 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
-#include "segcore/storagev1translator/TextMatchIndexLoader.h"
+#include "segcore/indexing/TextMatchIndexLoader.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/test_utils/TextPublicationTestUtils.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
 class TextLoadFileSystem : public arrow::fs::SubTreeFileSystem {
@@ -105,7 +105,7 @@ CheckTextReader(const index::IIndexReaderBase& reader) {
     EXPECT_TRUE(is_null[1]);
 }
 
-class TextIndexTranslatorTest : public ::testing::Test {
+class TextMatchIndexLoaderTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
@@ -135,7 +135,7 @@ class TextIndexTranslatorTest : public ::testing::Test {
     size_t old_slots_{};
 };
 
-TEST_F(TextIndexTranslatorTest, CachedIndexCreatesRequestReaders) {
+TEST_F(TextMatchIndexLoaderTest, CachedIndexCreatesRequestReaders) {
     storage::text_test::TextPublicationFixture fixture;
     for (const bool packed : {false, true}) {
         const auto stats = fixture.Publish(packed);
@@ -167,7 +167,7 @@ TEST_F(TextIndexTranslatorTest, CachedIndexCreatesRequestReaders) {
     }
 }
 
-TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
+TEST_F(TextMatchIndexLoaderTest, LegacyResourceEstimateIncludesNullableBitmap) {
     storagev2translator::SetStorageV2AsyncLoadEnabled(false);
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
@@ -204,7 +204,7 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
     }
 }
 
-TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
+TEST_F(TextMatchIndexLoaderTest, LegacyReloadPinsModeAndRebindsCancellation) {
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
     auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
@@ -252,7 +252,7 @@ TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
                 std::filesystem::is_empty(fixture.root->Path() + "/loaded"));
 }
 
-TEST_F(TextIndexTranslatorTest, LegacyPreparationReleasedWhenWarmupDisabled) {
+TEST_F(TextMatchIndexLoaderTest, LegacyPreparationReleasedWhenWarmupDisabled) {
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
     auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
@@ -278,7 +278,7 @@ TEST_F(TextIndexTranslatorTest, LegacyPreparationReleasedWhenWarmupDisabled) {
     }
 }
 
-TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
+TEST_F(TextMatchIndexLoaderTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
     auto& pool = storage::LocalFileIOPool::GetInstance();
     auto restore = folly::makeGuard([&] { pool.Configure(0); });
     for (const bool mmap : {false, true}) {
@@ -374,7 +374,7 @@ TEST_F(TextIndexTranslatorTest, LegacyRemoteWaitDoesNotRetainLocalPool) {
     }
 }
 
-TEST_F(TextIndexTranslatorTest, LegacyPreparationHonorsCancellation) {
+TEST_F(TextMatchIndexLoaderTest, LegacyPreparationHonorsCancellation) {
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(false);
     auto fs = std::make_shared<TextLoadFileSystem>(fixture.context.fs);
@@ -392,7 +392,7 @@ TEST_F(TextIndexTranslatorTest, LegacyPreparationHonorsCancellation) {
     EXPECT_EQ(fs->sync_opens.load(), 0);
 }
 
-TEST_F(TextIndexTranslatorTest,
+TEST_F(TextMatchIndexLoaderTest,
        PackedReloadPinsPlanningModeAcrossRolloutChanges) {
     storage::text_test::TextPublicationFixture fixture;
     const auto stats = fixture.Publish(true);
@@ -461,7 +461,7 @@ TEST_F(TextIndexTranslatorTest,
     EXPECT_TRUE(std::filesystem::is_empty(fixture.root->Path() + "/loaded"));
 }
 
-TEST_F(TextIndexTranslatorTest,
+TEST_F(TextMatchIndexLoaderTest,
        NativeReadSuspendsAndCancellationDrainsBeforeCleanup) {
     for (const bool mmap : {false, true}) {
         SCOPED_TRACE(mmap);
@@ -549,4 +549,4 @@ TEST_F(TextIndexTranslatorTest,
 }
 
 }  // namespace
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

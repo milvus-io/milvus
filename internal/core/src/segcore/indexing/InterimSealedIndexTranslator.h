@@ -25,7 +25,7 @@ namespace milvus {
 class ChunkedColumnInterface;
 }
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 /** @brief Build one interim engine cell; DataView engines retain their column pins. */
 class InterimSealedIndexTranslator
@@ -79,4 +79,4 @@ class InterimSealedIndexTranslator
     DataType vec_data_type_;
 };
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

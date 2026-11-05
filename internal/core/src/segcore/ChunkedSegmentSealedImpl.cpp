@@ -142,9 +142,9 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
-#include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "segcore/indexing/InterimSealedIndexTranslator.h"
 #include "index/vector/VectorIndexReader.h"
-#include "segcore/storagev1translator/TextMatchIndexLoader.h"
+#include "segcore/indexing/TextMatchIndexLoader.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
@@ -6273,7 +6273,7 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
     }
 
     // const auto& field_meta = schema_->operator[](field_id);
-    milvus::segcore::storagev1translator::TextMatchIndexLoadInfo load_info{
+    milvus::segcore::TextMatchIndexLoadInfo load_info{
         info_proto.enable_mmap(),
         segment_id,
         info_proto.fieldid(),
@@ -6283,8 +6283,7 @@ CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
         info_proto.warmup_policy(),
         shard};
 
-    auto translator = std::make_unique<
-        milvus::segcore::storagev1translator::TextMatchIndexLoader>(
+    auto translator = std::make_unique<milvus::segcore::TextMatchIndexLoader>(
         load_info, file_ctx, config, op_ctx);
     IndexInventory::ResolvedData resolved{translator->Family(),
                                           translator->ValueType(),
@@ -7652,8 +7651,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             const auto index_version =
                 segcore_config_.get_interim_index_version();
             auto translator =
-                std::make_unique<milvus::segcore::storagev1translator::
-                                     InterimSealedIndexTranslator>(
+                std::make_unique<milvus::segcore::InterimSealedIndexTranslator>(
                     vec_data,
                     id_,
                     field_id.get(),

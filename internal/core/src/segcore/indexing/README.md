@@ -42,6 +42,19 @@ Sealed and growing indexes use different ownership and publication mechanisms:
 : Retains a published Index version and a request reader, together with the contiguous coverage
   bound `CoveredRowEnd`.
 
+## Loading code ownership
+
+`SealedIndexLoader` and `TextMatchIndexLoader` live in this directory. They prepare
+segment metadata and cache policy, then delegate artifact loading to the family
+loaders under `index/`. `IndexLoadUtils` supplies their local staging root.
+`InterimSealedIndexTranslator` also lives here because it builds an engine from
+segment columns rather than reading a particular index-file format.
+
+The JSON stats shared-key loader, `BsonInvertedIndexTranslator`, lives under
+`segcore/json_stats/`. The version-independent single-cell cache adapter remains
+at `index/SingleCellIndexStorageTranslator.h`. `segcore/storagev1translator/`
+contains the field-data `ChunkTranslator` and `DefaultValueChunkTranslator`.
+
 ## Sealed: loading and publication
 
 Lazy entry creation requires `queryNode.segcore.tieredStorage.lazyIndexSlotEnabled=true` and

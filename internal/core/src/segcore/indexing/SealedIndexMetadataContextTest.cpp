@@ -24,11 +24,11 @@
 #include "common/OpContext.h"
 #include "index/Meta.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexLoader.h"
-#include "segcore/storagev1translator/TextMatchIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
+#include "segcore/indexing/TextMatchIndexLoader.h"
 #include "storage/Util.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
 class CancellingMetadataFileSystem : public arrow::fs::SubTreeFileSystem {
@@ -126,4 +126,4 @@ TEST_F(MetadataOpenCancellationTest, TextAsyncFailedOpenReportsCancellation) {
 }
 
 }  // namespace
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

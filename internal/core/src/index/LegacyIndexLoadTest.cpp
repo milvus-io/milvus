@@ -40,7 +40,7 @@
 #include "index/LegacyIndexLoad.h"
 #include "index/LoadResource.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorDiskLoader.h"
@@ -296,12 +296,11 @@ TEST_F(LegacyIndexLoadTest, TranslatorConsumesInspectedMetadataOnFirstLoad) {
                 SCOPED_TRACE(failure);
                 folly::CancellationSource construction;
                 OpContext creation(construction.getToken());
-                segcore::storagev1translator::SealedIndexLoader translator(
-                    &info,
-                    tracer::TraceContext{},
-                    context_,
-                    Config(info.index_params),
-                    &creation);
+                segcore::SealedIndexLoader translator(&info,
+                                                      tracer::TraceContext{},
+                                                      context_,
+                                                      Config(info.index_params),
+                                                      &creation);
                 construction.requestCancellation();
                 const auto open_reader = [&](OpContext* ctx) {
                     auto owner = translator.CreateIndex(ctx);

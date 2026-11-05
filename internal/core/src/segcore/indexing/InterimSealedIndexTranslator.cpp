@@ -1,4 +1,4 @@
-#include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "segcore/indexing/InterimSealedIndexTranslator.h"
 
 #include <algorithm>
 #include <limits>
@@ -24,7 +24,7 @@
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/Utils.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
 template <typename T>
@@ -382,4 +382,4 @@ InterimSealedIndexTranslator::meta() {
     return &meta_;
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

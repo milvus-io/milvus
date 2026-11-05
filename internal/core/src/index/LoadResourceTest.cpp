@@ -38,7 +38,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/Util.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
-#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 #include "segcore/Types.h"
 #include "segcore/SegmentLoadInfo.h"
 #include "test_utils/PlannerCipherPlugin.h"
@@ -263,12 +263,11 @@ class IndexMetadataContextTest : public ::testing::Test {
         }
         Config config(info.index_params);
         config["load_priority"] = 1;
-        segcore::storagev1translator::SealedIndexLoader translator(
-            &info,
-            tracer::TraceContext{},
-            fixture.context,
-            std::move(config),
-            &ctx);
+        segcore::SealedIndexLoader translator(&info,
+                                              tracer::TraceContext{},
+                                              fixture.context,
+                                              std::move(config),
+                                              &ctx);
     }
 
     ResourceFixture fixture;
@@ -493,11 +492,10 @@ TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
                                                        fixture.context)
                                .request;
             }
-            segcore::storagev1translator::SealedIndexLoader translator(
-                &info,
-                tracer::TraceContext{},
-                fixture.context,
-                Config(info.index_params));
+            segcore::SealedIndexLoader translator(&info,
+                                                  tracer::TraceContext{},
+                                                  fixture.context,
+                                                  Config(info.index_params));
             const auto [resident, private_overhead, shared_overhead] =
                 translator.EstimatedResources();
             const auto transient = private_overhead + shared_overhead;
@@ -1184,11 +1182,10 @@ TEST(ScalarIndexV3ResourceTest,
     auto check = [&] {
         fs->sync_opens = fs->async_opens = 0;
         // Construction inspects metadata and derives contracts, without engine initialization.
-        segcore::storagev1translator::SealedIndexLoader translator(
-            &load_info,
-            tracer::TraceContext{},
-            fixture.context,
-            Config(load_info.index_params));
+        segcore::SealedIndexLoader translator(&load_info,
+                                              tracer::TraceContext{},
+                                              fixture.context,
+                                              Config(load_info.index_params));
         EXPECT_EQ(fs->sync_opens, 0);
         EXPECT_EQ(fs->async_opens, 1);
         EXPECT_EQ(translator.Family(), families::kInverted);
@@ -1267,11 +1264,10 @@ TEST(ScalarIndexV3ResourceTest,
         SCOPED_TRACE(use_async);
         fixture.context.use_async_load = use_async;
         fs->sync_opens = fs->async_opens = 0;
-        segcore::storagev1translator::SealedIndexLoader translator(
-            &load_info,
-            tracer::TraceContext{},
-            fixture.context,
-            Config(load_info.index_params));
+        segcore::SealedIndexLoader translator(&load_info,
+                                              tracer::TraceContext{},
+                                              fixture.context,
+                                              Config(load_info.index_params));
         EXPECT_EQ(translator.Family(), families::kBitmap);
         EXPECT_EQ(
             translator.CacheMetadata().loading_overhead_config.has_value(),

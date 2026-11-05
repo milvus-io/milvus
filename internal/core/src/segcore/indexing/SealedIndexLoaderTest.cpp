@@ -24,65 +24,16 @@
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
-#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/Util.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/LocalDirectory.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
-TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
-    constexpr int64_t index_size = 4096;
-    for (const bool mmap : {false, true}) {
-        BsonInvertedIndexTranslator translator(
-            {mmap, 3, 101, index_size, {}, 0, "disable", ""},
-            storage::FileManagerContext{});
-        const auto [loaded, private_overhead, shared_overhead] =
-            translator.estimated_loading_usage({0});
-        const auto overhead = private_overhead + shared_overhead;
-        EXPECT_EQ(
-            loaded.memory_bytes,
-            (mmap ? 0 : index_size) + index::kScalarIndexFixedResidentBytes);
-        EXPECT_EQ(loaded.file_bytes, mmap ? index_size : 0);
-        EXPECT_EQ(overhead.memory_bytes, mmap ? index_size : 0);
-        EXPECT_EQ(overhead.file_bytes, mmap ? 0 : index_size);
-    }
-}
-
-TEST(IndexLoadContextTest, PriorityOverridePreservesCallerStateAndAccounting) {
-    folly::CancellationSource cancel;
-    OpContext parent(cancel.getToken());
-    parent.coload_fields = {101, 102};
-    parent.pinned_segment_state = std::make_shared<const int>(7);
-    parent.pinned_state_owner = &parent;
-    for (const auto runtime : {std::optional<int32_t>{},
-                               std::optional<int32_t>{0},
-                               std::optional<int32_t>{1}}) {
-        parent.runtime_load_priority = runtime;
-        {
-            index::IndexLoadContext load(&parent, 1);
-            EXPECT_EQ(load.ctx.runtime_load_priority, runtime.value_or(1));
-            EXPECT_EQ(load.ctx.coload_fields, parent.coload_fields);
-            EXPECT_EQ(load.ctx.pinned_segment_state,
-                      parent.pinned_segment_state);
-            EXPECT_EQ(load.ctx.pinned_state_owner, &parent);
-            cancel.requestCancellation();
-            EXPECT_TRUE(load.ctx.cancellation_token.isCancellationRequested());
-            load.ctx.storage_usage.scanned_cold_bytes = 3;
-            load.ctx.storage_usage.scanned_total_bytes = 5;
-        }
-        EXPECT_EQ(parent.runtime_load_priority, runtime);
-    }
-    EXPECT_EQ(parent.storage_usage.scanned_cold_bytes, 9);
-    EXPECT_EQ(parent.storage_usage.scanned_total_bytes, 15);
-    index::IndexLoadContext warmup(nullptr, 1);
-    EXPECT_EQ(warmup.ctx.runtime_load_priority, 1);
-}
-
-class ScalarIndexTranslatorTest : public ::testing::Test {
+class SealedIndexLoaderTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
@@ -128,7 +79,7 @@ class ScalarIndexTranslatorTest : public ::testing::Test {
     storage::FileManagerContext context_;
 };
 
-TEST_F(ScalarIndexTranslatorTest,
+TEST_F(SealedIndexLoaderTest,
        NestedHybridMetadataResolvesStandaloneAndSelectedSortFiles) {
     const std::vector<std::string_view> values{
         "alpha", "beta", "beta", "gamma"};
@@ -198,8 +149,7 @@ TEST_F(ScalarIndexTranslatorTest,
     }
 }
 
-TEST_F(ScalarIndexTranslatorTest,
-       MarisaCreatesIndexBeforeLoadingRequestStorage) {
+TEST_F(SealedIndexLoaderTest, MarisaCreatesIndexBeforeLoadingRequestStorage) {
     const std::vector<std::string_view> values{
         "alpha", "beta", "beta", "gamma"};
     const index::ScalarBuildBatch<std::string_view> batch{values, {}};
@@ -246,7 +196,7 @@ TEST_F(ScalarIndexTranslatorTest,
     }
 }
 
-TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
+TEST_F(SealedIndexLoaderTest, PackedScalarLoadRequiresActualFileMetadata) {
     for (const auto type : {DataType::INT16,
                             DataType::INT32,
                             DataType::INT64,
@@ -272,4 +222,4 @@ TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
 }
 
 }  // namespace
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

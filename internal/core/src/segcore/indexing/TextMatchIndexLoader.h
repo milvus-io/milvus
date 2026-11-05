@@ -19,13 +19,13 @@
 #include "common/Types.h"
 #include "index/contracts/IIndex.h"
 #include "common/LoadInfo.h"
-#include "segcore/storagev1translator/IndexLoadUtils.h"
+#include "segcore/indexing/IndexLoadUtils.h"
 #include "index/contracts/Registry.h"
 #include "index/IndexCacheConfig.h"
 #include "common/resource_c.h"
 #include "storage/FileManager.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 struct TextMatchIndexLoadInfo {
     bool enable_mmap;
@@ -89,4 +89,4 @@ class TextMatchIndexLoader {
     std::shared_ptr<storage::V1RemoteSource> prepared_source_;
 };
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

@@ -19,11 +19,11 @@
 
 #include "index/IndexLoadContext.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 // Root under which index loaders stage local files, with or without mmap.
 // QueryNode supplies localStorage.path; an empty root resolves to it.
 std::string
 LocalStagingRoot(const std::string& configured_root = {});
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

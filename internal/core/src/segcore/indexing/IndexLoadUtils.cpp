@@ -1,9 +1,9 @@
-#include "segcore/storagev1translator/IndexLoadUtils.h"
+#include "segcore/indexing/IndexLoadUtils.h"
 
 #include "common/EasyAssert.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 std::string
 LocalStagingRoot(const std::string& configured_root) {
@@ -17,4 +17,4 @@ LocalStagingRoot(const std::string& configured_root) {
     return local->GetRootPath();
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

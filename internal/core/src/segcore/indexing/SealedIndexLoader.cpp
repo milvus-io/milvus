@@ -1,4 +1,4 @@
-#include "segcore/storagev1translator/SealedIndexLoader.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 
 #include <filesystem>
 #include <limits>
@@ -39,7 +39,7 @@
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 namespace {
 
@@ -437,4 +437,4 @@ SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
     return index;
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore
