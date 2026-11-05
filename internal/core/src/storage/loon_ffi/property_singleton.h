@@ -63,9 +63,10 @@ class LoonFFIPropertiesSingleton {
                 std::unique_lock cfg_lck(config_mutex_);
                 s3_crt_queue_sizes_ = c_storage_config.crt_queue_sizes;
             }
-            properties_ =
+            auto properties =
                 MakeInternalPropertiesFromStorageConfig(c_storage_config);
-            ApplyArrowReaderConfig(*properties_);
+            ApplyArrowReaderConfig(*properties);
+            properties_ = std::move(properties);
         }
     }
 
@@ -92,7 +93,7 @@ class LoonFFIPropertiesSingleton {
         }
     }
 
-    std::shared_ptr<milvus_storage::api::Properties>
+    std::shared_ptr<const milvus_storage::api::Properties>
     GetProperties() const {
         std::shared_lock lck(mutex_);
         return properties_;
@@ -185,7 +186,8 @@ class LoonFFIPropertiesSingleton {
 
  private:
     mutable std::shared_mutex mutex_;
-    std::shared_ptr<milvus_storage::api::Properties> properties_ = nullptr;
+    std::shared_ptr<const milvus_storage::api::Properties> properties_ =
+        nullptr;
     // Guards configuration snapshots that do not belong to the internal
     // filesystem properties. Separate from mutex_ so the limits can be read
     // while mutex_ is held; see ApplyArrowReaderConfig.

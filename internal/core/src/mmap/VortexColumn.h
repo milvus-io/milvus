@@ -55,12 +55,13 @@ class VortexColumn final : public ChunkedColumnInterface {
  public:
     using FileInfo = VortexColumnFileInfo;
 
-    VortexColumn(FieldId field_id,
-                 FieldMeta field_meta,
-                 std::string field_name,
-                 std::shared_ptr<milvus_storage::api::Properties> properties,
-                 std::shared_ptr<VortexColumnGroup> column_group,
-                 std::optional<size_t> data_byte_size = std::nullopt);
+    VortexColumn(
+        FieldId field_id,
+        FieldMeta field_meta,
+        std::string field_name,
+        std::shared_ptr<const milvus_storage::api::Properties> properties,
+        std::shared_ptr<VortexColumnGroup> column_group,
+        std::optional<size_t> data_byte_size = std::nullopt);
 
     ~VortexColumn() override;
 
@@ -275,9 +276,10 @@ class VortexColumn final : public ChunkedColumnInterface {
     std::optional<std::string>
     BuildVortexPredicate(const ScanOptions& options) const;
 
-    static milvus_storage::api::Properties
+    static std::shared_ptr<const milvus_storage::api::Properties>
     MakeVortexReaderProperties(
-        const std::shared_ptr<milvus_storage::api::Properties>& properties);
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties);
 
     std::shared_ptr<milvus_storage::vortex::VortexFormatReader>
     BuildFileReader(const VortexColumnGroup::FileState& group_file) const;
@@ -371,7 +373,8 @@ class VortexColumn final : public ChunkedColumnInterface {
     FieldMeta field_meta_;
     DataType data_type_;
     std::string field_name_;
-    milvus_storage::api::Properties local_format_properties_;
+    std::shared_ptr<const milvus_storage::api::Properties>
+        local_format_properties_;
     std::shared_ptr<VortexColumnGroup> column_group_;
     size_t data_byte_size_ = 0;
     std::vector<FileState> files_;
