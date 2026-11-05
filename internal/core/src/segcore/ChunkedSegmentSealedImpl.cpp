@@ -153,6 +153,7 @@
 #include "storage/FileManager.h"
 #include "storage/StatusToErrorCode.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -2681,6 +2682,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
                                             *properties));
+    // QueryNode registers the collection's cipher context before loading.
+    // Resolve encrypted Parquet keys through that context when opening files.
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
     committer.Commit([reader](RuntimeResourceState& runtime,
                               PublishedSegmentState&) mutable {
         runtime.reader = std::move(reader);
@@ -3354,6 +3362,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
+                fs,
                 std::move(insert_files),
                 std::move(packing.row_group_meta_list),
                 info.enable_mmap,
@@ -4748,7 +4757,8 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
 
 void
 ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
-                                     const std::vector<PkType>& pks) const {
+                                     const std::vector<PkType>& pks,
+                                     milvus::OpContext* op_ctx) const {
     if (pks.empty()) {
         return;
     }
@@ -4768,7 +4778,7 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 
     if (!is_sorted_by_pk_) {
-        auto pk_index = PinPkIndex(runtime, nullptr);
+        auto pk_index = PinPkIndex(runtime, op_ctx);
         auto* pk_cell = pk_index.get();
         AssertInfo(pk_cell != nullptr && pk_cell->has_pk2offset(),
                    "primary key index is not ready");
@@ -6486,10 +6496,13 @@ ChunkedSegmentSealedImpl::FillPrimaryKeys(const query::Plan* plan,
                 segcore::CheckCancellation(
                     op_ctx, get_segment_id(), "FillPrimaryKeys");
                 milvus::OpContext local_ctx;
+                local_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 if (op_ctx != nullptr) {
                     local_ctx.cancellation_token = op_ctx->cancellation_token;
                     local_ctx.runtime_load_priority =
-                        op_ctx->runtime_load_priority;
+                        op_ctx->runtime_load_priority.value_or(
+                            milvus::proto::common::LoadPriority::HIGH);
                 }
                 // Intentionally bypass bulk_subscript's scalar-index raw-data
                 // routing here: the sealed VARCHAR PK fast path reads the
@@ -7241,7 +7254,8 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
 
 void
 ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
-                                     const IdArray& id_array) const {
+                                     const IdArray& id_array,
+                                     milvus::OpContext* op_ctx) const {
     auto field_id = primary_key_field_id_;
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto data_type = primary_key_type_;
@@ -7249,7 +7263,7 @@ ChunkedSegmentSealedImpl::search_ids(BitsetType& bitset,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    this->search_pks(bitset, pks);
+    this->search_pks(bitset, pks, op_ctx);
 }
 
 SegcoreError
@@ -8219,6 +8233,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                 milvus_storage::api::Reader::create(
                     column_groups, arrow_schema, needed_columns, *properties)
                     .release());
+            if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return storage::KeyRetriever().GetKey(key_metadata);
+                });
+            }
             committer.Commit(
                 [reader = std::move(reader)](RuntimeResourceState& runtime,
                                              PublishedSegmentState&) mutable {
@@ -10199,9 +10218,12 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     // sharing op_ctx across segments would double-count bytes. See
     // SegmentInternalInterface::FillPrimaryKeys for the same pattern.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     for (auto field_id : plan->target_entries_) {
         // Skip fields already filled by take

@@ -68,7 +68,7 @@ type durableSnapshotTestPackWriter struct {
 func (w *durableSnapshotTestPackWriter) FlushInsertBuffer(_ context.Context, pack *flushPack) (*flushResult, error) {
 	w.pack = pack
 	return &flushResult{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
-		Binlogs:     []*streamingpb.L1SegmentBinLogs{{FromTimeTick: 10, ToTimeTick: 10}},
+		Binlogs:     []*streamingpb.L1SegmentBinLogs{{FromTimeTick: pack.FromTimeTick, ToTimeTick: pack.ToTimeTick}},
 		Statistics:  &datapb.Statistics{InsertBinlogSize: 123},
 		DeltaBinlog: []*datapb.FieldBinlog{{FieldID: 100}},
 	}}, nil
@@ -132,7 +132,32 @@ func TestSegmentSnapshotContainsOnlyDurableInsertEffects(t *testing.T) {
 	live := view.AssignmentMeta()
 	assert.Equal(t, uint64(9), live.GetStat().GetModifiedRows())
 	assert.Equal(t, uint64(12), live.GetStat().GetModifiedBinarySize())
+	require.NotSame(t, view.meta.PersistedStorage, view.durableMeta.PersistedStorage)
+	require.NotSame(t, view.meta.PersistedStorage.DeltaBinlog[0], view.durableMeta.PersistedStorage.DeltaBinlog[0])
+	firstBinlog := view.meta.PersistedStorage.Binlogs[0]
+	firstStatistics := view.meta.PersistedStorage.Statistics
+	view.mu.Lock()
+	secondFlush := view.newFlushL1BufferTaskLocked()
+	view.mu.Unlock()
+	require.NoError(t, secondFlush.Execute(context.Background()))
+	require.Len(t, view.meta.PersistedStorage.Binlogs, 2)
+	require.Len(t, view.durableMeta.PersistedStorage.Binlogs, 2)
+	require.Equal(t, uint64(10), firstBinlog.GetToTimeTick())
+	require.Equal(t, uint64(20), view.meta.PersistedStorage.Binlogs[1].GetToTimeTick())
+	require.NotSame(t, firstStatistics, view.meta.PersistedStorage.Statistics, "later flushes replace Statistics")
+	require.Len(t, snapshot.GetPersistedStorage().GetBinlogs(), 1)
+	require.Len(t, live.GetPersistedStorage().GetBinlogs(), 1)
+	require.Len(t, view.ConsumeDirtyAndGetSnapshot().GetPersistedStorage().GetBinlogs(), 1, "the in-flight snapshot stays frozen")
 	view.MarkSnapshotPersisted(snapshot)
+	next := view.ConsumeDirtyAndGetSnapshot()
+	require.Equal(t, uint64(20), next.GetCheckpointTimeTick())
+	require.Equal(t, uint64(9), next.GetStat().GetModifiedRows())
+	require.Len(t, next.GetPersistedStorage().GetBinlogs(), 2)
+	snapshot.PersistedStorage.Binlogs[0].ToTimeTick = 99
+	snapshot.PersistedStorage.Statistics.InsertBinlogSize = 999
+	require.Equal(t, uint64(10), firstBinlog.GetToTimeTick())
+	require.Equal(t, int64(123), view.meta.PersistedStorage.Statistics.GetInsertBinlogSize())
+	view.MarkSnapshotPersisted(next)
 	view.mu.Lock()
 	assert.False(t, view.dirty)
 	view.mu.Unlock()

@@ -67,9 +67,9 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 		ElementType: schemapb.DataType_Array,
 		Data:        []*schemapb.ScalarField{row0, row1},
 	}
-	require.Equal(t, 8, data.GetRowSize(0))
-	require.Equal(t, 4, data.GetRowSize(1))
-	require.Equal(t, 14, data.GetMemorySize()) // Payload plus Nullable and ElementNullable flags.
+	require.Equal(t, 8+2*nestedArrayElementOverhead, data.GetRowSize(0))
+	require.Equal(t, 4+2*nestedArrayElementOverhead, data.GetRowSize(1))
+	require.Equal(t, 14+4*nestedArrayElementOverhead, data.GetMemorySize()) // Payload, inner arrays, Nullable and ElementNullable flags.
 
 	deepRow := nestedArrayData(
 		schemapb.DataType_Array,
@@ -83,8 +83,8 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 		ElementType: schemapb.DataType_Array,
 		Data:        []*schemapb.ScalarField{deepRow},
 	}
-	require.Equal(t, 24, deepData.GetRowSize(0))
-	require.Equal(t, 26, deepData.GetMemorySize())
+	require.Equal(t, 24+3*nestedArrayElementOverhead, deepData.GetRowSize(0))
+	require.Equal(t, 26+3*nestedArrayElementOverhead, deepData.GetMemorySize())
 
 	quadrupleRow := nestedArrayData(
 		schemapb.DataType_Array,
@@ -101,8 +101,29 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 		ElementType: schemapb.DataType_Array,
 		Data:        []*schemapb.ScalarField{quadrupleRow},
 	}
-	require.Equal(t, 12, quadrupleData.GetRowSize(0))
-	require.Equal(t, 14, quadrupleData.GetMemorySize())
+	require.Equal(t, 12+4*nestedArrayElementOverhead, quadrupleData.GetRowSize(0))
+	require.Equal(t, 14+4*nestedArrayElementOverhead, quadrupleData.GetMemorySize())
+}
+
+// TestNestedArrayNullInnerArraySize pins the cost of null and empty inner
+// arrays: they have no leaf payload but still occupy heap, and the inner
+// arrays' leaf validity counts like the row's element validity.
+func TestNestedArrayNullInnerArraySize(t *testing.T) {
+	nullInner := nestedArrayData(schemapb.DataType_Int64, nestedArrayLongData(), nestedArrayLongData(), nestedArrayLongData())
+	nullInner.ValidData = []bool{false, false, false}
+	data := &ArrayFieldData{ElementType: schemapb.DataType_Array, ElementNullable: true, Data: []*schemapb.ScalarField{nullInner}}
+	require.Equal(t, 3*nestedArrayElementOverhead, data.GetRowSize(0))
+	require.Equal(t, 3*nestedArrayElementOverhead+3+1+1, data.GetMemorySize()) // + row validity and the two flags
+
+	leaves := nestedArrayLongData(1, 2)
+	leaves.ValidData = []bool{true, false}
+	withLeafValidity := nestedArrayData(schemapb.DataType_Int64, leaves)
+	data = &ArrayFieldData{ElementType: schemapb.DataType_Array, Data: []*schemapb.ScalarField{withLeafValidity}}
+	require.Equal(t, nestedArrayElementOverhead+16+2, data.GetRowSize(0))
+
+	// A single-level Array row has no inner arrays and no overhead.
+	flat := &ArrayFieldData{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{nestedArrayLongData(1, 2)}}
+	require.Equal(t, 16, flat.GetRowSize(0))
 }
 
 func TestStorageRejectsNestedArrayBeyondTwoLevels(t *testing.T) {

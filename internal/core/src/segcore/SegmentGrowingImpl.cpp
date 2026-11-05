@@ -82,6 +82,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -2157,34 +2158,24 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // Get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
+        PreparedParquetFiles prepared_files;
+        prepared_files.reserve(insert_files.size());
         for (const auto& file : insert_files) {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties(),
-                storage::GetArrowReaderProperties());
+            auto result = milvus_storage::PreparedParquetFile::Open(
+                fs, file, storage::GetReaderProperties());
             if (!result.ok()) {
                 ThrowInfo(
-                    milvus::storage::ArrowStatusToErrorCode(result),
-                    "[StorageV2] Failed to create file row group reader: " +
-                        result.status().ToString());
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to prepare file {}: {}",
+                    file,
+                    result.status().ToString());
             }
-            auto reader = result.ValueOrDie();
-            auto row_group_num =
-                reader->file_metadata()->GetRowGroupMetadataVector().size();
+            auto prepared = std::move(result).ValueOrDie();
+            auto row_group_num = prepared->row_group_metadata().size();
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
-            auto status = reader->Close();
-            if (!status.ok()) {
-                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
-                          "[StorageV2] failed to close file reader when get "
-                          "row group "
-                          "metadata from file {} with error {}",
-                          file,
-                          status.ToString());
-            }
+            prepared_files.push_back(std::move(prepared));
         }
 
         // create parallel degree split strategy
@@ -2199,7 +2190,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    infos.load_priority);
+                                    infos.load_priority,
+                                    prepared_files);
         });
 
         LOG_INFO(
@@ -2708,8 +2700,39 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk view by offsets not implemented for growing segment");
+    auto schema = get_schema_snapshot();
+    const auto& meta = (*schema)[field_id];
+    AssertInfo(meta.get_data_type() == DataType::VARCHAR,
+               "growing string views require VARCHAR; TEXT needs LOB decoding");
+    const auto* values = insert_record_.get_data<std::string>(field_id);
+    const auto chunk_rows = values->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0 && chunk_id <= active_count / chunk_rows,
+               "invalid growing string chunk");
+    std::vector<int64_t> logical;
+    logical.reserve(offsets.size());
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < chunk_rows &&
+                       offset < active_count - chunk_id * chunk_rows,
+                   "invalid growing string offset");
+        logical.push_back(chunk_id * chunk_rows + offset);
+    }
+    FixedVector<bool> valid;
+    if (meta.is_nullable()) {
+        valid.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical.data(), logical.size(), valid.data());
+    }
+    std::vector<std::string_view> views;
+    views.reserve(offsets.size());
+    for (size_t i = 0; i < logical.size(); ++i) {
+        views.push_back(valid.empty() || valid[i]
+                            ? values->view_element(logical[i])
+                            : std::string_view{});
+    }
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+        std::make_pair(std::move(views), std::move(valid)));
 }
 
 cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
@@ -3609,7 +3632,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
 void
 SegmentGrowingImpl::search_ids(BitsetType& bitset,
-                               const IdArray& id_array) const {
+                               const IdArray& id_array,
+                               milvus::OpContext* /*op_ctx*/) const {
     auto schema = get_schema_snapshot();
     auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
@@ -4158,6 +4182,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader_->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
 
     // A column group whose fields were all dropped from the segment schema
     // has an empty read projection; opening it violates the reader contract

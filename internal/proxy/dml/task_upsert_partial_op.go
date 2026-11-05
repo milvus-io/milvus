@@ -403,8 +403,15 @@ func validatePathReplaceStructChildRows(fd *schemapb.FieldData, schema *schemapb
 		if schema.GetElementNullable() {
 			return validateNullableStructOperandRows(fd, schema, rowCount)
 		}
+		nested := typeutil.IsNestedArrayTypeSchema(schema.GetTypeSchema())
 		for rowIndex, row := range arrayData.GetData() {
-			rowLen, err := scalarArrayRowElementCount(row, schema.GetElementType())
+			var rowLen int
+			var err error
+			if nested {
+				rowLen, err = nestedArrayRowElementCount(row, schema.GetTypeSchema())
+			} else {
+				rowLen, err = scalarArrayRowElementCount(row, schema.GetElementType())
+			}
 			if err != nil {
 				return merr.Wrapf(err, "PATH_REPLACE child %q row %d is invalid", fd.GetFieldName(), rowIndex)
 			}
@@ -644,6 +651,108 @@ func scalarArrayRowElementCount(row *schemapb.ScalarField, elementType schemapb.
 			"Array row payload does not match element type %s", elementType.String())
 	}
 	return perRowArrayLen(row, elementType), nil
+}
+
+// nestedArrayRowElementCount returns the number of struct elements in one row
+// of a nested Array struct sub-field that is not element_nullable, after
+// checking each element against the type chain of arrayType: every level
+// carries the payload its type_schema node declares, and element validity
+// appears only on a level whose elements are nullable, such as a nullable
+// leaf. Counts against validity bits and capacities are left to the insert
+// validation that runs on the merged rows.
+func nestedArrayRowElementCount(row *schemapb.ScalarField, arrayType *schemapb.TypeSchema) (int, error) {
+	if row == nil || row.GetArrayData() == nil {
+		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a nested Array row")
+	}
+	if len(typeutil.GetArrayElementValidData(row)) != 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
+	}
+	if err := checkNestedArrayValueLayout(row, arrayType, 0); err != nil {
+		return 0, err
+	}
+	return len(row.GetArrayData().GetData()), nil
+}
+
+// checkNestedArrayValueLayout checks one Array value whose type is arrayType.
+func checkNestedArrayValueLayout(value *schemapb.ScalarField, arrayType *schemapb.TypeSchema, level int) error {
+	elementSchema := arrayType.GetArrayElement()
+	if elementSchema == nil {
+		// The collection schema was validated at DDL time.
+		return merr.WrapErrServiceInternalMsg("nested Array type_schema has no element at level %d", level)
+	}
+	if len(typeutil.GetArrayElementValidData(value)) != 0 && !elementSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested Array level %d carries element valid_data, but its elements are not nullable", level)
+	}
+	if elementSchema.GetArrayElement() == nil {
+		leafType := elementSchema.GetLeafType()
+		if !scalarArrayPayloadMatches(value, leafType) {
+			return merr.WrapErrParameterInvalidMsg(
+				"nested Array level %d payload does not match leaf type %s", level, leafType.String())
+		}
+		return nil
+	}
+	arrayData := value.GetArrayData()
+	if arrayData == nil {
+		return merr.WrapErrParameterInvalidMsg("nested Array level %d expects Array data", level)
+	}
+	expected := elementSchema.GetArrayElement().GetLeafType()
+	if elementSchema.GetArrayElement().GetArrayElement() != nil {
+		expected = schemapb.DataType_Array
+	}
+	if got := arrayData.GetElementType(); got != schemapb.DataType_None && got != expected {
+		return merr.WrapErrParameterInvalidMsg(
+			"nested Array level %d expects element type %s, got %s", level, expected.String(), got.String())
+	}
+	for index, child := range arrayData.GetData() {
+		if child == nil || child.GetData() == nil {
+			return merr.WrapErrParameterInvalidMsg("nested Array level %d element %d is nil", level+1, index)
+		}
+		if err := checkNestedArrayValueLayout(child, elementSchema, level+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scalarArrayPayloadMatches reports whether row carries the payload of the
+// scalar Array element type elementType.
+func scalarArrayPayloadMatches(row *schemapb.ScalarField, elementType schemapb.DataType) bool {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return row.GetBoolData() != nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return row.GetIntData() != nil
+	case schemapb.DataType_Int64:
+		return row.GetLongData() != nil
+	case schemapb.DataType_Float:
+		return row.GetFloatData() != nil
+	case schemapb.DataType_Double:
+		return row.GetDoubleData() != nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return row.GetStringData() != nil
+	default:
+		return false
+	}
+}
+
+// replaceNestedArrayRowElement replaces element index of a nested Array row
+// with the single element of update. The element is a whole inner Array, so
+// its payload and the validity of its own levels move together.
+func replaceNestedArrayRowElement(base, update *schemapb.ScalarField, index int) (*schemapb.ScalarField, error) {
+	if base.GetArrayData() == nil || len(typeutil.GetArrayElementValidData(base)) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires a nested Array row without element valid_data")
+	}
+	if update.GetArrayData() == nil || len(update.GetArrayData().GetData()) != 1 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE operand must contain exactly one Array element")
+	}
+	if index < 0 || index >= len(base.GetArrayData().GetData()) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE index %d is out of range for Array length %d", index, len(base.GetArrayData().GetData()))
+	}
+	out := proto.Clone(base).(*schemapb.ScalarField)
+	out.GetArrayData().Data[index] = proto.Clone(update.GetArrayData().GetData()[0]).(*schemapb.ScalarField)
+	return out, nil
 }
 
 func vectorArrayRowElementCount(row *schemapb.VectorField, elementType schemapb.DataType, dim int64) (int, error) {
@@ -922,8 +1031,14 @@ func applyStructPathReplace(dst, operand *schemapb.FieldData, plan *fieldPartial
 					dstRows[dstIndex] = replaced
 					continue
 				}
-				replaced, err := typeutil.ApplyArrayRowOp(dstRows[dstIndex], operandRows[operandIndex],
-					schemapb.FieldPartialUpdateOp_PATH_REPLACE, childSchema.GetElementType(), -1, plan.index)
+				var replaced *schemapb.ScalarField
+				var err error
+				if typeutil.IsNestedArrayTypeSchema(childSchema.GetTypeSchema()) {
+					replaced, err = replaceNestedArrayRowElement(dstRows[dstIndex], operandRows[operandIndex], plan.index)
+				} else {
+					replaced, err = typeutil.ApplyArrayRowOp(dstRows[dstIndex], operandRows[operandIndex],
+						schemapb.FieldPartialUpdateOp_PATH_REPLACE, childSchema.GetElementType(), -1, plan.index)
+				}
 				if err != nil {
 					return merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE child %q", structChildRawName(childSchema))
 				}

@@ -23,19 +23,7 @@ package segcore
 #include <stdint.h>
 #include "common/arrow_c_data_c.h"
 #include "common/type_c.h"
-#include "segcore/segment_c.h"
-#include "segcore/plan_c.h"
-
-CStatus
-FillRetrieveFieldsOrdered(CSegmentInterface* segments,
-                          int64_t num_segments,
-                          CRetrievePlan c_plan,
-                          const int32_t* seg_indices,
-                          const int64_t* seg_offsets,
-                          int64_t total_rows,
-                          struct ArrowSchema* out_schema,
-                          struct ArrowArray* out_array,
-                          void* cancellation_source);
+#include "segcore/retrieve_result_export_c.h"
 */
 import "C"
 
@@ -52,6 +40,7 @@ import (
 
 // FillRetrieveFieldsOrdered reads output fields from multiple segments
 // and returns one Arrow RecordBatch in the specified row order.
+// Field averages are checked against maxOutputSize before reading any fields.
 // The caller is responsible for releasing the returned record.
 func FillRetrieveFieldsOrdered(
 	ctx context.Context,
@@ -59,9 +48,13 @@ func FillRetrieveFieldsOrdered(
 	plan *RetrievePlan,
 	segIndices []int32,
 	segOffsets []int64,
+	maxOutputSize int64,
 ) (arrow.Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if maxOutputSize < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("negative retrieve output budget")
 	}
 	if plan == nil || plan.cRetrievePlan == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("nil retrieve plan")
@@ -101,6 +94,7 @@ func FillRetrieveFieldsOrdered(
 		segIndicesPtr,
 		segOffsetsPtr,
 		C.int64_t(len(segIndices)),
+		C.int64_t(maxOutputSize),
 		&cSchema,
 		&cArray,
 		guard.Source(),

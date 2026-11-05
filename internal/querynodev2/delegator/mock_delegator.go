@@ -742,6 +742,65 @@ func (_c *MockShardDelegator_LoadSegments_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// Materialize provides a mock function with given fields: ctx, req
+func (_m *MockShardDelegator) Materialize(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.MaterializeResults, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Materialize")
+	}
+
+	var r0 []*internalpb.MaterializeResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) ([]*internalpb.MaterializeResults, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.QueryRequest) []*internalpb.MaterializeResults); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.MaterializeResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.QueryRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_Materialize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Materialize'
+type MockShardDelegator_Materialize_Call struct {
+	*mock.Call
+}
+
+// Materialize is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.QueryRequest
+func (_e *MockShardDelegator_Expecter) Materialize(ctx interface{}, req interface{}) *MockShardDelegator_Materialize_Call {
+	return &MockShardDelegator_Materialize_Call{Call: _e.mock.On("Materialize", ctx, req)}
+}
+
+func (_c *MockShardDelegator_Materialize_Call) Run(run func(ctx context.Context, req *querypb.QueryRequest)) *MockShardDelegator_Materialize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.QueryRequest))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_Materialize_Call) Return(_a0 []*internalpb.MaterializeResults, _a1 error) *MockShardDelegator_Materialize_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardDelegator_Materialize_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest) ([]*internalpb.MaterializeResults, error)) *MockShardDelegator_Materialize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ProcessDelete provides a mock function with given fields: deleteData, ts
 func (_m *MockShardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	_m.Called(deleteData, ts)

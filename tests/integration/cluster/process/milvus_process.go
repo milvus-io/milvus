@@ -300,6 +300,16 @@ func (mp *MilvusProcess) GetNodeID() int64 {
 	return mp.nodeID
 }
 
+// GetMetricsAddr returns the host:port of the process's metrics/HTTP server,
+// or "" when the process was not given a METRICS_PORT.
+func (mp *MilvusProcess) GetMetricsAddr() string {
+	port := mp.env["METRICS_PORT"]
+	if port == "" {
+		return ""
+	}
+	return "127.0.0.1:" + port
+}
+
 // IsWorking returns true if the Milvus process is working
 func (mp *MilvusProcess) IsWorking() bool {
 	return !mp.graceful.IsClosed()
@@ -331,6 +341,20 @@ func (mp *MilvusProcess) Stop(gracefulTimeout ...time.Duration) error {
 		// after timeout, cancel the notifier to notify a force stop
 		return mp.ForceStop()
 	}
+}
+
+// PID identifies a process after it has become ready.
+func (mp *MilvusProcess) PID() int {
+	return mp.cmd.Process.Pid
+}
+
+// Kill crashes a ready process without first sending a graceful shutdown signal.
+func (mp *MilvusProcess) Kill() error {
+	if err := mp.cmd.Process.Kill(); err != nil {
+		return err
+	}
+	mp.graceful.Close()
+	return mp.notifier.BlockAndGetResult()
 }
 
 // ForceStop forcefully stops the Milvus process

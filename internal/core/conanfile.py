@@ -53,6 +53,7 @@ class MilvusConan(ConanFile):
         "aws-crt-cpp/*:shared": True,
         "aws-c-*/*:shared": True,
         "aws-checksums/*:shared": True,
+        "s2n/*:shared": True,
         "openssl/*:shared": True,
         "openssl/*:no_apps": True,
         "libevent/*:shared": True,
@@ -156,14 +157,20 @@ class MilvusConan(ConanFile):
             force=True,
         )
         self.requires(
-            "aws-sdk-cpp/1.11.842@milvus/dev#363556887f622db23a10168c108dd55d",
+            "aws-sdk-cpp/1.11.921@milvus/dev#0b229410d5498d3bacc19ccf57334b30",
             force=True,
         )
         # Tests call CRT APIs directly. A direct requirement exposes its link
         # libraries even when the shared SDK hides transitive libraries.
         # Keep this version in sync with the SDK recipe; do not force it, so
         # an incompatible SDK upgrade produces a Conan dependency conflict.
-        self.requires("aws-crt-cpp/0.40.1#c85891382919486534ac53902c013750")
+        self.requires("aws-crt-cpp/0.44.3#43f6408847655d35224320f4774bfcb9")
+        # milvus-storage uses native CRT APIs directly. Shared SDK libraries
+        # do not expose their transitive link dependencies to consumers.
+        self.requires("aws-c-auth/1.0.2#f587952f127cc579b90265a0f35056df")
+        self.requires("aws-c-io/1.1.1#2dd777871cf93ce4f35ba714a1ba87ef")
+        self.requires("aws-c-http/1.1.1#4ebd9cad4c949ed136f95419ce0ceee3")
+        self.requires("aws-c-s3/1.5.1#41f018ea69dd13668a2ffe76d0731742")
         # Force snappy/lz4 versions to override Arrow's older transitive deps
         # (arrow/*:with_snappy and arrow/*:with_lz4 are enabled for Parquet decoding)
         self.requires("snappy/1.2.1#b940695c64ccbff63c1aabd4b1eee3f3", force=True)
@@ -178,9 +185,6 @@ class MilvusConan(ConanFile):
             self.requires("openblas/0.3.30")
         if self.settings.os != "Macos":
             self.requires("libunwind/1.8.1#748a981ace010b80163a08867b732e71")
-        # Override s2n 1.4.1 (from aws-c-io) to 1.6.0 for OpenSSL 3.x FIPS detection
-        if self.settings.os in ["Linux", "FreeBSD"]:
-            self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
 
     def validate(self):
         # Profiles and command-line options can override default_options.

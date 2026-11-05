@@ -123,6 +123,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 
 	// finish reading
 	if insertData.GetRowNum() == 0 {
+		r.parser.IgnoredStructKeys().LogOnce(r.ctx, r.filePath)
 		return nil, io.EOF
 	}
 
@@ -132,6 +133,9 @@ func (r *reader) Read() (*storage.InsertData, error) {
 }
 
 func (r *reader) Close() {
+	if r.parser != nil {
+		r.parser.IgnoredStructKeys().LogOnce(r.ctx, r.filePath)
+	}
 	if r.cmr != nil {
 		r.cmr.Close()
 	}

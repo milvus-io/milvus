@@ -18,8 +18,10 @@ package storage
 
 import (
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,13 +49,23 @@ func allTokensTF(vocab int32) []byte {
 	return typeutil.CreateAndSortSparseFloatRow(all)
 }
 
+func flattenBM25Counts(rows bm25TokenCounts) map[uint32]int32 {
+	out := make(map[uint32]int32, rows.len())
+	for _, shard := range rows {
+		for token, count := range shard {
+			out[token] = count
+		}
+	}
+	return out
+}
+
 // nonZeroCounts drops the zero counts BM25Stats keeps when a merge brings a token back to zero;
 // ConcurrentBM25Stats drops a token whenever its count reaches zero.
-func nonZeroCounts(rows map[uint32]int32) map[uint32]int32 {
-	out := make(map[uint32]int32, len(rows))
-	for token, count := range rows {
-		if count != 0 {
-			out[token] = count
+func nonZeroCounts(rows bm25TokenCounts) map[uint32]int32 {
+	out := flattenBM25Counts(rows)
+	for token, count := range out {
+		if count == 0 {
+			delete(out, token)
 		}
 	}
 	return out
@@ -62,46 +74,48 @@ func nonZeroCounts(rows map[uint32]int32) map[uint32]int32 {
 // Taking back everything that was merged must leave no tokens, on every write path.
 func TestConcurrentBM25StatsDropsZeroCounts(t *testing.T) {
 	r := rand.New(rand.NewSource(21))
-	// below and above the split threshold of the locked path
-	for _, rows := range []int{20, 2000} {
-		s := randomBM25Stats(r, rows, 20000)
+	// Cover small and internally parallel updates.
+	for _, rows := range []int{20, 2000, 20000} {
+		s := randomBM25Stats(r, rows, int32(max(20000, rows*10)))
 
 		c := NewConcurrentBM25Stats()
 		c.Merge(s)
 		c.Minus(s)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "Minus, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "Minus, %d rows", rows)
 		assert.Zero(t, c.MemSize()-NewConcurrentBM25Stats().MemSize(), "Minus, %d rows", rows)
 
 		c.MergeUnlocked(s)
 		c.MinusUnlocked(s)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "MinusUnlocked, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "MinusUnlocked, %d rows", rows)
 
 		negative := NewConcurrentBM25Stats()
 		negative.Minus(s)
 		c.Merge(s)
 		c.MergeFrom(negative)
-		assert.Empty(t, c.Snapshot().rowsWithToken, "MergeFrom, %d rows", rows)
+		assert.Zero(t, c.Snapshot().rowsWithToken.len(), "MergeFrom, %d rows", rows)
 		assert.Zero(t, c.NumRow())
 	}
 }
 
 func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
-	// both the per-token path (small stats) and the split path (large stats)
+	// Cover small updates and parallel updates from multiple callers.
 	for _, tc := range []struct {
 		name  string
 		rows  int
 		vocab int32
+		adds  int
 	}{
-		{"small", 20, 200},
-		{"large", 2000, 20000},
+		{"small", 20, 200, 64},
+		{"large", 2000, 20000, 64},
+		{"parallel", 20000, 200000, 8},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := rand.New(rand.NewSource(11))
-			adds := make([]*BM25Stats, 64)
+			adds := make([]*BM25Stats, tc.adds)
 			for i := range adds {
 				adds[i] = randomBM25Stats(r, tc.rows, tc.vocab)
 			}
-			minus := adds[:16]
+			minus := adds[:len(adds)/4]
 
 			expected := NewBM25Stats()
 			for _, s := range adds {
@@ -133,7 +147,7 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 			got := c.Snapshot()
 			assert.Equal(t, expected.NumRow(), c.NumRow())
 			assert.Equal(t, expected.NumToken(), c.NumToken())
-			assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
+			assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(got.rowsWithToken))
 			assert.Equal(t, expected.GetAvgdl(), c.GetAvgdl())
 			tf := allTokensTF(tc.vocab)
 			assert.Equal(t, expected.BuildIDF(tf), c.BuildIDF(tf))
@@ -142,13 +156,13 @@ func TestConcurrentBM25StatsMatchesSerial(t *testing.T) {
 }
 
 func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
-	// below and above the split threshold of the locked path
-	for _, rows := range []int{20, 2000} {
+	for _, rows := range []int{20, 2000, 20000} {
 		r := rand.New(rand.NewSource(int64(rows)))
+		vocab := int32(max(20000, rows*10))
 		expected := NewBM25Stats()
 		c := NewConcurrentBM25Stats()
 		for i := 0; i < 16; i++ {
-			s := randomBM25Stats(r, rows, 20000)
+			s := randomBM25Stats(r, rows, vocab)
 			expected.Merge(s)
 			c.MergeUnlocked(s)
 			if i%4 == 0 {
@@ -158,10 +172,50 @@ func TestConcurrentBM25StatsUnlockedMatchesSerial(t *testing.T) {
 		}
 		assert.Equal(t, expected.NumRow(), c.NumRow())
 		assert.Equal(t, expected.NumToken(), c.NumToken())
-		assert.Equal(t, nonZeroCounts(expected.rowsWithToken), c.Snapshot().rowsWithToken)
-		tf := allTokensTF(20000)
+		assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(c.Snapshot().rowsWithToken))
+		tf := allTokensTF(vocab)
 		assert.Equal(t, expected.BuildIDF(tf), c.BuildIDFUnlocked(tf))
 		assert.Equal(t, c.BuildIDF(tf), c.BuildIDFUnlocked(tf))
+	}
+}
+
+func TestConcurrentBM25StatsParallelApplyProgress(t *testing.T) {
+	if runtime.GOMAXPROCS(0) < 2 {
+		t.Skip("internal parallelism needs at least two workers")
+	}
+	s := randomBM25Stats(rand.New(rand.NewSource(31)), 20000, 200000)
+	require.GreaterOrEqual(t, s.rowsWithToken.len(), bm25StatsParallelThreshold)
+	for _, subtract := range []bool{false, true} {
+		name := "merge"
+		if subtract {
+			name = "minus"
+		}
+		t.Run(name, func(t *testing.T) {
+			c := NewConcurrentBM25Stats()
+			if subtract {
+				c.MergeUnlocked(s)
+			}
+			c.shardLocks[0].Lock()
+			done := make(chan struct{})
+			defer func() {
+				c.shardLocks[0].Unlock()
+				<-done
+			}()
+			go func() {
+				defer close(done)
+				if subtract {
+					c.Minus(s)
+				} else {
+					c.Merge(s)
+				}
+			}()
+			// The first shard is blocked; another shard must still make progress.
+			require.Eventually(t, func() bool {
+				c.shardLocks[1].RLock()
+				defer c.shardLocks[1].RUnlock()
+				return (len(c.rowsWithToken[1]) == 0) == subtract
+			}, 5*time.Second, time.Millisecond)
+		})
 	}
 }
 
@@ -184,13 +238,13 @@ func TestConcurrentBM25StatsMergeFrom(t *testing.T) {
 	got := a.Snapshot()
 	assert.Equal(t, expected.NumRow(), a.NumRow())
 	assert.Equal(t, expected.NumToken(), a.NumToken())
-	assert.Equal(t, nonZeroCounts(expected.rowsWithToken), got.rowsWithToken)
+	assert.Equal(t, nonZeroCounts(expected.rowsWithToken), flattenBM25Counts(got.rowsWithToken))
 }
 
 // A search during preload reads current while segments merge into it. It must never see a token in more
 // rows than the row count, which gives a negative IDF that the worker rejects as an invalid sparse vector.
 func TestConcurrentBM25StatsBuildIDFNeverNegativeDuringMerge(t *testing.T) {
-	const vocab = 2048 // above the split threshold, like a real segment
+	const vocab = 1 << 17 // above the parallel threshold, like a real segment
 	// every row holds every token, so after any set of whole merges each token is in exactly numRow rows
 	row := map[uint32]float32{}
 	for i := uint32(0); i < vocab; i++ {
@@ -201,6 +255,8 @@ func TestConcurrentBM25StatsBuildIDFNeverNegativeDuringMerge(t *testing.T) {
 		segment.Append(row)
 	}
 	tf := allTokensTF(vocab)
+	source := NewConcurrentBM25Stats()
+	source.MergeUnlocked(segment)
 
 	for _, merge := range []struct {
 		name string
@@ -208,9 +264,7 @@ func TestConcurrentBM25StatsBuildIDFNeverNegativeDuringMerge(t *testing.T) {
 	}{
 		{"Merge", func(c *ConcurrentBM25Stats) { c.Merge(segment) }},
 		{"MergeFrom", func(c *ConcurrentBM25Stats) {
-			other := NewConcurrentBM25Stats()
-			other.MergeUnlocked(segment)
-			c.MergeFrom(other)
+			c.MergeFrom(source)
 		}},
 	} {
 		t.Run(merge.name, func(t *testing.T) {
@@ -223,7 +277,7 @@ func TestConcurrentBM25StatsBuildIDFNeverNegativeDuringMerge(t *testing.T) {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						for i := 0; i < 200; i++ {
+						for i := 0; i < 8; i++ {
 							merge.fn(c)
 						}
 					}()
@@ -257,18 +311,18 @@ func TestConcurrentBM25StatsEmptyAndMemSize(t *testing.T) {
 
 	s := randomBM25Stats(rand.New(rand.NewSource(1)), 100, 1000)
 	c.Merge(s)
-	assert.Equal(t, s.MemSize(), c.MemSize())
+	assert.Equal(t, s.MemSize()+empty-NewBM25Stats().MemSize(), c.MemSize())
 	assert.Greater(t, c.MemSize(), empty)
 }
 
 func TestConcurrentBM25StatsShardBalance(t *testing.T) {
 	// sequential token IDs must still spread evenly over the shards
-	counts := make([]int, concurrentBM25StatsShards)
+	counts := make([]int, bm25StatsShards)
 	const n = 1 << 16
 	for i := uint32(0); i < n; i++ {
 		counts[shardOf(i)]++
 	}
 	for _, c := range counts {
-		require.InDelta(t, n/concurrentBM25StatsShards, c, n/concurrentBM25StatsShards/4)
+		require.InDelta(t, n/bm25StatsShards, c, n/bm25StatsShards/4)
 	}
 }

@@ -49,19 +49,19 @@ type SegmentIndexCatalog interface {
 	// take the build-ID lock; the only caller today is the startup reload from
 	// manifests, which does not hold it.
 	UpdateSegmentIndex(segIdx *model.SegmentIndex)
-	// AddStoredIndexSizeMetric adds delta to the stored index size gauge of the
-	// index. It reads the index definition without taking fieldIndexLock or the
-	// build-ID lock, so it is safe only when no index DDL can run at the same
-	// time. The only caller today is the startup reload from manifests.
-	AddStoredIndexSizeMetric(collID, indexID UniqueID, delta float64)
+	// PublishStoredIndexSizes writes the stored index size of every collection
+	// whose size changed to the gauge. A write can wait for a Prometheus scrape,
+	// so callers must not hold segMu or fieldIndexLock.
+	PublishStoredIndexSizes()
 	// StageSegmentIndexMutation projects mut against the SegmentIndex record
 	// for mut.BuildID, and returns the catalog action to compose into the
 	// caller's transaction. The caller must hold LockBuildIDs for mut.BuildID
 	// from this call until the metric closure has run. The returned install
 	// updates memory only and takes no fieldIndexLock, so the caller runs it
 	// after the catalog write succeeds, inside its segMu critical section.
-	// install returns a metric closure that takes fieldIndexLock; the caller
-	// runs it after releasing segMu and before releasing the build-ID lock.
+	// install returns an observability closure that can wait for a Prometheus
+	// scrape; the caller runs it after releasing segMu and before releasing the
+	// build-ID lock.
 	StageSegmentIndexMutation(mut SegmentIndexMutation) (*StagedSegmentIndexMutation, error)
 
 	// RLockFieldIndexes takes the read side of fieldIndexLock, whose write side
