@@ -18,14 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction"
-	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
-	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
-	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
-	"github.com/milvus-io/milvus/internal/datacoord/index"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"testing"
 	"time"
 
@@ -34,6 +26,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"

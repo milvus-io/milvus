@@ -20,8 +20,9 @@ package policy
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/view"
 )
 
 func (p *SingleCompactionPolicy) TriggerSortForTest(ctx context.Context, triggerID, collectionID int64, ttl time.Duration) ([]view.CompactionView, []view.CompactionView, error) {

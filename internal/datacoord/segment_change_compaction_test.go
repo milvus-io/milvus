@@ -18,18 +18,18 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction"
-	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
-	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
-	"github.com/milvus-io/milvus/internal/datacoord/index"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"

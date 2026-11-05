@@ -21,13 +21,14 @@ package compaction
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
-	"github.com/stretchr/testify/require"
 )
 
 func NewSegmentChangeTestInspector(t *testing.T, m *meta.Meta, alloc allocator.Allocator) *Inspector {

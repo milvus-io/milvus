@@ -17,13 +17,13 @@
 package datacoord
 
 import (
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"

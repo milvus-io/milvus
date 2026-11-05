@@ -18,9 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
-	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -30,6 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"

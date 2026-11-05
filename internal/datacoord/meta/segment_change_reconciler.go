@@ -18,8 +18,9 @@ package meta
 
 import (
 	"context"
-	"errors"
 	"sort"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"

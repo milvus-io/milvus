@@ -17,9 +17,11 @@
 package task
 
 import (
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func setSegmentChangeTestParam(t *testing.T, item *paramtable.ParamItem, value string) {

@@ -18,16 +18,16 @@ package datacoord
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
-	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
-	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
