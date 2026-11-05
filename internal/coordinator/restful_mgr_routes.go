@@ -1281,8 +1281,9 @@ func newAlterWALBroadcastMessage(
 //	Batch format: {"configs": [{"key": "k1", "value": "v1"}, {"key": "k2"}]}
 //	Legacy single format: {"key": "config.key", "value": "value"}
 func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *http.Request) {
+	ctx := request.Context()
 	if request.Method != http.MethodPost {
-		writeJSONError(writer, "Method not allowed, use POST", http.StatusMethodNotAllowed)
+		management.WriteJSONWithMsg(ctx, writer, http.StatusMethodNotAllowed, "Method not allowed, use POST")
 		return
 	}
 
@@ -1304,8 +1305,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 
 	if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
 		// Decoder errors may quote request keys and credential values.
-		logger.Info(request.Context(), "HandleAlterConfig failed to decode request body")
-		writeJSONError(writer, "Invalid request body", http.StatusBadRequest)
+		logger.Info(ctx, "HandleAlterConfig failed to decode request body")
+		management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -1315,8 +1316,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	}
 
 	if len(requestBody.Configs) == 0 {
-		logger.Info(request.Context(), "HandleAlterConfig no configs provided")
-		writeJSONError(writer, "configs array is required and cannot be empty", http.StatusBadRequest)
+		logger.Info(ctx, "HandleAlterConfig no configs provided")
+		management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, "configs array is required and cannot be empty")
 		return
 	}
 
@@ -1327,8 +1328,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 
 	for _, config := range requestBody.Configs {
 		if config.Key == "" {
-			logger.Info(request.Context(), "HandleAlterConfig config missing key")
-			writeJSONError(writer, "all configs must have a non-empty key", http.StatusBadRequest)
+			logger.Info(ctx, "HandleAlterConfig config missing key")
+			management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, "all configs must have a non-empty key")
 			return
 		}
 
@@ -1337,8 +1338,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// apply its usual key formatting. Sensitivity only controls projections
 		// and logging; it does not add a write restriction.
 		if _, exists := seen[config.Key]; exists {
-			logger.Info(request.Context(), "HandleAlterConfig duplicate key found")
-			writeJSONError(writer, fmt.Sprintf("duplicate key found: %s", config.Key), http.StatusBadRequest)
+			logger.Info(ctx, "HandleAlterConfig duplicate key found")
+			management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, fmt.Sprintf("duplicate key found: %s", config.Key))
 			return
 		}
 		seen[config.Key] = struct{}{}
@@ -1350,8 +1351,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// missing every guard below.
 		normalizedKey := pkgconfig.FormatKey(config.Key)
 		if strings.Contains(normalizedKey, "mqtype") {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify mqtype")
-			writeJSONError(writer, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key), http.StatusBadRequest)
+			logger.Info(ctx, "HandleAlterConfig attempted to modify mqtype")
+			management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, fmt.Sprintf("mqtype configuration cannot be modified through this endpoint. Please use the alterWAL endpoint instead. Invalid key: %s", config.Key))
 			return
 		}
 
@@ -1362,15 +1363,15 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 		// file and env, the operator's later adminAuthEnabled: true in yaml
 		// never takes effect and nothing says so.
 		if normalizedKey == pkgconfig.FormatKey(paramtable.Get().CommonCfg.AdminAuthEnabled.Key) {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify the management auth gate")
-			writeJSONError(writer, fmt.Sprintf("%s cannot be modified through this endpoint; set it in the configuration file. Invalid key: %s", paramtable.Get().CommonCfg.AdminAuthEnabled.Key, config.Key), http.StatusBadRequest)
+			logger.Info(ctx, "HandleAlterConfig attempted to modify the management auth gate")
+			management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, fmt.Sprintf("%s cannot be modified through this endpoint; set it in the configuration file. Invalid key: %s", paramtable.Get().CommonCfg.AdminAuthEnabled.Key, config.Key))
 			return
 		}
 
 		// Check if the configuration is immutable - immutable keys cannot be modified
 		if paramMgr.IsImmutable(config.Key) {
-			logger.Info(request.Context(), "HandleAlterConfig attempted to modify immutable config")
-			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			logger.Info(ctx, "HandleAlterConfig attempted to modify immutable config")
+			management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key))
 			return
 		}
 
@@ -1384,8 +1385,8 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// Get EtcdSource to save the configuration
 	etcdSource, ok := paramMgr.GetEtcdSource()
 	if !ok {
-		logger.Info(request.Context(), "HandleAlterConfig failed, etcd source not enabled")
-		writeJSONError(writer, "etcd source is not enabled", http.StatusInternalServerError)
+		logger.Info(ctx, "HandleAlterConfig failed, etcd source not enabled")
+		management.WriteJSONWithMsg(ctx, writer, http.StatusInternalServerError, "etcd source is not enabled")
 		return
 	}
 
@@ -1393,19 +1394,19 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 	// AlterConfigsInEtcd also proactively refreshes the local EtcdSource so that the write
 	// is immediately visible in this process before we return.
 	if err := paramMgr.AlterConfigsInEtcd(etcdSource, configsToUpdate, keysToDelete); err != nil {
-		logger.Error(request.Context(), "HandleAlterConfig failed to atomically alter configs in etcd",
+		logger.Error(ctx, "HandleAlterConfig failed to atomically alter configs in etcd",
 			mlog.Int("updateCount", len(configsToUpdate)),
 			mlog.Int("deleteCount", len(keysToDelete)),
 			mlog.Err(err))
-		writeJSONError(writer, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()), http.StatusInternalServerError)
+		management.WriteJSONWithMsg(ctx, writer, http.StatusInternalServerError, fmt.Sprintf("failed to atomically alter configurations in etcd: %s", err.Error()))
 		return
 	}
 
-	logger.Info(request.Context(), "HandleAlterConfig success",
+	logger.Info(ctx, "HandleAlterConfig success",
 		mlog.Int("updateCount", len(configsToUpdate)),
 		mlog.Int("deleteCount", len(keysToDelete)))
 
-	writeJSONResponse(writer, http.StatusOK, map[string]string{"msg": "OK"})
+	management.WriteJSONResponse(ctx, writer, http.StatusOK, map[string]string{"msg": "OK"})
 }
 
 // HandleGetConfig handles GET requests to retrieve paramtable configuration.
@@ -1417,14 +1418,15 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 //
 //	{"configs": [{"key": "k1", "value": "v1", "source": "EtcdSource"}, {"key": "k2", "error": "key not found"}]}
 func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http.Request) {
+	ctx := request.Context()
 	if request.Method != http.MethodGet {
-		writeJSONError(writer, "Method not allowed, use GET", http.StatusMethodNotAllowed)
+		management.WriteJSONWithMsg(ctx, writer, http.StatusMethodNotAllowed, "Method not allowed, use GET")
 		return
 	}
 
 	keysParam := request.URL.Query().Get("keys")
 	if keysParam == "" {
-		writeJSONError(writer, "query parameter 'keys' is required", http.StatusBadRequest)
+		management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, "query parameter 'keys' is required")
 		return
 	}
 
@@ -1458,25 +1460,11 @@ func (s *mixCoordImpl) HandleGetConfig(writer http.ResponseWriter, request *http
 	}
 
 	if len(results) == 0 {
-		writeJSONError(writer, "no valid keys provided", http.StatusBadRequest)
+		management.WriteJSONWithMsg(ctx, writer, http.StatusBadRequest, "no valid keys provided")
 		return
 	}
 
-	writeJSONResponse(writer, http.StatusOK, map[string]interface{}{
+	management.WriteJSONResponse(ctx, writer, http.StatusOK, map[string]interface{}{
 		"configs": results,
 	})
-}
-
-// writeJSONError writes a JSON error response with proper escaping.
-func writeJSONError(w http.ResponseWriter, msg string, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
-}
-
-// writeJSONResponse writes a JSON response with proper escaping.
-func writeJSONResponse(w http.ResponseWriter, statusCode int, resp interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(resp)
 }

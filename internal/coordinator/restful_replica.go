@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -100,16 +101,16 @@ type LoadConfigComplianceResponse struct {
 // and configuration refresh are asynchronous; the report is not a
 // cross-component atomic snapshot.
 func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	if req.Method != http.MethodGet {
-		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
+		management.WriteJSONWithMsg(ctx, w, http.StatusMethodNotAllowed, "Method not allowed, use GET")
 		return
 	}
 	output := req.URL.Query().Get("output")
 	if output != "" && output != "summary" && output != "per_resource_group" {
-		writeJSONError(w, fmt.Sprintf("invalid output %q, expected one of: summary, per_resource_group", output), http.StatusBadRequest)
+		management.WriteJSONWithMsg(ctx, w, http.StatusBadRequest, fmt.Sprintf("invalid output %q, expected one of: summary, per_resource_group", output))
 		return
 	}
-	ctx := req.Context()
 	reasons := make(map[string]string)
 	record := func(rg, reason string) {
 		if reasons[rg] == "" {
@@ -120,12 +121,12 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	// even when no primary RG is configured. Reuse this snapshot for WAL checks.
 	b, err := balance.GetWithContext(ctx)
 	if err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get streaming balancer: %s", err), http.StatusInternalServerError)
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError, fmt.Sprintf("failed to get streaming balancer: %s", err))
 		return
 	}
 	nodes, err := b.GetAllStreamingNodes(ctx)
 	if err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get streaming nodes: %s", err), http.StatusInternalServerError)
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError, fmt.Sprintf("failed to get streaming nodes: %s", err))
 		return
 	}
 	streamingNodeRGs := make(map[int64]string, len(nodes))
@@ -137,11 +138,11 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	if primaryRG != "" {
 		assignment, err := b.GetLatestChannelAssignment()
 		if err != nil {
-			writeJSONError(w, fmt.Sprintf("failed to get WAL assignment: %s", err), http.StatusInternalServerError)
+			management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError, fmt.Sprintf("failed to get WAL assignment: %s", err))
 			return
 		}
 		if assignment.PChannelView == nil {
-			writeJSONError(w, "WAL channel view is not initialized", http.StatusInternalServerError)
+			management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError, "WAL channel view is not initialized")
 			return
 		}
 		record(primaryRG, "")
@@ -194,7 +195,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	}
 	showResp, err := s.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{Base: commonpbutil.NewMsgBase()})
 	if err := merr.CheckRPCCall(showResp, err); err != nil {
-		writeJSONError(w, fmt.Sprintf("failed to get collections: %s", err), http.StatusInternalServerError)
+		management.WriteJSONWithMsg(ctx, w, http.StatusInternalServerError, fmt.Sprintf("failed to get collections: %s", err))
 		return
 	}
 	collectionIDs := append([]int64(nil), showResp.GetCollectionIDs()...)
@@ -270,7 +271,7 @@ func (s *mixCoordImpl) HandleReplicaLoadConfigCompliance(w http.ResponseWriter, 
 	if output == "per_resource_group" {
 		response.ResourceGroups = &states
 	}
-	writeJSONResponse(w, http.StatusOK, response)
+	management.WriteJSONResponse(ctx, w, http.StatusOK, response)
 }
 
 // validateRGDistribution validates that replicas are distributed according to cluster config.
