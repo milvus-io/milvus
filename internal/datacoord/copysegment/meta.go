@@ -80,6 +80,7 @@ import (
 //   - GetTask/GetTaskBy: Query tasks by ID or filters
 //   - RemoveTask: Delete task from metadata (garbage collection)
 type CopySegmentMeta interface {
+	ActiveCopyCollectionIDs() []int64
 	// Job operations
 	AddJob(ctx context.Context, job CopySegmentJob) error
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
@@ -98,6 +99,24 @@ type CopySegmentMeta interface {
 	GetTasksByCollectionID(ctx context.Context, collectionID int64) []CopySegmentTask
 	GetTaskBy(ctx context.Context, filters ...CopySegmentTaskFilter) []CopySegmentTask
 	RemoveTask(ctx context.Context, taskID int64) error
+}
+
+// Snapshot the scalar admission state without cloning large restore plans.
+// L0 must retain deletes while a copy may still introduce historical rows.
+func (m *Meta) ActiveCopyCollectionIDs() []int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seen := make(map[int64]bool)
+	for _, job := range m.Jobs {
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobPending || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobExecuting {
+			seen[job.GetCollectionId()] = true
+		}
+	}
+	ids := make([]int64, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // ===========================================================================================

@@ -734,6 +734,7 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	s.Run("collection has no index", func() {
 		task := s.generateBasicTask(false)
 		task.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_indexing))
@@ -862,6 +863,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 
 // fix: https://github.com/milvus-io/milvus/issues/35110
 func (s *ClusteringCompactionTaskSuite) TestCompleteTask() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	task := s.generateBasicTask(false)
 	task.completeTask()
 	partitionStats := s.dm.partitionStatsMeta.GetPartitionStats(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID(), task.GetTaskProto().GetChannel(), task.GetTaskProto().GetPlanID())
@@ -989,13 +991,12 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 			s.NoError(err)
 		}
 
-		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
-			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
-			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
-
 		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 		s.NoError(err)
+		partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
 
 		defer func() {
 			cli.Remove(context.Background(), partitionStatsFile)
@@ -1036,13 +1037,12 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 			s.NoError(err)
 		}
 
-		partitionStatsFile := path.Join(Params.MinioCfg.RootPath.GetValue(), common.PartitionStatsPath,
-			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
-			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
-
 		chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 		cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 		s.NoError(err)
+		partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
+			metautil.JoinIDPath(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID()), task.plan.GetChannel(),
+			strconv.FormatInt(task.GetTaskProto().GetPlanID(), 10))
 
 		defer func() {
 			cli.Remove(context.Background(), partitionStatsFile)

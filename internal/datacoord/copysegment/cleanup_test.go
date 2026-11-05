@@ -74,7 +74,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		finished <- SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		finished <- SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
 		}, copies, m, nil)
@@ -143,7 +143,7 @@ func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	// A late result must not make the scheduler wait for the cleanup worker.
 	lateResult := make(chan error, 1)
 	go func() {
-		lateResult <- SyncCopySegmentTask(failed, &datapb.QueryCopySegmentResponse{
+		lateResult <- SyncCopySegmentTask(context.TODO(), failed, &datapb.QueryCopySegmentResponse{
 			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		}, copies, m, nil)
 	}()

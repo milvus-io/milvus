@@ -17,10 +17,34 @@
 package model
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSegmentChangeGroupSortLineageCodec(t *testing.T) {
+	g := testGroup()
+	g.InitialSegmentIDs = []int64{1001, 1002}
+	g.NewSegmentIDs = []int64{1101, 1002}
+	g.SortJobs = map[int64]SegmentChangeSortJob{5001: {InputSegmentID: 1001, OutputSegmentID: 1101}}
+	encoded, err := MarshalSegmentChangeGroup(g)
+	require.NoError(t, err)
+	decoded, err := UnmarshalSegmentChangeGroup(encoded)
+	require.NoError(t, err)
+	require.Equal(t, g, decoded)
+	cloned := g.Clone()
+	cloned.InitialSegmentIDs[0] = 999
+	cloned.SortJobs[5001] = SegmentChangeSortJob{InputSegmentID: 999, OutputSegmentID: 1101}
+	require.Equal(t, int64(1001), g.InitialSegmentIDs[0])
+	require.Equal(t, int64(1001), g.SortJobs[5001].InputSegmentID)
+	corrupt := bytes.Replace(encoded, []byte(`"inputSegmentID":1001`), []byte(`"inputSegmentID":999`), 1)
+	require.NotEqual(t, encoded, corrupt)
+	_, err = UnmarshalSegmentChangeGroup(corrupt)
+	require.Error(t, err, "an unrooted private sort must fail recovery rather than claim foreign data")
+	g.SortJobs[5002] = SegmentChangeSortJob{InputSegmentID: 1101, OutputSegmentID: 1001}
+	require.Error(t, g.Validate(), "allocated segment IDs cannot form a lineage cycle")
+}
 
 func testGroup() *SegmentChangeGroup {
 	return &SegmentChangeGroup{
@@ -116,10 +140,12 @@ func TestSegmentChangeGroup_Validate(t *testing.T) {
 		g.CollectionID = 0
 		require.Error(t, g.Validate())
 	})
-	t.Run("no new segments", func(t *testing.T) {
+	t.Run("no outputs", func(t *testing.T) {
 		g := testGroup()
 		g.NewSegmentIDs = nil
-		require.Error(t, g.Validate())
+		require.NoError(t, g.Validate(), "a compaction may retire parents without producing rows")
+		g.SupersededSegmentIDs = nil
+		require.NoError(t, g.Validate(), "an empty import may complete as a no-op")
 	})
 	t.Run("invalid member id", func(t *testing.T) {
 		g := testGroup()
